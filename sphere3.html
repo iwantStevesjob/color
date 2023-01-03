@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Sphere</title>
+    <title>Sphere</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+    body {
+        font-family: Monospace;
+        background-color: #f0f0f0;
+        margin: 0px;
+        overflow: hidden;
+    }
+    .buttons {
+        position: fixed;
+        top:30px;
+        right:30px;
+        padding: 16px;
+        font-size: 0.5cm;
+    }
+    .buttons button {
+        padding: 16px;
+        font-size: 0.5cm;
+        float: right;
+    }
+    </style>
+	<script src="http://cdnjs.cloudflare.com/ajax/libs/three.js/r67/three.min.js"></script>
+
+    <script type="text/javascript">
+    window.log = function()
+{
+    if (this.console)
+    {
+        console.log(Array.prototype.slice.call(arguments));
+    }
+};
+
+// Namespace
+var Defmech = Defmech ||
+{};
+
+// adapted from https://github.com/WICG/EventListenerOptions/blob/gh-pages/explainer.md
+const detectPassiveEvents = {
+  update() {
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      let passive = false;
+      const options = Object.defineProperty({}, 'passive', {
+        get() { passive = true; },
+      });
+      // note: have to set and remove a no-op listener instead of null
+      // (which was used previously), becasue Edge v15 throws an error
+      // when providing a null callback.
+      // https://github.com/rafrex/detect-passive-events/pull/3
+      const noop = () => {};
+      window.addEventListener('testPassiveEventSupport', noop, options);
+      window.removeEventListener('testPassiveEventSupport', noop, options);
+      detectPassiveEvents.hasSupport = passive;
+    }
+  },
+};
+
+detectPassiveEvents.update()
+
+Defmech.RotationWithQuaternion = (function()
+{
+    'use_strict';
+
+    var container;
+
+    var camera, scene, renderer;
+
+    var sphere, boxGeometry;
+    var sphereRadius = 200;
+
+    var mouseDown = false;
+    var rotateStartPoint = new THREE.Vector3(0, 0, 1);
+    var rotateEndPoint = new THREE.Vector3(0, 0, 1);
+
+    var curQuaternion;
+    var windowHalfX = window.innerWidth / 2;
+    var windowHalfY = window.innerHeight / 2;
+    var rotationSpeed = 2;
+    var lastMoveTimestamp,
+        moveReleaseTimeDelta = 50;
+
+    var startPoint = {
+        x: 0,
+        y: 0
+    };
+
+    var deltaX = 0,
+        deltaY = 0;
+
+    var recording = [], previous_recordings = [],
+        is_playing = false, is_recording = false,
+        playing_position = 0;
+
+    var UI_states = {
+        states: ['start_record', 'recording', 'playing', 'comparing'],
+        state: '',
+        set_state: function(state){
+            console.log("changing to state: "+state)
+            if(this.states.indexOf(state) === -1){
+                throw Error("Invalid state");
+            }
+            this.state = state;
+            for(var btn of document.querySelectorAll('.buttons button')){
+                btn.style.display = btn.classList.contains(state) ? '':'none';
+            }
+            is_recording = is_playing = false;
+            switch(state){
+                case "start_record":
+                    sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI/2,0,0));
+                    document.getElementById('compare-result').textContent = "";
+                    clear_path();
+                    break;
+                case "playing":
+                    playing_position = 0;
+                    is_playing = true
+                    break;
+                case "recording":
+                    recording = [];
+                    previous_recordings.push(recording);
+                    is_recording = true;
+                    break;
+            }
+        }
+    }
+
+    var buttons = {
+        replay: () => {
+            if(recording.length !== 0 && UI_states.state === "recording"){
+                UI_states.set_state("playing");
+            }
+        },
+        record_next: () => {
+            UI_states.set_state("start_record");
+        },
+        compare: () => {
+            show_path()
+            if(previous_recordings.length < 2){
+                document.getElementById('compare-result').textContent =
+                    "Make another recording to compare";
+            }else{
+                var [A,B] = previous_recordings.slice(-2)
+                // NOTE: Very simplistic comparison here.
+                // We're assuming constant FPS. If we record the times
+                // we can make a much more accurate comparison, and have
+                // distance and time independently.
+                var q = new THREE.Quaternion;
+                var va = new THREE.Vector3;
+                var vb = new THREE.Vector3;
+                var shortest = Math.min(A.length, B.length)
+                var dist = 0
+                for(i=0; i<shortest; i+=4){
+                    q.set(...A.slice(i,i+4))
+                    va.set(0,0,1)
+                    va.applyQuaternion(q)
+                    q.set(...B.slice(i,i+4))
+                    vb.set(0,0,1)
+                    vb.applyQuaternion(q)
+                    dist += va.distanceTo(vb)
+                }
+                dist /= shortest/4
+                document.getElementById('compare-result').textContent =
+                    "Avg distance: "+dist;
+            }
+        },
+
+    }
+
+
+    var passiveEvent = detectPassiveEvents.hasSupport? {passive:false}:false;
+
+    var setup = function()
+    {
+        container = document.createElement('div');
+        document.body.appendChild(container);
+
+        var info = document.createElement('div');
+        info.style.position = 'absolute';
+        info.style.top = '10px';
+        info.style.width = '100%';
+        info.style.textAlign = 'center';
+        info.innerHTML = 'Pick you favorite color';
+        container.appendChild(info);
+
+        for(var btn of document.querySelectorAll('.buttons button')){
+            btn.addEventListener('click', function(event){
+                event.stopPropagation();
+                var fname = this.getAttribute("data-action");
+                buttons[fname]();
+            }, false)
+        }
+
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 1000);
+        camera.position.y = 150;
+        camera.position.z = 500;
+
+        scene = new THREE.Scene();
+        // scene.background = new THREE.Color(1,0,0)
+
+        var sphereGeometry = new THREE.SphereGeometry(sphereRadius, 50, 25);
+        boxGeometry = new THREE.BoxGeometry(5,5,5);
+
+        var material = new THREE.MeshPhongMaterial();
+        material.map = THREE.ImageUtils.loadTexture('./hsv.png');
+
+        sphere = new THREE.Mesh(sphereGeometry, material);
+
+        sphere.position.y = 100;
+        // sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI/2,0,0));
+        scene.add(sphere);
+
+        var light = new THREE.AmbientLight( 0xffffff ); // soft white light
+        scene.add( light )
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setClearColor(0xf0f0f0);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        container.appendChild(renderer.domElement);
+
+        document.addEventListener('mousedown', onDocumentMouseDown, false);
+        document.addEventListener('touchstart', onTouchStart, passiveEvent)
+
+        window.addEventListener('resize', onWindowResize, false);
+
+        UI_states.set_state('start_record');
+
+        animate();
+    };
+
+    function onWindowResize()
+    {
+        windowHalfX = window.innerWidth / 2;
+        windowHalfY = window.innerHeight / 2;
+
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function onTouchStart(event){
+        if(event.touches.length==1){
+            event.clientX = event.touches[0].clientX
+            event.clientY = event.touches[0].clientY
+            onDocumentMouseDown(event)
+        }
+    }
+
+    function onDocumentMouseDown(event)
+    {
+        if(event.target.tagName == 'BUTTON') {
+            return
+        }
+        event.preventDefault();
+        if(UI_states.state === "start_record"){
+            UI_states.set_state("recording");
+        }
+        window.addEventListener('mousemove', onDocumentMouseMove, false);
+        window.addEventListener('mouseup', onDocumentMouseUp, false);
+        window.addEventListener('touchmove', onTouchMove, passiveEvent)
+        window.addEventListener('touchend', onTouchEnd, false)
+
+        mouseDown = true;
+
+        startPoint = {
+            x: event.clientX,
+            y: event.clientY
+        };
+
+        rotateStartPoint = rotateEndPoint = projectOnTrackball(0, 0);
+    }
+
+    function onTouchMove(event){
+        event.clientX = event.touches[0].clientX
+        event.clientY = event.touches[0].clientY
+        onDocumentMouseMove(event)
+    }
+
+    function onDocumentMouseMove(event)
+    {
+        event.preventDefault()
+
+        deltaX = event.clientX - startPoint.x;
+        deltaY = event.clientY - startPoint.y;
+
+        handleRotation();
+
+        startPoint.x = event.clientX;
+        startPoint.y = event.clientY;
+
+        lastMoveTimestamp = new Date();
+    }
+
+    function onTouchEnd(event){
+        if(event.touches.length==0){
+            // event.clientX = event.touches[0].clientX
+            // event.clientY = event.touches[0].clientY
+            onDocumentMouseUp(event)
+        }
+    }
+
+    function onDocumentMouseUp(event)
+    {
+        if (new Date().getTime() - lastMoveTimestamp.getTime() > moveReleaseTimeDelta)
+        {
+            deltaX = deltaY = 0;
+        }
+
+        mouseDown = false;
+
+        window.removeEventListener('mousemove', onDocumentMouseMove, false);
+        window.removeEventListener('mouseup', onDocumentMouseUp, false);
+        window.removeEventListener('touchmove', onTouchMove, passiveEvent)
+        window.removeEventListener('touchend', onTouchEnd, false)
+    }
+
+    function projectOnTrackball(touchX, touchY)
+    {
+        var mouseOnBall = new THREE.Vector3();
+
+        mouseOnBall.set(
+            clamp(touchX / windowHalfX, -1, 1), clamp(-touchY / windowHalfY, -1, 1),
+            0.0
+        );
+
+        var length = mouseOnBall.length();
+
+        if (length > 1.0)
+        {
+            mouseOnBall.normalize();
+        }
+        else
+        {
+            mouseOnBall.z = Math.sqrt(1.0 - length * length);
+        }
+
+        return mouseOnBall;
+    }
+
+    function rotateMatrix(rotateStart, rotateEnd)
+    {
+        var axis = new THREE.Vector3(),
+            quaternion = new THREE.Quaternion();
+
+        var angle = Math.acos(rotateStart.dot(rotateEnd) / rotateStart.length() / rotateEnd.length());
+
+        if (angle)
+        {
+            axis.crossVectors(rotateStart, rotateEnd).normalize();
+            angle *= rotationSpeed;
+            quaternion.setFromAxisAngle(axis, angle);
+        }
+        return quaternion;
+    }
+
+    function clamp(value, min, max)
+    {
+        return Math.min(Math.max(value, min), max);
+    }
+
+    function animate()
+    {
+        requestAnimationFrame(animate);
+        render();
+    }
+
+    function render()
+    {
+        if (!mouseDown)
+        {
+            var drag = 0.95;
+            var minDelta = 0.05;
+
+            if (deltaX < -minDelta || deltaX > minDelta)
+            {
+                deltaX *= drag;
+            }
+            else
+            {
+                deltaX = 0;
+            }
+
+            if (deltaY < -minDelta || deltaY > minDelta)
+            {
+                deltaY *= drag;
+            }
+            else
+            {
+                deltaY = 0;
+            }
+
+            handleRotation();
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    var handleRotation = function()
+    {
+        if(!is_playing){
+            rotateEndPoint = projectOnTrackball(deltaX, deltaY);
+
+            var rotateQuaternion = rotateMatrix(rotateStartPoint, rotateEndPoint);
+            curQuaternion = sphere.quaternion;
+            curQuaternion.multiplyQuaternions(rotateQuaternion, curQuaternion);
+            curQuaternion.normalize();
+            sphere.setRotationFromQuaternion(curQuaternion);
+
+            rotateEndPoint = rotateStartPoint;
+            if(is_recording){
+                recording.push(curQuaternion.x, curQuaternion.y, curQuaternion.z, curQuaternion.w);
+            }
+        }else{
+            var q = sphere.quaternion;
+            q.x = recording[playing_position];
+            q.y = recording[playing_position+1];
+            q.z = recording[playing_position+2];
+            q.w = recording[playing_position+3];
+            playing_position += 4;
+            if(playing_position >= recording.length){
+                is_playing = false;
+            }
+        }
+        renderer.setClearColor(get_HSL(sphere), 1);
+    };
+
+    function get_HSL(sphere){
+        var q = new THREE.Quaternion;
+        q.copy(sphere.quaternion);
+        q.inverse();
+        v = new THREE.Vector3(0,0,1);
+        v.applyQuaternion(q);
+        v2 = new THREE.Vector3(0,1,0);
+        lum = 1 - v2.angleTo(v)/Math.PI;
+        hue = Math.atan2(-v.z, -v.x)/Math.PI*-.5;
+        return (new THREE.Color).setHSL(hue, 1, lum);
+    }
+
+    var path_vis = [];
+
+    function clear_path(){
+        for(var cube of path_vis){
+            sphere.remove(cube);
+        }
+        path_vis.splice(0);
+    }
+
+    function show_path(){
+        var WIDTH = 2, PROTRUDE = .02
+        var v;
+        clear_path();
+        hue = 0;
+        for(var recording of previous_recordings){
+            var q = new THREE.Quaternion;
+            var path = []
+            for(var i=0;i<recording.length;i+=4){
+                q.set(...recording.slice(i,i+4))
+                q.inverse()
+                v = new THREE.Vector3
+                v.x = v.y = 0
+                v.z = sphereRadius
+                v.applyQuaternion(q)
+                path.push(v)
+            }
+            var tangents = [new THREE.Vector3]
+            var p, v, n;
+            for(var i=1;i<path.length;i++){
+                v = new THREE.Vector3;
+                v.copy(path[i])
+                v.sub(path[i-1])
+                v.cross(path[i])
+                v.divideScalar(v.length())
+                tangents[i-1].add(v)
+                tangents.push(v)
+            }
+            vertices = new Float32Array(
+                (recording.length
+                *0.25  // points
+                -1)    // segments
+                *4     // triangles
+                *3     // vectors
+                *3     // floats
+            )
+            vi = 0;
+            var p, v, pt, vt, s;
+            s = 1 + PROTRUDE
+            for(var i=1;i<path.length;i++){
+                p = path[i-1]
+                v = path[i]
+                vt = tangents[i]
+                pt = tangents[i-1]
+                vertices[vi++] = (v.x+vt.x) * s
+                vertices[vi++] = (v.y+vt.y) * s
+                vertices[vi++] = (v.z+vt.z) * s
+                vertices[vi++] = (v.x-vt.x) * s
+                vertices[vi++] = (v.y-vt.y) * s
+                vertices[vi++] = (v.z-vt.z) * s
+                vertices[vi++] = (p.x-pt.x) * s
+                vertices[vi++] = (p.y-pt.y) * s
+                vertices[vi++] = (p.z-pt.z) * s
+                vertices[vi++] = (v.x+vt.x) * s
+                vertices[vi++] = (v.y+vt.y) * s
+                vertices[vi++] = (v.z+vt.z) * s
+                vertices[vi++] = (p.x-pt.x) * s
+                vertices[vi++] = (p.y-pt.y) * s
+                vertices[vi++] = (p.z-pt.z) * s
+                vertices[vi++] = (p.x+pt.x) * s
+                vertices[vi++] = (p.y+pt.y) * s
+                vertices[vi++] = (p.z+pt.z) * s
+
+                vertices[vi++] = (v.x-vt.x) * s
+                vertices[vi++] = (v.y-vt.y) * s
+                vertices[vi++] = (v.z-vt.z) * s
+                vertices[vi++] = 0
+                vertices[vi++] = 0
+                vertices[vi++] = 0
+                vertices[vi++] = (p.x-pt.x) * s
+                vertices[vi++] = (p.y-pt.y) * s
+                vertices[vi++] = (p.z-pt.z) * s
+                vertices[vi++] = 0
+                vertices[vi++] = 0
+                vertices[vi++] = 0
+                vertices[vi++] = (v.x+vt.x) * s
+                vertices[vi++] = (v.y+vt.y) * s
+                vertices[vi++] = (v.z+vt.z) * s
+                vertices[vi++] = (p.x+pt.x) * s
+                vertices[vi++] = (p.y+pt.y) * s
+                vertices[vi++] = (p.z+pt.z) * s
+
+
+            }
+
+            var geometry = new THREE.BufferGeometry();
+            geometry.addAttribute( 'position', new THREE.BufferAttribute( vertices, 3 ) );
+            var material = new THREE.MeshBasicMaterial;
+            hue += .1;
+            // material.color.setHSL(hue, 1, .5);
+            var mesh = new THREE.Mesh( geometry, material );
+            sphere.add(mesh);
+            path_vis.push(mesh);
+        }
+    }
+
+    // PUBLIC INTERFACE
+    return {
+        init: function()
+        {
+            setup();
+        }
+    };
+})();
+
+document.onreadystatechange = function()
+{
+    if (document.readyState === 'complete')
+    {
+        Defmech.RotationWithQuaternion.init();
+    }
+};
+    </script>
+</head>
+
+<body>
+    <div class="buttons">
+        <button class="recording" data-action="replay">REPLAY</button>
+        <button class="playing" data-action="record_next">RECORD NEXT</button>
+        <button class="playing" data-action="compare">Compare</button>
+        <span id="compare-result"></span>
+    </div>
+</body>
+
+</html>

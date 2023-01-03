@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Sphere</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+    body {
+        font-family: Monospace;
+        background-color: #f0f0f0;
+        margin: 0px;
+        overflow: hidden;
+    }
+    .buttons {
+        position: fixed;
+        top:30px;
+        right:30px;
+        padding: 16px;
+        font-size: 0.5cm;
+    }
+    .buttons button {
+        /*padding: 16px;*/
+        font-size: 0.5cm;
+        float: right;
+        margin-left: 16px;
+    }
+    .pass {color: green; font-weight: bold;}
+    .fail {color: red; font-weight: bold;}
+	
+	
+	#center {
+	position:absolute; z-index:999999; top:50%; left:50%;
+    width: 0px;
+    height: 0px;
+    background-color: #fff;
+    box-shadow: 0 0 20px 7px #fff;
+	}
+    </style>
+	
+	<script src="three.min.js"></script>
+    <script src="http://pixelements.net/myou/color-picker/node_modules/localforage/dist/localforage.min.js"></script>
+ <script type="text/javascript">
+ 
+ /**
+ * @author mrdoob / http://mrdoob.com/
+ * @author benaadams / https://twitter.com/ben_a_adams
+ * @author Mugen87 / https://github.com/Mugen87
+ * @author DiThi / https://github.com/DiThi
+ */
+
+var {Geometry, BufferGeometry, Float32BufferAttribute, Vector3, Color} = THREE;
+
+// SphereGeometry
+
+function HSVSphereGeometry( radius, widthSegments, heightSegments, phiStart, phiLength, thetaStart, thetaLength ) {
+
+	Geometry.call( this );
+
+	this.type = 'SphereGeometry';
+
+	this.parameters = {
+		radius: radius,
+		widthSegments: widthSegments,
+		heightSegments: heightSegments,
+		phiStart: phiStart,
+		phiLength: phiLength,
+		thetaStart: thetaStart,
+		thetaLength: thetaLength
+	};
+
+	this.fromBufferGeometry( new HSVSphereBufferGeometry( radius, widthSegments, heightSegments, phiStart, phiLength, thetaStart, thetaLength ) );
+	this.mergeVertices();
+
+}
+
+HSVSphereGeometry.prototype = Object.create( Geometry.prototype );
+HSVSphereGeometry.prototype.constructor = HSVSphereGeometry;
+
+// SphereBufferGeometry
+
+function HSVSphereBufferGeometry( radius, widthSegments, heightSegments, phiStart, phiLength, thetaStart, thetaLength ) {
+
+	BufferGeometry.call( this );
+
+	this.type = 'SphereBufferGeometry';
+
+	this.parameters = {
+		radius: radius,
+		widthSegments: widthSegments,
+		heightSegments: heightSegments,
+		phiStart: phiStart,
+		phiLength: phiLength,
+		thetaStart: thetaStart,
+		thetaLength: thetaLength
+	};
+
+	radius = radius || 1;
+
+	widthSegments = Math.max( 3, Math.floor( widthSegments ) || 8 );
+	heightSegments = Math.max( 2, Math.floor( heightSegments ) || 6 );
+
+	phiStart = phiStart !== undefined ? phiStart : 0;
+	phiLength = phiLength !== undefined ? phiLength : Math.PI * 2;
+
+	thetaStart = thetaStart !== undefined ? thetaStart : 0;
+	thetaLength = thetaLength !== undefined ? thetaLength : Math.PI;
+
+	var thetaEnd = thetaStart + thetaLength;
+
+	var ix, iy;
+
+	var index = 0;
+	var grid = [];
+
+	var vertex = new Vector3();
+	var normal = new Vector3();
+
+	// buffers
+
+	var indices = [];
+	var vertices = [];
+	var normals = [];
+	var colors = [];
+
+	// generate vertices, normals and uvs
+
+	var color = new Color
+
+	for ( iy = 0; iy <= heightSegments; iy ++ ) {
+
+		var verticesRow = [];
+
+		var v = iy / heightSegments;
+
+		for ( ix = 0; ix <= widthSegments; ix ++ ) {
+
+			var u = ix / widthSegments;
+
+			// vertex
+
+			vertex.x = - radius * Math.cos( phiStart + u * phiLength ) * Math.sin( thetaStart + v * thetaLength );
+			vertex.y = radius * Math.cos( thetaStart + v * thetaLength );
+			vertex.z = radius * Math.sin( phiStart + u * phiLength ) * Math.sin( thetaStart + v * thetaLength );
+
+			vertices.push( vertex.x, vertex.y, vertex.z );
+
+			// normal
+
+			normal.set( vertex.x, vertex.y, vertex.z ).normalize();
+			normals.push( normal.x, normal.y, normal.z );
+
+			// color
+
+			color.setHSL(u, 1, 1-v)
+			colors.push(color.r, color.g, color.b);
+
+			verticesRow.push( index ++ );
+
+		}
+
+		grid.push( verticesRow );
+
+	}
+
+	// indices
+
+	for ( iy = 0; iy < heightSegments; iy ++ ) {
+
+		for ( ix = 0; ix < widthSegments; ix ++ ) {
+
+			var a = grid[ iy ][ ix + 1 ];
+			var b = grid[ iy ][ ix ];
+			var c = grid[ iy + 1 ][ ix ];
+			var d = grid[ iy + 1 ][ ix + 1 ];
+
+			if ( iy !== 0 || thetaStart > 0 ) indices.push( a, b, d );
+			if ( iy !== heightSegments - 1 || thetaEnd < Math.PI ) indices.push( b, c, d );
+
+		}
+
+	}
+
+	// build geometry
+
+	this.setIndex( indices );
+	this.addAttribute( 'position', new Float32BufferAttribute( vertices, 3 ) );
+	this.addAttribute( 'normal', new Float32BufferAttribute( normals, 3 ) );
+	this.addAttribute( 'color', new Float32BufferAttribute( colors, 3 ) );
+
+}
+
+HSVSphereBufferGeometry.prototype = Object.create( BufferGeometry.prototype );
+HSVSphereBufferGeometry.prototype.constructor = HSVSphereBufferGeometry;
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+    'use strict'
+
+// options
+var SHOW_AVERAGE = false;
+var COMPARE_DISTANCE = 11;
+// compare method must be one of: average first last best
+var COMPARE_METHOD = 'best';
+var PASS_RATIO = .5; // 1 = 100%
+var SPHERE_RADIUS = 200;
+var HANDLE_RADIUS = 15;
+var HANDLE_MIN_DIST = 0; // minimum space between handles, can be negative
+var HANDLE_ORIG_MIN_SQR_DIST = Math.pow(HANDLE_RADIUS*2 + HANDLE_MIN_DIST, 2);
+
+// Namespace
+var Defmech = Defmech ||
+{};
+
+// adapted from https://github.com/WICG/EventListenerOptions/blob/gh-pages/explainer.md
+const detectPassiveEvents = {
+  update() {
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      let passive = false;
+      const options = Object.defineProperty({}, 'passive', {
+        get() { passive = true; },
+      });
+      // note: have to set and remove a no-op listener instead of null
+      // (which was used previously), becasue Edge v15 throws an error
+      // when providing a null callback.
+      // https://github.com/rafrex/detect-passive-events/pull/3
+      const noop = () => {};
+      window.addEventListener('testPassiveEventSupport', noop, options);
+      window.removeEventListener('testPassiveEventSupport', noop, options);
+      detectPassiveEvents.hasSupport = passive;
+    }
+  },
+};
+
+detectPassiveEvents.update()
+
+Defmech.RotationWithQuaternion = (function()
+{
+    'use_strict';
+
+    var container;
+
+    var camera, scene, renderer;
+
+    var sphere, boxGeometry, smallSphereGeometry, handle_material;
+
+    var mouseDown = false;
+    var previous_point = new THREE.Vector3(0, 0, 1);
+    var current_point = new THREE.Vector3(0, 0, 1);
+
+    var curQuaternion;
+    var windowHalfX = window.innerWidth / 2;
+    var windowHalfY = window.innerHeight / 2;
+    var lastMoveTimestamp = new Date(),
+        moveReleaseTimeDelta = 50;
+
+    var ray = new THREE.Raycaster;
+
+    var recording = [], all_paths = [], path_meshes = [], average = null,
+        handles = [], handle_meshes = [], best_path_index = 0,
+        is_playing = false, is_recording = false,
+        playing_position = 0, finish_path_timeout;
+
+    var UI_states = {
+        states: ['start_record', 'recording', 'playing', 'comparing'],
+        state: '',
+        set_state: function(state){
+            clearTimeout(finish_path_timeout)
+            console.log("changing to state: "+state)
+            if(this.states.indexOf(state) === -1){
+                throw Error("Invalid state");
+            }
+            this.state = state;
+            for(var btn of document.querySelectorAll('.buttons button')){
+                var show = btn.classList.contains(state)||btn.classList.contains('all')
+                btn.style.display = show ? '':'none';
+            }
+            is_recording = is_playing = false;
+            switch(state){
+                case "start_record":
+                    show_paths()
+                    sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI/2,0,0));
+                    break;
+                case "playing":
+                    // trim recording
+                    var [x1,y1,z1,w1,x2,y2,z2,w2] = recording.slice(recording.length-8)
+                    while(
+                        recording.length > 8 &&
+                        Math.abs(x1-x2)+Math.abs(y1-y2)+
+                        Math.abs(z1-z2)+Math.abs(w1-w2) < 0.001
+                    ){
+                        recording.splice(recording.length-4)
+                        var [x1,y1,z1,w1,x2,y2,z2,w2] = recording.slice(recording.length-8)
+                    }
+                    // start playback
+                    playing_position = recording.length;
+                    is_playing = true
+                    // convert this recording to path, add to average
+                    var path = recording_to_path(recording)
+                    // compare
+                    var ratio = 0
+                    var result_box = document.getElementById('compare-result');
+                    if(all_paths.length >= 1){
+                        switch(COMPARE_METHOD){
+                            case 'average':
+                                var other = average;break;
+                            case 'first':
+                                var other = all_paths[0].path;break;
+                            case 'last':
+                                var other = all_paths[all_paths.length-1].path;
+                                break;
+                            case 'best':
+                                var other = all_paths[best_path_index].path;
+                                break;
+                            default:
+                                alert("wrong compare method");
+                                throw Error("wrong compare method")
+                        }
+                        var ratio = compare_paths(other, path, COMPARE_DISTANCE)
+                        var pass = ratio >= PASS_RATIO;
+                        result_box.innerHTML =
+                            ((ratio*100)|0)+"% match<br>"+
+                            (pass?'<span class="pass">PASS</span>':
+                                  '<span class="fail">FAIL</span>');
+                        setTimeout(function(){result_box.innerHTML=""}, 2000)
+
+                    }
+                    if(pass || all_paths.length < 1){
+                        var color = get_HSL(sphere)
+                        // Here is all data that is saved
+                        var path_data = {path: path, ratio: ratio, color: color}
+                        all_paths.push(path_data)
+                        add_weighted_average(path, all_paths.length)
+                        // show all paths (including this one) and save
+                        show_paths()
+                        save_paths().catch(function(err) {
+                            console.error(err);
+                        });
+                    }
+                    break;
+                case "recording":
+                    recording = [];
+                    is_recording = true;
+                    break;
+            }
+        }
+    }
+
+    var buttons = {
+        delete_all: () => {
+            if(confirm('Delete all lines?')){
+                delete_saved().then(function() {
+                    for(var mesh of path_meshes){
+                        sphere.remove(mesh);
+                    }
+                    all_paths = []
+                    path_meshes = []
+                    best_path_index = 0;
+                    console.log('Data is cleared!');
+                }).catch(function(err) {
+                    console.error(err);
+                });
+                UI_states.set_state('start_record')
+            }
+        },
+    }
+
+
+    var passiveEvent = detectPassiveEvents.hasSupport? {passive:false}:false;
+
+    var setup = function()
+    {
+
+        container = document.createElement('div');
+        document.body.appendChild(container);
+
+        var info = document.createElement('div');
+        info.style.position = 'absolute';
+        info.style.top = '10px';
+        info.style.width = '100%';
+        info.style.textAlign = 'center';
+        info.innerHTML = 'Pick you favorite color';
+        container.appendChild(info);
+
+        for(var btn of document.querySelectorAll('.buttons button')){
+            btn.addEventListener('click', function(event){
+                event.stopPropagation();
+                var fname = this.getAttribute("data-action");
+                buttons[fname]();
+            }, false)
+        }
+
+        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 1, 1000);
+        // camera.position.y = 150;
+        camera.position.z = 500;
+
+        scene = new THREE.Scene();
+        // scene.background = new THREE.Color(1,0,0)
+
+        var sphereGeometry = new HSVSphereGeometry(SPHERE_RADIUS, 50, 25);
+        smallSphereGeometry = new HSVSphereGeometry(HANDLE_RADIUS, 15, 15);
+        boxGeometry = new THREE.BoxGeometry(5,5,5);
+
+        var material = new THREE.MeshPhongMaterial({vertexColors:THREE.FaceColors});
+        handle_material = new THREE.MeshBasicMaterial({color: 0xffffff});
+
+        sphere = new THREE.Mesh(sphereGeometry, material);
+
+        // sphere.position.y = 100;
+        // sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI/2,0,0));
+        scene.add(sphere);
+
+        var light = new THREE.AmbientLight( 0xffffff ); // soft white light
+        scene.add( light );
+		
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setClearColor(0xf0f0f0);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        container.appendChild(renderer.domElement);
+
+        document.addEventListener('mousedown', onDocumentMouseDown, false);
+        document.addEventListener('touchstart', onTouchStart, passiveEvent)
+
+        window.addEventListener('resize', onWindowResize, false);
+
+        // Load previous data, using the localForageDriver we wrote before
+        localforage.setDriver(localStorage.localForageDriver)
+        console.log('Using localforage driver:',
+            localStorage.localForageDriver.replace('asyncStorage', 'IndexedDB'));
+        restore_paths().then(function(){
+            UI_states.set_state('start_record');
+        }).catch(function(err) {
+            console.error(err);
+        });
+        animate();
+    };
+
+    function onWindowResize()
+    {
+        windowHalfX = window.innerWidth / 2;
+        windowHalfY = window.innerHeight / 2;
+
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function onTouchStart(event){
+        if(event.touches.length==1){
+            event.clientX = event.touches[0].clientX
+            event.clientY = event.touches[0].clientY
+            onDocumentMouseDown(event)
+        }
+    }
+
+    function onDocumentMouseDown(event)
+    {
+        if(event.target.tagName == 'BUTTON') {
+            return
+        }
+        event.preventDefault();
+        if(UI_states.state === "start_record"){
+            UI_states.set_state("recording");
+        }
+        clearTimeout(finish_path_timeout)
+        window.addEventListener('mousemove', onDocumentMouseMove, false);
+        window.addEventListener('mouseup', onDocumentMouseUp, false);
+        window.addEventListener('touchmove', onTouchMove, passiveEvent)
+        window.addEventListener('touchend', onTouchEnd, false)
+
+        var vector = new THREE.Vector3();
+        vector.set(
+            (event.clientX/window.innerWidth)*2-1,
+            -(event.clientY/window.innerHeight)*2+1,
+            0.5);
+        ray.setFromCamera(vector, camera);
+        var results = ray.intersectObjects([sphere])
+        if (results[0]){
+            var point = results[0].point;
+            var add_handle = true;
+            for(var handle of handles){
+                if(point.distanceToSquared(handle) < HANDLE_ORIG_MIN_SQR_DIST){
+                    add_handle = false;
+                    break;
+                }
+            }
+            if(add_handle){
+                var smallSphere = new THREE.Mesh(smallSphereGeometry, handle_material);
+                handles.push(point)
+                smallSphere.position.copy(results[0].point)
+                smallSphere.position.applyQuaternion(sphere.getWorldQuaternion().inverse())
+                sphere.add(smallSphere);
+                handle_meshes.push(smallSphere);
+            }
+            mouseDown = true;
+            previous_point.copy(point);
+            current_point.copy(point);
+        }
+    }
+
+    function onTouchMove(event){
+        event.clientX = event.touches[0].clientX
+        event.clientY = event.touches[0].clientY
+        onDocumentMouseMove(event)
+    }
+
+    function onDocumentMouseMove(event)
+    {
+        event.preventDefault()
+        if(!mouseDown){
+            return
+        }
+
+        previous_point.copy(current_point);
+        var vector = new THREE.Vector3();
+        vector.set(
+            (event.clientX/window.innerWidth)*2-1,
+            -(event.clientY/window.innerHeight)*2+1,
+            0.5);
+        ray.setFromCamera(vector, camera);
+        var results = ray.intersectObjects([sphere])
+        if (results[0]){
+            current_point.copy(results[0].point);
+            handleRotation();
+        }
+        
+        lastMoveTimestamp = new Date();
+    }
+
+    function onTouchEnd(event){
+        if(event.touches.length==0){
+            onDocumentMouseUp(event)
+        }
+    }
+
+    function onDocumentMouseUp(event)
+    {
+        if(!mouseDown) return;
+
+        if (new Date().getTime() - lastMoveTimestamp.getTime() > moveReleaseTimeDelta)
+        {
+            previous_point.copy(current_point);
+        }
+        if(UI_states.state === 'recording' && recording.length > 8){
+            clearTimeout(finish_path_timeout)
+            finish_path_timeout = setTimeout(()=>{
+                UI_states.set_state('playing')
+            }, 2000)
+        }
+
+        mouseDown = false;
+
+        window.removeEventListener('mousemove', onDocumentMouseMove, false);
+        window.removeEventListener('mouseup', onDocumentMouseUp, false);
+        window.removeEventListener('touchmove', onTouchMove, passiveEvent)
+        window.removeEventListener('touchend', onTouchEnd, false)
+    }
+
+    function rotateMatrix(rotateStart, rotateEnd)
+    {
+        var axis = new THREE.Vector3(),
+            quaternion = new THREE.Quaternion();
+
+        var angle = Math.acos(rotateStart.dot(rotateEnd) / rotateStart.length() / rotateEnd.length());
+
+        if (angle)
+        {
+            axis.crossVectors(rotateStart, rotateEnd).normalize();
+            quaternion.setFromAxisAngle(axis, angle);
+        }
+        return quaternion;
+    }
+
+    function clamp(value, min, max)
+    {
+        return Math.min(Math.max(value, min), max);
+    }
+
+    function animate()
+    {
+        requestAnimationFrame(animate);
+        // Fade in opacities
+        var goal = 1/all_paths.length
+        for(var i=0;i<path_meshes.length;i++){
+            var mesh = path_meshes[i];
+            var o = mesh.material.opacity
+            mesh.material.opacity = o + (goal-o) * 0.01
+        }
+        render();
+    }
+
+    function render()
+    {
+        if (!mouseDown)
+        {
+            var drag = 0.82;
+            
+            previous_point.lerp(current_point, 1 - drag);
+
+            handleRotation();
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    var handleRotation = function()
+    {
+        if(!is_playing){
+            var rotateQuaternion = rotateMatrix(previous_point, current_point);
+            curQuaternion = sphere.quaternion;
+            curQuaternion.multiplyQuaternions(rotateQuaternion, curQuaternion);
+            curQuaternion.normalize();
+            sphere.setRotationFromQuaternion(curQuaternion);
+
+            if(is_recording){
+                recording.push(curQuaternion.x, curQuaternion.y, curQuaternion.z, curQuaternion.w);
+            }
+        }else{
+            var q = sphere.quaternion;
+            playing_position -= 4;
+            q.x = recording[playing_position];
+            q.y = recording[playing_position+1];
+            q.z = recording[playing_position+2];
+            q.w = recording[playing_position+3];
+            if(playing_position <= 0){
+                is_playing = false;
+                UI_states.set_state('start_record')
+            }
+        }
+        renderer.setClearColor(get_HSL(sphere), 1);
+    };
+
+    function get_HSL(sphere){
+        var q = new THREE.Quaternion;
+        q.copy(sphere.quaternion);
+        q.inverse();
+        var v = new THREE.Vector3(0,0,1);
+        v.applyQuaternion(q);
+        var v2 = new THREE.Vector3(0,1,0);
+        var lum = 1 - v2.angleTo(v)/Math.PI;
+        var hue = Math.atan2(-v.z, -v.x)/Math.PI*-.5;
+        return (new THREE.Color).setHSL(hue, 1, lum);
+    }
+
+    function recording_to_path(recording){
+        var MAX_SQR_DIST = 5000;
+        var v, v2;
+        var q = new THREE.Quaternion;
+        var path = []
+        for(var i=0;i<recording.length;i+=4){
+            q.set(...recording.slice(i,i+4))
+            q.inverse()
+            v = new THREE.Vector3
+            v.x = v.y = 0
+            v.z = SPHERE_RADIUS
+            v.applyQuaternion(q)
+            if(path.length!==0){
+                // Insert intermediate points so it doesn't dive under the sphere
+                var prev = path[path.length-1]
+                var dist = prev.distanceToSquared(v)
+                var count = Math.floor(dist / MAX_SQR_DIST)
+                var spacing = 1/(count+1)
+                var f = spacing
+                while(f<0.99){
+                    v2 = prev.clone()
+                    v2.lerp(v, f)
+                    v2.multiplyScalar(SPHERE_RADIUS/v2.length())
+                    path.push(v2)
+                    f += spacing
+                }
+            }
+            path.push(v)
+        }
+        return path
+    }
+
+    function path_to_mesh(path){
+        var WIDTH = 5/2, PROTRUDE = .02
+        var tangents = [new THREE.Vector3]
+        var p, v, n;
+        for(var i=1;i<path.length;i++){
+            v = new THREE.Vector3;
+            v.copy(path[i])
+            v.sub(path[i-1])
+            v.cross(path[i])
+            v.multiplyScalar(WIDTH/v.length())
+            tangents[i-1].add(v)
+            tangents.push(v)
+        }
+        var vertices = new Float32Array(
+            (path.length
+            -1)    // segments
+            *4     // triangles
+            *3     // vectors
+            *3     // floats
+        )
+        var vi = 0;
+        var p, v, pt, vt, s;
+        s = 1 + PROTRUDE
+        for(var i=1;i<path.length;i++){
+            p = path[i-1]
+            v = path[i]
+            vt = tangents[i]
+            pt = tangents[i-1]
+            vertices[vi++] = (v.x+vt.x) * s
+            vertices[vi++] = (v.y+vt.y) * s
+            vertices[vi++] = (v.z+vt.z) * s
+            vertices[vi++] = (v.x-vt.x) * s
+            vertices[vi++] = (v.y-vt.y) * s
+            vertices[vi++] = (v.z-vt.z) * s
+            vertices[vi++] = (p.x-pt.x) * s
+            vertices[vi++] = (p.y-pt.y) * s
+            vertices[vi++] = (p.z-pt.z) * s
+            vertices[vi++] = (v.x+vt.x) * s
+            vertices[vi++] = (v.y+vt.y) * s
+            vertices[vi++] = (v.z+vt.z) * s
+            vertices[vi++] = (p.x-pt.x) * s
+            vertices[vi++] = (p.y-pt.y) * s
+            vertices[vi++] = (p.z-pt.z) * s
+            vertices[vi++] = (p.x+pt.x) * s
+            vertices[vi++] = (p.y+pt.y) * s
+            vertices[vi++] = (p.z+pt.z) * s
+
+            vertices[vi++] = (v.x-vt.x) * s
+            vertices[vi++] = (v.y-vt.y) * s
+            vertices[vi++] = (v.z-vt.z) * s
+            vertices[vi++] = 0
+            vertices[vi++] = 0
+            vertices[vi++] = 0
+            vertices[vi++] = (p.x-pt.x) * s
+            vertices[vi++] = (p.y-pt.y) * s
+            vertices[vi++] = (p.z-pt.z) * s
+            vertices[vi++] = 0
+            vertices[vi++] = 0
+            vertices[vi++] = 0
+            vertices[vi++] = (v.x+vt.x) * s
+            vertices[vi++] = (v.y+vt.y) * s
+            vertices[vi++] = (v.z+vt.z) * s
+            vertices[vi++] = (p.x+pt.x) * s
+            vertices[vi++] = (p.y+pt.y) * s
+            vertices[vi++] = (p.z+pt.z) * s
+
+
+        }
+
+        var geometry = new THREE.BufferGeometry();
+        geometry.addAttribute( 'position', new THREE.BufferAttribute( vertices, 3 ) );
+        geometry.boundingSphere = new THREE.Sphere();
+        var material = new THREE.MeshBasicMaterial({
+            // color: 0xeeeeee,
+            transparent: true,
+            depthWrite: false,
+        });
+        var mesh = new THREE.Mesh( geometry, material );
+        return mesh;
+    }
+
+    var average_mesh;
+
+    function show_paths(){
+        for(var i=0;i<all_paths.length;i++){
+            var path = all_paths[i].path;
+            var mesh = path_meshes[i];
+            if(!mesh){
+                mesh = path_to_mesh(path);
+                path_meshes.push(mesh);
+                sphere.add(mesh);
+                mesh.material.opacity = 0; // Will fade in slowly
+            }else{
+                mesh.material.opacity = 1/all_paths.length
+            }
+        }
+        if(SHOW_AVERAGE){
+            if(average_mesh){
+                sphere.remove(average_mesh);
+            }
+            if(average){
+                average_mesh = path_to_mesh(average);
+                sphere.add(average_mesh);
+                average_mesh.material.opacity = 1;
+                average_mesh.material.color.setHex(0xff00ff)
+            }
+        }
+    }
+
+    var debug_cubes = []
+
+    function compare_paths(path_a, path_b, max_dist){
+        var max_dist_sq = max_dist*max_dist;
+        for(var cube of debug_cubes){
+            sphere.remove(cube)
+        }
+        // Check which points of path_a is near path_b
+        var matching_a = get_matching(path_a, path_b, max_dist_sq);
+
+        // Check which points of path_b is near path_a
+        var matching_b = get_matching(path_b, path_a, max_dist_sq);
+
+        // make a list of chunks that are consecutive for both
+        var ia = 0, ib = 0;
+            // TODO
+
+        // return ratio of matches
+        return (matching_a.concat(matching_b).filter((x)=>x).length
+            / (matching_a.length + matching_b.length));
+    }
+
+    function get_matching(path_a, path_b, max_dist_sq){
+        var matching_a = [] // list of bools
+        var a,b,va = new THREE.Vector3, vb = new THREE.Vector3, b1, b2;
+        // var material = new THREE.MeshPhongMaterial({color:0xff00ff});
+        for(var i=0;i<path_a.length;i++){
+            a = path_a[i]
+            var shortest = Infinity;
+            for(var j=1;j<path_b.length;j++){
+                // calculate distance from point a to segment of b
+                b1 = path_b[j-1]
+                b2 = path_b[j]
+                va.copy(a)
+                va.sub(b1)
+                vb.copy(b2)
+                vb.sub(b1)
+                vb.multiplyScalar(Math.min(1, Math.max(0, va.dot(vb))))
+                shortest = Math.min(shortest, va.distanceToSquared(vb))
+            }
+            var is_match = shortest < max_dist_sq
+            matching_a.push(is_match)
+            // if(is_match){
+            //     var cube = new THREE.Mesh(boxGeometry, material);
+            //     console.log(a)
+            //     cube.position.copy(a)
+            //     cube.scale.multiplyScalar(2)
+            //     sphere.add(cube)
+            //     debug_cubes.push(cube)
+            // }
+        }
+        return matching_a;
+    }
+
+    function add_weighted_average(path, count){
+        if(!average){
+            average = clone_path(path);
+            return;
+        }
+        var weight = 1/count;
+        var path_a = average, path_b = path;
+        var v = new THREE.Vector3
+
+        var a_length = 0, a_prev = path_a[0].clone()
+        var b_length = 0, b_prev = path_b[0], j=0, b_dist=0;
+        var a, b=path_b[0];
+
+        for(var i=0;i<path_a.length;i++){
+            // For each point of path_a, find the point at the same path length
+            // in path_b, and use it for the weighted average
+            a = path_a[i];
+            a_length += a.distanceTo(a_prev);
+            a_prev.copy(a)
+            while(j<path_b.length-1 && a_length > b_length+b_dist ){
+                b_length += b_dist;
+                b_prev = b;
+                b = path_b[++j]
+                b_dist = b.distanceTo(b_prev)
+            }
+            v.copy(b_prev)
+            if(b_dist != 0){
+                v.lerp(b, (a_length-b_length)/b_dist)
+            }
+            // we're applying the average here
+            a.lerp(v, weight)
+            // normalize
+            a.multiplyScalar(SPHERE_RADIUS/a.length())
+        }
+    }
+
+    function clone_path(path){
+        var clone = [];
+        for(var i=0;i<path.length;i++){
+            clone.push(path[i].clone());
+        }
+        return clone;
+    }
+
+    // returns a promise
+    function save_paths(){
+        return Promise.all([
+            localforage.setItem('paths_v1', all_paths),
+            // localforage.setItem('average', average),
+        ])
+    }
+
+    // returns a promise
+    function restore_paths(){
+        return localforage.getItem('paths_v1').then(function(paths) {
+            // return localforage.getItem('average').then(function(avg) {
+                if(paths){
+                    for(var i=0;i<paths.length;i++){
+                        var path = paths[i].path;
+                        for(var j=0;j<path.length;j++){
+                            var v = path[j]
+                            path[j] = new THREE.Vector3(v.x,v.y,v.z);
+                        }
+                    }
+                    all_paths = paths;
+                }
+                // average = array_to_path(avg);
+            // });
+        });
+    }
+
+    function delete_saved(){
+        return Promise.all([
+            localforage.removeItem('paths_v1'),
+            // localforage.removeItem('average'),
+        ])
+    }
+
+    // PUBLIC INTERFACE
+    return {
+        init: function()
+        {
+            setup();
+        }
+    };
+})();
+
+document.onreadystatechange = function()
+{
+    if (document.readyState === 'complete')
+    {
+        // Configure localForage
+        if(!localStorage.localForageDriver){
+            var try_sql = localforage.INDEXEDDB
+            // if(window.openDatabase){
+            //     try_sql = localforage.WEBSQL
+            // }
+            localforage.setItem('test', []).then(function (value) {
+                localStorage.localForageDriver = try_sql
+                Defmech.RotationWithQuaternion.init();
+            }).catch(function(err) {
+                localStorage.localForageDriver = localforage.LOCALSTORAGE
+                Defmech.RotationWithQuaternion.init();
+            });
+        }else{
+            Defmech.RotationWithQuaternion.init();
+        }
+    }
+};
+    </script>
+</head>
+
+
+<body>
+<div id="center"></div>
+    <div class="buttons">
+        <button class="all" data-action="delete_all">Delete all</button>
+        <span id="compare-result"></span>
+    </div>
+</body>
+
+</html>
