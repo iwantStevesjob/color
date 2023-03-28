@@ -672,6 +672,42 @@ Defmech.RotationWithQuaternion = (function()
         return (new THREE.Color).setHSL(hue, 1, lum);
     }
 
+function onDocumentDoubleClick(event) {
+    // Get the position of the click on the sphere
+    var vector = new THREE.Vector3();
+    vector.set(
+        (event.clientX / window.innerWidth) * 2 - 1,
+        -(event.clientY / window.innerHeight) * 2 + 1,
+        0.5
+    );
+    ray.setFromCamera(vector, camera);
+    var results = ray.intersectObjects([sphere]);
+    if (results[0]) {
+        // Get the color at the clicked position
+        var point = results[0].point;
+        var color = new THREE.Color();
+        color.setHSL(
+            (Math.atan2(-point.z, -point.x) / Math.PI) * -0.5,
+            1,
+            1 - new THREE.Vector3(0, 1, 0).angleTo(point) / Math.PI
+        );
+	 
+
+        // Create a small handle sphere with the clicked color
+        var smallSphere = new THREE.Mesh(
+            smallSphereGeometry,
+            new THREE.MeshBasicMaterial({ color: color })
+        );
+        smallSphere.position.copy(results[0].point);
+        smallSphere.position.applyQuaternion(
+            sphere.getWorldQuaternion().inverse()
+        );
+        sphere.add(smallSphere);
+    }
+}
+	
+	window.addEventListener('dblclick', onDocumentDoubleClick, false);
+
     function recording_to_path(recording){
         var MAX_SQR_DIST = 5000;
         var v, v2;
