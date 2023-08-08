@@ -6,36 +6,105 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <style>
-    body {
-        font-family: Monospace;
-        background-color: #f0f0f0;
-        margin: 0px;
-        overflow: hidden;
-    }
-    .buttons {
-        position: fixed;
-        top:30px;
-        right:30px;
-        padding: 16px;
-        font-size: 0.5cm;
-    }
-    .buttons button {
-        /*padding: 16px;*/
-        font-size: 0.5cm;
-        float: right;
-        margin-left: 16px;
-    }
-    .pass {color: green; font-weight: bold;}
-    .fail {color: red; font-weight: bold;}
-	
-	
-	#center {
-	position:absolute; z-index:999999; top:50%; left:50%;
-    width: 0px;
-    height: 0px;
-    background-color: #fff;
-    box-shadow: 0 0 20px 7px #fff;
-	}
+body {
+  font-family: Monospace;
+  background-color: #f0f0f0;
+  margin: 0px;
+  overflow: hidden;
+}
+.buttons {
+  position: fixed;
+  top: 30px;
+  right: 30px;
+  padding: 16px;
+  font-size: 0.5cm;
+}
+.buttons button {
+  /*padding: 16px;*/
+  font-size: 0.5cm;
+  float: right;
+  margin-left: 16px;
+}
+.pass {
+  color: green;
+  font-weight: bold;
+}
+.fail {
+  color: red;
+  font-weight: bold;
+}
+
+#center {
+  position: absolute;
+  z-index: 999999;
+  top: 50%;
+  left: 50%;
+  width: 0px;
+  height: 0px;
+  background-color: #fff;
+  box-shadow: 0 0 20px 7px #fff;
+}
+
+/* Password Toggle */
+
+#toggleContainer {
+    position: absolute;
+    left: 50%;
+    top: 85%; /* adjust this value to move the button up or down */
+    transform: translateX(-50%); /* centers the button horizontally */
+}
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 60px;
+  height: 34px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .4s;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:checked + .slider:before {
+  transform: translateX(26px);
+}
+
+/* Rounded sliders */
+.slider.round {
+  border-radius: 34px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+
     </style>
 	
 	<script src="three.min.js"></script>
@@ -262,6 +331,7 @@ Defmech.RotationWithQuaternion = (function () {
 
   var camera, scene, renderer;
   var labels = [];
+  var all_handles = [];
   var sphere, boxGeometry, smallSphereGeometry, handle_material;
 
   var mouseDown = false;
@@ -365,7 +435,7 @@ Defmech.RotationWithQuaternion = (function () {
               result_box.innerHTML = "";
             }, 2000);
           }
-          
+      
           if (pass || all_paths.length < 1) {
             var color = get_HSL(sphere);
             // Here is all data that is saved
@@ -536,6 +606,21 @@ Defmech.RotationWithQuaternion = (function () {
   }
 
   var currentMesh = null;
+  
+  
+  
+  
+  
+  
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // ON MOUSE DOWN
+  // Event for when the user clicks on sphere, creating a handle if one doesnt already exist
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  
+  
+  
   function onDocumentMouseDown(event) {
     if (event.target.tagName == "BUTTON") {
       return;
@@ -621,6 +706,9 @@ Defmech.RotationWithQuaternion = (function () {
         mesh1.rotation.x += Math.PI / 2;
         sphere.add(mesh1);
         labels.push(mesh1);
+        
+          all_handles.push(point.clone()); // Store the handle's position
+  localforage.setItem('handles', JSON.stringify(all_handles)); // Store the handle positions in the local storage
       }
       mouseDown = true;
       previous_point.copy(point);
@@ -634,6 +722,9 @@ Defmech.RotationWithQuaternion = (function () {
     onDocumentMouseMove(event);
   }
 
+  
+  
+  
   function onDocumentMouseMove(event) {
     event.preventDefault();
 
@@ -807,6 +898,20 @@ Defmech.RotationWithQuaternion = (function () {
     var hue = (Math.atan2(-v.z, -v.x) / Math.PI) * -0.5;
     return new THREE.Color().setHSL(hue, 1, lum);
   }
+  
+  
+  
+  
+  
+  
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // STORE  PATHS
+  // Convert a quarternion recording to a mesh so the path can be stored and displayed on sphere
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  
+  
 
   function recording_to_path(recording) {
     var MAX_SQR_DIST = 5000;
@@ -946,9 +1051,29 @@ Defmech.RotationWithQuaternion = (function () {
       }
     }
   }
-  /*
+  
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // GUESS PATHS
+  // Uses a genetic algorithm to guess what path a looks like when it is unknown
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  
+  
   var debug_cubes = [];
-  // NEW WAY THAT PATHS ARE COMPARED
+  
+  function compare_paths(path_a, path_b, max_dist) {
+    var mutatedPathB = shapePreservingBlindSearch(path_a, path_b, 1, 0.1, 1000);
+    if (mutatedPathB) {
+      // mutatedPathB is a perfect match for path_a
+      // Do something with mutatedPathB...
+    } else {
+      // No match was found within 1000 iterations
+      // Handle this case...
+    }
+  }
+  
+  
   function randomUniform(min, max) {
     return Math.random() * (max - min) + min;
   }
@@ -1004,18 +1129,29 @@ Defmech.RotationWithQuaternion = (function () {
     return true;
   }
 
-  function compare_paths(path_a, path_b, max_dist) {
-    var mutatedPathB = shapePreservingBlindSearch(path_a, path_b, 1, 0.1, 1000);
-    if (mutatedPathB) {
-      // mutatedPathB is a perfect match for path_a
-      // Do something with mutatedPathB...
+  
+  
+//Toggle button to show hide paths
+document.getElementById('toggleButton').addEventListener('change', function() {
+    if (this.checked) {
+        for (let path of path_meshes) {
+            path.material.visible = false;
+        }
     } else {
-      // No match was found within 1000 iterations
-      // Handle this case...
+        for (let path of path_meshes) {
+            path.material.visible = true;
+        }
     }
-  }
-  */
+    render(); // Ensure the renderer updates after changing visibility
+});
 
+  
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // COMPARE PATHS
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+ 
   var debug_cubes = [];
 
   function compare_paths(path_a, path_b, max_dist) {
@@ -1200,11 +1336,17 @@ document.onreadystatechange = function () {
 
 
 <body>
-<div id="center"></div>
-    <div class="buttons">
-        <button class="all" data-action="delete_all">Delete all</button>
-        <span id="compare-result"></span>
-    </div>
+  <div id="center"></div>
+  <div class="buttons">
+    <button class="all" data-action="delete_all">Delete all</button>
+    <span id="compare-result"></span>
+  </div>
+  <div id="toggleContainer">
+      <label class="toggle-switch">
+          <input type="checkbox" id="toggleButton">
+          <span class="slider round"></span>
+      </label>
+  </div>
 </body>
 
 </html>
