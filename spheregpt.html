@@ -118,8 +118,28 @@ var {
   Color
 } = THREE;
 
-// SphereGeometry
+// Common function to initialize parameters
+function initializeParameters(
+  radius,
+  widthSegments,
+  heightSegments,
+  phiStart,
+  phiLength,
+  thetaStart,
+  thetaLength
+) {
+  return {
+    radius: radius,
+    widthSegments: widthSegments,
+    heightSegments: heightSegments,
+    phiStart: phiStart,
+    phiLength: phiLength,
+    thetaStart: thetaStart,
+    thetaLength: thetaLength
+  };
+}
 
+// SphereGeometry
 function HSVSphereGeometry(
   radius,
   widthSegments,
@@ -132,16 +152,15 @@ function HSVSphereGeometry(
   Geometry.call(this);
 
   this.type = "SphereGeometry";
-
-  this.parameters = {
-    radius: radius,
-    widthSegments: widthSegments,
-    heightSegments: heightSegments,
-    phiStart: phiStart,
-    phiLength: phiLength,
-    thetaStart: thetaStart,
-    thetaLength: thetaLength
-  };
+  this.parameters = initializeParameters(
+    radius,
+    widthSegments,
+    heightSegments,
+    phiStart,
+    phiLength,
+    thetaStart,
+    thetaLength
+  );
 
   this.fromBufferGeometry(
     new HSVSphereBufferGeometry(
@@ -161,7 +180,6 @@ HSVSphereGeometry.prototype = Object.create(Geometry.prototype);
 HSVSphereGeometry.prototype.constructor = HSVSphereGeometry;
 
 // SphereBufferGeometry
-
 function HSVSphereBufferGeometry(
   radius,
   widthSegments,
@@ -174,25 +192,22 @@ function HSVSphereBufferGeometry(
   BufferGeometry.call(this);
 
   this.type = "SphereBufferGeometry";
+  this.parameters = initializeParameters(
+    radius,
+    widthSegments,
+    heightSegments,
+    phiStart,
+    phiLength,
+    thetaStart,
+    thetaLength
+  );
 
-  this.parameters = {
-    radius: radius,
-    widthSegments: widthSegments,
-    heightSegments: heightSegments,
-    phiStart: phiStart,
-    phiLength: phiLength,
-    thetaStart: thetaStart,
-    thetaLength: thetaLength
-  };
-
+  // Default values for undefined parameters
   radius = radius || 1;
-
   widthSegments = Math.max(3, Math.floor(widthSegments) || 8);
   heightSegments = Math.max(2, Math.floor(heightSegments) || 6);
-
   phiStart = phiStart !== undefined ? phiStart : 0;
   phiLength = phiLength !== undefined ? phiLength : Math.PI * 2;
-
   thetaStart = thetaStart !== undefined ? thetaStart : 0;
   thetaLength = thetaLength !== undefined ? thetaLength : Math.PI;
 
@@ -284,7 +299,6 @@ HSVSphereBufferGeometry.prototype.constructor = HSVSphereBufferGeometry;
 ("use strict");
 
 // options
-var SHOW_AVERAGE = false;
 var COMPARE_DISTANCE = 11;
 // compare method must be one of: average first last best
 var COMPARE_METHOD = "best";
@@ -294,6 +308,7 @@ var HANDLE_RADIUS = 15;
 var HANDLE_MIN_DIST = 0; // minimum space between handles, can be negative
 var HANDLE_ORIG_MIN_SQR_DIST = Math.pow(HANDLE_RADIUS * 2 + HANDLE_MIN_DIST, 2);
 
+var arePathsVisible = true; // Variable to track visibility
 // Namespace
 var Defmech = Defmech || {};
 
@@ -349,7 +364,6 @@ Defmech.RotationWithQuaternion = (function () {
   var recording = [],
     all_paths = [],
     path_meshes = [],
-    average = null,
     handles = [],
     handle_meshes = [],
     best_path_index = 0,
@@ -400,62 +414,61 @@ Defmech.RotationWithQuaternion = (function () {
           // start playback
           playing_position = recording.length;
           is_playing = true;
-          // convert this recording to path, add to average
-          var path = recording_to_path(recording);
+          // convert this recording to path
+          var current_path = recording_to_path(recording);
           // compare
           var ratio = 0;
           var result_box = document.getElementById("compare-result");
           if (all_paths.length >= 1) {
-            switch (COMPARE_METHOD) {
-              case "average":
-                var other = average;
-                break;
-              case "first":
-                var other = all_paths[0].path;
-                break;
-              case "last":
-                var other = all_paths[all_paths.length - 1].path;
-                break;
-              case "best":
-                var other = all_paths[best_path_index].path;
-                break;
-              default:
-                alert("wrong compare method");
-                throw Error("wrong compare method");
+            // Iterate through all the paths in the 'all_paths' array
+            for (var i = 0; i < all_paths.length; i++) {
+              var stored_path = all_paths[i].path;
+              //Check if toggle is clicked to either compare or guess paths
+              if (!arePathsVisible) {
+                var ratio = guess_paths(stored_path, current_path);
+                 result_box.innerHTML = "calculating...";
+
+              } else {
+                var ratio = compare_paths(stored_path, current_path, COMPARE_DISTANCE);
+                var pass = ratio >= PASS_RATIO;
+
+                result_box.innerHTML =
+                  ((ratio * 100) | 0) +
+                  "% match<br>" +
+                  (pass
+                    ? '<span class="pass">PASS</span>'
+                    : '<span class="fail">FAIL</span>');
+              }
+           
+              
+              // If a successful match is found, exit the loop
+              if (pass) {
+                setTimeout(function () {result_box.innerHTML = "";}, 2000);
+                break; // Exit the loop
+              }
             }
-            var ratio = compare_paths(other, path, COMPARE_DISTANCE);
-            var pass = ratio >= PASS_RATIO;
-            result_box.innerHTML =
-              ((ratio * 100) | 0) +
-              "% match<br>" +
-              (pass
-                ? '<span class="pass">PASS</span>'
-                : '<span class="fail">FAIL</span>');
-            setTimeout(function () {
-              result_box.innerHTML = "";
-            }, 2000);
           }
-      
+
           if (pass || all_paths.length < 1) {
             var color = get_HSL(sphere);
             // Here is all data that is saved
-            var path_data = { path: path, ratio: ratio, color: color };
+            var path_data = { path: current_path, ratio: ratio, color: color };
             all_paths.push(path_data);
-            add_weighted_average(path, all_paths.length);
+            //add_weighted_average(path, all_paths.length);
             // show all paths (including this one) and save
             show_paths();
-              sphere.remove(currentPathMesh);
-              currentPathMesh = null; // Set to null to indicate there's no current path.
+            sphere.remove(currentPathMesh);
+            currentPathMesh = null; // Set to null to indicate there's no current path.
             save_paths().catch(function (err) {
               console.error(err);
             });
           } else {
-  // If there is a currentPathMesh and it's a child of the sphere, remove it.
-  if (currentPathMesh) {
-    sphere.remove(currentPathMesh);
-    currentPathMesh = null; // Set to null to indicate there's no current path.
-  }
-}
+            // If there is a currentPathMesh and it's a child of the sphere, remove it.
+            if (currentPathMesh) {
+              sphere.remove(currentPathMesh);
+              currentPathMesh = null; // Set to null to indicate there's no current path.
+            }
+          }
           break;
         case "recording":
           recording = [];
@@ -606,21 +619,14 @@ Defmech.RotationWithQuaternion = (function () {
   }
 
   var currentMesh = null;
-  
-  
-  
-  
-  
-  
+
   ///////////////////////////////////////////////////////////////////////////////////////////////
   //
-  // ON MOUSE DOWN
-  // Event for when the user clicks on sphere, creating a handle if one doesnt already exist
+  // USER INTERACTIONS
+  // Events for when the user clicks on sphere and rotates it
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
-  
-  
-  
+
   function onDocumentMouseDown(event) {
     if (event.target.tagName == "BUTTON") {
       return;
@@ -641,7 +647,11 @@ Defmech.RotationWithQuaternion = (function () {
       -(event.clientY / window.innerHeight) * 2 + 1,
       0.5
     );
-    ray.setFromCamera(vector, camera);
+
+    camera.updateMatrixWorld(); // Update the camera's matrix world
+    camera.updateProjectionMatrix(); // Update the camera's projection matrix
+    ray.setFromCamera(vector, camera); // Now use the updated camera in setFromCamera()
+
     var results = ray.intersectObjects([sphere].concat(handle_meshes));
 
     if (results[0]) {
@@ -664,56 +674,63 @@ Defmech.RotationWithQuaternion = (function () {
 
       if (add_handle) {
         var pointColor = getColorAtPoint(point);
-        var smallSphere = new THREE.Mesh(
-          smallSphereGeometry,
-          new THREE.MeshBasicMaterial({ color: pointColor })
-        );
-
-        handles.push(point);
-        smallSphere.position.copy(results[0].point);
-        smallSphere.position.applyQuaternion(
-          sphere.getWorldQuaternion().inverse()
-        );
-        sphere.add(smallSphere);
-        handle_meshes.push(smallSphere);
-
-        // create a canvas element
-        var canvas1 = document.createElement("canvas");
-        var context1 = canvas1.getContext("2d");
-        context1.font = "12px Arial";
-        context1.fillStyle = "rgba(0,0,0,1)";
         var hexColor = "#" + pointColor.getHexString();
-        context1.fillText(hexColor, 0, 50);
-
-        // canvas contents will be used for a texture
-        var texture1 = new THREE.Texture(canvas1);
-        texture1.needsUpdate = true;
-
-        var material1 = new THREE.MeshBasicMaterial({
-          map: texture1,
-          side: THREE.DoubleSide
-        });
-        material1.transparent = true;
-
-        var mesh1 = new THREE.Mesh(
-          new THREE.PlaneGeometry(canvas1.width, canvas1.height),
-          material1
-        );
-        mesh1.position.copy(results[0].point);
-        mesh1.position.lerp(camera.position, 0.01);
-        mesh1.position.applyQuaternion(sphere.getWorldQuaternion().inverse());
-        mesh1.lookAt(camera.position);
-        mesh1.rotation.x += Math.PI / 2;
-        sphere.add(mesh1);
-        labels.push(mesh1);
-        
-        all_handles.push({ handle: { x: point.x, y: point.y, z: point.z }, id: guid() }); // Store the handle's position
-          localforage.setItem('handles', JSON.stringify(all_handles)); // Store the handle positions in the local storage
+        addHandle(point, pointColor, hexColor); // Call the new "addHandle" function
       }
       mouseDown = true;
       previous_point.copy(point);
       current_point.copy(point);
     }
+  }
+
+  // ADD A HANDLE TO SPHERE
+  function addHandle(point, pointColor, hexColor) {
+    var smallSphere = new THREE.Mesh(
+      smallSphereGeometry,
+      new THREE.MeshBasicMaterial({ color: pointColor })
+    );
+
+    handles.push(point);
+    smallSphere.position.copy(point);
+    smallSphere.position.applyQuaternion(sphere.getWorldQuaternion().inverse());
+    sphere.add(smallSphere);
+    handle_meshes.push(smallSphere);
+
+    // create a canvas element
+    var canvas1 = document.createElement("canvas");
+    var context1 = canvas1.getContext("2d");
+    context1.font = "12px Arial";
+    context1.fillStyle = "rgba(0,0,0,1)";
+    context1.fillText(hexColor, 0, 50);
+
+    // canvas contents will be used for a texture
+    var texture1 = new THREE.Texture(canvas1);
+    texture1.needsUpdate = true;
+
+    var material1 = new THREE.MeshBasicMaterial({
+      map: texture1,
+      side: THREE.DoubleSide
+    });
+    material1.transparent = true;
+
+    var mesh1 = new THREE.Mesh(
+      new THREE.PlaneGeometry(canvas1.width, canvas1.height),
+      material1
+    );
+    mesh1.position.copy(point);
+    mesh1.position.lerp(camera.position, 0.01);
+    mesh1.position.applyQuaternion(sphere.getWorldQuaternion().inverse());
+    mesh1.lookAt(camera.position);
+    mesh1.rotation.x += Math.PI / 2;
+    sphere.add(mesh1);
+    labels.push(mesh1);
+
+    // Store the handle's position
+    all_handles.push({
+      handle: { x: point.x, y: point.y, z: point.z },
+      id: hexColor
+    });
+    localforage.setItem("handles", JSON.stringify(all_handles));
   }
 
   function onTouchMove(event) {
@@ -722,9 +739,6 @@ Defmech.RotationWithQuaternion = (function () {
     onDocumentMouseMove(event);
   }
 
-  
-  
-  
   function onDocumentMouseMove(event) {
     event.preventDefault();
 
@@ -792,7 +806,6 @@ Defmech.RotationWithQuaternion = (function () {
     window.removeEventListener("touchend", onTouchEnd, false);
   }
 
-  
   function rotateMatrix(rotateStart, rotateEnd) {
     var axis = new THREE.Vector3(),
       quaternion = new THREE.Quaternion();
@@ -898,20 +911,13 @@ Defmech.RotationWithQuaternion = (function () {
     var hue = (Math.atan2(-v.z, -v.x) / Math.PI) * -0.5;
     return new THREE.Color().setHSL(hue, 1, lum);
   }
-  
-  
-  
-  
-  
-  
+
   ///////////////////////////////////////////////////////////////////////////////////////////////
   //
   // STORE  PATHS
   // Convert a quarternion recording to a mesh so the path can be stored and displayed on sphere
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
-  
-  
 
   function recording_to_path(recording) {
     var MAX_SQR_DIST = 5000;
@@ -1039,46 +1045,50 @@ Defmech.RotationWithQuaternion = (function () {
         mesh.material.opacity = 1 / all_paths.length;
       }
     }
-    if (SHOW_AVERAGE) {
-      if (average_mesh) {
-        sphere.remove(average_mesh);
-      }
-      if (average) {
-        average_mesh = path_to_mesh(average);
-        sphere.add(average_mesh);
-        average_mesh.material.opacity = 1;
-        average_mesh.material.color.setHex(0xff00ff);
-      }
-    }
   }
-  
+
   ///////////////////////////////////////////////////////////////////////////////////////////////
   //
   // GUESS PATHS
   // Uses a genetic algorithm to guess what path a looks like when it is unknown
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
-  
-  
-  var debug_cubes = [];
-  
-  function compare_paths(path_a, path_b, max_dist) {
-    var mutatedPathB = shapePreservingBlindSearch(path_a, path_b, 1, 0.1, 1000);
-    if (mutatedPathB) {
-      // mutatedPathB is a perfect match for path_a
-      // Do something with mutatedPathB...
+
+  function guess_paths(stored_path, current_path) {
+    var guess_path = shapePreservingBlindSearch(stored_path, current_path, 1, 0.1, 1000);
+    if (guess_path) {
+       //Stored path and current path are perfect match
+       return true;
     } else {
-      // No match was found within 1000 iterations
-      // Handle this case...
+       // No match was found within 1000 iterations
+       return false;
     }
   }
-  
-  
+
   function randomUniform(min, max) {
     return Math.random() * (max - min) + min;
   }
 
-  function shapePreservingMutate(path, maxMutations = 1, mutationAmount = 1) {
+
+  async function shapePreservingBlindSearch(stored_path, current_path, maxMutations, mutationAmount, maxIterations) 
+  {
+    for (var iteration = 0; iteration < maxIterations; iteration++) {
+      var mutated_path = shapePreservingMutate(current_path, maxMutations, mutationAmount);
+      if (isPerfectMatch(stored_path, mutated_path)) {
+        return newPath;
+      }
+
+      // Every 20 iterations, update the displayed path and yield control back to the browser
+      if (iteration % 20 === 0) {
+        // Assume updatePathDisplay is a function that updates the displayed path
+        updatePathDisplay(mutated_path);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    return null;
+  }
+  
+   function shapePreservingMutate(path, maxMutations = 1, mutationAmount = 1) {
     var newPath = path.slice();
     var numMutations = Math.floor(Math.random() * maxMutations) + 1;
     for (var i = 0; i < numMutations; i++) {
@@ -1090,38 +1100,15 @@ Defmech.RotationWithQuaternion = (function () {
     return newPath;
   }
 
-  async function shapePreservingBlindSearch(
-    path1,
-    path2,
-    maxMutations = 1,
-    mutationAmount = 1,
-    maxIterations = 1000
-  ) {
-    for (var iteration = 0; iteration < maxIterations; iteration++) {
-      var newPath = shapePreservingMutate(path2, maxMutations, mutationAmount);
-      if (isPerfectMatch(path1, newPath)) {
-        return newPath;
-      }
-
-      // Every 20 iterations, update the displayed path and yield control back to the browser
-      if (iteration % 20 === 0) {
-        // Assume updatePathDisplay is a function that updates the displayed path
-        updatePathDisplay(newPath);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
-    return null;
-  }
-
-  function isPerfectMatch(path1, path2) {
-    if (path1.length != path2.length) {
+  function isPerfectMatch(stored_path, mutated_path) {
+    if (stored_path.length != mutated_path.length) {
       return false;
     }
-    for (var i = 0; i < path1.length; i++) {
+    for (var i = 0; i < stored_path.length; i++) {
       if (
-        path1[i].x != path2[i].x ||
-        path1[i].y != path2[i].y ||
-        path1[i].z != path2[i].z
+        stored_path[i].x != mutated_path[i].x ||
+        stored_path[i].y != mutated_path[i].y ||
+        stored_path[i].z != mutated_path[i].z
       ) {
         return false;
       }
@@ -1129,34 +1116,44 @@ Defmech.RotationWithQuaternion = (function () {
     return true;
   }
 
-  
-  
-//Toggle button to show hide paths
+  function updatePathDisplay(path) {
+    // Update the path to visually represent the coordinates being generated by the shapePreservingMutate function
 
+    if (currentPathMesh) {
+       sphere.remove(currentPathMesh);
+       currentPathMesh = null; // Set to null to indicate there's no current path.
+    }
+    // Convert the new path to a mesh
+    currentPathMesh = path_to_mesh(path);
 
-document.addEventListener("DOMContentLoaded", function() {
-    document.getElementById('toggleButton').addEventListener('change', function() {
+    // Add the new path mesh to the sphere
+    sphere.add(currentPathMesh);
+  }
+
+  //Toggle button to show hide paths
+  document
+    .getElementById("toggleButton")
+    .addEventListener("change", function () {
       if (this.checked) {
         for (let path of path_meshes) {
-            path.material.visible = false;
+          path.material.visible = false;
         }
-    } else {
+        arePathsVisible = false; // Update visibility state
+      } else {
         for (let path of path_meshes) {
-            path.material.visible = true;
+          path.material.visible = true;
         }
-    }
-    render(); // Ensure the renderer updates after changing visibility
+        arePathsVisible = true; // Update visibility state
+      }
+      render(); // Ensure the renderer updates after changing visibility
     });
-});
 
-
-  
   ///////////////////////////////////////////////////////////////////////////////////////////////
   //
   // COMPARE PATHS
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
- 
+
   var debug_cubes = [];
 
   function compare_paths(path_a, path_b, max_dist) {
@@ -1207,80 +1204,18 @@ document.addEventListener("DOMContentLoaded", function() {
       }
       var is_match = shortest < max_dist_sq;
       matching_a.push(is_match);
-      // if(is_match){
-      //     var cube = new THREE.Mesh(boxGeometry, material);
-      //     console.log(a)
-      //     cube.position.copy(a)
-      //     cube.scale.multiplyScalar(2)
-      //     sphere.add(cube)
-      //     debug_cubes.push(cube)
-      // }
     }
     return matching_a;
   }
 
-  function add_weighted_average(path, count) {
-    if (!average) {
-      average = clone_path(path);
-      return;
-    }
-    var weight = 1 / count;
-    var path_a = average,
-      path_b = path;
-    var v = new THREE.Vector3();
-
-    var a_length = 0,
-      a_prev = path_a[0].clone();
-    var b_length = 0,
-      b_prev = path_b[0],
-      j = 0,
-      b_dist = 0;
-    var a,
-      b = path_b[0];
-
-    for (var i = 0; i < path_a.length; i++) {
-      // For each point of path_a, find the point at the same path length
-      // in path_b, and use it for the weighted average
-      a = path_a[i];
-      a_length += a.distanceTo(a_prev);
-      a_prev.copy(a);
-      while (j < path_b.length - 1 && a_length > b_length + b_dist) {
-        b_length += b_dist;
-        b_prev = b;
-        b = path_b[++j];
-        b_dist = b.distanceTo(b_prev);
-      }
-      v.copy(b_prev);
-      if (b_dist != 0) {
-        v.lerp(b, (a_length - b_length) / b_dist);
-      }
-      // we're applying the average here
-      a.lerp(v, weight);
-      // normalize
-      a.multiplyScalar(SPHERE_RADIUS / a.length());
-    }
-  }
-
-  function clone_path(path) {
-    var clone = [];
-    for (var i = 0; i < path.length; i++) {
-      clone.push(path[i].clone());
-    }
-    return clone;
-  }
-
   // returns a promise
   function save_paths() {
-    return Promise.all([
-      localforage.setItem("paths_v1", all_paths)
-      // localforage.setItem('average', average),
-    ]);
+    return Promise.all([localforage.setItem("paths_v1", all_paths)]);
   }
 
   // returns a promise
   function restore_paths() {
     return localforage.getItem("paths_v1").then(function (paths) {
-      // return localforage.getItem('average').then(function(avg) {
       if (paths) {
         for (var i = 0; i < paths.length; i++) {
           var path = paths[i].path;
@@ -1291,15 +1226,12 @@ document.addEventListener("DOMContentLoaded", function() {
         }
         all_paths = paths;
       }
-      // average = array_to_path(avg);
-      // });
     });
   }
 
   function delete_saved() {
     return Promise.all([
       localforage.removeItem("paths_v1")
-      // localforage.removeItem('average'),
     ]);
   }
 
