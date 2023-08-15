@@ -918,38 +918,51 @@ Defmech.RotationWithQuaternion = (function () {
   // Convert a quarternion recording to a mesh so the path can be stored and displayed on sphere
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
+function recording_to_path(recording) {
+  var MAX_SQR_DIST = 5000;
+  var v, v2;
+  var q = new THREE.Quaternion();
+  var path = [];
+  for (var i = 0; i < recording.length; i += 4) {
+    q.set(...recording.slice(i, i + 4));
+    q.inverse();
+    v = new THREE.Vector3();
+    v.x = v.y = 0;
+    v.z = SPHERE_RADIUS;
+    v.applyQuaternion(q);
 
-  function recording_to_path(recording) {
-    var MAX_SQR_DIST = 5000;
-    var v, v2;
-    var q = new THREE.Quaternion();
-    var path = [];
-    for (var i = 0; i < recording.length; i += 4) {
-      q.set(...recording.slice(i, i + 4));
-      q.inverse();
-      v = new THREE.Vector3();
-      v.x = v.y = 0;
-      v.z = SPHERE_RADIUS;
-      v.applyQuaternion(q);
-      if (path.length !== 0) {
-        // Insert intermediate points so it doesn't dive under the sphere
-        var prev = path[path.length - 1];
-        var dist = prev.distanceToSquared(v);
-        var count = Math.floor(dist / MAX_SQR_DIST);
-        var spacing = 1 / (count + 1);
-        var f = spacing;
-        while (f < 0.99) {
-          v2 = prev.clone();
-          v2.lerp(v, f);
-          v2.multiplyScalar(SPHERE_RADIUS / v2.length());
-          path.push(v2);
-          f += spacing;
-        }
+    // Format the coordinates to 2 decimal places
+    v.x = parseFloat(v.x.toFixed(2));
+    v.y = parseFloat(v.y.toFixed(2));
+    v.z = parseFloat(v.z.toFixed(2));
+
+    if (path.length !== 0) {
+      // Insert intermediate points so it doesn't dive under the sphere
+      var prev = path[path.length - 1];
+      var dist = prev.distanceToSquared(v);
+      var count = Math.floor(dist / MAX_SQR_DIST);
+      var spacing = 1 / (count + 1);
+      var f = spacing;
+      while (f < 0.99) {
+        v2 = prev.clone();
+        v2.lerp(v, f);
+        v2.multiplyScalar(SPHERE_RADIUS / v2.length());
+
+        // Format the coordinates to 2 decimal places
+        v2.x = parseFloat(v2.x.toFixed(2));
+        v2.y = parseFloat(v2.y.toFixed(2));
+        v2.z = parseFloat(v2.z.toFixed(2));
+
+        path.push(v2);
+        f += spacing;
       }
-      path.push(v);
     }
-    return path;
+
+    path.push(v);
   }
+
+  return path;
+}
 
   function path_to_mesh(path) {
     var WIDTH = 5 / 2,
