@@ -920,62 +920,62 @@ Defmech.RotationWithQuaternion = (function () {
   // Convert a quarternion recording to a mesh so the path can be stored and displayed on sphere
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
-
-  function recording_to_path(recording) {
+function recording_to_path(recording) {
   var MAX_SQR_DIST = 5000;
   var v, v2;
   var q = new THREE.Quaternion();
   var path = [];
+  var factor = 100; // For 2 decimal places
   for (var i = 0; i < recording.length; i += 4) {
     q.set(...recording.slice(i, i + 4));
-    // Invert the quaternion (This is needed to convert from one coordinate system to another, typically from local to global space)
     q.inverse();
     v = new THREE.Vector3();
     v.x = v.y = 0;
-    
-    // Set z to SPHERE_RADIUS (SPHERE_RADIUS defines the radius of a sphere representing a spatial boundary or constraint)
     v.z = SPHERE_RADIUS;
     v.applyQuaternion(q);
-    
+
     if (path.length !== 0) {
       var prev = path[path.length - 1];
       var dist = prev.distanceToSquared(v);
       var count = Math.floor(dist / MAX_SQR_DIST);
       var spacing = 1 / (count + 1);
       var f = spacing;
-      // Insert intermediate points and leave a small gap (0.01) before the next actual point
       while (f < 1 - spacing) {
         v2 = prev.clone();
         v2.lerp(v, f);
         v2.multiplyScalar(SPHERE_RADIUS / v2.length());
-        // Round to two decimal places
         path.push(v2);
         f += spacing;
       }
     }
-    v = roundVector(v, 2); 
-
+    
+  
     path.push(v);
   }
-  // Simplify path
+  for(let v of path) {
+    v.x = Math.round(v.x * factor) / factor;
+    v.y = Math.round(v.y * factor) / factor;
+    v.z = Math.round(v.z * factor) / factor; 
+  }
   var tolerance = 1; // Adjust as needed
   var simplified = simplifyPath(path, tolerance);
 
   return simplified;
 }
 
+
   
   
   
-  
-  
-function roundVector(v, decimals) {
+  function roundVector(v) {
+  var factor = 100; // For 2 decimal places
   return new THREE.Vector3(
-    parseFloat(v.x.toFixed(decimals)), 
-    parseFloat(v.y.toFixed(decimals)),
-    parseFloat(v.z.toFixed(decimals))
+    Math.round(v.x * factor) / factor,
+    Math.round(v.y * factor) / factor,
+    Math.round(v.z * factor) / factor
   );
 }
+
  
 
 function simplifyPath(path, tolerance) {
