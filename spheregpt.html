@@ -110,6 +110,8 @@ input:checked + .slider:before {
 	<script src="three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
  <script type="text/javascript">
+
+
 var {
   Geometry,
   BufferGeometry,
@@ -918,50 +920,65 @@ Defmech.RotationWithQuaternion = (function () {
   // Convert a quarternion recording to a mesh so the path can be stored and displayed on sphere
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
-function recording_to_path(recording) {
+
+  
+  function recording_to_path(recording) {
   var MAX_SQR_DIST = 5000;
   var v, v2;
   var q = new THREE.Quaternion();
   var path = [];
   for (var i = 0; i < recording.length; i += 4) {
     q.set(...recording.slice(i, i + 4));
+    // Invert the quaternion (if needed, explain why)
     q.inverse();
     v = new THREE.Vector3();
     v.x = v.y = 0;
+    // Set z to SPHERE_RADIUS (clarify the context or purpose of SPHERE_RADIUS)
     v.z = SPHERE_RADIUS;
     v.applyQuaternion(q);
-
-    // Format the coordinates to 2 decimal places
-    v.x = parseFloat(v.x.toFixed(2));
-    v.y = parseFloat(v.y.toFixed(2));
-    v.z = parseFloat(v.z.toFixed(2));
-
     if (path.length !== 0) {
-      // Insert intermediate points so it doesn't dive under the sphere
       var prev = path[path.length - 1];
       var dist = prev.distanceToSquared(v);
       var count = Math.floor(dist / MAX_SQR_DIST);
       var spacing = 1 / (count + 1);
       var f = spacing;
-      while (f < 0.99) {
+      // Insert intermediate points and leave a small gap (0.01) before the next actual point
+      while (f < 1 - spacing) {
         v2 = prev.clone();
         v2.lerp(v, f);
         v2.multiplyScalar(SPHERE_RADIUS / v2.length());
-
-        // Format the coordinates to 2 decimal places
-        v2.x = parseFloat(v2.x.toFixed(2));
-        v2.y = parseFloat(v2.y.toFixed(2));
-        v2.z = parseFloat(v2.z.toFixed(2));
-
         path.push(v2);
         f += spacing;
       }
     }
-
     path.push(v);
   }
+  // Simplify path
+  var tolerance = 1; // Adjust as needed
+  var simplified = simplifyPath(path, tolerance);
 
-  return path;
+  return simplified;
+}
+
+function simplifyPath(path, tolerance) {
+  let simplified = [path[0]];
+
+  for (let i = 1; i < path.length - 1; i++) {
+    let prev = simplified[simplified.length - 1];
+    let next = path[i + 1];
+
+    // Check the deviation by linearly interpolating between prev and next, and comparing with the current point
+    let deviation = path[i].distanceTo(prev.lerp(next, 0.5));
+
+    if (deviation > tolerance) {
+      simplified.push(path[i]);
+    }
+  }
+
+  // Always include the last point in the simplified path
+  simplified.push(path[path.length - 1]);
+
+  return simplified;
 }
 
   function path_to_mesh(path) {
@@ -1101,17 +1118,32 @@ function recording_to_path(recording) {
     return null;
   }
   
-   function shapePreservingMutate(path, maxMutations = 1, mutationAmount = 1) {
-    var newPath = path.slice();
-    var numMutations = Math.floor(Math.random() * maxMutations) + 1;
-    for (var i = 0; i < numMutations; i++) {
-      var idx = Math.floor(Math.random() * path.length);
-      newPath[idx].x += randomUniform(-mutationAmount, mutationAmount);
-      newPath[idx].y += randomUniform(-mutationAmount, mutationAmount);
-      newPath[idx].z += randomUniform(-mutationAmount, mutationAmount);
-    }
-    return newPath;
+  function shapePreservingMutate(path, maxMutations = 1, mutationAmount = 1) {
+  var newPath = path.slice(); // Copying the original path
+  var numMutations = Math.floor(Math.random() * maxMutations) + 1;
+  console.log("Number of mutations:", numMutations); // Log the number of mutations
+
+  for (var i = 0; i < numMutations; i++) {
+    var idx = Math.floor(Math.random() * path.length); // Random index for mutation
+    var mutation = {
+      x: randomUniform(-mutationAmount, mutationAmount),
+      y: randomUniform(-mutationAmount, mutationAmount),
+      z: randomUniform(-mutationAmount, mutationAmount)
+    };
+
+    console.log("Mutation at index", idx, ":", mutation); // Log the mutation details
+
+    newPath[idx].x += mutation.x;
+    newPath[idx].y += mutation.y;
+    newPath[idx].z += mutation.z;
   }
+
+  console.log("Original Path:", path); // Log the original path
+  console.log("Mutated Path:", newPath); // Log the mutated path
+
+  return newPath;
+}
+
 
   function isPerfectMatch(stored_path, mutated_path) {
     if (stored_path.length != mutated_path.length) {
@@ -1146,16 +1178,18 @@ function recording_to_path(recording) {
   //Toggle button to show hide paths
  document.addEventListener("DOMContentLoaded", function() {
     document.getElementById('toggleButton').addEventListener('change', function() {
-      if (this.checked) {
+       if (this.checked) {
         for (let path of path_meshes) {
-            path.material.visible = false;
+          path.material.visible = false;
         }
-    } else {
+        arePathsVisible = false; // Update visibility state
+      } else {
         for (let path of path_meshes) {
-            path.material.visible = true;
+          path.material.visible = true;
         }
-    }
-    render(); // Ensure the renderer updates after changing visibility
+        arePathsVisible = true; // Update visibility state
+      }
+      render(); // Ensure the renderer updates after changing visibility
     });
 });
 
@@ -1278,6 +1312,7 @@ document.onreadystatechange = function () {
     }
   }
 };
+
 
 	 
     </script>
