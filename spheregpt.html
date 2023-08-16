@@ -921,7 +921,6 @@ Defmech.RotationWithQuaternion = (function () {
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
 
-  
   function recording_to_path(recording) {
   var MAX_SQR_DIST = 5000;
   var v, v2;
@@ -929,13 +928,17 @@ Defmech.RotationWithQuaternion = (function () {
   var path = [];
   for (var i = 0; i < recording.length; i += 4) {
     q.set(...recording.slice(i, i + 4));
-    // Invert the quaternion (if needed, explain why)
+    // Invert the quaternion (This is needed to convert from one coordinate system to another, typically from local to global space)
     q.inverse();
     v = new THREE.Vector3();
     v.x = v.y = 0;
-    // Set z to SPHERE_RADIUS (clarify the context or purpose of SPHERE_RADIUS)
+    // Set z to SPHERE_RADIUS (SPHERE_RADIUS defines the radius of a sphere representing a spatial boundary or constraint)
     v.z = SPHERE_RADIUS;
     v.applyQuaternion(q);
+    // Round to two decimal places
+    v.x = parseFloat(v.x.toFixed(2));
+    v.y = parseFloat(v.y.toFixed(2));
+    v.z = parseFloat(v.z.toFixed(2));
     if (path.length !== 0) {
       var prev = path[path.length - 1];
       var dist = prev.distanceToSquared(v);
@@ -947,6 +950,10 @@ Defmech.RotationWithQuaternion = (function () {
         v2 = prev.clone();
         v2.lerp(v, f);
         v2.multiplyScalar(SPHERE_RADIUS / v2.length());
+        // Round to two decimal places
+        v2.x = parseFloat(v2.x.toFixed(2));
+        v2.y = parseFloat(v2.y.toFixed(2));
+        v2.z = parseFloat(v2.z.toFixed(2));
         path.push(v2);
         f += spacing;
       }
@@ -959,6 +966,7 @@ Defmech.RotationWithQuaternion = (function () {
 
   return simplified;
 }
+
 
 function simplifyPath(path, tolerance) {
   let simplified = [path[0]];
