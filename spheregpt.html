@@ -921,45 +921,46 @@ Defmech.RotationWithQuaternion = (function () {
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
 function recording_to_path(recording) {
+  var MAX_SQR_DIST = 5000;
+  var v, v2;
+  var q = new THREE.Quaternion();
 
-    var MAX_SQR_DIST = 5000;
-    var v, v2;
-    var q = new THREE.Quaternion();
+  // Define the starting point using the given coordinates for "off-white"
+  var STARTING_POINT = new THREE.Vector3(4.652692221694485, -2.79161533301664, 199.6580628676369);
 
-    var path = [];
+  // Initialize the path with the defined starting point
+  var path = [STARTING_POINT.clone()];
 
-    for (var i = 0; i < recording.length; i += 4) {
-      q.set(...recording.slice(i, i + 4));
-      q.inverse();
-      v = new THREE.Vector3();
-      v.x = v.y = 0;
-      v.z = SPHERE_RADIUS;
-      v.applyQuaternion(q);
+  // Start the loop from the second point
+  for (var i = 4; i < recording.length; i += 4) {
+    q.set(...recording.slice(i, i + 4));
+    q.inverse();
+    v = new THREE.Vector3();
+    v.x = v.y = 0;
+    v.z = SPHERE_RADIUS;
+    v.applyQuaternion(q);
 
-      // Format the coordinates to 2 decimal places
-      if (path.length !== 0) {
-          // Insert intermediate points so it doesn't dive under the sphere
-          var prev = path[path.length - 1];
-          var dist = prev.distanceToSquared(v);
-          var count = Math.floor(dist / MAX_SQR_DIST);
-          var spacing = 1 / (count + 1);
-          var f = spacing;
+    if (path.length !== 1) { // Modified condition to account for the manually set first point
+      var prev = path[path.length - 1];
+      var dist = prev.distanceToSquared(v);
+      var count = Math.floor(dist / MAX_SQR_DIST);
+      var spacing = 1 / (count + 1);
+      var f = spacing;
 
-          while (f < 0.99) {
-              v2 = prev.clone();
-              v2.lerp(v, f);
-
-              v2.multiplyScalar(SPHERE_RADIUS / v2.length());
-
-              path.push(v2);
-              f += spacing;
-          }
-
+      while (f < 0.99) {
+        v2 = prev.clone();
+        v2.lerp(v, f);
+        v2.multiplyScalar(SPHERE_RADIUS / v2.length());
+        path.push(v2);
+        f += spacing;
       }
-      path.push(v);
+    }
 
+    path.push(v);
   }
-  var tolerance = 1; // Adjust as needed
+
+  // Simplify (if you have the simplifyPath function defined elsewhere)
+  var tolerance = 1;
   var simplified = simplifyPath(path, tolerance);
 
   return simplified;
@@ -969,7 +970,7 @@ function recording_to_path(recording) {
   
   
   
-  function roundVector(v) {
+function roundVector(v) {
   var factor = 100; // For 2 decimal places
   return new THREE.Vector3(
     Math.round(v.x * factor) / factor,
@@ -1153,32 +1154,33 @@ function simplifyPath(path, tolerance) {
     return null;
   }
   
+  
+  
+  
   function shapePreservingMutate(path, maxMutations = 1, mutationAmount = 1) {
-  var newPath = path.slice(); // Copying the original path
-  var numMutations = Math.floor(Math.random() * maxMutations) + 1;
-  console.log("Number of mutations:", numMutations); // Log the number of mutations
+  const newPath = [...path]; // Copying the original path using spread operator
+  const numMutations = Math.floor(Math.random() * maxMutations) + 1;
+  console.log("Number of mutations:", numMutations);
 
-  for (var i = 0; i < numMutations; i++) {
-    var idx = Math.floor(Math.random() * path.length); // Random index for mutation
-    var mutation = {
+  for (let i = 0; i < numMutations; i++) {
+    const idx = Math.floor(Math.random() * path.length);
+    const mutation = {
       x: randomUniform(-mutationAmount, mutationAmount),
       y: randomUniform(-mutationAmount, mutationAmount),
       z: randomUniform(-mutationAmount, mutationAmount)
     };
 
-    mutation = roundVector(mutation, 2);
-    console.log("Mutation at index", idx, ":", mutation); // Log the mutation details
-
-    newPath[idx].x += mutation.x;
-    newPath[idx].y += mutation.y;
-    newPath[idx].z += mutation.z;
+    // Apply mutation and round
+    ['x', 'y', 'z'].forEach(coord => {
+      newPath[idx][coord] += mutation[coord];
+      newPath[idx][coord] = parseFloat(newPath[idx][coord].toFixed(2));
+    });
   }
 
-  console.log("Original Path:", path); // Log the original path
-  console.log("Mutated Path:", newPath); // Log the mutated path
-
+  console.log("Mutated Path:", newPath);
   return newPath;
 }
+
 
 
   function isPerfectMatch(stored_path, mutated_path) {
