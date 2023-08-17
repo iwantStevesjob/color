@@ -262,9 +262,20 @@ function HSVSphereBufferGeometry(
       normals.push(normal.x, normal.y, normal.z);
 
       // color
+// Convert vertex to polar coordinates in the xy-plane
+var angle = Math.atan2(vertex.y, vertex.x) + Math.PI / 2;
+if (angle < 0) angle += Math.PI * 2;
 
-      color.setHSL(u, 1, 1 - v);
-      colors.push(color.r, color.g, color.b);
+// Set hue based on the angle
+var hue = angle / (Math.PI * 2);
+
+// Compute lightness based on z-coordinate
+var lightness = (vertex.z / radius + 1) / 2;
+
+// color
+color.setHSL(hue, 1, lightness);
+colors.push(color.r, color.g, color.b);
+
 
       verticesRow.push(index++);
     }
@@ -393,7 +404,7 @@ Defmech.RotationWithQuaternion = (function () {
       switch (state) {
         case "start_record":
           show_paths();
-          sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+          //sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
           break;
         case "playing":
           // trim recording
@@ -603,22 +614,44 @@ Defmech.RotationWithQuaternion = (function () {
       onDocumentMouseDown(event);
     }
   }
+  /*
+function getColorAtPoint(point) {
+  var localPoint = point
+    .clone()
+    .applyQuaternion(sphere.getWorldQuaternion().inverse());
 
-  function getColorAtPoint(point) {
-    var localPoint = point
-      .clone()
-      .applyQuaternion(sphere.quaternion.clone().inverse());
-    var phi = Math.acos(-localPoint.y / localPoint.length());
-    var theta = Math.atan2(localPoint.z, localPoint.x) + Math.PI;
+  // Hue based on angle around Y-axis
+  var theta = Math.atan2(localPoint.x, localPoint.z);
+  var hue = (theta + Math.PI) / (2 * Math.PI); // Normalize to [0, 1]
 
-    var hue = 1 - theta / (2 * Math.PI); // Flip the hue
-    var saturation = localPoint.length();
-    var lightness = phi / Math.PI;
+  // Lightness based on angle from positive Z-axis
+  var phi = Math.atan2(Math.sqrt(localPoint.x * localPoint.x + localPoint.y * localPoint.y), localPoint.z);
+  var lightness = phi / Math.PI;
 
-    var color = new THREE.Color();
-    color.setHSL(hue, saturation, lightness);
-    return color;
-  }
+  // Set HSL color
+  var color = new THREE.Color();
+  color.setHSL(hue, 1, lightness); // Set saturation to 1
+
+  return color;
+}*/
+function getColorAtPoint(point) {
+  var localPoint = point.clone().applyQuaternion(sphere.getWorldQuaternion().inverse());
+  
+  // Invert only the X-coordinate in the hue calculation
+  var theta = Math.atan2(-localPoint.x, localPoint.y) + Math.PI;
+  var hue = theta / (2 * Math.PI);
+  
+  var lightness = (localPoint.z / localPoint.length() + 1) / 2;
+
+  var color = new THREE.Color();
+  color.setHSL(hue, 1, lightness);
+
+  return color;
+}
+
+
+
+
 
   var currentMesh = null;
 
@@ -902,17 +935,19 @@ Defmech.RotationWithQuaternion = (function () {
     renderer.setClearColor(get_HSL(sphere), 1);
   };
 
-  function get_HSL(sphere) {
-    var q = new THREE.Quaternion();
-    q.copy(sphere.quaternion);
-    q.inverse();
-    var v = new THREE.Vector3(0, 0, 1);
-    v.applyQuaternion(q);
-    var v2 = new THREE.Vector3(0, 1, 0);
-    var lum = 1 - v2.angleTo(v) / Math.PI;
-    var hue = (Math.atan2(-v.z, -v.x) / Math.PI) * -0.5;
-    return new THREE.Color().setHSL(hue, 1, lum);
-  }
+function get_HSL(sphere) {
+  var q = new THREE.Quaternion();
+  q.copy(sphere.quaternion);
+  q.inverse();
+  var v = new THREE.Vector3(0, 0, 1);
+  v.applyQuaternion(q);
+  var angle = Math.atan2(v.y, v.x) + Math.PI / 2;
+  if (angle < 0) angle += Math.PI * 2;
+  var hue = angle / (Math.PI * 2);
+  var lum = (v.z + 1) / 2;
+  return new THREE.Color().setHSL(hue, 1, lum);
+}
+
 
   ///////////////////////////////////////////////////////////////////////////////////////////////
   //
@@ -1014,7 +1049,7 @@ function simplifyPath(path, tolerance) {
     v.z = parseFloat(v.z.toFixed(2)); 
   });
 
-  var newCoord = new THREE.Vector3(0, 200, 0);
+  var newCoord = new THREE.Vector3(0, 0, 0);
   simplified.unshift(newCoord); // Add the specific coordinate to the beginning
   
   return simplified;
@@ -1185,7 +1220,7 @@ function simplifyPath(path, tolerance) {
     // Apply mutation and round
     ['x', 'y', 'z'].forEach(coord => {
       newPath[idx][coord] += mutation[coord];
-      newPath[idx][coord] = parseFloat(newPath[idx][coord].toFixed(2));
+      newPath[idx][coord] = Math.floor(newPath[idx][coord]);
     });
   }
 
@@ -1362,7 +1397,6 @@ document.onreadystatechange = function () {
     }
   }
 };
-
 
 	 
     </script>
