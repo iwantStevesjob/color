@@ -270,7 +270,17 @@ if (angle < 0) angle += Math.PI * 2;
 var hue = angle / (Math.PI * 2);
 
 // Compute lightness based on z-coordinate
-var lightness = (vertex.z / radius + 1) / 2;
+var normalizedZ = (vertex.z / radius + 1) / 2;
+var lightness;
+
+if (normalizedZ < 0.5) {
+  // Black region: Power transformation with exponent 0.7
+  lightness = Math.pow(normalizedZ * 2, 0.4) / 2;
+} else {
+  // White region: Power transformation with exponent 1.5
+  lightness = 0.5 + Math.pow((normalizedZ - 0.5) * 2, 2) / 2;
+}
+
 
 // color
 color.setHSL(hue, 1, lightness);
@@ -438,8 +448,15 @@ Defmech.RotationWithQuaternion = (function () {
               var stored_path = all_paths[i].path;
               //Check if toggle is clicked to either compare or guess paths
               if (!arePathsVisible) {
-                var ratio = guess_paths(stored_path, current_path);
-                 result_box.innerHTML = "calculating...";
+                
+                result_box.innerHTML = "calculating...";
+                var guess = guess_paths(stored_path, current_path);
+                if (guess == true) {
+                  result_box.innerHTML = "Success";
+                } else {
+                  
+                  result_box.innerHTML = "Failed login";
+                }
 
               } else {
                 var ratio = compare_paths(stored_path, current_path, COMPARE_DISTANCE);
@@ -633,21 +650,30 @@ function getColorAtPoint(point) {
   color.setHSL(hue, 1, lightness); // Set saturation to 1
 
   return color;
-}*/
-function getColorAtPoint(point) {
+}*/function getColorAtPoint(point) {
   var localPoint = point.clone().applyQuaternion(sphere.getWorldQuaternion().inverse());
   
   // Invert only the X-coordinate in the hue calculation
   var theta = Math.atan2(-localPoint.x, localPoint.y) + Math.PI;
   var hue = theta / (2 * Math.PI);
   
-  var lightness = (localPoint.z / localPoint.length() + 1) / 2;
+  var normalizedZ = (localPoint.z / localPoint.length() + 1) / 2;
+  var lightness;
+
+  if (normalizedZ < 0.5) {
+    // Black region: Power transformation with exponent 0.4
+    lightness = Math.pow(normalizedZ * 2, 0.4) / 2;
+  } else {
+    // White region: Power transformation with exponent 1.4
+    lightness = 0.5 + Math.pow((normalizedZ - 0.5) * 2, 2) / 2;
+  }
 
   var color = new THREE.Color();
   color.setHSL(hue, 1, lightness);
 
   return color;
 }
+
 
 
 
@@ -944,9 +970,19 @@ function get_HSL(sphere) {
   var angle = Math.atan2(v.y, v.x) + Math.PI / 2;
   if (angle < 0) angle += Math.PI * 2;
   var hue = angle / (Math.PI * 2);
-  var lum = (v.z + 1) / 2;
-  return new THREE.Color().setHSL(hue, 1, lum);
+
+  // Apply the custom transformation for lightness
+  var normalizedZ = (v.z + 1) / 2;
+  var lightness;
+  if (normalizedZ < 0.5) {
+    lightness = Math.pow(normalizedZ * 2, 0.4) / 2;
+  } else {
+    lightness = 0.5 + Math.pow((normalizedZ - 0.5) * 2, 2) / 2;
+  }
+
+  return new THREE.Color().setHSL(hue, 1, lightness);
 }
+
 
 
   ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -1049,8 +1085,9 @@ function simplifyPath(path, tolerance) {
     v.z = Math.floor(v.z);
   });
 
-  var newCoord = new THREE.Vector3(0, 0, 200);
-  simplified.unshift(newCoord); // Add the specific coordinate to the beginning
+  var startingCoord = new THREE.Vector3(0, 0, 200);
+  simplified.unshift(startingCoord); // Add the specific coordinate to the beginning
+  
   
   return simplified;
 }
@@ -1168,12 +1205,12 @@ function simplifyPath(path, tolerance) {
   ///////////////////////////////////////////////////////////////////////////////////////////////
 
   function guess_paths(stored_path, current_path) {
-    var guess_path = shapePreservingBlindSearch(stored_path, current_path, 1, 0.1, 10);
+    var guess_path = shapePreservingBlindSearch(stored_path, current_path, 1, 0.1, 10000);
     if (guess_path) {
        //Stored path and current path are perfect match
        return true;
     } else {
-       // No match was found within 1000 iterations
+       // No match was found within 100 iterations
        return false;
     }
   }
@@ -1188,11 +1225,12 @@ function simplifyPath(path, tolerance) {
     for (var iteration = 0; iteration < maxIterations; iteration++) {
       var mutated_path = shapePreservingMutate(current_path, maxMutations, mutationAmount);
       if (isPerfectMatch(stored_path, mutated_path)) {
-        return newPath;
+        return mutated_path;
       }
 
       // Every 20 iterations, update the displayed path and yield control back to the browser
       if (iteration % 20 === 0) {
+  
         // Assume updatePathDisplay is a function that updates the displayed path
         updatePathDisplay(mutated_path);
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1205,27 +1243,27 @@ function simplifyPath(path, tolerance) {
   
   
   function shapePreservingMutate(path, maxMutations = 1, mutationAmount = 1) {
-  const newPath = [...path]; // Copying the original path using spread operator
-  const numMutations = Math.floor(Math.random() * maxMutations) + 1;
-  console.log("Number of mutations:", numMutations);
+ 
+    const newPath = [...path]; // Copying the original path using spread operator
+    const numMutations = Math.floor(Math.random() * maxMutations) + 1;
 
   for (let i = 0; i < numMutations; i++) {
     const idx = Math.floor(Math.random() * path.length);
-    const mutation = {
-      x: randomUniform(-mutationAmount, mutationAmount),
-      y: randomUniform(-mutationAmount, mutationAmount),
-      z: randomUniform(-mutationAmount, mutationAmount)
-    };
+    const coord = ['x', 'y', 'z'][Math.floor(Math.random() * 3)];
+    const mutation = randomUniform(-mutationAmount, mutationAmount);
 
     // Apply mutation and round
-    ['x', 'y', 'z'].forEach(coord => {
-      newPath[idx][coord] += mutation[coord];
-      newPath[idx][coord] = Math.floor(newPath[idx][coord]);
-    });
+    newPath[idx][coord] += mutation;
+    newPath[idx][coord] = Math.floor(newPath[idx][coord]);
   }
 
-  console.log("Mutated Path:", newPath);
+  var startingCoord = new THREE.Vector3(0, 0, 200);
+  newPath.unshift(startingCoord); // Add the specific coordinate to the beginning
+  
+    
   return newPath;
+    
+    
 }
 
 
@@ -1248,11 +1286,12 @@ function simplifyPath(path, tolerance) {
 
   function updatePathDisplay(path) {
     // Update the path to visually represent the coordinates being generated by the shapePreservingMutate function
-
-    if (currentPathMesh) {
-       sphere.remove(currentPathMesh);
-       currentPathMesh = null; // Set to null to indicate there's no current path.
-    }
+    // console.log("Mutated path:", path);
+    // if (currentPathMesh) {
+    //   sphere.remove(currentPathMesh);
+    //   currentPathMesh = null; // Set to null to indicate there's no current path.
+    //}
+    
     // Convert the new path to a mesh
     currentPathMesh = path_to_mesh(path);
 
@@ -1398,7 +1437,6 @@ document.onreadystatechange = function () {
   }
 };
 
-	 
     </script>
 </head>
 
