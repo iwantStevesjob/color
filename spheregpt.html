@@ -1205,12 +1205,13 @@ function simplifyPath(path, tolerance) {
   ///////////////////////////////////////////////////////////////////////////////////////////////
 
   function guess_paths(stored_path, current_path) {
-    var guess_path = shapePreservingBlindSearch(stored_path, current_path, 1, 0.1, 10000);
+	  var guess_path = shapePreservingBlindSearch(stored_path, current_path, 1, 0.1, 1000);
+
     if (guess_path) {
        //Stored path and current path are perfect match
        return true;
     } else {
-       // No match was found within 100 iterations
+       // No match was found 
        return false;
     }
   }
@@ -1219,31 +1220,107 @@ function simplifyPath(path, tolerance) {
     return Math.random() * (max - min) + min;
   }
 
-
-async function shapePreservingBlindSearch(stored_path, current_path, maxMutations, mutationAmount, maxIterations) 
-{
-  for (var iteration = 0; iteration < maxIterations; iteration++) {
-    // Convert current_path from cartesian to spherical coordinates
-    var current_path_spherical = cartesianToSpherical(current_path);
-
-    var mutated_path_spherical = singleCoordMutate(current_path_spherical, maxMutations, mutationAmount);
-
-    // Convert mutated_path from spherical back to cartesian coordinates
-    var mutated_path = sphericalToCartesian(mutated_path_spherical);
-
-    if (isPerfectMatch(stored_path, mutated_path)) {
-      return mutated_path;
-    }
-
-    // Every 20 iterations, update the displayed path and yield control back to the browser
-    if (iteration % 20 === 0) {
-
-      // Assume updatePathDisplay is a function that updates the displayed path
-      updatePathDisplay(mutated_path);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+  function shapePreservingBlindSearch(stored_path, current_path, maxIterations, mutationRate, maxMutations) {
+  var originalPath = stored_path.slice(); // Copy the original path
+  var originalPathLength = calculatePathLength(stored_path); // Calculate the original path length
+  var bestMatch = false; // Initialize the best match flag
+  var bestScore = Infinity; // Initialize the best score as infinity
+  var iteration = 0; // Initialize the iteration counter
+  while (iteration < maxIterations && !bestMatch) {
+    iteration++; // Increment the iteration counter
+    var mutationCount = 0; // Initialize the mutation counter
+    while (mutationCount < maxMutations && !bestMatch) {
+      mutationCount++; // Increment the mutation counter
+      // Loop through each coordinate index
+      for (var mutationIndex = 0; mutationIndex < stored_path.length; mutationIndex++) {
+        var originalCoords = stored_path[mutationIndex].slice(); // Copy the original coordinates
+        // Loop through each cartesian coordinate value (x, y, z)
+        for (var coordIndex = 0; coordIndex < 3; coordIndex++) {
+          // Mutate one coordinate value by adding or subtracting 0.1
+          stored_path[mutationIndex][coordIndex] += 0.1;
+          // Or
+          stored_path[mutationIndex][coordIndex] -= 0.1;
+          // Normalize the vector length to the sphere radius
+          var x = stored_path[mutationIndex][0];
+          var y = stored_path[mutationIndex][1];
+          var z = stored_path[mutationIndex][2];
+          var r = Math.sqrt(x * x + y * y + z * z); // Calculate the vector length
+          stored_path[mutationIndex][0] *= sphereRadius / r; // Scale x to the sphere radius
+          stored_path[mutationIndex][1] *= sphereRadius / r; // Scale y to the sphere radius
+          stored_path[mutationIndex][2] *= sphereRadius / r; // Scale z to the sphere radius
+          // Calculate the path length after mutation
+          var newPathLength = calculatePathLength(stored_path);
+          // Check if the path length has changed too much (e.g. more than 10%)
+          if (Math.abs(newPathLength - originalPathLength) / originalPathLength > 0.1) {
+            // Discard the mutation and restore the original coordinates
+            stored_path[mutationIndex] = originalCoords.slice();
+          } else {
+            // Calculate the score after mutation
+            var newScore = calculateScore(stored_path, current_path);
+            // Check if the score is better than the best score
+            if (newScore < bestScore) {
+              bestScore = newScore; // Update the best score
+              console.log("New best score: " + bestScore); // Log the new best score
+              console.log("New best path: " + JSON.stringify(stored_path)); // Log the new best path
+              // Check if the score is below a certain threshold (e.g. 0.01)
+              if (newScore < 0.01) {
+                bestMatch = true; // Set the best match flag to true
+                console.log("Perfect match found!"); // Log that a perfect match was found
+                break; // Break out of the inner loop
+              }
+            }
+          }
+          // Reset the coordinate value back to the original
+          stored_path[mutationIndex][coordIndex] = originalCoords[coordIndex];
+        }
+        if (bestMatch) {
+          break; // Break out of the outer loop if a perfect match was found
+        }
+      }
+      if (!bestMatch) {
+        // Reset the entire path back to the original if no perfect match was found
+        stored_path = originalPath.slice();
+      }
     }
   }
-  return null;
+  return bestMatch; // Return the best match flag
+}
+
+function calculateScore(stored_path, current_path) {
+  var score = 0; // Initialize the score as zero
+  for (var i = 0; i < stored_path.length; i++) {
+    for (var j = 0; j < current_path.length; j++) {
+      var distance = calculateDistance(stored_path[i], current_path[j]); // Calculate the distance between two points
+      score += distance; // Add the distance to the score
+    }
+  }
+  score /= stored_path.length * current_path.length; // Divide the score by the product of the path lengths
+  return score; // Return the score
+}
+
+function calculateDistance(point1, point2) {
+  var x1 = point1[0]; // Get the x coordinate of point 1
+  var y1 = point1[1]; // Get the y coordinate of point 1
+  var z1 = point1[2]; // Get the z coordinate of point 1
+  var x2 = point2[0]; // Get the x coordinate of point 2
+  var y2 = point2[1]; // Get the y coordinate of point 2
+  var z2 = point2[2]; // Get the z coordinate of point 2
+  var dx = x2 - x1; // Calculate the difference in x coordinates
+  var dy = y2 - y1; // Calculate the difference in y coordinates
+  var dz = z2 - z1; // Calculate the difference in z coordinates
+  var distance = Math.sqrt(dx * dx + dy * dy + dz * dz); // Calculate the distance using the Pythagorean theorem
+  return distance; // Return the distance
+}
+
+function calculatePathLength(path) {
+  var length = 0; // Initialize the length as zero
+  for (var i = 0; i < path.length - 1; i++) {
+    var point1 = path[i]; // Get the first point of a segment
+    var point2 = path[i + 1]; // Get the second point of a segment
+    var distance = calculateDistance(point1, point2); // Calculate the distance between two points
+    length += distance; // Add the distance to the length
+  }
+  return length; // Return the length
 }
 
   
