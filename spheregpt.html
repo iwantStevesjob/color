@@ -1220,36 +1220,42 @@ function simplifyPath(path, tolerance) {
   }
 
 
-  async function shapePreservingBlindSearch(stored_path, current_path, maxMutations, mutationAmount, maxIterations) 
-  {
-    for (var iteration = 0; iteration < maxIterations; iteration++) {
-      var mutated_path = shapePreservingMutate(current_path, maxMutations, mutationAmount);
-      if (isPerfectMatch(stored_path, mutated_path)) {
-        return mutated_path;
-      }
+async function shapePreservingBlindSearch(stored_path, current_path, maxMutations, mutationAmount, maxIterations) 
+{
+  for (var iteration = 0; iteration < maxIterations; iteration++) {
+    // Convert current_path from cartesian to spherical coordinates
+    var current_path_spherical = cartesianToSpherical(current_path);
 
-      // Every 20 iterations, update the displayed path and yield control back to the browser
-      if (iteration % 20 === 0) {
-  
-        // Assume updatePathDisplay is a function that updates the displayed path
-        updatePathDisplay(mutated_path);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+    var mutated_path_spherical = singleCoordMutate(current_path_spherical, maxMutations, mutationAmount);
+
+    // Convert mutated_path from spherical back to cartesian coordinates
+    var mutated_path = sphericalToCartesian(mutated_path_spherical);
+
+    if (isPerfectMatch(stored_path, mutated_path)) {
+      return mutated_path;
     }
-    return null;
+
+    // Every 20 iterations, update the displayed path and yield control back to the browser
+    if (iteration % 20 === 0) {
+
+      // Assume updatePathDisplay is a function that updates the displayed path
+      updatePathDisplay(mutated_path);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
+  return null;
+}
+
   
   
   
-  
-  function shapePreservingMutate(path, maxMutations = 1, mutationAmount = 1) {
- 
-    const newPath = [...path]; // Copying the original path using spread operator
-    const numMutations = Math.floor(Math.random() * maxMutations) + 1;
+  function singleCoordMutate(path, maxMutations = 1, mutationAmount = 1) {
+  const newPath = [...path]; // Copying the original path using spread operator
+  const numMutations = Math.floor(Math.random() * maxMutations) + 1;
 
   for (let i = 0; i < numMutations; i++) {
     const idx = Math.floor(Math.random() * path.length);
-    const coord = ['x', 'y', 'z'][Math.floor(Math.random() * 3)];
+    const coord = ['theta', 'phi'][Math.floor(Math.random() * 2)];
     const mutation = randomUniform(-mutationAmount, mutationAmount);
 
     // Apply mutation and round
@@ -1317,6 +1323,32 @@ function simplifyPath(path, tolerance) {
     });
 });
 
+
+function cartesianToSpherical(path) {
+  const newPath = [];
+  for (let point of path) {
+    const { x, y, z } = point;
+    const r = Math.sqrt(x * x + y * y + z * z);
+    const theta = Math.acos(z / r);
+    const phi = Math.atan2(y, x);
+    newPath.push({ r, theta, phi });
+  }
+  return newPath;
+}
+
+function sphericalToCartesian(path) {
+  const newPath = [];
+  for (let point of path) {
+    const { r, theta, phi } = point;
+    const x = r * Math.sin(theta) * Math.cos(phi);
+    const y = r * Math.sin(theta) * Math.sin(phi);
+    const z = r * Math.cos(theta);
+    newPath.push({ x, y, z });
+  }
+  return newPath;
+}
+
+	
 
   ///////////////////////////////////////////////////////////////////////////////////////////////
   //
