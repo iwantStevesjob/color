@@ -34,17 +34,6 @@ body {
   font-weight: bold;
 }
 
-#center {
-  position: absolute;
-  z-index: 999999;
-  top: 50%;
-  left: 50%;
-  width: 0px;
-  height: 0px;
-  background-color: #fff;
-  box-shadow: 0 0 20px 7px #fff;
-}
-
 /* Password Toggle */
 
 #toggleContainer {
@@ -107,7 +96,7 @@ input:checked + .slider:before {
 
     </style>
 	
-	<script src="three.min.js"></script>
+	<script src="https://iwantstevesjob.github.io/color/three.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
  <script type="text/javascript">
 
@@ -140,46 +129,6 @@ function initializeParameters(
     thetaLength: thetaLength
   };
 }
-
-// SphereGeometry
-function HSVSphereGeometry(
-  radius,
-  widthSegments,
-  heightSegments,
-  phiStart,
-  phiLength,
-  thetaStart,
-  thetaLength
-) {
-  Geometry.call(this);
-
-  this.type = "SphereGeometry";
-  this.parameters = initializeParameters(
-    radius,
-    widthSegments,
-    heightSegments,
-    phiStart,
-    phiLength,
-    thetaStart,
-    thetaLength
-  );
-
-  this.fromBufferGeometry(
-    new HSVSphereBufferGeometry(
-      radius,
-      widthSegments,
-      heightSegments,
-      phiStart,
-      phiLength,
-      thetaStart,
-      thetaLength
-    )
-  );
-  this.mergeVertices();
-}
-
-HSVSphereGeometry.prototype = Object.create(Geometry.prototype);
-HSVSphereGeometry.prototype.constructor = HSVSphereGeometry;
 
 // SphereBufferGeometry
 function HSVSphereBufferGeometry(
@@ -278,7 +227,7 @@ if (normalizedZ < 0.5) {
   lightness = Math.pow(normalizedZ * 2, 0.4) / 2;
 } else {
   // White region: Power transformation with exponent 1.5
-  lightness = 0.5 + Math.pow((normalizedZ - 0.5) * 2, 2) / 2;
+  lightness = 0.5 + Math.pow((normalizedZ - 0.5) * 2, 2) / 2.;
 }
 
 
@@ -326,7 +275,7 @@ var COMPARE_DISTANCE = 11;
 // compare method must be one of: average first last best
 var COMPARE_METHOD = "best";
 var PASS_RATIO = 0.5; // 1 = 100%
-var SPHERE_RADIUS = 200;
+var SPHERE_RADIUS = 150;
 var HANDLE_RADIUS = 15;
 var HANDLE_MIN_DIST = 0; // minimum space between handles, can be negative
 var HANDLE_ORIG_MIN_SQR_DIST = Math.pow(HANDLE_RADIUS * 2 + HANDLE_MIN_DIST, 2);
@@ -569,8 +518,8 @@ Defmech.RotationWithQuaternion = (function () {
     scene = new THREE.Scene();
     // scene.background = new THREE.Color(1,0,0)
 
-    var sphereGeometry = new HSVSphereGeometry(SPHERE_RADIUS, 50, 25);
-    smallSphereGeometry = new HSVSphereGeometry(HANDLE_RADIUS, 15, 15);
+    var sphereGeometry = new HSVSphereBufferGeometry(SPHERE_RADIUS, 50, 25);
+    smallSphereGeometry = new HSVSphereBufferGeometry(HANDLE_RADIUS, 15, 15);
     boxGeometry = new THREE.BoxGeometry(5, 5, 5);
 
     var material = new THREE.MeshPhongMaterial({
@@ -631,26 +580,7 @@ Defmech.RotationWithQuaternion = (function () {
       onDocumentMouseDown(event);
     }
   }
-  /*
 function getColorAtPoint(point) {
-  var localPoint = point
-    .clone()
-    .applyQuaternion(sphere.getWorldQuaternion().inverse());
-
-  // Hue based on angle around Y-axis
-  var theta = Math.atan2(localPoint.x, localPoint.z);
-  var hue = (theta + Math.PI) / (2 * Math.PI); // Normalize to [0, 1]
-
-  // Lightness based on angle from positive Z-axis
-  var phi = Math.atan2(Math.sqrt(localPoint.x * localPoint.x + localPoint.y * localPoint.y), localPoint.z);
-  var lightness = phi / Math.PI;
-
-  // Set HSL color
-  var color = new THREE.Color();
-  color.setHSL(hue, 1, lightness); // Set saturation to 1
-
-  return color;
-}*/function getColorAtPoint(point) {
   var localPoint = point.clone().applyQuaternion(sphere.getWorldQuaternion().inverse());
   
   // Invert only the X-coordinate in the hue calculation
@@ -915,6 +845,14 @@ function getColorAtPoint(point) {
 
   var currentPathMesh = null;
 
+
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // HANDLE ROTATION
+  // Rotate sphere and draw the path as you do
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+
   var handleRotation = function () {
     if (!is_playing) {
       var rotateQuaternion = rotateMatrix(previous_point, current_point);
@@ -1031,8 +969,6 @@ function recording_to_path(recording) {
 
   }
  
-
-// Continue with the rest of the code, using newPath instead of path
 var tolerance = 1; // Adjust as needed
 var simplified = simplifyPath(path, tolerance);
 
@@ -1040,9 +976,6 @@ return simplified;
 }
 
 
-  
-  
-  
   function roundVector(v) {
   var factor = 100; // For 2 decimal places
   return new THREE.Vector3(
@@ -1085,7 +1018,7 @@ function simplifyPath(path, tolerance) {
     v.z = Math.floor(v.z);
   });
 
-  var startingCoord = new THREE.Vector3(0, 0, 200);
+  var startingCoord = new THREE.Vector3(0, 0, 150);
   simplified.unshift(startingCoord); // Add the specific coordinate to the beginning
   
   
@@ -1204,171 +1137,103 @@ function simplifyPath(path, tolerance) {
   //
   ///////////////////////////////////////////////////////////////////////////////////////////////
 
-  function guess_paths(stored_path, current_path) {
-	  var guess_path = shapePreservingBlindSearch(stored_path, current_path, 1, 0.1, 1000);
-
-    if (guess_path) {
-       //Stored path and current path are perfect match
-       return true;
-    } else {
-       // No match was found 
-       return false;
-    }
+  async function guess_paths(stored_path, current_path) {
+  var guess_path = await shapePreservingBlindSearch(stored_path, current_path, 1, 0.1, 10000);
+  if (guess_path) {
+    // Stored path and current path are a perfect match
+    return true;
+  } else {
+    // No match was found within 100 iterations
+    return false;
   }
-
+}
   function randomUniform(min, max) {
     return Math.random() * (max - min) + min;
   }
 
-  function shapePreservingBlindSearch(stored_path, current_path, maxIterations, mutationRate, maxMutations) {
-  var originalPath = stored_path.slice(); // Copy the original path
-  var originalPathLength = calculatePathLength(stored_path); // Calculate the original path length
-  var bestMatch = false; // Initialize the best match flag
-  var bestScore = Infinity; // Initialize the best score as infinity
-  var iteration = 0; // Initialize the iteration counter
-  while (iteration < maxIterations && !bestMatch) {
-    iteration++; // Increment the iteration counter
-    var mutationCount = 0; // Initialize the mutation counter
-    while (mutationCount < maxMutations && !bestMatch) {
-      mutationCount++; // Increment the mutation counter
-      // Loop through each coordinate index
-      for (var mutationIndex = 0; mutationIndex < stored_path.length; mutationIndex++) {
-        var originalCoords = stored_path[mutationIndex].slice(); // Copy the original coordinates
-        // Loop through each cartesian coordinate value (x, y, z)
-        for (var coordIndex = 0; coordIndex < 3; coordIndex++) {
-          // Mutate one coordinate value by adding or subtracting 0.1
-          stored_path[mutationIndex][coordIndex] += 0.1;
-          // Or
-          stored_path[mutationIndex][coordIndex] -= 0.1;
-          // Normalize the vector length to the sphere radius
-          var x = stored_path[mutationIndex][0];
-          var y = stored_path[mutationIndex][1];
-          var z = stored_path[mutationIndex][2];
-          var r = Math.sqrt(x * x + y * y + z * z); // Calculate the vector length
-          stored_path[mutationIndex][0] *= sphereRadius / r; // Scale x to the sphere radius
-          stored_path[mutationIndex][1] *= sphereRadius / r; // Scale y to the sphere radius
-          stored_path[mutationIndex][2] *= sphereRadius / r; // Scale z to the sphere radius
-          // Calculate the path length after mutation
-          var newPathLength = calculatePathLength(stored_path);
-          // Check if the path length has changed too much (e.g. more than 10%)
-          if (Math.abs(newPathLength - originalPathLength) / originalPathLength > 0.1) {
-            // Discard the mutation and restore the original coordinates
-            stored_path[mutationIndex] = originalCoords.slice();
-          } else {
-            // Calculate the score after mutation
-            var newScore = calculateScore(stored_path, current_path);
-            // Check if the score is better than the best score
-            if (newScore < bestScore) {
-              bestScore = newScore; // Update the best score
-              console.log("New best score: " + bestScore); // Log the new best score
-              console.log("New best path: " + JSON.stringify(stored_path)); // Log the new best path
-              // Check if the score is below a certain threshold (e.g. 0.01)
-              if (newScore < 0.01) {
-                bestMatch = true; // Set the best match flag to true
-                console.log("Perfect match found!"); // Log that a perfect match was found
-                break; // Break out of the inner loop
-              }
+  async function shapePreservingBlindSearch(stored_path, current_path, maxMutations, mutationAmount, maxIterations) {
+    for (let coordinate of ['x', 'y', 'z']) {
+        for (var iteration = 0; iteration < maxIterations; iteration++) {
+            var mutated_path = shapePreservingMutate(current_path, maxMutations, mutationAmount, coordinate);
+            if (isPerfectMatch(stored_path, mutated_path)) {
+                return mutated_path;
             }
-          }
-          // Reset the coordinate value back to the original
-          stored_path[mutationIndex][coordIndex] = originalCoords[coordIndex];
+
+            // Every 20 iterations, update the displayed path and yield control back to the browser
+            if (iteration % 20 === 0) {
+                updatePathDisplay(mutated_path);
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
         }
-        if (bestMatch) {
-          break; // Break out of the outer loop if a perfect match was found
-        }
-      }
-      if (!bestMatch) {
-        // Reset the entire path back to the original if no perfect match was found
-        stored_path = originalPath.slice();
-      }
     }
-  }
-  return bestMatch; // Return the best match flag
-}
-
-function calculateScore(stored_path, current_path) {
-  var score = 0; // Initialize the score as zero
-  for (var i = 0; i < stored_path.length; i++) {
-    for (var j = 0; j < current_path.length; j++) {
-      var distance = calculateDistance(stored_path[i], current_path[j]); // Calculate the distance between two points
-      score += distance; // Add the distance to the score
-    }
-  }
-  score /= stored_path.length * current_path.length; // Divide the score by the product of the path lengths
-  return score; // Return the score
-}
-
-function calculateDistance(point1, point2) {
-  var x1 = point1[0]; // Get the x coordinate of point 1
-  var y1 = point1[1]; // Get the y coordinate of point 1
-  var z1 = point1[2]; // Get the z coordinate of point 1
-  var x2 = point2[0]; // Get the x coordinate of point 2
-  var y2 = point2[1]; // Get the y coordinate of point 2
-  var z2 = point2[2]; // Get the z coordinate of point 2
-  var dx = x2 - x1; // Calculate the difference in x coordinates
-  var dy = y2 - y1; // Calculate the difference in y coordinates
-  var dz = z2 - z1; // Calculate the difference in z coordinates
-  var distance = Math.sqrt(dx * dx + dy * dy + dz * dz); // Calculate the distance using the Pythagorean theorem
-  return distance; // Return the distance
-}
-
-function calculatePathLength(path) {
-  var length = 0; // Initialize the length as zero
-  for (var i = 0; i < path.length - 1; i++) {
-    var point1 = path[i]; // Get the first point of a segment
-    var point2 = path[i + 1]; // Get the second point of a segment
-    var distance = calculateDistance(point1, point2); // Calculate the distance between two points
-    length += distance; // Add the distance to the length
-  }
-  return length; // Return the length
+    return null;
 }
 
   
-  
-  
-function singleCoordMutate(path, maxMutations = 1, mutationAmount = 1) {
-  const newPath = [...path]; // Copying the original path using spread operator
-  const numMutations = Math.floor(Math.random() * maxMutations) + 1;
+  function shapePreservingMutate(path, maxMutations, mutationAmount, coordinate) {
+    // Convert to CatmullRomCurve
+    const curve = new THREE.CatmullRomCurve3(path);
 
-  for (let i = 0; i < numMutations; i++) {
-    const idx = Math.floor(Math.random() * path.length);
-    const coord = ['theta', 'phi'][Math.floor(Math.random() * 2)];
-    const mutation = randomUniform(-mutationAmount, mutationAmount);
+    // Perturb control points
+    for (let i = 0; i < maxMutations; i++) {
+        const pt = curve.points[Math.floor(Math.random() * curve.points.length)];
+        pt[coordinate] += randomUniform(-mutationAmount, mutationAmount);
+    }
 
-    // Apply mutation and round
-    newPath[idx][coord] += mutation;
-    newPath[idx][coord] = Math.floor(newPath[idx][coord]);
-  }
+    // Sample new path from perturbed curve
+    const newPath = [];
+    const sampleCount = path.length;
+    for (let i = 0; i < sampleCount; i++) {
+        const t = i / (sampleCount - 1);
+        newPath.push(curve.getPoint(t));
+    }
 
-  return newPath;
+    // Apply rotations along path
+    const rotationAxis = new THREE.Vector3(0, 0, 1);
+    for (let i = 0; i < newPath.length; i++) {
+        const angle = randomUniform(-mutationAmount, mutationAmount);
+        newPath[i].applyAxisAngle(rotationAxis, angle);
+    }
+
+    // Add back starting point
+    newPath.unshift(new THREE.Vector3(0, 0, 150));
+
+    return newPath;
 }
 
 
 
+// Convert cartesian to spherical
+function cartesianToSpherical(x, y, z) {
+  const r = 150; // Set radius
+  const hypotenuse = Math.sqrt(x*x + y*y);
+  
+  const theta = Math.atan2(y, x);
+  const phi = Math.acos(z / r);
 
-  function isPerfectMatch(stored_path, mutated_path) {
-    if (stored_path.length != mutated_path.length) {
-      return false;
-    }
-    for (var i = 0; i < stored_path.length; i++) {
-      if (
-        stored_path[i].x != mutated_path[i].x ||
-        stored_path[i].y != mutated_path[i].y ||
-        stored_path[i].z != mutated_path[i].z
-      ) {
-        return false;
-      }
-    }
-    return true;
-  }
+  return [r, theta, phi]; 
+}
+
+// Convert spherical to cartesian 
+function sphericalToCartesian(r, theta, phi) {
+  const x = r * Math.sin(phi) * Math.cos(theta);
+  const y = r * Math.sin(phi) * Math.sin(theta);
+  const z = r * Math.cos(phi);
+
+  return [x, y, z];
+}
+
+function isPerfectMatch(stored_path, mutated_path) {
+  return JSON.stringify(stored_path) === JSON.stringify(mutated_path);
+}
 
   function updatePathDisplay(path) {
     // Update the path to visually represent the coordinates being generated by the shapePreservingMutate function
-    // console.log("Mutated path:", path);
-    // if (currentPathMesh) {
-    //   sphere.remove(currentPathMesh);
-    //   currentPathMesh = null; // Set to null to indicate there's no current path.
-    //}
+   
+     if (currentPathMesh) {
+       sphere.remove(currentPathMesh);
+       currentPathMesh = null; // Set to null to indicate there's no current path.
+    }
     
     // Convert the new path to a mesh
     currentPathMesh = path_to_mesh(path);
@@ -1395,32 +1260,6 @@ function singleCoordMutate(path, maxMutations = 1, mutationAmount = 1) {
     });
 });
 
-
-function cartesianToSpherical(path) {
-  const newPath = [];
-  for (let point of path) {
-    const { x, y, z } = point;
-    const r = Math.sqrt(x * x + y * y + z * z);
-    const theta = Math.acos(z / r);
-    const phi = Math.atan2(y, x);
-    newPath.push({ r, theta, phi });
-  }
-  return newPath;
-}
-
-function sphericalToCartesian(path) {
-  const newPath = [];
-  for (let point of path) {
-    const { r, theta, phi } = point;
-    const x = r * Math.sin(theta) * Math.cos(phi);
-    const y = r * Math.sin(theta) * Math.sin(phi);
-    const z = r * Math.cos(theta);
-    newPath.push({ x, y, z });
-  }
-  return newPath;
-}
-
-	
 
   ///////////////////////////////////////////////////////////////////////////////////////////////
   //
@@ -1546,7 +1385,6 @@ document.onreadystatechange = function () {
 
 
 <body>
-  <div id="center"></div>
   <div class="buttons">
     <button class="all" data-action="delete_all">Delete all</button>
     <span id="compare-result"></span>
