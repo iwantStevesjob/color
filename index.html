@@ -1,0 +1,170 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive HSV Sphere</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, sphere;
+        let isMouseDown = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 2;
+
+            renderer = new THREE.WebGLRenderer();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            const geometry = new THREE.SphereGeometry(1, 64, 64);
+            const material = new THREE.ShaderMaterial({
+                uniforms: {},
+                vertexShader: `
+                    varying vec3 vPosition;
+                    void main() {
+                        vPosition = position;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    varying vec3 vPosition;
+                    void main() {
+                        vec3 color;
+                        float r = length(vPosition);
+                        if (r > 1.0) discard;
+                        
+                        float phi = atan(vPosition.z, vPosition.x);
+                        float theta = acos(vPosition.y / r);
+                        
+                        float h = (phi + 3.141592653589793) / (2.0 * 3.141592653589793);
+                        float s = sin(theta);
+                        float v = (r + 1.0) * 0.5;
+
+                        if (s == 0.0) {
+                            color = vec3(v);
+                        } else {
+                            float i = floor(h * 6.0);
+                            float f = h * 6.0 - i;
+                            float p = v * (1.0 - s);
+                            float q = v * (1.0 - f * s);
+                            float t = v * (1.0 - (1.0 - f) * s);
+
+                            if (i == 0.0) color = vec3(v, t, p);
+                            else if (i == 1.0) color = vec3(q, v, p);
+                            else if (i == 2.0) color = vec3(p, v, t);
+                            else if (i == 3.0) color = vec3(p, q, v);
+                            else if (i == 4.0) color = vec3(t, p, v);
+                            else color = vec3(v, p, q);
+                        }
+
+                        gl_FragColor = vec4(color, 1.0);
+                    }
+                `
+            });
+
+            sphere = new THREE.Mesh(geometry, material);
+            scene.add(sphere);
+
+            document.addEventListener('mousedown', onMouseDown, false);
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('mouseup', onMouseUp, false);
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        function onMouseDown(event) {
+            isMouseDown = true;
+            previousMousePosition = {
+                x: event.clientX,
+                y: event.clientY
+            };
+        }
+
+        function onMouseMove(event) {
+            if (!isMouseDown) return;
+
+            const deltaMove = {
+                x: event.clientX - previousMousePosition.x,
+                y: event.clientY - previousMousePosition.y
+            };
+
+            sphere.rotation.y += deltaMove.x * 0.01;
+            sphere.rotation.x += deltaMove.y * 0.01;
+
+            previousMousePosition = {
+                x: event.clientX,
+                y: event.clientY
+            };
+
+            updateBackgroundColor();
+        }
+
+        function onMouseUp() {
+            isMouseDown = false;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateBackgroundColor() {
+            const vector = new THREE.Vector3(0, 0, 1);
+            vector.applyQuaternion(sphere.quaternion);
+
+            const phi = Math.atan2(vector.z, vector.x);
+            const theta = Math.acos(vector.y);
+            const r = vector.length();
+
+            const h = (phi + Math.PI) / (2 * Math.PI);
+            const s = Math.sin(theta);
+            const v = (r + 1) * 0.5;
+
+            const color = HSVtoRGB(h, s, v);
+            document.body.style.backgroundColor = `rgb(${color.r}, ${color.g}, ${color.b})`;
+        }
+
+        function HSVtoRGB(h, s, v) {
+            let r, g, b;
+            const i = Math.floor(h * 6);
+            const f = h * 6 - i;
+            const p = v * (1 - s);
+            const q = v * (1 - f * s);
+            const t = v * (1 - (1 - f) * s);
+
+            switch (i % 6) {
+                case 0: r = v; g = t; b = p; break;
+                case 1: r = q; g = v; b = p; break;
+                case 2: r = p; g = v; b = t; break;
+                case 3: r = p; g = q; b = v; break;
+                case 4: r = t; g = p; b = v; break;
+                case 5: r = v; g = p; b = q; break;
+            }
+
+            return {
+                r: Math.round(r * 255),
+                g: Math.round(g * 255),
+                b: Math.round(b * 255)
+            };
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+
+        init();
+        animate();
+    </script>
+</body>
+</html>
