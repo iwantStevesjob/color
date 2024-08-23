@@ -13,6 +13,20 @@
     <div id="desktop">
         <h2>Desktop (Server)</h2>
         <p>Peer ID: <span id="peerId">Generating...</span></p>
+        
+        <h3>Update Data</h3>
+        <form id="dataForm">
+            <label for="name">Name:</label>
+            <input type="text" id="nameInput" name="name"><br><br>
+
+            <label for="zipcode">Zipcode:</label>
+            <input type="text" id="zipcodeInput" name="zipcode"><br><br>
+
+            <label for="colorId">Color ID:</label>
+            <input type="text" id="colorIdInput" name="colorId"><br><br>
+
+            <button type="button" onclick="updateData()">Update Data</button>
+        </form>
     </div>
 
     <!-- Display for Mobile -->
@@ -35,6 +49,25 @@
                 document.getElementById('peerId').textContent = id;
                 window.history.pushState({}, '', `#${id}`);
                 console.log(`Desktop peer ID: ${id}`);
+
+                // Load data from localStorage and populate the form
+                const storedData = JSON.parse(localStorage.getItem('userData'));
+                if (storedData) {
+                    document.getElementById('nameInput').value = storedData.name;
+                    document.getElementById('zipcodeInput').value = storedData.zipcode;
+                    document.getElementById('colorIdInput').value = storedData.colorId;
+                } else {
+                    // Initialize localStorage with default data if empty
+                    const defaultData = {
+                        name: 'John Doe',
+                        zipcode: '12345',
+                        colorId: 'Blue'
+                    };
+                    localStorage.setItem('userData', JSON.stringify(defaultData));
+                    document.getElementById('nameInput').value = defaultData.name;
+                    document.getElementById('zipcodeInput').value = defaultData.zipcode;
+                    document.getElementById('colorIdInput').value = defaultData.colorId;
+                }
             });
 
             peer.on('connection', (connection) => {
@@ -62,18 +95,23 @@
             });
 
             function sendData() {
-                const data = {
-                    name: 'John Doe',
-                    zipcode: '12345',
-                    colorId: 'Blue'
-                };
-                localStorage.setItem('userData', JSON.stringify(data));
                 const storedData = JSON.parse(localStorage.getItem('userData'));
-                if (conn && conn.open) {
+                if (conn && conn.open && storedData) {
                     conn.send(storedData);
                 } else {
-                    console.warn('Connection not open');
+                    console.warn('Connection not open or no data in localStorage');
                 }
+            }
+
+            // Function to update localStorage with new data from the form
+            function updateData() {
+                const newData = {
+                    name: document.getElementById('nameInput').value,
+                    zipcode: document.getElementById('zipcodeInput').value,
+                    colorId: document.getElementById('colorIdInput').value
+                };
+                localStorage.setItem('userData', JSON.stringify(newData));
+                alert('Data updated successfully!');
             }
 
         } else {
@@ -127,3 +165,4 @@
     </script>
 </body>
 </html>
+
