@@ -1,134 +1,129 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive HSV Color Wheel</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: white; }
-        canvas { display: block; }
-    </style>
+    <title>P2P Data Transfer with WebRTC and PeerJS</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
 <body>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <h1>P2P Data Transfer</h1>
+
+    <!-- Display for Desktop -->
+    <div id="desktop">
+        <h2>Desktop (Server)</h2>
+        <p>Peer ID: <span id="peerId">Generating...</span></p>
+    </div>
+
+    <!-- Display for Mobile -->
+    <div id="mobile" style="display:none;">
+        <h2>Mobile (Client)</h2>
+        <p>Name: <span id="name"></span></p>
+        <p>Zipcode: <span id="zipcode"></span></p>
+        <p>Color ID: <span id="colorId"></span></p>
+    </div>
+
     <script>
-        let scene, camera, renderer, circle;
-        let isMouseDown = false;
-        let previousMousePosition = { x: 0, y: 0 };
+        const isDesktop = !window.location.hash;
 
-        function init() {
-            scene = new THREE.Scene();
-            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
-            camera.position.z = 1;
+        if (isDesktop) {
+            // Desktop (Server) Code
+            const peer = new Peer();
+            let conn;
 
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setClearColor(0xffffff, 0);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.body.appendChild(renderer.domElement);
-
-            const geometry = new THREE.CircleGeometry(1, 64);
-            const material = new THREE.ShaderMaterial({
-                uniforms: {
-                    uTime: { value: 0 }
-                },
-                vertexShader: `
-                    varying vec2 vUv;
-                    void main() {
-                        vUv = uv;
-                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                    }
-                `,
-                fragmentShader: `
-                    varying vec2 vUv;
-                    uniform float uTime;
-
-                    vec3 hsv2rgb(vec3 c) {
-                        vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-                        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-                        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-                    }
-
-                    void main() {
-                        vec2 center = vec2(0.5, 0.5);
-                        vec2 pos = vUv - center;
-                        float angle = atan(pos.y, pos.x);
-                        float radius = length(pos) * 2.0;
-
-                        float hue = (angle / (2.0 * 3.14159) + 0.5 + uTime) % 1.0;
-                        float saturation = radius;
-                        float value = 1.0;
-
-                        vec3 rgb = hsv2rgb(vec3(hue, saturation, value));
-
-                        if (radius > 1.0) discard;
-                        gl_FragColor = vec4(rgb, 1.0);
-                    }
-                `
+            peer.on('open', (id) => {
+                document.getElementById('peerId').textContent = id;
+                window.history.pushState({}, '', `#${id}`);
+                console.log(`Desktop peer ID: ${id}`);
             });
 
-            circle = new THREE.Mesh(geometry, material);
-            scene.add(circle);
+            peer.on('connection', (connection) => {
+                conn = connection;
 
-            document.addEventListener('mousedown', onMouseDown, false);
-            document.addEventListener('mousemove', onMouseMove, false);
-            document.addEventListener('mouseup', onMouseUp, false);
-            window.addEventListener('resize', onWindowResize, false);
-        }
+                conn.on('data', (receivedToken) => {
+                    const secretToken = 'your-secret-token'; // Replace with a real token generation logic
+                    if (receivedToken === secretToken) {
+                        conn.send({ status: 'authorized' });
+                        setInterval(sendData, 1000); // Send data every second
+                    } else {
+                        conn.send({ status: 'unauthorized' });
+                        conn.close();
+                    }
+                });
 
-        function onMouseDown(event) {
-            isMouseDown = true;
-            previousMousePosition = {
-                x: event.clientX,
-                y: event.clientY
-            };
-        }
+                conn.on('close', () => {
+                    console.log('Connection closed');
+                });
+            });
 
-        function onMouseMove(event) {
-            if (!isMouseDown) return;
+            peer.on('error', (err) => {
+                console.error('PeerJS Error:', err);
+                alert('An error occurred with the P2P connection: ' + err.message);
+            });
 
-            const deltaMove = {
-                x: event.clientX - previousMousePosition.x,
-                y: event.clientY - previousMousePosition.y
-            };
-
-            circle.material.uniforms.uTime.value += deltaMove.x * 0.001;
-
-            previousMousePosition = {
-                x: event.clientX,
-                y: event.clientY
-            };
-        }
-
-        function onMouseUp() {
-            isMouseDown = false;
-        }
-
-        function onWindowResize() {
-            const aspect = window.innerWidth / window.innerHeight;
-            let width, height;
-            if (aspect > 1) {
-                width = 1;
-                height = 1 / aspect;
-            } else {
-                width = aspect;
-                height = 1;
+            function sendData() {
+                const data = {
+                    name: 'John Doe',
+                    zipcode: '12345',
+                    colorId: 'Blue'
+                };
+                localStorage.setItem('userData', JSON.stringify(data));
+                const storedData = JSON.parse(localStorage.getItem('userData'));
+                if (conn && conn.open) {
+                    conn.send(storedData);
+                } else {
+                    console.warn('Connection not open');
+                }
             }
-            camera.left = -width;
-            camera.right = width;
-            camera.top = height;
-            camera.bottom = -height;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
 
-        function animate() {
-            requestAnimationFrame(animate);
-            renderer.render(scene, camera);
-        }
+        } else {
+            // Mobile (Client) Code
+            const remotePeerId = window.location.hash.slice(1);
+            const peer = new Peer();
+            let conn;
 
-        init();
-        animate();
+            peer.on('open', (id) => {
+                console.log(`Mobile peer ID: ${id}`);
+                connectToPeer(remotePeerId);
+            });
+
+            function connectToPeer(peerId) {
+                conn = peer.connect(peerId);
+
+                conn.on('open', () => {
+                    console.log('Connected to server');
+                    conn.send('your-secret-token'); // Replace with a real token
+                });
+
+                conn.on('data', (data) => {
+                    if (data.status === 'authorized') {
+                        console.log('Authorized, starting to receive data');
+                        document.getElementById('mobile').style.display = 'block';
+                    } else if (data.status === 'unauthorized') {
+                        alert('Unauthorized access');
+                        conn.close();
+                    } else {
+                        displayData(data);
+                    }
+                });
+
+                conn.on('close', () => {
+                    console.log('Connection closed, attempting to reconnect...');
+                    setTimeout(() => connectToPeer(peerId), 3000); // Reconnect after 3 seconds
+                });
+            }
+
+            peer.on('error', (err) => {
+                console.error('PeerJS Error:', err);
+                alert('An error occurred with the P2P connection: ' + err.message);
+            });
+
+            function displayData(data) {
+                document.getElementById('name').textContent = data.name;
+                document.getElementById('zipcode').textContent = data.zipcode;
+                document.getElementById('colorId').textContent = data.colorId;
+            }
+        }
     </script>
 </body>
 </html>
