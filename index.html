@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative P2P Notes v3</title>
+    <title>Collaborative P2P Notes</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.js"></script>
     <style>
         body, html {
             margin: 0;
@@ -26,114 +25,169 @@
         }
         #notes-display {
             width: 100%;
-            height: 100%;
+            height: calc(100% - 30px);
             white-space: pre-wrap;
             word-wrap: break-word;
             overflow-y: auto;
             outline: none;
+            border: 1px solid #ccc;
+            padding: 10px;
         }
         #notes-display img {
             max-width: 100%;
             height: auto;
         }
         #status {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            padding: 5px 10px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-            font-size: 12px;
+            height: 20px;
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
         }
     </style>
 </head>
 <body>
     <div id="notes-container">
         <div id="notes-display" contenteditable="true"></div>
+        <div id="status">Status: Initializing...</div>
     </div>
-    <div id="status">Status: Initializing...</div>
 
     <script>
         const display = document.getElementById('notes-display');
         const statusElement = document.getElementById('status');
-        const lineHeight = 21; // Approximate line height in pixels
         let peer, conn, connections = [];
-        let lastBroadcastContent = '';
-        let dmp = new diff_match_patch();
+        let lastSyncedContent = '';
+        let localVersion = new VersionVector();
+        let clientId = generateUniqueId();
 
-        // Initialize notes display area
+        class TextOperation {
+            constructor(ops) {
+                this.ops = ops;
+            }
+
+            static insert(pos, text) {
+                return new TextOperation([{ insert: { pos, text } }]);
+            }
+
+            static delete(pos, length) {
+                return new TextOperation([{ delete: { pos, length } }]);
+            }
+
+            apply(text) {
+                let result = text;
+                for (let op of this.ops) {
+                    if (op.insert) {
+                        result = result.slice(0, op.insert.pos) + op.insert.text + result.slice(op.insert.pos);
+                    } else if (op.delete) {
+                        result = result.slice(0, op.delete.pos) + result.slice(op.delete.pos + op.delete.length);
+                    }
+                }
+                return result;
+            }
+        }
+
+        class VersionVector {
+            constructor() {
+                this.vector = new Map();
+            }
+
+            increment(clientId) {
+                this.vector.set(clientId, (this.vector.get(clientId) || 0) + 1);
+            }
+
+            merge(other) {
+                for (let [clientId, version] of other.vector.entries()) {
+                    if (!this.vector.has(clientId) || this.vector.get(clientId) < version) {
+                        this.vector.set(clientId, version);
+                    }
+                }
+            }
+
+            isNewer(other) {
+                for (let [clientId, version] of this.vector.entries()) {
+                    if (!other.vector.has(clientId) || other.vector.get(clientId) < version) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        function generateUniqueId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+
         function initNotes() {
-            const viewportHeight = window.innerHeight;
-            const totalLines = Math.floor(viewportHeight / lineHeight);
-            display.innerHTML = '<br>'.repeat(totalLines - 1);
-            display.focus();
+            display.innerHTML = localStorage.getItem('notesContent') || '';
+            lastSyncedContent = display.innerHTML;
+        }
 
-            // Load content from local storage if available
-            const savedContent = localStorage.getItem('notesContent');
-            if (savedContent) {
-                display.innerHTML = savedContent;
+        function mergeContent(baseContent, localChanges, remoteChanges) {
+            let mergedContent = baseContent;
+            mergedContent = localChanges.apply(mergedContent);
+            mergedContent = remoteChanges.apply(mergedContent);
+            return mergedContent;
+        }
+
+        function getOperationsSinceLastSync(oldContent, newContent) {
+            // This is a simplified diff algorithm. In a real-world scenario,
+            // you'd want to use a more sophisticated diff algorithm.
+            if (oldContent === newContent) return new TextOperation([]);
+            
+            let ops = [];
+            let i = 0;
+            while (i < oldContent.length && i < newContent.length && oldContent[i] === newContent[i]) i++;
+            
+            if (i < oldContent.length) {
+                ops.push({ delete: { pos: i, length: oldContent.length - i } });
             }
-        }
-
-        // Handle clicks inside the notes area
-        function handleClick(e) {
-            const range = document.caretRangeFromPoint(e.clientX, e.clientY);
-            if (range) {
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
+            
+            if (i < newContent.length) {
+                ops.push({ insert: { pos: i, text: newContent.slice(i) } });
             }
+            
+            return new TextOperation(ops);
         }
 
-        // Merge content using diff-match-patch
-        function mergeContent(existingContent, newContent) {
-            const patches = dmp.patch_make(existingContent, newContent);
-            const [patchedText, results] = dmp.patch_apply(patches, existingContent);
-            return patchedText;
-        }
-
-        // Handle incoming data
         function handleIncomingData(data) {
-            if (data.content) {
-                const existingContent = display.innerHTML;
-                const mergedContent = mergeContent(existingContent, data.content);
-                
-                // Save cursor position
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                const startOffset = range.startOffset;
-
-                display.innerHTML = mergedContent;
-
-                // Restore cursor position
-                const newRange = document.createRange();
-                newRange.setStart(display.childNodes[0], startOffset);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-
-                // Save to local storage
-                localStorage.setItem('notesContent', mergedContent);
+            if (data.version && data.operations) {
+                if (data.version.isNewer(localVersion)) {
+                    const remoteChanges = new TextOperation(data.operations);
+                    const localChanges = getOperationsSinceLastSync(lastSyncedContent, display.innerHTML);
+                    
+                    const mergedContent = mergeContent(lastSyncedContent, localChanges, remoteChanges);
+                    
+                    display.innerHTML = mergedContent;
+                    lastSyncedContent = mergedContent;
+                    localVersion.merge(data.version);
+                    
+                    localStorage.setItem('notesContent', mergedContent);
+                    updateStatus('Changes merged');
+                } else {
+                    updateStatus('Received outdated changes, discarded');
+                }
             }
         }
 
-        // Send data to all connected peers
         function broadcastData() {
             const content = display.innerHTML;
-            if (content !== lastBroadcastContent) {
+            if (content !== lastSyncedContent) {
+                const operations = getOperationsSinceLastSync(lastSyncedContent, content);
+                localVersion.increment(clientId);
+                const dataWithVersion = {
+                    operations: operations.ops,
+                    version: localVersion
+                };
                 connections.forEach(conn => {
                     if (conn.open) {
-                        conn.send({ content });
+                        conn.send(dataWithVersion);
                     }
                 });
-                lastBroadcastContent = content;
-
-                // Save to local storage
+                lastSyncedContent = content;
                 localStorage.setItem('notesContent', content);
+                updateStatus('Changes sent');
             }
         }
 
-        // Debounce function
         function debounce(func, wait) {
             let timeout;
             return function executedFunction(...args) {
@@ -146,7 +200,6 @@
             };
         }
 
-        // Initialize PeerJS connection
         function initPeerJS() {
             const hash = window.location.hash;
 
@@ -155,7 +208,7 @@
                 peer = new Peer();
                 peer.on('open', (id) => {
                     console.log(`Desktop peer ID: ${id}`);
-                    window.location.hash = id; // Update the URL with the peer ID
+                    window.location.hash = id;
                     updateStatus('Connected as desktop');
                 });
 
@@ -163,9 +216,9 @@
                     connections.push(connection);
                     connection.on('data', handleIncomingData);
                     connection.on('open', () => {
-                        // Send the current content to the newly connected peer
-                        connection.send({ content: display.innerHTML });
                         updateStatus('Client connected');
+                        // Send the current content to the newly connected peer
+                        broadcastData();
                     });
                     connection.on('close', () => {
                         connections = connections.filter(conn => conn !== connection);
@@ -181,27 +234,26 @@
                     console.log(`Mobile peer ID: ${id}`);
                     connectToPeer(remotePeerId);
                 });
-
-                function connectToPeer(peerId) {
-                    conn = peer.connect(peerId);
-                    conn.on('open', () => {
-                        console.log('Connected to server');
-                        conn.send({ content: display.innerHTML }); // Send initial content
-                        updateStatus('Connected to desktop');
-                    });
-                    conn.on('data', handleIncomingData);
-                    conn.on('close', () => {
-                        console.log('Connection closed, attempting to reconnect...');
-                        updateStatus('Disconnected, reconnecting...');
-                        setTimeout(() => connectToPeer(peerId), 3000); // Reconnect after 3 seconds
-                    });
-                }
             }
 
             peer.on('error', (err) => {
                 console.error('PeerJS Error:', err);
                 updateStatus('Connection error');
-                alert('An error occurred with the P2P connection: ' + err.message);
+            });
+        }
+
+        function connectToPeer(peerId) {
+            conn = peer.connect(peerId);
+            conn.on('open', () => {
+                console.log('Connected to desktop');
+                updateStatus('Connected to desktop');
+                broadcastData(); // Send initial content
+            });
+            conn.on('data', handleIncomingData);
+            conn.on('close', () => {
+                console.log('Connection closed, attempting to reconnect...');
+                updateStatus('Disconnected, reconnecting...');
+                setTimeout(() => connectToPeer(peerId), 3000);
             });
         }
 
@@ -209,56 +261,22 @@
             statusElement.textContent = `Status: ${message}`;
         }
 
-        // Event listeners
         window.addEventListener('load', () => {
             initNotes();
             initPeerJS();
         });
-        window.addEventListener('resize', initNotes);
-        display.addEventListener('click', handleClick);
+
         display.addEventListener('input', debounce(() => {
-            interpretHTML();
-            maintainEmptyLines();
             broadcastData();
-        }, 300)); // Debounce for 300ms
-
-        // Interpret and format HTML content
-        function interpretHTML() {
-            const content = display.innerHTML;
-            const interpretedContent = content.replace(/&lt;img\s+src=['"](.+?)['"]\s*\/?&gt;/gi, '<img src="$1" alt="User inserted image">');
-            if (content !== interpretedContent) {
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                const startContainer = range.startContainer;
-                const startOffset = range.startOffset;
-
-                display.innerHTML = interpretedContent;
-
-                // Restore cursor position
-                const newRange = document.createRange();
-                newRange.setStart(startContainer, startOffset);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-            }
-        }
-
-        // Maintain empty lines at the end of the contenteditable area
-        function maintainEmptyLines() {
-            const content = display.innerHTML;
-            if (!content.endsWith('<br>')) {
-                display.innerHTML = content + '<br>';
-            }
-        }
-
-        // Handle offline scenario
-        window.addEventListener('offline', () => {
-            updateStatus('Offline');
-        });
+        }, 300));
 
         window.addEventListener('online', () => {
             updateStatus('Online, reconnecting...');
             initPeerJS();
+        });
+
+        window.addEventListener('offline', () => {
+            updateStatus('Offline');
         });
     </script>
 </body>
