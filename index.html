@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative P2P Notes v1</title>
+    <title>Collaborative P2P Notes v2</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         body, html {
@@ -95,8 +95,7 @@
         }
 
         // Send data to all connected peers
-        function broadcastData() {
-            const content = display.innerHTML;
+        function broadcastData(content) {
             connections.forEach(conn => {
                 if (conn.open) {
                     conn.send({ content });
@@ -137,6 +136,8 @@
                     conn = peer.connect(peerId);
                     conn.on('open', () => {
                         console.log('Connected to server');
+                        // Ensure the mobile also sends its initial content
+                        broadcastData(display.innerHTML);
                     });
                     conn.on('data', handleIncomingData);
                     conn.on('close', () => {
@@ -156,6 +157,7 @@
         function handleIncomingData(data) {
             if (data.content) {
                 display.innerHTML = data.content;
+                maintainEmptyLines();
             }
         }
 
@@ -169,7 +171,7 @@
         display.addEventListener('input', () => {
             interpretHTML();
             maintainEmptyLines();
-            broadcastData();
+            broadcastData(display.innerHTML);
         });
     </script>
 </body>
