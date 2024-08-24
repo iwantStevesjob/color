@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative P2P Notes v3</title>
+    <title>Collaborative P2P Notes - v1 </title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.js"></script>
     <style>
         body, html {
             margin: 0;
@@ -36,30 +35,17 @@
             max-width: 100%;
             height: auto;
         }
-        #status {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            padding: 5px 10px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-            font-size: 12px;
-        }
     </style>
 </head>
 <body>
     <div id="notes-container">
         <div id="notes-display" contenteditable="true"></div>
     </div>
-    <div id="status">Status: Initializing...</div>
 
     <script>
         const display = document.getElementById('notes-display');
-        const statusElement = document.getElementById('status');
         const lineHeight = 21; // Approximate line height in pixels
         let peer, conn, connections = [];
-        let lastBroadcastContent = '';
-        let dmp = new diff_match_patch();
 
         // Initialize notes display area
         function initNotes() {
@@ -67,12 +53,6 @@
             const totalLines = Math.floor(viewportHeight / lineHeight);
             display.innerHTML = '<br>'.repeat(totalLines - 1);
             display.focus();
-
-            // Load content from local storage if available
-            const savedContent = localStorage.getItem('notesContent');
-            if (savedContent) {
-                display.innerHTML = savedContent;
-            }
         }
 
         // Handle clicks inside the notes area
@@ -84,143 +64,6 @@
                 selection.addRange(range);
             }
         }
-
-        // Merge content using diff-match-patch
-        function mergeContent(existingContent, newContent) {
-            const patches = dmp.patch_make(existingContent, newContent);
-            const [patchedText, results] = dmp.patch_apply(patches, existingContent);
-            return patchedText;
-        }
-
-        // Handle incoming data
-        function handleIncomingData(data) {
-            if (data.content) {
-                const existingContent = display.innerHTML;
-                const mergedContent = mergeContent(existingContent, data.content);
-                
-                // Save cursor position
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                const startOffset = range.startOffset;
-
-                display.innerHTML = mergedContent;
-
-                // Restore cursor position
-                const newRange = document.createRange();
-                newRange.setStart(display.childNodes[0], startOffset);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-
-                // Save to local storage
-                localStorage.setItem('notesContent', mergedContent);
-            }
-        }
-
-        // Send data to all connected peers
-        function broadcastData() {
-            const content = display.innerHTML;
-            if (content !== lastBroadcastContent) {
-                connections.forEach(conn => {
-                    if (conn.open) {
-                        conn.send({ content });
-                    }
-                });
-                lastBroadcastContent = content;
-
-                // Save to local storage
-                localStorage.setItem('notesContent', content);
-            }
-        }
-
-        // Debounce function
-        function debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-            };
-        }
-
-        // Initialize PeerJS connection
-        function initPeerJS() {
-            const hash = window.location.hash;
-
-            if (!hash) {
-                // Desktop (Server) Code
-                peer = new Peer();
-                peer.on('open', (id) => {
-                    console.log(`Desktop peer ID: ${id}`);
-                    window.location.hash = id; // Update the URL with the peer ID
-                    updateStatus('Connected as desktop');
-                });
-
-                peer.on('connection', (connection) => {
-                    connections.push(connection);
-                    connection.on('data', handleIncomingData);
-                    connection.on('open', () => {
-                        // Send the current content to the newly connected peer
-                        connection.send({ content: display.innerHTML });
-                        updateStatus('Client connected');
-                    });
-                    connection.on('close', () => {
-                        connections = connections.filter(conn => conn !== connection);
-                        updateStatus('Client disconnected');
-                    });
-                });
-            } else {
-                // Mobile (Client) Code
-                const remotePeerId = hash.slice(1);
-                peer = new Peer();
-                
-                peer.on('open', (id) => {
-                    console.log(`Mobile peer ID: ${id}`);
-                    connectToPeer(remotePeerId);
-                });
-
-                function connectToPeer(peerId) {
-                    conn = peer.connect(peerId);
-                    conn.on('open', () => {
-                        console.log('Connected to server');
-                        conn.send({ content: display.innerHTML }); // Send initial content
-                        updateStatus('Connected to desktop');
-                    });
-                    conn.on('data', handleIncomingData);
-                    conn.on('close', () => {
-                        console.log('Connection closed, attempting to reconnect...');
-                        updateStatus('Disconnected, reconnecting...');
-                        setTimeout(() => connectToPeer(peerId), 3000); // Reconnect after 3 seconds
-                    });
-                }
-            }
-
-            peer.on('error', (err) => {
-                console.error('PeerJS Error:', err);
-                updateStatus('Connection error');
-                alert('An error occurred with the P2P connection: ' + err.message);
-            });
-        }
-
-        function updateStatus(message) {
-            statusElement.textContent = `Status: ${message}`;
-        }
-
-        // Event listeners
-        window.addEventListener('load', () => {
-            initNotes();
-            initPeerJS();
-        });
-        window.addEventListener('resize', initNotes);
-        display.addEventListener('click', handleClick);
-        display.addEventListener('input', debounce(() => {
-            interpretHTML();
-            maintainEmptyLines();
-            broadcastData();
-        }, 300)); // Debounce for 300ms
 
         // Interpret and format HTML content
         function interpretHTML() {
@@ -251,14 +94,82 @@
             }
         }
 
-        // Handle offline scenario
-        window.addEventListener('offline', () => {
-            updateStatus('Offline');
-        });
+        // Send data to all connected peers
+        function broadcastData() {
+            const content = display.innerHTML;
+            connections.forEach(conn => {
+                if (conn.open) {
+                    conn.send({ content });
+                }
+            });
+        }
 
-        window.addEventListener('online', () => {
-            updateStatus('Online, reconnecting...');
+        // Initialize PeerJS connection
+        function initPeerJS() {
+            const hash = window.location.hash;
+
+            if (!hash) {
+                // Desktop (Server) Code
+                peer = new Peer();
+                peer.on('open', (id) => {
+                    console.log(`Desktop peer ID: ${id}`);
+                    window.location.hash = id; // Update the URL with the peer ID
+                });
+
+                peer.on('connection', (connection) => {
+                    connections.push(connection);
+                    connection.on('data', handleIncomingData);
+                    connection.on('close', () => {
+                        connections = connections.filter(conn => conn !== connection);
+                    });
+                });
+            } else {
+                // Mobile (Client) Code
+                const remotePeerId = hash.slice(1);
+                peer = new Peer();
+                
+                peer.on('open', (id) => {
+                    console.log(`Mobile peer ID: ${id}`);
+                    connectToPeer(remotePeerId);
+                });
+
+                function connectToPeer(peerId) {
+                    conn = peer.connect(peerId);
+                    conn.on('open', () => {
+                        console.log('Connected to server');
+                    });
+                    conn.on('data', handleIncomingData);
+                    conn.on('close', () => {
+                        console.log('Connection closed, attempting to reconnect...');
+                        setTimeout(() => connectToPeer(peerId), 3000); // Reconnect after 3 seconds
+                    });
+                }
+            }
+
+            peer.on('error', (err) => {
+                console.error('PeerJS Error:', err);
+                alert('An error occurred with the P2P connection: ' + err.message);
+            });
+        }
+
+        // Handle incoming data
+        function handleIncomingData(data) {
+            if (data.content) {
+                display.innerHTML = data.content;
+            }
+        }
+
+        // Event listeners
+        window.addEventListener('load', () => {
+            initNotes();
             initPeerJS();
+        });
+        window.addEventListener('resize', initNotes);
+        display.addEventListener('click', handleClick);
+        display.addEventListener('input', () => {
+            interpretHTML();
+            maintainEmptyLines();
+            broadcastData();
         });
     </script>
 </body>
