@@ -15,7 +15,7 @@
         }
         #notes-container {
             width: 100%;
-            height: 100%;
+            height: calc(100% - 40px);
             position: relative;
             padding: 10px;
             box-sizing: border-box;
@@ -35,21 +35,51 @@
             max-width: 100%;
             height: auto;
         }
+        #status-bar {
+            height: 40px;
+            background-color: #f0f0f0;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .connected { background-color: green; }
+        .disconnected { background-color: red; }
     </style>
 </head>
 <body>
     <div id="notes-container">
         <div id="notes-display" contenteditable="true"></div>
     </div>
+    <div id="status-bar">
+        <div id="connection-status">
+            <span class="status-indicator"></span>
+            <span id="status-text">Disconnected</span>
+        </div>
+        <div id="peer-count">Connected Peers: 0</div>
+    </div>
 
     <script>
         const display = document.getElementById('notes-display');
+        const statusIndicator = document.querySelector('.status-indicator');
+        const statusText = document.getElementById('status-text');
+        const peerCountElement = document.getElementById('peer-count');
         const lineHeight = 21; // Approximate line height in pixels
-        let peer, conn, connections = [];
+        let peer, connections = [];
+        let isServer = false;
+        let lastSyncedContent = '';
 
         // Initialize notes display area
         function initNotes() {
-            const viewportHeight = window.innerHeight;
+            const viewportHeight = window.innerHeight - 40; // Subtract status bar height
             const totalLines = Math.floor(viewportHeight / lineHeight);
             display.innerHTML = '<br>'.repeat(totalLines - 1);
             display.focus();
@@ -95,70 +125,101 @@
         }
 
         // Send data to all connected peers
-        function broadcastData(content) {
-            connections.forEach(conn => {
-                if (conn.open) {
-                    conn.send({ content });
-                }
-            });
+        function broadcastData() {
+            const content = display.innerHTML;
+            if (content !== lastSyncedContent) {
+                lastSyncedContent = content;
+                connections.forEach(conn => {
+                    if (conn.open) {
+                        conn.send({ type: 'content', data: content });
+                    }
+                });
+            }
         }
 
         // Initialize PeerJS connection
         function initPeerJS() {
             const hash = window.location.hash;
 
-            if (!hash) {
-                // Desktop (Server) Code
-                peer = new Peer();
-                peer.on('open', (id) => {
-                    console.log(`Desktop peer ID: ${id}`);
-                    window.location.hash = id; // Update the URL with the peer ID
-                });
+            peer = new Peer();
 
-                peer.on('connection', (connection) => {
-                    connections.push(connection);
-                    connection.on('data', handleIncomingData);
-                    connection.on('close', () => {
-                        connections = connections.filter(conn => conn !== connection);
-                    });
-                });
-            } else {
-                // Mobile (Client) Code
-                const remotePeerId = hash.slice(1);
-                peer = new Peer();
+            peer.on('open', (id) => {
+                updateConnectionStatus(true);
+                console.log(`Peer ID: ${id}`);
                 
-                peer.on('open', (id) => {
-                    console.log(`Mobile peer ID: ${id}`);
+                if (!hash) {
+                    // Server Code
+                    isServer = true;
+                    window.location.hash = id;
+                } else {
+                    // Client Code
+                    const remotePeerId = hash.slice(1);
                     connectToPeer(remotePeerId);
-                });
-
-                function connectToPeer(peerId) {
-                    conn = peer.connect(peerId);
-                    conn.on('open', () => {
-                        console.log('Connected to server');
-                        // Ensure the mobile also sends its initial content
-                        broadcastData(display.innerHTML);
-                    });
-                    conn.on('data', handleIncomingData);
-                    conn.on('close', () => {
-                        console.log('Connection closed, attempting to reconnect...');
-                        setTimeout(() => connectToPeer(peerId), 3000); // Reconnect after 3 seconds
-                    });
                 }
-            }
+            });
+
+            peer.on('connection', handleNewConnection);
 
             peer.on('error', (err) => {
                 console.error('PeerJS Error:', err);
+                updateConnectionStatus(false);
                 alert('An error occurred with the P2P connection: ' + err.message);
+            });
+        }
+
+        function handleNewConnection(connection) {
+            connections.push(connection);
+            setupConnectionListeners(connection);
+            updatePeerCount();
+
+            if (isServer) {
+                // Send current content to the new peer
+                connection.on('open', () => {
+                    connection.send({ type: 'content', data: display.innerHTML });
+                });
+            }
+        }
+
+        function connectToPeer(peerId) {
+            const conn = peer.connect(peerId);
+            connections.push(conn);
+            setupConnectionListeners(conn);
+        }
+
+        function setupConnectionListeners(conn) {
+            conn.on('open', () => {
+                console.log('Connected to peer');
+                updateConnectionStatus(true);
+            });
+
+            conn.on('data', handleIncomingData);
+
+            conn.on('close', () => {
+                console.log('Connection closed, attempting to reconnect...');
+                updateConnectionStatus(false);
+                connections = connections.filter(c => c !== conn);
+                updatePeerCount();
+                if (!isServer) {
+                    setTimeout(() => connectToPeer(conn.peer), 3000);
+                }
             });
         }
 
         // Handle incoming data
         function handleIncomingData(data) {
-            if (data.content) {
-                display.innerHTML = data.content;
-                maintainEmptyLines();
+            if (data.type === 'content') {
+                display.innerHTML = data.data;
+                lastSyncedContent = data.data;
             }
+        }
+
+        function updateConnectionStatus(connected) {
+            statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+            statusText.textContent = connected ? 'Connected' : 'Disconnected';
+        }
+
+        function updatePeerCount() {
+            peerCountElement.textContent = `Connected Peers: ${connections.length}`;
         }
 
         // Event listeners
@@ -171,7 +232,7 @@
         display.addEventListener('input', () => {
             interpretHTML();
             maintainEmptyLines();
-            broadcastData(display.innerHTML);
+            broadcastData();
         });
     </script>
 </body>
