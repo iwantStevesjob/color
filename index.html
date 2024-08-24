@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative P2P Notes v3</title>
+    <title>Collaborative P2P Notes v4</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         body, html {
@@ -77,22 +77,14 @@
         let isServer = false;
         let lastSyncedContent = '';
 
-        // Initialize notes display area
+        // Initialize notes display area only if it's empty
         function initNotes() {
-            const viewportHeight = window.innerHeight - 40; // Subtract status bar height
-            const totalLines = Math.floor(viewportHeight / lineHeight);
-            display.innerHTML = '<br>'.repeat(totalLines - 1);
-            display.focus();
-        }
-
-        // Handle clicks inside the notes area
-        function handleClick(e) {
-            const range = document.caretRangeFromPoint(e.clientX, e.clientY);
-            if (range) {
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
+            if (display.innerHTML.trim() === '') {
+                const viewportHeight = window.innerHeight - 40; // Subtract status bar height
+                const totalLines = Math.floor(viewportHeight / lineHeight);
+                display.innerHTML = '<br>'.repeat(totalLines - 1);
             }
+            display.focus();
         }
 
         // Interpret and format HTML content
@@ -151,6 +143,7 @@
                     // Server Code
                     isServer = true;
                     window.location.hash = id;
+                    initNotes(); // Only initialize notes for the server
                 } else {
                     // Client Code
                     const remotePeerId = hash.slice(1);
@@ -223,12 +216,10 @@
         }
 
         // Event listeners
-        window.addEventListener('load', () => {
-            initNotes();
-            initPeerJS();
+        window.addEventListener('load', initPeerJS);
+        window.addEventListener('resize', () => {
+            if (isServer) initNotes();
         });
-        window.addEventListener('resize', initNotes);
-        display.addEventListener('click', handleClick);
         display.addEventListener('input', () => {
             interpretHTML();
             maintainEmptyLines();
