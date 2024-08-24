@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative P2P Notes</title>
+    <title>Collaborative P2P Notes - v2</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         body, html {
@@ -65,32 +65,17 @@
             }
         }
 
-        // Interpret and format HTML content
-        function interpretHTML() {
-            const content = display.innerHTML;
-            const interpretedContent = content.replace(/&lt;img\s+src=['"](.+?)['"]\s*\/?&gt;/gi, '<img src="$1" alt="User inserted image">');
-            if (content !== interpretedContent) {
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                const startContainer = range.startContainer;
-                const startOffset = range.startOffset;
-
-                display.innerHTML = interpretedContent;
-
-                // Restore cursor position
-                const newRange = document.createRange();
-                newRange.setStart(startContainer, startOffset);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-            }
+        // Merge content from the incoming peer with the existing content
+        function mergeContent(existingContent, newContent) {
+            // Implement a simple merge strategy
+            return existingContent + "\n" + newContent;
         }
 
-        // Maintain empty lines at the end of the contenteditable area
-        function maintainEmptyLines() {
-            const content = display.innerHTML;
-            if (!content.endsWith('<br>')) {
-                display.innerHTML = content + '<br>';
+        // Handle incoming data
+        function handleIncomingData(data) {
+            if (data.content) {
+                const existingContent = display.innerHTML;
+                display.innerHTML = mergeContent(existingContent, data.content);
             }
         }
 
@@ -157,13 +142,6 @@
             });
         }
 
-        // Handle incoming data
-        function handleIncomingData(data) {
-            if (data.content) {
-                display.innerHTML = data.content;
-            }
-        }
-
         // Event listeners
         window.addEventListener('load', () => {
             initNotes();
@@ -176,8 +154,35 @@
             maintainEmptyLines();
             broadcastData();
         });
+
+        // Interpret and format HTML content
+        function interpretHTML() {
+            const content = display.innerHTML;
+            const interpretedContent = content.replace(/&lt;img\s+src=['"](.+?)['"]\s*\/?&gt;/gi, '<img src="$1" alt="User inserted image">');
+            if (content !== interpretedContent) {
+                const selection = window.getSelection();
+                const range = selection.getRangeAt(0);
+                const startContainer = range.startContainer;
+                const startOffset = range.startOffset;
+
+                display.innerHTML = interpretedContent;
+
+                // Restore cursor position
+                const newRange = document.createRange();
+                newRange.setStart(startContainer, startOffset);
+                newRange.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(newRange);
+            }
+        }
+
+        // Maintain empty lines at the end of the contenteditable area
+        function maintainEmptyLines() {
+            const content = display.innerHTML;
+            if (!content.endsWith('<br>')) {
+                display.innerHTML = content + '<br>';
+            }
+        }
     </script>
 </body>
 </html>
-
-    
