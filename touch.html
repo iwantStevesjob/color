@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pressure Sensitive Touch</title>
+    <style>
+        canvas {
+            display: block;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #ffffff;
+            touch-action: none; /* Prevent default gestures */
+        }
+    </style>
+</head>
+<body>
+    <canvas id="touchCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('touchCanvas');
+        const ctx = canvas.getContext('2d');
+        let touches = [];
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Handle touch events
+        canvas.addEventListener('pointerdown', handlePointerEvent);
+        canvas.addEventListener('pointermove', handlePointerEvent);
+        canvas.addEventListener('pointerup', removePointerEvent);
+        canvas.addEventListener('pointercancel', removePointerEvent);
+        
+        function handlePointerEvent(event) {
+            const touch = touches.find(t => t.id === event.pointerId);
+            if (touch) {
+                touch.x = event.clientX;
+                touch.y = event.clientY;
+                touch.pressure = event.pressure || 1;
+            } else {
+                touches.push({ id: event.pointerId, x: event.clientX, y: event.clientY, pressure: event.pressure || 1 });
+            }
+            drawTouches();
+        }
+
+        function removePointerEvent(event) {
+            touches = touches.filter(t => t.id !== event.pointerId);
+            drawTouches();
+        }
+
+        function drawTouches() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            touches.forEach(touch => {
+                const { x, y, pressure } = touch;
+                const baseRadius = 20;
+                const glowRadius = pressure * 100;
+
+                // Draw the black dot at the touch point
+                ctx.fillStyle = '#000000';
+                ctx.beginPath();
+                ctx.arc(x, y, baseRadius, 0, 2 * Math.PI);
+                ctx.fill();
+
+                // Draw the glow effect
+                const gradient = ctx.createRadialGradient(x, y, baseRadius, x, y, glowRadius);
+                gradient.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, y, glowRadius, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+        }
+
+        // Optimize performance with requestAnimationFrame
+        function drawLoop() {
+            requestAnimationFrame(drawLoop);
+            drawTouches();
+        }
+        drawLoop();
+
+        // Adjust the canvas size on window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            drawTouches();
+        });
+    </script>
+</body>
+</html>
