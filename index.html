@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative P2P Notes v5</title>
+    <title>Collaborative P2P Notes v6</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         body,
@@ -26,13 +26,15 @@
             font-size: 16px;
             line-height: 1.3;
             overflow-y: auto;
+            border-left: 3px solid #000000; /* Border for the main user */
         }
 
         #notes-display {
             width: 100%;
-            min-height: 300%;
+            height: 100%;
             white-space: pre-wrap;
             word-wrap: break-word;
+            overflow-y: auto;
             outline: none;
         }
 
@@ -66,6 +68,18 @@
         .disconnected {
             background-color: red;
         }
+
+        /* Style for the main user */
+        .main-user {
+            color: #000000;
+            border-left: 3px solid #000000;
+            padding-left: 3px;
+        }
+
+        /* Style for other users */
+        .user-text {
+            padding-left: 3px;
+        }
     </style>
 </head>
 
@@ -83,7 +97,6 @@
 
     <script>
         const display = document.getElementById('notes-display');
-        const container = document.getElementById('notes-container');
         const statusIndicator = document.querySelector('.status-indicator');
         const statusText = document.getElementById('status-text');
         const peerCountElement = document.getElementById('peer-count');
@@ -91,26 +104,61 @@
         let peer, connections = [];
         let isServer = false;
         let lastSyncedContent = '';
+        const userColors = {}; // Stores user IDs and their corresponding colors
+        const currentUserId = generateRandomId(); // Generate a random ID for the user
+        const mainUserColor = '#000000'; // Main desktop user's color
+        userColors[currentUserId] = mainUserColor; // Assign main user's color
 
-        function initNotes() {
-            const viewportHeight = window.innerHeight - 40; // Subtract status bar height
-            const totalLines = Math.floor(viewportHeight / lineHeight) * 3; // Triple the viewport height
-            if (display.innerHTML.trim() === '') {
-                display.innerHTML = '<br>'.repeat(totalLines);
+        // Utility functions
+        function generateRandomId() {
+            return 'user_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function generateRandomColor() {
+            return '#' + Math.floor(Math.random() * 16777215).toString(16);
+        }
+
+        function getUserColor(userId) {
+            let userColors = JSON.parse(localStorage.getItem('userColors')) || {};
+            if (!userColors[userId]) {
+                userColors[userId] = generateRandomColor();
+                localStorage.setItem('userColors', JSON.stringify(userColors));
             }
-            container.scrollTop = container.scrollHeight / 3; // Position the scroll at 1/3 of the container height
+            return userColors[userId];
+        }
+
+        function applyUserColor(userId, element) {
+            const color = getUserColor(userId);
+            element.classList.add('user-text');
+            element.style.color = color;
+            if (userId === currentUserId) {
+                element.classList.add('main-user');
+            }
+        }
+
+        function saveUserColor(id, color) {
+            userColors[id] = color;
+            localStorage.setItem('userColors', JSON.stringify(userColors));
+        }
+
+        function loadUserColors() {
+            const savedColors = localStorage.getItem('userColors');
+            if (savedColors) {
+                Object.assign(userColors, JSON.parse(savedColors));
+            }
+        }
+
+        // Initialize notes display area only if it's empty
+        function initNotes() {
+            if (display.innerHTML.trim() === '') {
+                const viewportHeight = window.innerHeight - 40; // Subtract status bar height
+                const totalLines = Math.floor(viewportHeight / lineHeight);
+                display.innerHTML = '<br>'.repeat(totalLines - 1);
+            }
             display.focus();
         }
 
-        function handleClick(e) {
-            const range = document.caretRangeFromPoint(e.clientX, e.clientY);
-            if (range) {
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-        }
-
+        // Interpret and format HTML content
         function interpretHTML() {
             const content = display.innerHTML;
             const interpretedContent = content.replace(/&lt;img\s+src=['"](.+?)['"]\s*\/?&gt;/gi, '<img src="$1" alt="User inserted image">');
@@ -131,52 +179,7 @@
             }
         }
 
-        function handleEnterKey(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                const br = document.createElement('br');
-                
-                range.deleteContents();
-                range.insertNode(br);
-                
-                // Move the cursor after the newly inserted <br>
-                range.setStartAfter(br);
-                range.setEndAfter(br);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-        }
-
-        function handleScroll() {
-            const scrollTop = container.scrollTop;
-            const scrollHeight = container.scrollHeight;
-            const clientHeight = container.clientHeight;
-
-            // Add more lines at the top if needed
-            if (scrollTop < clientHeight) {
-                const linesToAdd = Math.floor(clientHeight / lineHeight);
-                const fragment = document.createDocumentFragment();
-                for (let i = 0; i < linesToAdd; i++) {
-                    fragment.appendChild(document.createElement('br'));
-                }
-                display.insertBefore(fragment, display.firstChild);
-                container.scrollTop += linesToAdd * lineHeight;
-            }
-
-            // Add more lines at the bottom if needed
-            if (scrollHeight - scrollTop - clientHeight < clientHeight) {
-                const linesToAdd = Math.floor(clientHeight / lineHeight);
-                const fragment = document.createDocumentFragment();
-                for (let i = 0; i < linesToAdd; i++) {
-                    fragment.appendChild(document.createElement('br'));
-                }
-                display.appendChild(fragment);
-            }
-        }
-
+        // Maintain empty lines at the end of the contenteditable area
         function maintainEmptyLines() {
             const content = display.innerHTML;
             if (!content.endsWith('<br>')) {
@@ -184,18 +187,24 @@
             }
         }
 
+        // Send data to all connected peers
         function broadcastData() {
             const content = display.innerHTML;
             if (content !== lastSyncedContent) {
                 lastSyncedContent = content;
                 connections.forEach(conn => {
                     if (conn.open) {
-                        conn.send({ type: 'content', data: content });
+                        conn.send({
+                            type: 'content',
+                            data: content,
+                            userId: currentUserId
+                        });
                     }
                 });
             }
         }
 
+        // Initialize PeerJS connection
         function initPeerJS() {
             const hash = window.location.hash;
 
@@ -204,6 +213,8 @@
             peer.on('open', (id) => {
                 updateConnectionStatus(true);
                 console.log(`Peer ID: ${id}`);
+
+                loadUserColors(); // Load user colors from localStorage
 
                 if (!hash) {
                     // Server Code
@@ -232,9 +243,17 @@
             updatePeerCount();
 
             if (isServer) {
-                // Send current content to the new peer
+                // Send current content and user colors to the new peer
                 connection.on('open', () => {
-                    connection.send({ type: 'content', data: display.innerHTML });
+                    connection.send({
+                        type: 'content',
+                        data: display.innerHTML,
+                        userId: currentUserId
+                    });
+                    connection.send({
+                        type: 'userColors',
+                        data: userColors
+                    });
                 });
             }
         }
@@ -264,37 +283,52 @@
             });
         }
 
+        // Handle incoming data
         function handleIncomingData(data) {
             if (data.type === 'content') {
                 display.innerHTML = data.data;
                 lastSyncedContent = data.data;
+            } else if (data.type === 'userColors') {
+                Object.assign(userColors, data.data);
+                applyColorsToText();
             }
         }
 
+        // Apply stored colors to text
+        function applyColorsToText() {
+            display.querySelectorAll('[data-user-id]').forEach((element) => {
+                applyUserColor(element.getAttribute('data-user-id'), element);
+            });
+        }
+
         function updateConnectionStatus(connected) {
-            statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
-            statusText.textContent = connected ? 'Connected' : 'Disconnected';
+            if (connected) {
+                statusIndicator.classList.remove('disconnected');
+                statusIndicator.classList.add('connected');
+                statusText.textContent = 'Connected';
+            } else {
+                statusIndicator.classList.remove('connected');
+                statusIndicator.classList.add('disconnected');
+                statusText.textContent = 'Disconnected';
+            }
         }
 
         function updatePeerCount() {
             peerCountElement.textContent = `Connected Peers: ${connections.length}`;
         }
 
-        window.addEventListener('load', () => {
-            initPeerJS();
-            initNotes();
+        // Prevent editing of other users' text
+        display.addEventListener('beforeinput', (event) => {
+            const selection = window.getSelection();
+            const textBlock = selection.anchorNode.parentElement.closest('[data-user-id]');
+            if (textBlock && textBlock.getAttribute('data-user-id') !== currentUserId) {
+                event.preventDefault();
+            }
         });
-        window.addEventListener('resize', () => {
-            if (isServer) initNotes();
-        });
-        display.addEventListener('click', handleClick);
-        display.addEventListener('keydown', handleEnterKey);
-        display.addEventListener('input', () => {
-            interpretHTML();
-            maintainEmptyLines();
-            broadcastData();
-        });
-        container.addEventListener('scroll', handleScroll);
+
+        // Run initialization functions
+        initPeerJS();
+        setInterval(broadcastData, 1000);
     </script>
 </body>
 
