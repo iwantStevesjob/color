@@ -1,18 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative P2P Notes v4</title>
+    <title>Collaborative P2P Notes v5</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
-        body, html {
+        body,
+        html {
             margin: 0;
             padding: 0;
             height: 100%;
             width: 100%;
             overflow: hidden;
         }
+
         #notes-container {
             width: 100%;
             height: calc(100% - 40px);
@@ -22,19 +25,22 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
             font-size: 16px;
             line-height: 1.3;
+            overflow-y: auto;
         }
+
         #notes-display {
             width: 100%;
-            height: 100%;
+            min-height: 300%;
             white-space: pre-wrap;
             word-wrap: break-word;
-            overflow-y: auto;
             outline: none;
         }
+
         #notes-display img {
             max-width: 100%;
             height: auto;
         }
+
         #status-bar {
             height: 40px;
             background-color: #f0f0f0;
@@ -44,6 +50,7 @@
             justify-content: space-between;
             align-items: center;
         }
+
         .status-indicator {
             width: 10px;
             height: 10px;
@@ -51,10 +58,17 @@
             display: inline-block;
             margin-right: 5px;
         }
-        .connected { background-color: green; }
-        .disconnected { background-color: red; }
+
+        .connected {
+            background-color: green;
+        }
+
+        .disconnected {
+            background-color: red;
+        }
     </style>
 </head>
+
 <body>
     <div id="notes-container">
         <div id="notes-display" contenteditable="true"></div>
@@ -69,6 +83,7 @@
 
     <script>
         const display = document.getElementById('notes-display');
+        const container = document.getElementById('notes-container');
         const statusIndicator = document.querySelector('.status-indicator');
         const statusText = document.getElementById('status-text');
         const peerCountElement = document.getElementById('peer-count');
@@ -77,17 +92,25 @@
         let isServer = false;
         let lastSyncedContent = '';
 
-        // Initialize notes display area only if it's empty
         function initNotes() {
+            const viewportHeight = window.innerHeight - 40; // Subtract status bar height
+            const totalLines = Math.floor(viewportHeight / lineHeight) * 3; // Triple the viewport height
             if (display.innerHTML.trim() === '') {
-                const viewportHeight = window.innerHeight - 40; // Subtract status bar height
-                const totalLines = Math.floor(viewportHeight / lineHeight);
-                display.innerHTML = '<br>'.repeat(totalLines - 1);
+                display.innerHTML = '<br>'.repeat(totalLines);
             }
+            container.scrollTop = container.scrollHeight / 3; // Position the scroll at 1/3 of the container height
             display.focus();
         }
 
-        // Interpret and format HTML content
+        function handleClick(e) {
+            const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+            if (range) {
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        }
+
         function interpretHTML() {
             const content = display.innerHTML;
             const interpretedContent = content.replace(/&lt;img\s+src=['"](.+?)['"]\s*\/?&gt;/gi, '<img src="$1" alt="User inserted image">');
@@ -108,7 +131,52 @@
             }
         }
 
-        // Maintain empty lines at the end of the contenteditable area
+        function handleEnterKey(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                
+                const selection = window.getSelection();
+                const range = selection.getRangeAt(0);
+                const br = document.createElement('br');
+                
+                range.deleteContents();
+                range.insertNode(br);
+                
+                // Move the cursor after the newly inserted <br>
+                range.setStartAfter(br);
+                range.setEndAfter(br);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        }
+
+        function handleScroll() {
+            const scrollTop = container.scrollTop;
+            const scrollHeight = container.scrollHeight;
+            const clientHeight = container.clientHeight;
+
+            // Add more lines at the top if needed
+            if (scrollTop < clientHeight) {
+                const linesToAdd = Math.floor(clientHeight / lineHeight);
+                const fragment = document.createDocumentFragment();
+                for (let i = 0; i < linesToAdd; i++) {
+                    fragment.appendChild(document.createElement('br'));
+                }
+                display.insertBefore(fragment, display.firstChild);
+                container.scrollTop += linesToAdd * lineHeight;
+            }
+
+            // Add more lines at the bottom if needed
+            if (scrollHeight - scrollTop - clientHeight < clientHeight) {
+                const linesToAdd = Math.floor(clientHeight / lineHeight);
+                const fragment = document.createDocumentFragment();
+                for (let i = 0; i < linesToAdd; i++) {
+                    fragment.appendChild(document.createElement('br'));
+                }
+                display.appendChild(fragment);
+            }
+        }
+
         function maintainEmptyLines() {
             const content = display.innerHTML;
             if (!content.endsWith('<br>')) {
@@ -116,7 +184,6 @@
             }
         }
 
-        // Send data to all connected peers
         function broadcastData() {
             const content = display.innerHTML;
             if (content !== lastSyncedContent) {
@@ -129,7 +196,6 @@
             }
         }
 
-        // Initialize PeerJS connection
         function initPeerJS() {
             const hash = window.location.hash;
 
@@ -138,7 +204,7 @@
             peer.on('open', (id) => {
                 updateConnectionStatus(true);
                 console.log(`Peer ID: ${id}`);
-                
+
                 if (!hash) {
                     // Server Code
                     isServer = true;
@@ -198,7 +264,6 @@
             });
         }
 
-        // Handle incoming data
         function handleIncomingData(data) {
             if (data.type === 'content') {
                 display.innerHTML = data.data;
@@ -215,16 +280,22 @@
             peerCountElement.textContent = `Connected Peers: ${connections.length}`;
         }
 
-        // Event listeners
-        window.addEventListener('load', initPeerJS);
+        window.addEventListener('load', () => {
+            initPeerJS();
+            initNotes();
+        });
         window.addEventListener('resize', () => {
             if (isServer) initNotes();
         });
+        display.addEventListener('click', handleClick);
+        display.addEventListener('keydown', handleEnterKey);
         display.addEventListener('input', () => {
             interpretHTML();
             maintainEmptyLines();
             broadcastData();
         });
+        container.addEventListener('scroll', handleScroll);
     </script>
 </body>
+
 </html>
