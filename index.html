@@ -1,21 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Collaborative P2P Notes v6</title>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
-        body,
-        html {
+        body, html {
             margin: 0;
             padding: 0;
             height: 100%;
             width: 100%;
             overflow: hidden;
         }
-
         #notes-container {
             width: 100%;
             height: calc(100% - 40px);
@@ -25,10 +22,8 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
             font-size: 16px;
             line-height: 1.3;
-            overflow-y: auto;
-            border-left: 3px solid #000000; /* Border for the main user */
+            border-left: 3px solid transparent; /* Default border for main user */
         }
-
         #notes-display {
             width: 100%;
             height: 100%;
@@ -37,12 +32,10 @@
             overflow-y: auto;
             outline: none;
         }
-
         #notes-display img {
             max-width: 100%;
             height: auto;
         }
-
         #status-bar {
             height: 40px;
             background-color: #f0f0f0;
@@ -52,7 +45,6 @@
             justify-content: space-between;
             align-items: center;
         }
-
         .status-indicator {
             width: 10px;
             height: 10px;
@@ -60,29 +52,18 @@
             display: inline-block;
             margin-right: 5px;
         }
-
-        .connected {
-            background-color: green;
-        }
-
-        .disconnected {
-            background-color: red;
-        }
-
-        /* Style for the main user */
-        .main-user {
-            color: #000000;
-            border-left: 3px solid #000000;
-            padding-left: 3px;
-        }
-
-        /* Style for other users */
+        .connected { background-color: green; }
+        .disconnected { background-color: red; }
         .user-text {
-            padding-left: 3px;
+            border-left: 3px solid; /* This will apply the colored line for users */
+            padding-left: 5px;
+        }
+        .main-user {
+            border-left: 3px solid #000000; /* Black line for main user */
+            padding-left: 5px;
         }
     </style>
 </head>
-
 <body>
     <div id="notes-container">
         <div id="notes-display" contenteditable="true"></div>
@@ -104,49 +85,8 @@
         let peer, connections = [];
         let isServer = false;
         let lastSyncedContent = '';
-        const userColors = {}; // Stores user IDs and their corresponding colors
-        const currentUserId = generateRandomId(); // Generate a random ID for the user
-        const mainUserColor = '#000000'; // Main desktop user's color
-        userColors[currentUserId] = mainUserColor; // Assign main user's color
-
-        // Utility functions
-        function generateRandomId() {
-            return 'user_' + Math.random().toString(36).substr(2, 9);
-        }
-
-        function generateRandomColor() {
-            return '#' + Math.floor(Math.random() * 16777215).toString(16);
-        }
-
-        function getUserColor(userId) {
-            let userColors = JSON.parse(localStorage.getItem('userColors')) || {};
-            if (!userColors[userId]) {
-                userColors[userId] = generateRandomColor();
-                localStorage.setItem('userColors', JSON.stringify(userColors));
-            }
-            return userColors[userId];
-        }
-
-        function applyUserColor(userId, element) {
-            const color = getUserColor(userId);
-            element.classList.add('user-text');
-            element.style.color = color;
-            if (userId === currentUserId) {
-                element.classList.add('main-user');
-            }
-        }
-
-        function saveUserColor(id, color) {
-            userColors[id] = color;
-            localStorage.setItem('userColors', JSON.stringify(userColors));
-        }
-
-        function loadUserColors() {
-            const savedColors = localStorage.getItem('userColors');
-            if (savedColors) {
-                Object.assign(userColors, JSON.parse(savedColors));
-            }
-        }
+        const currentUserId = 'mainUser'; // Assuming 'mainUser' is the current user ID
+        const userColors = {}; // Store user colors by user ID
 
         // Initialize notes display area only if it's empty
         function initNotes() {
@@ -158,34 +98,39 @@
             display.focus();
         }
 
-        // Interpret and format HTML content
-        function interpretHTML() {
-            const content = display.innerHTML;
-            const interpretedContent = content.replace(/&lt;img\s+src=['"](.+?)['"]\s*\/?&gt;/gi, '<img src="$1" alt="User inserted image">');
-            if (content !== interpretedContent) {
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                const startContainer = range.startContainer;
-                const startOffset = range.startOffset;
+        // Get or assign a random color to the user
+        function getUserColor(userId) {
+            if (!userColors[userId]) {
+                userColors[userId] = userId === currentUserId ? '#000000' : '#' + Math.floor(Math.random() * 16777215).toString(16);
+            }
+            return userColors[userId];
+        }
 
-                display.innerHTML = interpretedContent;
-
-                // Restore cursor position
-                const newRange = document.createRange();
-                newRange.setStart(startContainer, startOffset);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
+        // Apply user-specific color and line to text blocks
+        function applyUserColor(userId, element) {
+            const color = getUserColor(userId);
+            if (element.textContent.trim() !== '') { // Only apply if there's actual text
+                element.style.color = color;
+                if (userId === currentUserId) {
+                    element.classList.add('main-user');
+                } else {
+                    element.classList.add('user-text');
+                    element.style.borderColor = color;
+                }
             }
         }
 
-        // Maintain empty lines at the end of the contenteditable area
-        function maintainEmptyLines() {
-            const content = display.innerHTML;
-            if (!content.endsWith('<br>')) {
-                display.innerHTML = content + '<br>';
+        // Listen for text input by the main user
+        display.addEventListener('input', (event) => {
+            const selection = window.getSelection();
+            const textBlock = selection.anchorNode.parentElement;
+
+            if (textBlock && textBlock.textContent.trim() !== '') {
+                textBlock.setAttribute('data-user-id', currentUserId); // Tag the text block with the user's ID
+                applyUserColor(currentUserId, textBlock);
+                broadcastData(); // Ensure data is broadcasted after the color is applied
             }
-        }
+        });
 
         // Send data to all connected peers
         function broadcastData() {
@@ -194,11 +139,7 @@
                 lastSyncedContent = content;
                 connections.forEach(conn => {
                     if (conn.open) {
-                        conn.send({
-                            type: 'content',
-                            data: content,
-                            userId: currentUserId
-                        });
+                        conn.send({ type: 'content', data: content });
                     }
                 });
             }
@@ -213,9 +154,7 @@
             peer.on('open', (id) => {
                 updateConnectionStatus(true);
                 console.log(`Peer ID: ${id}`);
-
-                loadUserColors(); // Load user colors from localStorage
-
+                
                 if (!hash) {
                     // Server Code
                     isServer = true;
@@ -243,17 +182,9 @@
             updatePeerCount();
 
             if (isServer) {
-                // Send current content and user colors to the new peer
+                // Send current content to the new peer
                 connection.on('open', () => {
-                    connection.send({
-                        type: 'content',
-                        data: display.innerHTML,
-                        userId: currentUserId
-                    });
-                    connection.send({
-                        type: 'userColors',
-                        data: userColors
-                    });
+                    connection.send({ type: 'content', data: display.innerHTML });
                 });
             }
         }
@@ -288,48 +219,33 @@
             if (data.type === 'content') {
                 display.innerHTML = data.data;
                 lastSyncedContent = data.data;
-            } else if (data.type === 'userColors') {
-                Object.assign(userColors, data.data);
-                applyColorsToText();
+                applyColorsToAllUsers(); // Reapply colors after syncing content
             }
-        }
-
-        // Apply stored colors to text
-        function applyColorsToText() {
-            display.querySelectorAll('[data-user-id]').forEach((element) => {
-                applyUserColor(element.getAttribute('data-user-id'), element);
-            });
         }
 
         function updateConnectionStatus(connected) {
-            if (connected) {
-                statusIndicator.classList.remove('disconnected');
-                statusIndicator.classList.add('connected');
-                statusText.textContent = 'Connected';
-            } else {
-                statusIndicator.classList.remove('connected');
-                statusIndicator.classList.add('disconnected');
-                statusText.textContent = 'Disconnected';
-            }
+            statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+            statusText.textContent = connected ? 'Connected' : 'Disconnected';
         }
 
         function updatePeerCount() {
             peerCountElement.textContent = `Connected Peers: ${connections.length}`;
         }
 
-        // Prevent editing of other users' text
-        display.addEventListener('beforeinput', (event) => {
-            const selection = window.getSelection();
-            const textBlock = selection.anchorNode.parentElement.closest('[data-user-id]');
-            if (textBlock && textBlock.getAttribute('data-user-id') !== currentUserId) {
-                event.preventDefault();
-            }
-        });
+        // Apply colors to all user-specific text blocks
+        function applyColorsToAllUsers() {
+            const textBlocks = display.querySelectorAll('[data-user-id]');
+            textBlocks.forEach(block => {
+                const userId = block.getAttribute('data-user-id');
+                applyUserColor(userId, block);
+            });
+        }
 
-        // Run initialization functions
-        initPeerJS();
-        setInterval(broadcastData, 1000);
+        // Event listeners
+        window.addEventListener('load', initPeerJS);
+        window.addEventListener('resize', () => {
+            if (isServer) initNotes();
+        });
     </script>
 </body>
-
 </html>
