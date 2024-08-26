@@ -1,24 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative P2P Notes v6</title>
-    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <title>Collaborative Notes Application v1</title>
     <style>
-        body,
-        html {
+        body, html {
             margin: 0;
             padding: 0;
             height: 100%;
             width: 100%;
             overflow: hidden;
         }
-
         #notes-container {
             width: 100%;
-            height: calc(100% - 40px);
+            height: 100%;
             position: relative;
             padding: 10px;
             box-sizing: border-box;
@@ -27,20 +23,48 @@
             line-height: 1.3;
             overflow-y: auto;
         }
-
         #notes-display {
-            width: 100%;
             min-height: 300%;
             white-space: pre-wrap;
             word-wrap: break-word;
             outline: none;
+            padding-bottom: 50px; /* Space for toolbar */
         }
-
+        #notes-display:focus {
+            outline: none; /* Remove focus border */
+        }
         #notes-display img {
             max-width: 100%;
             height: auto;
         }
-
+        #toolbar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: #f0f0f0;
+            padding: 10px;
+            box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+            display: none;
+            transition: transform 0.3s ease-in-out;
+            transform: translateY(100%);
+        }
+        #toolbar.visible {
+            display: flex;
+            justify-content: space-around;
+            transform: translateY(0);
+        }
+        #toolbar button {
+            background: none;
+            border: none;
+            padding: 5px 10px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #toolbar button:active {
+            background-color: #e0e0e0;
+        }
         #status-bar {
             height: 40px;
             background-color: #f0f0f0;
@@ -68,11 +92,18 @@
         }
     </style>
 </head>
-
 <body>
+    <div id="status-bar">
+        <div id="connection-status">
+            <span class="status-indicator disconnected"></span>
+            <span id="status-text">Disconnected</span>
+        </div>
+        <div id="peers-count">Peers Connected: 0</div>
+    </div>
     <div id="notes-container">
         <div id="notes-display" contenteditable="true"></div>
     </div>
+
     <div id="status-bar">
         <div id="connection-status">
             <span class="status-indicator"></span>
@@ -81,39 +112,92 @@
         <div id="peer-count">Connected Peers: 0</div>
     </div>
 
+    <div id="toolbar">
+        <button onclick="formatText('bold')">B</button>
+        <button onclick="formatText('italic')">I</button>
+        <button onclick="formatText('underline')">U</button>
+        <button onclick="insertLink()">Link</button>
+        <button onclick="insertImage()">Image</button>
+    </div>
+
     <script>
-        const display = document.getElementById('notes-display');
         const container = document.getElementById('notes-container');
+        const display = document.getElementById('notes-display');
+        const toolbar = document.getElementById('toolbar');
+        const connectionStatus = document.getElementById('connection-status');
+        
         const statusIndicator = document.querySelector('.status-indicator');
         const statusText = document.getElementById('status-text');
-        const peerCountElement = document.getElementById('peer-count');
-        const lineHeight = 21; // Approximate line height in pixels
-        let peer, connections = [];
-        let isServer = false;
-        let lastSyncedContent = '';
+        const peersCount = document.getElementById('peers-count');
+        const lineHeight = 21;
+        let lastScrollTop = 0;
+        
 
+        // Simulate connection state and peers count
+        // ca
+        let isConnected = false;
+        let peerCount = 0;
+
+        function updateConnectionStatus() {
+            statusText.textContent = isConnected ? 'Connected' : 'Disconnected';
+            statusIndicator.className =  isConnected ? 'status-indicator connected' : 'status-indicator disconnected';
+    
+        }
+
+
+
+
+        function updatePeersCount() {
+            peersCount.textContent = `Peers Connected: ${peerCount}`;
+        }
+
+        function simulateConnection() {
+            // Simulate connection establishment
+            setTimeout(() => {
+                isConnected = true;
+                peerCount = Math.floor(Math.random() * 5) + 1; // Simulate random number of peers
+                updateConnectionStatus();
+                updatePeersCount();
+            }, 2000); // Simulate a 2-second delay for connection
+        }
+
+        // Initialize the notes display with content
         function initNotes() {
-            const viewportHeight = window.innerHeight - 40; // Subtract status bar height
-            const totalLines = Math.floor(viewportHeight / lineHeight) * 3; // Triple the viewport height
-            if (display.innerHTML.trim() === '') {
-                display.innerHTML = '<br>'.repeat(totalLines);
-            }
-            container.scrollTop = container.scrollHeight / 3; // Position the scroll at 1/3 of the container height
+            const viewportHeight = window.innerHeight;
+            const totalLines = Math.floor(viewportHeight / lineHeight) * 3;
+            display.innerHTML = '<br>'.repeat(totalLines);
+            container.scrollTop = container.scrollHeight / 3;
             display.focus();
         }
 
-        function handleClick(e) {
-            const range = document.caretRangeFromPoint(e.clientX, e.clientY);
-            if (range) {
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-        }
-
+        // Interpret and convert HTML tags entered as text
         function interpretHTML() {
             const content = display.innerHTML;
-            const interpretedContent = content.replace(/&lt;img\s+src=['"](.+?)['"]\s*\/?&gt;/gi, '<img src="$1" alt="User inserted image">');
+            const interpretedContent = content.replace(
+                /&lt;(img|b|i|u|a)(\s+[^&]*)?&gt;(.*?)&lt;\/\1&gt;|&lt;(img|b|i|u|a)(\s+[^&]*)?(?:\/)?&gt;/gi,
+                (match, tag1, attributes1, innerContent, tag2, attributes2) => {
+                    const tag = tag1 || tag2;
+                    const attributes = attributes1 || attributes2 || '';
+                    
+                    if (tag !== 'img' && !match.includes(`&lt;/${tag}&gt;`)) {
+                        return match;
+                    }
+
+                    switch (tag) {
+                        case 'img':
+                            return `<img ${attributes.replace(/&quot;/g, '"')} alt="User inserted image">`;
+                        case 'a':
+                            return `<a ${attributes.replace(/&quot;/g, '"')}>${innerContent}</a>`;
+                        case 'b':
+                        case 'i':
+                        case 'u':
+                            return `<${tag}>${innerContent}</${tag}>`;
+                        default:
+                            return match;
+                    }
+                }
+            );
+
             if (content !== interpretedContent) {
                 const selection = window.getSelection();
                 const range = selection.getRangeAt(0);
@@ -122,7 +206,6 @@
 
                 display.innerHTML = interpretedContent;
 
-                // Restore cursor position
                 const newRange = document.createRange();
                 newRange.setStart(startContainer, startOffset);
                 newRange.collapse(true);
@@ -131,18 +214,15 @@
             }
         }
 
+        // Handle Enter key press to create a new line with <br> instead of a <div>
         function handleEnterKey(e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                
                 const selection = window.getSelection();
                 const range = selection.getRangeAt(0);
                 const br = document.createElement('br');
-                
                 range.deleteContents();
                 range.insertNode(br);
-                
-                // Move the cursor after the newly inserted <br>
                 range.setStartAfter(br);
                 range.setEndAfter(br);
                 selection.removeAllRanges();
@@ -150,12 +230,12 @@
             }
         }
 
+        // Handle scrolling to dynamically add or remove lines at the top or bottom
         function handleScroll() {
             const scrollTop = container.scrollTop;
             const scrollHeight = container.scrollHeight;
             const clientHeight = container.clientHeight;
 
-            // Add more lines at the top if needed
             if (scrollTop < clientHeight) {
                 const linesToAdd = Math.floor(clientHeight / lineHeight);
                 const fragment = document.createDocumentFragment();
@@ -166,7 +246,6 @@
                 container.scrollTop += linesToAdd * lineHeight;
             }
 
-            // Add more lines at the bottom if needed
             if (scrollHeight - scrollTop - clientHeight < clientHeight) {
                 const linesToAdd = Math.floor(clientHeight / lineHeight);
                 const fragment = document.createDocumentFragment();
@@ -175,127 +254,62 @@
                 }
                 display.appendChild(fragment);
             }
+
+            lastScrollTop = scrollTop;
         }
 
-        function maintainEmptyLines() {
-            const content = display.innerHTML;
-            if (!content.endsWith('<br>')) {
-                display.innerHTML = content + '<br>';
+        // Show or hide the toolbar based on text selection
+        function handleSelection() {
+            if (window.getSelection().toString().trim()) {
+                showToolbar();
+            } else {
+                hideToolbar();
             }
         }
 
-        function broadcastData() {
-            const content = display.innerHTML;
-            if (content !== lastSyncedContent) {
-                lastSyncedContent = content;
-                connections.forEach(conn => {
-                    if (conn.open) {
-                        conn.send({ type: 'content', data: content });
-                    }
-                });
+        function showToolbar() {
+            toolbar.classList.add('visible');
+        }
+
+        function hideToolbar() {
+            toolbar.classList.remove('visible');
+        }
+
+        // Functions to format text
+        function formatText(style) {
+            document.execCommand(style, false, null);
+            display.focus();
+        }
+
+        // Function to insert a link
+        function insertLink() {
+            const url = prompt('Enter the URL:');
+            if (url) {
+                document.execCommand('createLink', false, url);
             }
+            display.focus();
         }
 
-        function initPeerJS() {
-            const hash = window.location.hash;
-
-            peer = new Peer();
-
-            peer.on('open', (id) => {
-                updateConnectionStatus(true);
-                console.log(`Peer ID: ${id}`);
-
-                if (!hash) {
-                    // Server Code
-                    isServer = true;
-                    window.location.hash = id;
-                    initNotes(); // Only initialize notes for the server
-                } else {
-                    // Client Code
-                    const remotePeerId = hash.slice(1);
-                    connectToPeer(remotePeerId);
-                }
-            });
-
-            peer.on('connection', handleNewConnection);
-
-            peer.on('error', (err) => {
-                console.error('PeerJS Error:', err);
-                updateConnectionStatus(false);
-                alert('An error occurred with the P2P connection: ' + err.message);
-            });
-        }
-
-        function handleNewConnection(connection) {
-            connections.push(connection);
-            setupConnectionListeners(connection);
-            updatePeerCount();
-
-            if (isServer) {
-                // Send current content to the new peer
-                connection.on('open', () => {
-                    connection.send({ type: 'content', data: display.innerHTML });
-                });
+        // Function to insert an image
+        function insertImage() {
+            const url = prompt('Enter the image URL:');
+            if (url) {
+                document.execCommand('insertImage', false, url);
             }
+            display.focus();
         }
 
-        function connectToPeer(peerId) {
-            const conn = peer.connect(peerId);
-            connections.push(conn);
-            setupConnectionListeners(conn);
-        }
-
-        function setupConnectionListeners(conn) {
-            conn.on('open', () => {
-                console.log('Connected to peer');
-                updateConnectionStatus(true);
-            });
-
-            conn.on('data', handleIncomingData);
-
-            conn.on('close', () => {
-                console.log('Connection closed, attempting to reconnect...');
-                updateConnectionStatus(false);
-                connections = connections.filter(c => c !== conn);
-                updatePeerCount();
-                if (!isServer) {
-                    setTimeout(() => connectToPeer(conn.peer), 3000);
-                }
-            });
-        }
-
-        function handleIncomingData(data) {
-            if (data.type === 'content') {
-                display.innerHTML = data.data;
-                lastSyncedContent = data.data;
-            }
-        }
-
-        function updateConnectionStatus(connected) {
-            statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
-            statusText.textContent = connected ? 'Connected' : 'Disconnected';
-        }
-
-        function updatePeerCount() {
-            peerCountElement.textContent = `Connected Peers: ${connections.length}`;
-        }
-
+        // Initial setup
         window.addEventListener('load', () => {
-            initPeerJS();
             initNotes();
+            simulateConnection(); // Simulate the connection and peers
         });
-        window.addEventListener('resize', () => {
-            if (isServer) initNotes();
-        });
-        display.addEventListener('click', handleClick);
+        window.addEventListener('resize', initNotes);
         display.addEventListener('keydown', handleEnterKey);
-        display.addEventListener('input', () => {
-            interpretHTML();
-            maintainEmptyLines();
-            broadcastData();
-        });
+        display.addEventListener('input', interpretHTML);
+        display.addEventListener('mouseup', handleSelection);
+        display.addEventListener('keyup', handleSelection);
         container.addEventListener('scroll', handleScroll);
     </script>
 </body>
-
 </html>
