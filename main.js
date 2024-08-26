@@ -1,8 +1,8 @@
-import { initNotes, handleClick, interpretHTML, handleEnterKey, handleScroll, maintainEmptyLines, broadcastData } from './display.js';
-import { initPeerJS, updateConnectionStatus, connectToPeer, setupConnectionListeners } from './peer.js';
+import { initPeerJS, updateConnectionStatus, updatePeerCount } from './peer.js';
+import { initNotes, handleClick, handleEnterKey, interpretHTML, maintainEmptyLines, handleScroll } from './display.js';
 
-let connections = [];
-let isServer = false;
+const display = document.getElementById('notes-display');
+const container = document.getElementById('notes-container');
 
 window.addEventListener('load', () => {
     initPeerJS();
@@ -10,17 +10,16 @@ window.addEventListener('load', () => {
 });
 
 window.addEventListener('resize', () => {
-    if (isServer) initNotes();
+    if (window.location.hash) {
+        initNotes();
+    }
 });
 
-document.getElementById('notes-display').addEventListener('click', handleClick);
-document.getElementById('notes-display').addEventListener('keydown', handleEnterKey);
-document.getElementById('notes-display').addEventListener('input', () => {
+display.addEventListener('click', handleClick);
+display.addEventListener('keydown', handleEnterKey);
+display.addEventListener('input', () => {
     interpretHTML();
     maintainEmptyLines();
-    broadcastData(connections);
+    broadcastData();
 });
-
-document.getElementById('notes-container').addEventListener('scroll', handleScroll);
-
-export { connections, isServer };
+container.addEventListener('scroll', handleScroll);
