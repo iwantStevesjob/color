@@ -1,8 +1,11 @@
-let peer, connections = [];
+// peer.js
+
+let peer;
+let connections = [];
 let isServer = false;
 let lastSyncedContent = '';
 
-function initPeerJS() {
+export function initPeerJS() {
     const hash = window.location.hash;
 
     peer = new Peer();
@@ -32,6 +35,12 @@ function initPeerJS() {
     });
 }
 
+export function connectToPeer(peerId) {
+    const conn = peer.connect(peerId);
+    connections.push(conn);
+    setupConnectionListeners(conn);
+}
+
 function handleNewConnection(connection) {
     connections.push(connection);
     setupConnectionListeners(connection);
@@ -43,12 +52,6 @@ function handleNewConnection(connection) {
             connection.send({ type: 'content', data: display.innerHTML });
         });
     }
-}
-
-function connectToPeer(peerId) {
-    const conn = peer.connect(peerId);
-    connections.push(conn);
-    setupConnectionListeners(conn);
 }
 
 function setupConnectionListeners(conn) {
@@ -79,7 +82,19 @@ function handleIncomingData(data) {
     }
 }
 
-function broadcastData() {
+function updateConnectionStatus(connected) {
+    const statusIndicator = document.querySelector('.status-indicator');
+    const statusText = document.getElementById('status-text');
+    statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+    statusText.textContent = connected ? 'Connected' : 'Disconnected';
+}
+
+function updatePeerCount() {
+    const peerCountElement = document.getElementById('peer-count');
+    peerCountElement.textContent = `Connected Peers: ${connections.length}`;
+}
+
+export function broadcastData(display) {
     const content = display.innerHTML;
     if (content !== lastSyncedContent) {
         lastSyncedContent = content;
@@ -93,13 +108,19 @@ function broadcastData() {
     }
 }
 
-function updateConnectionStatus(connected) {
-    statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
-    statusText.textContent = connected ? 'Connected' : 'Disconnected';
+// Add any additional helper functions related to PeerJS if needed
+
+// You might need to include these functions from main.js
+export function saveContentToStorage(peerId, content) {
+    const lines = content.split('<br>');
+    localStorage.setItem(`notes_${peerId}`, JSON.stringify(lines));
 }
 
-function updatePeerCount() {
-    peerCountElement.textContent = `Connected Peers: ${connections.length}`;
+export function getContentFromStorage(peerId) {
+    const storedContent = localStorage.getItem(`notes_${peerId}`);
+    if (storedContent) {
+        return JSON.parse(storedContent).join('<br>');
+    }
+    return null;
 }
 
-export { initPeerJS, broadcastData };
