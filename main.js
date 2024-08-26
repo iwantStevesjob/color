@@ -1,12 +1,13 @@
-// main.js
-        const display = document.getElementById('notes-display');
+const display = document.getElementById('notes-display');
         const container = document.getElementById('notes-container');
         const statusIndicator = document.querySelector('.status-indicator');
         const statusText = document.getElementById('status-text');
         const peerCountElement = document.getElementById('peer-count');
         const toolbar = document.getElementById('toolbar');
         const lineHeight = 21; // Approximate line height in pixels
-      
+        let peer, connections = [];
+        let isServer = false;
+        let lastSyncedContent = '';
         let lastScrollTop = 0;
 
         function saveContentToStorage(peerId, content) {
