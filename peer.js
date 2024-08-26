@@ -1,7 +1,8 @@
 let peer, connections = [];
+let isServer = false;
 let lastSyncedContent = '';
 
-export function initPeerJS() {
+function initPeerJS() {
     const hash = window.location.hash;
 
     peer = new Peer();
@@ -12,6 +13,7 @@ export function initPeerJS() {
 
         if (!hash) {
             // Server Code
+            isServer = true;
             window.location.hash = id;
             initNotes(); // Only initialize notes for the server
         } else {
@@ -35,9 +37,10 @@ function handleNewConnection(connection) {
     setupConnectionListeners(connection);
     updatePeerCount();
 
-    if (window.location.hash) {
+    if (isServer) {
+        // Send current content to the new peer
         connection.on('open', () => {
-            connection.send({ type: 'content', data: document.getElementById('notes-display').innerHTML });
+            connection.send({ type: 'content', data: display.innerHTML });
         });
     }
 }
@@ -61,7 +64,7 @@ function setupConnectionListeners(conn) {
         updateConnectionStatus(false);
         connections = connections.filter(c => c !== conn);
         updatePeerCount();
-        if (!window.location.hash) {
+        if (!isServer) {
             setTimeout(() => connectToPeer(conn.peer), 3000);
         }
     });
@@ -69,18 +72,34 @@ function setupConnectionListeners(conn) {
 
 function handleIncomingData(data) {
     if (data.type === 'content') {
-        document.getElementById('notes-display').innerHTML = data.data;
+        display.innerHTML = data.data;
         lastSyncedContent = data.data;
+        const peerId = window.location.hash.slice(1);
+        saveContentToStorage(peerId, data.data);
     }
 }
 
-export function updateConnectionStatus(connected) {
-    const statusIndicator = document.querySelector('.status-indicator');
-    const statusText = document.getElementById('status-text');
+function broadcastData() {
+    const content = display.innerHTML;
+    if (content !== lastSyncedContent) {
+        lastSyncedContent = content;
+        const peerId = window.location.hash.slice(1);
+        saveContentToStorage(peerId, content);
+        connections.forEach(conn => {
+            if (conn.open) {
+                conn.send({ type: 'content', data: content });
+            }
+        });
+    }
+}
+
+function updateConnectionStatus(connected) {
     statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
     statusText.textContent = connected ? 'Connected' : 'Disconnected';
 }
 
-export function updatePeerCount() {
-    document.getElementById('peer-count').textContent = `Connected Peers: ${connections.length}`;
+function updatePeerCount() {
+    peerCountElement.textContent = `Connected Peers: ${connections.length}`;
 }
+
+export { initPeerJS, broadcastData };
