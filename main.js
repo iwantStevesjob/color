@@ -1,5 +1,5 @@
 // main.js
-const display = document.getElementById('notes-display');
+        const display = document.getElementById('notes-display');
         const container = document.getElementById('notes-container');
         const statusIndicator = document.querySelector('.status-indicator');
         const statusText = document.getElementById('status-text');
@@ -7,6 +7,8 @@ const display = document.getElementById('notes-display');
         const toolbar = document.getElementById('toolbar');
         const lineHeight = 21; // Approximate line height in pixels
       
+        let lastScrollTop = 0;
+
         function saveContentToStorage(peerId, content) {
             const lines = content.split('<br>');
             localStorage.setItem(notes_${peerId}, JSON.stringify(lines));
