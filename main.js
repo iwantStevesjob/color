@@ -179,11 +179,6 @@ function handleSelection() {
     }
 }
 
-// Event listeners
-window.addEventListener('load', () => {
-    initPeerJS();
-    initNotes();
-});
 window.addEventListener('resize', () => {
     const scrollPercentage = container.scrollTop / container.scrollHeight;
     requestAnimationFrame(() => {
