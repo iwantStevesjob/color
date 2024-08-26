@@ -1,4 +1,4 @@
-const display = document.getElementById('notes-display');
+ const display = document.getElementById('notes-display');
         const container = document.getElementById('notes-container');
         const statusIndicator = document.querySelector('.status-indicator');
         const statusText = document.getElementById('status-text');
@@ -12,11 +12,11 @@ const display = document.getElementById('notes-display');
 
         function saveContentToStorage(peerId, content) {
             const lines = content.split('<br>');
-            localStorage.setItem(notes_${peerId}, JSON.stringify(lines));
+            localStorage.setItem(`notes_${peerId}`, JSON.stringify(lines));
         }
 
         function getContentFromStorage(peerId) {
-            const storedContent = localStorage.getItem(notes_${peerId});
+            const storedContent = localStorage.getItem(`notes_${peerId}`);
             if (storedContent) {
                 return JSON.parse(storedContent).join('<br>');
             }
@@ -47,19 +47,19 @@ const display = document.getElementById('notes-display');
                     const tag = tag1 || tag2;
                     const attributes = attributes1 || attributes2 || '';
                     
-                    if (tag !== 'img' && !match.includes(&lt;/${tag}&gt;)) {
+                    if (tag !== 'img' && !match.includes(`&lt;/${tag}&gt;`)) {
                         return match;
                     }
 
                     switch (tag) {
                         case 'img':
-                            return <img ${attributes.replace(/&quot;/g, '"')} alt="User inserted image">;
+                            return `<img ${attributes.replace(/&quot;/g, '"')} alt="User inserted image">`;
                         case 'a':
-                            return <a ${attributes.replace(/&quot;/g, '"')}>${innerContent}</a>;
+                            return `<a ${attributes.replace(/&quot;/g, '"')}>${innerContent}</a>`;
                         case 'b':
                         case 'i':
                         case 'u':
-                            return <${tag}>${innerContent}</${tag}>;
+                            return `<${tag}>${innerContent}</${tag}>`;
                         default:
                             return match;
                     }
@@ -156,7 +156,7 @@ const display = document.getElementById('notes-display');
 
             peer.on('open', (id) => {
                 updateConnectionStatus(true);
-                console.log(Peer ID: ${id});
+                console.log(`Peer ID: ${id}`);
 
                 if (!hash) {
                     // Server Code
@@ -227,12 +227,12 @@ const display = document.getElementById('notes-display');
         }
 
         function updateConnectionStatus(connected) {
-            statusIndicator.className = status-indicator ${connected ? 'connected' : 'disconnected'};
+            statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
             statusText.textContent = connected ? 'Connected' : 'Disconnected';
         }
 
         function updatePeerCount() {
-            peerCountElement.textContent = Connected Peers: ${connections.length};
+            peerCountElement.textContent = `Connected Peers: ${connections.length}`;
         }
 
         function showToolbar() {
