@@ -1,12 +1,8 @@
-import { initPeerJS, broadcastData } from './peer.js';
-
 const display = document.getElementById('notes-display');
 const container = document.getElementById('notes-container');
-const statusIndicator = document.querySelector('.status-indicator');
-const statusText = document.getElementById('status-text');
-const peerCountElement = document.getElementById('peer-count');
 const toolbar = document.getElementById('toolbar');
 const lineHeight = 21; // Approximate line height in pixels
+let lastScrollTop = 0;
 
 function saveContentToStorage(peerId, content) {
     const lines = content.split('<br>');
@@ -91,7 +87,6 @@ function handleEnterKey(e) {
         range.deleteContents();
         range.insertNode(br);
         
-        // Move the cursor after the newly inserted <br>
         range.setStartAfter(br);
         range.setEndAfter(br);
         selection.removeAllRanges();
@@ -133,6 +128,20 @@ function maintainEmptyLines() {
     }
 }
 
+function broadcastData() {
+    const content = display.innerHTML;
+    if (content !== lastSyncedContent) {
+        lastSyncedContent = content;
+        const peerId = window.location.hash.slice(1);
+        saveContentToStorage(peerId, content);
+        connections.forEach(conn => {
+            if (conn.open) {
+                conn.send({ type: 'content', data: content });
+            }
+        });
+    }
+}
+
 function showToolbar() {
     toolbar.classList.add('visible');
 }
@@ -170,27 +179,7 @@ function handleSelection() {
     }
 }
 
-function handleToolbarClick(e) {
-    const buttonId = e.target.id;
-    switch (buttonId) {
-        case 'bold-button':
-            formatText('bold');
-            break;
-        case 'italic-button':
-            formatText('italic');
-            break;
-        case 'underline-button':
-            formatText('underline');
-            break;
-        case 'link-button':
-            insertLink();
-            break;
-        case 'image-button':
-            insertImage();
-            break;
-    }
-}
-
+// Event listeners
 window.addEventListener('load', () => {
     initPeerJS();
     initNotes();
@@ -200,4 +189,34 @@ window.addEventListener('resize', () => {
     requestAnimationFrame(() => {
         container.scrollTop = scrollPercentage * container.scrollHeight;
     });
+});
+display.addEventListener('keydown', handleEnterKey);
+display.addEventListener('input', () => {
+    interpretHTML();
+    maintainEmptyLines();
+    broadcastData();
+});
+display.addEventListener('mouseup', handleSelection);
+display.addEventListener('keyup', handleSelection);
+container.addEventListener('scroll', handleScroll);
+toolbar.addEventListener('click', (e) => {
+    const buttonId = e.target.id;
+    switch (buttonId) {
+        case 'bold':
+            formatText('bold');
+            break;
+        case 'italic':
+            formatText('italic');
+            break;
+        case 'underline':
+            formatText('underline');
+            break;
+        case 'link':
+            insertLink();
+            break;
+        case 'image':
+            insertImage();
+            break;
+    }
+    hideToolbar();
 });
