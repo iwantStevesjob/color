@@ -6,11 +6,7 @@ const display = document.getElementById('notes-display');
         const peerCountElement = document.getElementById('peer-count');
         const toolbar = document.getElementById('toolbar');
         const lineHeight = 21; // Approximate line height in pixels
-        let peer, connections = [];
-        let isServer = false;
-        let lastSyncedContent = '';
-        let lastScrollTop = 0;
-
+      
         function saveContentToStorage(peerId, content) {
             const lines = content.split('<br>');
             localStorage.setItem(notes_${peerId}, JSON.stringify(lines));
