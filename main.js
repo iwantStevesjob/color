@@ -1,5 +1,4 @@
-
-        const display = document.getElementById('notes-display');
+  const display = document.getElementById('notes-display');
         const container = document.getElementById('notes-container');
         const statusIndicator = document.querySelector('.status-indicator');
         const statusText = document.getElementById('status-text');
@@ -11,14 +10,34 @@
         let lastSyncedContent = '';
         let lastScrollTop = 0;
 
+        function saveContentToStorage(peerId, content) {
+            const lines = content.split('<br>');
+            localStorage.setItem(`notes_${peerId}`, JSON.stringify(lines));
+        }
+
+        function getContentFromStorage(peerId) {
+            const storedContent = localStorage.getItem(`notes_${peerId}`);
+            if (storedContent) {
+                return JSON.parse(storedContent).join('<br>');
+            }
+            return null;
+        }
+
         function initNotes() {
-            const viewportHeight = window.innerHeight;
-            const totalLines = Math.floor(viewportHeight / lineHeight) * 3;
-            display.innerHTML = '<br>'.repeat(totalLines);
+            const peerId = window.location.hash.slice(1);
+            const storedContent = getContentFromStorage(peerId);
+
+            if (storedContent) {
+                display.innerHTML = storedContent;
+            } else {
+                const viewportHeight = window.innerHeight;
+                const totalLines = Math.floor(viewportHeight / lineHeight) * 3;
+                display.innerHTML = '<br>'.repeat(totalLines);
+            }
+
             container.scrollTop = container.scrollHeight / 3;
             display.focus();
         }
-
 
         function interpretHTML() {
             const content = display.innerHTML;
@@ -120,6 +139,8 @@
             const content = display.innerHTML;
             if (content !== lastSyncedContent) {
                 lastSyncedContent = content;
+                const peerId = window.location.hash.slice(1);
+                saveContentToStorage(peerId, content);
                 connections.forEach(conn => {
                     if (conn.open) {
                         conn.send({ type: 'content', data: content });
@@ -200,6 +221,8 @@
             if (data.type === 'content') {
                 display.innerHTML = data.data;
                 lastSyncedContent = data.data;
+                const peerId = window.location.hash.slice(1);
+                saveContentToStorage(peerId, data.data);
             }
         }
 
@@ -211,31 +234,6 @@
         function updatePeerCount() {
             peerCountElement.textContent = `Connected Peers: ${connections.length}`;
         }
-
-        window.addEventListener('load', () => {
-            initPeerJS();
-            initNotes();
-        });
-        window.addEventListener('resize', () => {
-            if (isServer) initNotes();
-        });
-
-
-        display.addEventListener('keydown', handleEnterKey);
-        display.addEventListener('input', () => {
-            interpretHTML();
-            maintainEmptyLines();
-            broadcastData();
-        });
-        container.addEventListener('scroll', handleScroll);
-
-
-
-
-
-
-
-        
 
         function showToolbar() {
             toolbar.classList.add('visible');
@@ -295,10 +293,22 @@
             }
         }
 
-        window.addEventListener('load', initNotes);
-        window.addEventListener('resize', initNotes);
+        window.addEventListener('load', () => {
+            initPeerJS();
+            initNotes();
+        });
+        window.addEventListener('resize', () => {
+            const scrollPercentage = container.scrollTop / container.scrollHeight;
+            requestAnimationFrame(() => {
+                container.scrollTop = scrollPercentage * container.scrollHeight;
+            });
+        });
         display.addEventListener('keydown', handleEnterKey);
-        display.addEventListener('input', interpretHTML);
+        display.addEventListener('input', () => {
+            interpretHTML();
+            maintainEmptyLines();
+            broadcastData();
+        });
         display.addEventListener('mouseup', handleSelection);
         display.addEventListener('keyup', handleSelection);
         container.addEventListener('scroll', handleScroll);
