@@ -187,3 +187,5 @@ window.addEventListener('resize', () => {
     const scrollPercentage = container.scrollTop / container.scrollHeight;
     requestAnimationFrame(() => {
         container.scrollTop = scrollPercentage * container.scrollHeight;
+    });
+});
