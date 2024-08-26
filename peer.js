@@ -5,4 +5,3 @@ let connections = [];
 let isServer = false;
 let lastSyncedContent = '';
 
-
