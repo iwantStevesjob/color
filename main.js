@@ -215,3 +215,5 @@ toolbar.addEventListener('click', (e) => {
     }
     hideToolbar();
 });
+initPeerJS();
+initNotes();
