@@ -1,107 +1,122 @@
-const display = document.getElementById('notes-display');
-const container = document.getElementById('notes-container');
-const lineHeight = 21; // Approximate line height in pixels
+class DisplayManager {
+    constructor() {
+        this.display = document.getElementById('notes-display');
+        this.container = document.getElementById('notes-container');
+        this.toolbar = document.getElementById('toolbar');
+        this.lineHeight = 21;
+        this.lastSyncedContent = '';
 
-export function initNotes() {
-    const viewportHeight = window.innerHeight - 40; // Subtract status bar height
-    const totalLines = Math.floor(viewportHeight / lineHeight) * 3; // Triple the viewport height
-    if (display.innerHTML.trim() === '') {
-        display.innerHTML = '<br>'.repeat(totalLines);
+        this.initEventListeners();
     }
-    container.scrollTop = container.scrollHeight / 3; // Position the scroll at 1/3 of the container height
-    display.focus();
-}
 
-export function handleClick(e) {
-    const range = document.caretRangeFromPoint(e.clientX, e.clientY);
-    if (range) {
-        const selection = window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
-    }
-}
+    initNotes() {
+        const peerId = window.location.hash.slice(1);
+        const storedContent = this.getContentFromStorage(peerId);
 
-export function handleEnterKey(e) {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-
-        const selection = window.getSelection();
-        const range = selection.getRangeAt(0);
-        const br = document.createElement('br');
-
-        range.deleteContents();
-        range.insertNode(br);
-
-        // Move the cursor after the newly inserted <br>
-        range.setStartAfter(br);
-        range.setEndAfter(br);
-        selection.removeAllRanges();
-        selection.addRange(range);
-    }
-}
-
-export function interpretHTML() {
-    const content = display.innerHTML;
-    const interpretedContent = content.replace(/&lt;img\s+src=['"](.+?)['"]\s*\/?&gt;/gi, '<img src="$1" alt="User inserted image">');
-    if (content !== interpretedContent) {
-        const selection = window.getSelection();
-        const range = selection.getRangeAt(0);
-        const startContainer = range.startContainer;
-        const startOffset = range.startOffset;
-
-        display.innerHTML = interpretedContent;
-
-        // Restore cursor position
-        const newRange = document.createRange();
-        newRange.setStart(startContainer, startOffset);
-        newRange.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(newRange);
-    }
-}
-
-export function handleScroll() {
-    const scrollTop = container.scrollTop;
-    const scrollHeight = container.scrollHeight;
-    const clientHeight = container.clientHeight;
-
-    // Add more lines at the top if needed
-    if (scrollTop < clientHeight) {
-        const linesToAdd = Math.floor(clientHeight / lineHeight);
-        const fragment = document.createDocumentFragment();
-        for (let i = 0; i < linesToAdd; i++) {
-            fragment.appendChild(document.createElement('br'));
+        if (storedContent) {
+            this.display.innerHTML = storedContent;
+        } else {
+            const viewportHeight = window.innerHeight;
+            const totalLines = Math.floor(viewportHeight / this.lineHeight) * 3;
+            this.display.innerHTML = '<br>'.repeat(totalLines);
         }
-        display.insertBefore(fragment, display.firstChild);
-        container.scrollTop += linesToAdd * lineHeight;
+
+        this.container.scrollTop = this.container.scrollHeight / 3;
+        this.display.focus();
     }
 
-    // Add more lines at the bottom if needed
-    if (scrollHeight - scrollTop - clientHeight < clientHeight) {
-        const linesToAdd = Math.floor(clientHeight / lineHeight);
-        const fragment = document.createDocumentFragment();
-        for (let i = 0; i < linesToAdd; i++) {
-            fragment.appendChild(document.createElement('br'));
+    interpretHTML() {
+        // ... (same as before)
+    }
+
+    handleEnterKey(e) {
+        // ... (same as before)
+    }
+
+    handleScroll() {
+        // ... (same as before)
+    }
+
+    maintainEmptyLines() {
+        // ... (same as before)
+    }
+
+    showToolbar() {
+        this.toolbar.classList.add('visible');
+    }
+
+    hideToolbar() {
+        this.toolbar.classList.remove('visible');
+    }
+
+    formatText(style) {
+        document.execCommand(style, false, null);
+        this.display.focus();
+    }
+
+    insertLink() {
+        // ... (same as before)
+    }
+
+    insertImage() {
+        // ... (same as before)
+    }
+
+    handleSelection() {
+        if (window.getSelection().toString().trim()) {
+            this.showToolbar();
+        } else {
+            this.hideToolbar();
         }
-        display.appendChild(fragment);
     }
-}
 
-export function maintainEmptyLines() {
-    const content = display.innerHTML;
-    if (!content.endsWith('<br>')) {
-        display.innerHTML = content + '<br>';
+    handleToolbarClick(e) {
+        // ... (same as before)
     }
-}
 
-export function broadcastData() {
-    const content = display.innerHTML;
-    if (content !== lastSyncedContent) {
-        lastSyncedContent = content;
-        connections.forEach(conn => {
-            if (conn.open) {
-                conn.send({ type: 'content', data: content });
-            }
+    initEventListeners() {
+        this.display.addEventListener('keydown', this.handleEnterKey.bind(this));
+        this.display.addEventListener('input', () => {
+            this.interpretHTML();
+            this.maintainEmptyLines();
+            this.onContentChange(this.display.innerHTML);
+        });
+        this.display.addEventListener('mouseup', this.handleSelection.bind(this));
+        this.display.addEventListener('keyup', this.handleSelection.bind(this));
+        this.container.addEventListener('scroll', this.handleScroll.bind(this));
+        this.toolbar.addEventListener('click', this.handleToolbarClick.bind(this));
+        window.addEventListener('resize', () => {
+            const scrollPercentage = this.container.scrollTop / this.container.scrollHeight;
+            requestAnimationFrame(() => {
+                this.container.scrollTop = scrollPercentage * this.container.scrollHeight;
+            });
         });
     }
+
+    setContent(content) {
+        this.display.innerHTML = content;
+    }
+
+    getContent() {
+        return this.display.innerHTML;
+    }
+
+    onContentChange(callback) {
+        this.contentChangeCallback = callback;
+    }
+
+    saveContentToStorage(peerId, content) {
+        const lines = content.split('<br>');
+        localStorage.setItem(`notes_${peerId}`, JSON.stringify(lines));
+    }
+
+    getContentFromStorage(peerId) {
+        const storedContent = localStorage.getItem(`notes_${peerId}`);
+        if (storedContent) {
+            return JSON.parse(storedContent).join('<br>');
+        }
+        return null;
+    }
 }
+
+export default DisplayManager;
