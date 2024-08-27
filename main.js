@@ -9,13 +9,16 @@ const MainModule = (function() {
     let lastSyncedContent = '';
     let lastScrollTop = 0;
 
-     function init() {
+    function init() {
         initNotes();
         setupEventListeners();
-        PeerModule.init(updateConnectionStatus, updatePeerCount);
-        PeerModule.setContentCallback(() => display.innerHTML);
+        
+        PeerModule.init({
+            onStatusChange: updateConnectionStatus,
+            onPeerCountChange: updatePeerCount,
+            onContentChange: handleIncomingContent
+        });
     }
-
 
     function initNotes() {
         const peerId = window.location.hash.slice(1);
@@ -249,12 +252,10 @@ const MainModule = (function() {
     }
 
     return {
-        init: init
+        init: init,
+        getContent: () => display.innerHTML
     };
 })();
 
 // Call the init function when the window loads
 window.addEventListener('load', MainModule.init);
-
-// Uncomment the following line if using ES6 modules
-// export default MainModule;
