@@ -9,12 +9,13 @@ const MainModule = (function() {
     let lastSyncedContent = '';
     let lastScrollTop = 0;
 
-    function init() {
+     function init() {
         initNotes();
         setupEventListeners();
         PeerModule.init(updateConnectionStatus, updatePeerCount);
-        PeerModule.setContentCallback(handleIncomingContent);
+        PeerModule.setContentCallback(() => display.innerHTML);
     }
+
 
     function initNotes() {
         const peerId = window.location.hash.slice(1);
