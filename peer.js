@@ -2,9 +2,13 @@
 const PeerModule = (function() {
     let peer, connections = [];
     let isServer = false;
-    let broadcastCallback;
+    let broadcastCallback, onConnectionStatusChange, onPeerCountChange, onInitialSync;
 
-    function initPeerJS(onConnectionStatusChange, onPeerCountChange) {
+    function initPeerJS(connectionStatusCallback, peerCountCallback, initialSyncCallback) {
+        onConnectionStatusChange = connectionStatusCallback;
+        onPeerCountChange = peerCountCallback;
+        onInitialSync = initialSyncCallback;
+
         const hash = window.location.hash;
 
         peer = new Peer();
@@ -52,14 +56,15 @@ const PeerModule = (function() {
     function setupConnectionListeners(conn) {
         conn.on('open', () => {
             console.log('Connected to peer');
-            updateConnectionStatus(true);
+            onConnectionStatusChange(true);
+            onInitialSync();
         });
 
         conn.on('data', handleIncomingData);
 
         conn.on('close', () => {
             console.log('Connection closed, attempting to reconnect...');
-            updateConnectionStatus(false);
+            onConnectionStatusChange(false);
             connections = connections.filter(c => c !== conn);
             updatePeerCount();
             if (!isServer) {
@@ -71,12 +76,8 @@ const PeerModule = (function() {
     function handleIncomingData(data) {
         if (data.type === 'content' && typeof broadcastCallback === 'function') {
             broadcastCallback(data.data);
-        }
-    }
-
-    function updateConnectionStatus(connected) {
-        if (typeof onConnectionStatusChange === 'function') {
-            onConnectionStatusChange(connected);
+        } else if (data.type === 'request_content') {
+            broadcastData();
         }
     }
 
@@ -94,9 +95,18 @@ const PeerModule = (function() {
         });
     }
 
+    function requestContent() {
+        connections.forEach(conn => {
+            if (conn.open) {
+                conn.send({ type: 'request_content' });
+            }
+        });
+    }
+
     return {
         init: initPeerJS,
         broadcast: broadcastData,
+        requestContent: requestContent,
         setContentCallback: (callback) => { broadcastCallback = callback; }
     };
 })();
