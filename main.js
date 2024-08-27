@@ -9,8 +9,10 @@ const MainModule = (function() {
     const lineHeight = 21; // Approximate line height in pixels
     let lastSyncedContent = '';
     let lastScrollTop = 0;
+    let currentPeerId = '';
 
     function init() {
+        currentPeerId = window.location.hash.slice(1);
         initNotes();
         setupEventListeners();
         PeerModule.init(updateConnectionStatus, updatePeerCount);
@@ -18,8 +20,7 @@ const MainModule = (function() {
     }
 
     function initNotes() {
-        const peerId = window.location.hash.slice(1);
-        const storedContent = getContentFromStorage(peerId);
+        const storedContent = getContentFromStorage();
 
         if (storedContent) {
             display.innerHTML = storedContent;
@@ -66,12 +67,15 @@ const MainModule = (function() {
             range.setEndAfter(br);
             selection.removeAllRanges();
             selection.addRange(range);
+            
+            handleInput(); // Trigger input handler to save changes
         }
     }
 
     function handleInput() {
         interpretHTML();
         maintainEmptyLines();
+        saveContentToStorage();
         broadcastData();
     }
 
@@ -156,8 +160,6 @@ const MainModule = (function() {
         const content = display.innerHTML;
         if (content !== lastSyncedContent) {
             lastSyncedContent = content;
-            const peerId = window.location.hash.slice(1);
-            saveContentToStorage(peerId, content);
             PeerModule.broadcast(content);
         }
     }
@@ -165,8 +167,7 @@ const MainModule = (function() {
     function handleIncomingContent(content) {
         display.innerHTML = content;
         lastSyncedContent = content;
-        const peerId = window.location.hash.slice(1);
-        saveContentToStorage(peerId, content);
+        saveContentToStorage();
     }
 
     function updateConnectionStatus(connected) {
@@ -218,6 +219,7 @@ const MainModule = (function() {
     function formatText(style) {
         document.execCommand(style, false, null);
         display.focus();
+        handleInput(); // Trigger input handler to save changes
     }
 
     function insertLink() {
@@ -226,6 +228,7 @@ const MainModule = (function() {
             document.execCommand('createLink', false, url);
         }
         display.focus();
+        handleInput(); // Trigger input handler to save changes
     }
 
     function insertImage() {
@@ -234,19 +237,49 @@ const MainModule = (function() {
             document.execCommand('insertImage', false, url);
         }
         display.focus();
+        handleInput(); // Trigger input handler to save changes
     }
 
-    function saveContentToStorage(peerId, content) {
-        const lines = content.split('<br>');
-        localStorage.setItem(`notes_${peerId}`, JSON.stringify(lines));
-    }
+    function saveContentToStorage() {
+        const lines = display.innerHTML.split('<br>');
+        let lineNumber = 0;
+        let consecutiveEmptyLines = 0;
 
-    function getContentFromStorage(peerId) {
-        const storedContent = localStorage.getItem(`notes_${peerId}`);
-        if (storedContent) {
-            return JSON.parse(storedContent).join('<br>');
+        lines.forEach((line, index) => {
+            if (line.trim() === '') {
+                consecutiveEmptyLines++;
+                if (consecutiveEmptyLines === 1 || index === lines.length - 1) {
+                    localStorage.setItem(`#${currentPeerId}_${lineNumber}`, '');
+                    lineNumber++;
+                }
+            } else {
+                localStorage.setItem(`#${currentPeerId}_${lineNumber}`, line);
+                lineNumber++;
+                consecutiveEmptyLines = 0;
+            }
+        });
+
+        // Remove any extra lines that might have been deleted
+        let nextLine = localStorage.getItem(`#${currentPeerId}_${lineNumber}`);
+        while (nextLine !== null) {
+            localStorage.removeItem(`#${currentPeerId}_${lineNumber}`);
+            lineNumber++;
+            nextLine = localStorage.getItem(`#${currentPeerId}_${lineNumber}`);
         }
-        return null;
+    }
+
+    function getContentFromStorage() {
+        let content = '';
+        let lineNumber = 0;
+        let line = localStorage.getItem(`#${currentPeerId}_${lineNumber}`);
+
+        while (line !== null) {
+            content += line + '<br>';
+            lineNumber++;
+            line = localStorage.getItem(`#${currentPeerId}_${lineNumber}`);
+        }
+
+        return content;
     }
 
     return {
