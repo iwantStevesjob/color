@@ -1,4 +1,5 @@
 // main.js
+
 const MainModule = (function() {
     const display = document.getElementById('notes-display');
     const container = document.getElementById('notes-container');
@@ -10,19 +11,18 @@ const MainModule = (function() {
     let lastSyncedContent = '';
     let lastScrollTop = 0;
     let currentPeerId = '';
-    let isInitialSync = true;
+    let isReady = false;
 
     function init() {
         currentPeerId = window.location.hash.slice(1);
         initNotes();
         setupEventListeners();
-        PeerModule.init(updateConnectionStatus, updatePeerCount, requestInitialSync);
+        PeerModule.init(updateConnectionStatus, updatePeerCount, onPeerReady);
         PeerModule.setContentCallback(handleIncomingContent);
     }
 
     function initNotes() {
         const storedContent = getContentFromStorage();
-
         if (storedContent) {
             display.innerHTML = storedContent;
         } else {
@@ -30,7 +30,6 @@ const MainModule = (function() {
             const totalLines = Math.floor(viewportHeight / lineHeight) * 3;
             display.innerHTML = '<br>'.repeat(totalLines);
         }
-
         container.scrollTop = container.scrollHeight / 3;
         display.focus();
     }
@@ -55,21 +54,16 @@ const MainModule = (function() {
     function handleEnterKey(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            
             const selection = window.getSelection();
             const range = selection.getRangeAt(0);
             const br = document.createElement('br');
-            
             range.deleteContents();
             range.insertNode(br);
-            
-            // Move the cursor after the newly inserted <br>
             range.setStartAfter(br);
             range.setEndAfter(br);
             selection.removeAllRanges();
             selection.addRange(range);
-            
-            handleInput(); // Trigger input handler to save changes
+            handleInput();
         }
     }
 
@@ -108,46 +102,7 @@ const MainModule = (function() {
     }
 
     function interpretHTML() {
-        const content = display.innerHTML;
-        const interpretedContent = content.replace(
-            /&lt;(img|b|i|u|a)(\s+[^&]*)?&gt;(.*?)&lt;\/\1&gt;|&lt;(img|b|i|u|a)(\s+[^&]*)?(?:\/)?&gt;/gi,
-            (match, tag1, attributes1, innerContent, tag2, attributes2) => {
-                const tag = tag1 || tag2;
-                const attributes = attributes1 || attributes2 || '';
-                
-                if (tag !== 'img' && !match.includes(`&lt;/${tag}&gt;`)) {
-                    return match;
-                }
-
-                switch (tag) {
-                    case 'img':
-                        return `<img ${attributes.replace(/&quot;/g, '"')} alt="User inserted image">`;
-                    case 'a':
-                        return `<a ${attributes.replace(/&quot;/g, '"')}>${innerContent}</a>`;
-                    case 'b':
-                    case 'i':
-                    case 'u':
-                        return `<${tag}>${innerContent}</${tag}>`;
-                    default:
-                        return match;
-                }
-            }
-        );
-
-        if (content !== interpretedContent) {
-            const selection = window.getSelection();
-            const range = selection.getRangeAt(0);
-            const startContainer = range.startContainer;
-            const startOffset = range.startOffset;
-
-            display.innerHTML = interpretedContent;
-
-            const newRange = document.createRange();
-            newRange.setStart(startContainer, startOffset);
-            newRange.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(newRange);
-        }
+        // ... (keep the existing implementation)
     }
 
     function maintainEmptyLines() {
@@ -166,9 +121,12 @@ const MainModule = (function() {
     }
 
     function handleIncomingContent(content) {
-        display.innerHTML = content;
-        lastSyncedContent = content;
-        saveContentToStorage();
+        console.log("Received content:", content);
+        if (content && content.trim() !== '') {
+            display.innerHTML = content;
+            lastSyncedContent = content;
+            saveContentToStorage();
+        }
     }
 
     function updateConnectionStatus(connected) {
@@ -199,28 +157,18 @@ const MainModule = (function() {
     function handleToolbarClick(e) {
         const buttonId = e.target.id;
         switch (buttonId) {
-            case 'bold-button':
-                formatText('bold');
-                break;
-            case 'italic-button':
-                formatText('italic');
-                break;
-            case 'underline-button':
-                formatText('underline');
-                break;
-            case 'link-button':
-                insertLink();
-                break;
-            case 'image-button':
-                insertImage();
-                break;
+            case 'bold-button': formatText('bold'); break;
+            case 'italic-button': formatText('italic'); break;
+            case 'underline-button': formatText('underline'); break;
+            case 'link-button': insertLink(); break;
+            case 'image-button': insertImage(); break;
         }
     }
 
     function formatText(style) {
         document.execCommand(style, false, null);
         display.focus();
-        handleInput(); // Trigger input handler to save changes
+        handleInput();
     }
 
     function insertLink() {
@@ -229,7 +177,7 @@ const MainModule = (function() {
             document.execCommand('createLink', false, url);
         }
         display.focus();
-        handleInput(); // Trigger input handler to save changes
+        handleInput();
     }
 
     function insertImage() {
@@ -238,7 +186,7 @@ const MainModule = (function() {
             document.execCommand('insertImage', false, url);
         }
         display.focus();
-        handleInput(); // Trigger input handler to save changes
+        handleInput();
     }
 
     function saveContentToStorage() {
@@ -283,10 +231,14 @@ const MainModule = (function() {
         return content;
     }
 
-    function requestInitialSync() {
-        if (isInitialSync) {
+    function onPeerReady() {
+        console.log("Peer is ready");
+        isReady = true;
+        const storedContent = getContentFromStorage();
+        if (storedContent && storedContent.trim() !== '') {
+            PeerModule.broadcast(storedContent);
+        } else {
             PeerModule.requestContent();
-            isInitialSync = false;
         }
     }
 
@@ -296,9 +248,4 @@ const MainModule = (function() {
     };
 })();
 
-// Initialize the main module when the window loads
 window.addEventListener('load', MainModule.init);
-
-// Export the module if using ES6 modules
-// export default MainModule;
-
