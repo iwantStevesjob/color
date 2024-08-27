@@ -2,24 +2,26 @@
 const PeerModule = (function() {
     let peer, connections = [];
     let isServer = false;
-    let broadcastCallback, onConnectionStatusChange, onPeerCountChange, onInitialSync;
+    let broadcastCallback, onConnectionStatusChange, onPeerCountChange, onPeerReady;
+    let isReady = false;
 
-    function initPeerJS(connectionStatusCallback, peerCountCallback, initialSyncCallback) {
+    function initPeerJS(connectionStatusCallback, peerCountCallback, peerReadyCallback) {
         onConnectionStatusChange = connectionStatusCallback;
         onPeerCountChange = peerCountCallback;
-        onInitialSync = initialSyncCallback;
+        onPeerReady = peerReadyCallback;
 
         const hash = window.location.hash;
 
         peer = new Peer();
 
         peer.on('open', (id) => {
-            onConnectionStatusChange(true);
             console.log(`Peer ID: ${id}`);
+            onConnectionStatusChange(true);
 
             if (!hash) {
                 isServer = true;
                 window.location.hash = id;
+                setReady();
             } else {
                 const remotePeerId = hash.slice(1);
                 connectToPeer(remotePeerId);
@@ -36,11 +38,12 @@ const PeerModule = (function() {
     }
 
     function handleNewConnection(connection) {
+        console.log("New connection:", connection);
         connections.push(connection);
         setupConnectionListeners(connection);
         updatePeerCount();
 
-        if (isServer) {
+        if (isServer && isReady) {
             connection.on('open', () => {
                 broadcastData();
             });
@@ -48,6 +51,7 @@ const PeerModule = (function() {
     }
 
     function connectToPeer(peerId) {
+        console.log("Connecting to peer:", peerId);
         const conn = peer.connect(peerId);
         connections.push(conn);
         setupConnectionListeners(conn);
@@ -57,7 +61,9 @@ const PeerModule = (function() {
         conn.on('open', () => {
             console.log('Connected to peer');
             onConnectionStatusChange(true);
-            onInitialSync();
+            if (!isServer) {
+                setReady();
+            }
         });
 
         conn.on('data', handleIncomingData);
@@ -74,6 +80,7 @@ const PeerModule = (function() {
     }
 
     function handleIncomingData(data) {
+        console.log("Received data:", data);
         if (data.type === 'content' && typeof broadcastCallback === 'function') {
             broadcastCallback(data.data);
         } else if (data.type === 'request_content') {
@@ -88,6 +95,7 @@ const PeerModule = (function() {
     }
 
     function broadcastData(content) {
+        console.log("Broadcasting data:", content);
         connections.forEach(conn => {
             if (conn.open) {
                 conn.send({ type: 'content', data: content });
@@ -96,11 +104,19 @@ const PeerModule = (function() {
     }
 
     function requestContent() {
+        console.log("Requesting content");
         connections.forEach(conn => {
             if (conn.open) {
                 conn.send({ type: 'request_content' });
             }
         });
+    }
+
+    function setReady() {
+        isReady = true;
+        if (typeof onPeerReady === 'function') {
+            onPeerReady();
+        }
     }
 
     return {
