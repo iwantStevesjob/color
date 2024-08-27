@@ -1,4 +1,5 @@
-const display = document.getElementById('notes-display');
+
+      const display = document.getElementById('notes-display');
 const container = document.getElementById('notes-container');
 const statusIndicator = document.querySelector('.status-indicator');
 const statusText = document.getElementById('status-text');
@@ -9,26 +10,42 @@ let peer, connections = [];
 let isServer = false;
 let lastSyncedContent = '';
 let lastScrollTop = 0;
-let userColor = '#000000'; // Default color for the first user
+let userColors = {}; // Store user colors by peer ID
 
-function getRandomHexColor() {
+// Function to generate a random hex color
+function getRandomColor() {
     return '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
 }
 
-function saveContentToStorage(peerId, content) {
-    const lines = content.split('<br>');
-    const coloredLines = lines.map(line => ({
-        text: line,
-        color: userColor
-    }));
-    localStorage.setItem(`notes_${peerId}`, JSON.stringify(coloredLines));
+// Function to assign color to user if not already assigned
+function getUserColor(peerId) {
+    if (!userColors[peerId]) {
+        userColors[peerId] = Object.keys(userColors).length === 0 ? '#000000' : getRandomColor();
+    }
+    return userColors[peerId];
 }
 
+// Save content to localStorage in key-value pair format
+function saveContentToStorage(peerId, content) {
+    const lines = content.split('<br>').filter(line => line.trim() !== '');
+    const jsonData = {};
+    
+    lines.forEach(line => {
+        const color = getUserColor(peerId);
+        jsonData[color] = jsonData[color] ? jsonData[color] + line + '<br>' : line + '<br>';
+    });
+
+    localStorage.setItem(`notes_${peerId}`, JSON.stringify(jsonData));
+}
+
+// Get content from localStorage in key-value pair format
 function getContentFromStorage(peerId) {
     const storedContent = localStorage.getItem(`notes_${peerId}`);
     if (storedContent) {
-        const lines = JSON.parse(storedContent);
-        return lines.map(line => `<span style="color:${line.color}">${line.text}</span>`).join('<br>');
+        const jsonData = JSON.parse(storedContent);
+        return Object.entries(jsonData).map(([color, text]) => {
+            return `<span style="color:${color};">${text}</span>`;
+        }).join('');
     }
     return null;
 }
@@ -52,11 +69,11 @@ function initNotes() {
 function interpretHTML() {
     const content = display.innerHTML;
     const interpretedContent = content.replace(
-        /&lt;(img|b|i|u|a)(\s+[^&]*)?&gt;(.*?)&lt;\/\1&gt;|&lt;(img|b|i|u)(\s+[^&]*)?(?:\/)?&gt;/gi,
+        /&lt;(img|b|i|u|a)(\s+[^&]*)?&gt;(.*?)&lt;\/\1&gt;|&lt;(img|b|i|u|a)(\s+[^&]*)?(?:\/)?&gt;/gi,
         (match, tag1, attributes1, innerContent, tag2, attributes2) => {
             const tag = tag1 || tag2;
             const attributes = attributes1 || attributes2 || '';
-            
+
             if (tag !== 'img' && !match.includes(`&lt;/${tag}&gt;`)) {
                 return match;
             }
@@ -95,14 +112,14 @@ function interpretHTML() {
 function handleEnterKey(e) {
     if (e.key === 'Enter') {
         e.preventDefault();
-        
+
         const selection = window.getSelection();
         const range = selection.getRangeAt(0);
         const br = document.createElement('br');
-        
+
         range.deleteContents();
         range.insertNode(br);
-        
+
         // Move the cursor after the newly inserted <br>
         range.setStartAfter(br);
         range.setEndAfter(br);
@@ -153,7 +170,7 @@ function broadcastData() {
         saveContentToStorage(peerId, content);
         connections.forEach(conn => {
             if (conn.open) {
-                conn.send({ type: 'content', data: content });
+                conn.send({ type: 'content', data: content, peerId });
             }
         });
     }
@@ -169,14 +186,11 @@ function initPeerJS() {
         console.log(`Peer ID: ${id}`);
 
         if (!hash) {
-            // Server Code
             isServer = true;
             window.location.hash = id;
-            initNotes(); // Only initialize notes for the server
+            initNotes();
         } else {
-            // Client Code
             const remotePeerId = hash.slice(1);
-            userColor = getRandomHexColor(); // Assign a random color to the client
             connectToPeer(remotePeerId);
         }
     });
@@ -196,14 +210,8 @@ function handleNewConnection(connection) {
     updatePeerCount();
 
     if (isServer) {
-        // Assign the first user the color #000000
-        if (connections.length === 1) {
-            userColor = '#000000';
-        }
-        // Send current content and user color to the new peer
         connection.on('open', () => {
-            connection.send({ type: 'content', data: display.innerHTML });
-            connection.send({ type: 'userColor', data: userColor });
+            connection.send({ type: 'content', data: display.innerHTML, peerId: peer.id });
         });
     }
 }
@@ -237,10 +245,7 @@ function handleIncomingData(data) {
     if (data.type === 'content') {
         display.innerHTML = data.data;
         lastSyncedContent = data.data;
-        const peerId = window.location.hash.slice(1);
-        saveContentToStorage(peerId, data.data);
-    } else if (data.type === 'userColor') {
-        userColor = data.data; // Set the user color based on the server's assignment
+        saveContentToStorage(data.peerId, data.data);
     }
 }
 
@@ -289,38 +294,44 @@ function handleSelection() {
         hideToolbar();
     }
 }
+        function handleToolbarClick(e) {
+            const buttonId = e.target.id;
+            switch (buttonId) {
+                case 'bold-button':
+                    formatText('bold');
+                    break;
+                case 'italic-button':
+                    formatText('italic');
+                    break;
+                case 'underline-button':
+                    formatText('underline');
+                    break;
+                case 'link-button':
+                    insertLink();
+                    break;
+                case 'image-button':
+                    insertImage();
+                    break;
+            }
+        }
 
-function handleToolbarClick(e) {
-    const buttonId = e.target.id;
-    switch (buttonId) {
-        case 'bold-button':
-            formatText('bold');
-            break;
-        case 'italic-button':
-            formatText('italic');
-            break;
-        case 'underline-button':
-            formatText('underline');
-            break;
-        case 'link-button':
-            insertLink();
-            break;
-        case 'image-button':
-            insertImage();
-            break;
-        default:
-            break;
-    }
-}
-
-initPeerJS();
-initNotes();
-
-display.addEventListener('keyup', interpretHTML);
-display.addEventListener('keypress', handleEnterKey);
-container.addEventListener('scroll', handleScroll);
-display.addEventListener('input', broadcastData);
-display.addEventListener('input', maintainEmptyLines);
-display.addEventListener('mouseup', handleSelection);
-toolbar.addEventListener('click', handleToolbarClick);
-
+        window.addEventListener('load', () => {
+            initPeerJS();
+            initNotes();
+        });
+        window.addEventListener('resize', () => {
+            const scrollPercentage = container.scrollTop / container.scrollHeight;
+            requestAnimationFrame(() => {
+                container.scrollTop = scrollPercentage * container.scrollHeight;
+            });
+        });
+        display.addEventListener('keydown', handleEnterKey);
+        display.addEventListener('input', () => {
+            interpretHTML();
+            maintainEmptyLines();
+            broadcastData();
+        });
+        display.addEventListener('mouseup', handleSelection);
+        display.addEventListener('keyup', handleSelection);
+        container.addEventListener('scroll', handleScroll);
+        toolbar.addEventListener('click', handleToolbarClick);
