@@ -29,20 +29,20 @@ const PeerModule = (function() {
             alert('An error occurred with the P2P connection: ' + err.message);
         });
 
-        function handleNewConnection(connection) {
-            connections.push(connection);
-            setupConnectionListeners(connection);
-            peerCountCallback(connections.length);
+         function handleNewConnection(connection) {
+        connections.push(connection);
+        setupConnectionListeners(connection);
+        peerCountCallback(connections.length);
 
-            if (isServer) {
-                connection.on('open', () => {
-                    if (contentCallback) {
-                        const content = contentCallback();
-                        connection.send({ type: 'content', data: content });
-                    }
-                });
-            }
+        if (isServer) {
+            connection.on('open', () => {
+                if (contentCallback) {
+                    const content = contentCallback();
+                    connection.send({ type: 'content', data: content });
+                }
+            });
         }
+    }
     }
 
     function connectToPeer(peerId) {
