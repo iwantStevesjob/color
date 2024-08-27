@@ -10,12 +10,13 @@ const MainModule = (function() {
     let lastSyncedContent = '';
     let lastScrollTop = 0;
     let currentPeerId = '';
+    let isInitialSync = true;
 
     function init() {
         currentPeerId = window.location.hash.slice(1);
         initNotes();
         setupEventListeners();
-        PeerModule.init(updateConnectionStatus, updatePeerCount);
+        PeerModule.init(updateConnectionStatus, updatePeerCount, requestInitialSync);
         PeerModule.setContentCallback(handleIncomingContent);
     }
 
@@ -282,8 +283,16 @@ const MainModule = (function() {
         return content;
     }
 
+    function requestInitialSync() {
+        if (isInitialSync) {
+            PeerModule.requestContent();
+            isInitialSync = false;
+        }
+    }
+
     return {
-        init: init
+        init: init,
+        handleIncomingContent: handleIncomingContent
     };
 })();
 
@@ -292,3 +301,4 @@ window.addEventListener('load', MainModule.init);
 
 // Export the module if using ES6 modules
 // export default MainModule;
+
