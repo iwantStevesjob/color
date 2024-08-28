@@ -1,153 +1,32 @@
- const display = document.getElementById('notes-display');
-        const container = document.getElementById('notes-container');
-        const statusIndicator = document.querySelector('.status-indicator');
-        const statusText = document.getElementById('status-text');
-        const peerCountElement = document.getElementById('peer-count');
-        const toolbar = document.getElementById('toolbar');
-        const lineHeight = 21; // Approximate line height in pixels
-        let peer, connections = [];
-        let isServer = false;
-        let lastSyncedContent = '';
-        let lastScrollTop = 0;
 
-        function saveContentToStorage(peerId, content) {
-            const lines = content.split('<br>');
-            localStorage.setItem(`notes_${peerId}`, JSON.stringify(lines));
-        }
+/*-------------------------------------------
+PEERJS CONNECTION AND COMMUNICATION
 
-        function getContentFromStorage(peerId) {
-            const storedContent = localStorage.getItem(`notes_${peerId}`);
-            if (storedContent) {
-                return JSON.parse(storedContent).join('<br>');
-            }
-            return null;
-        }
+This section handles everything related to PeerJS connections and communication between peers. 
+It includes functions like `updateConnectionStatus()`, `updatePeerCount()`, and `broadcastData()` 
+to manage the connection status, update the peer count, and send data between peers.
 
-        function initNotes() {
-            const peerId = window.location.hash.slice(1);
-            const storedContent = getContentFromStorage(peerId);
+-----------------------------------------------------------*/
 
-            if (storedContent) {
-                display.innerHTML = storedContent;
-            } else {
-                const viewportHeight = window.innerHeight;
-                const totalLines = Math.floor(viewportHeight / lineHeight) * 3;
-                display.innerHTML = '<br>'.repeat(totalLines);
-            }
+function updateConnectionStatus(connected) {
+    if (connected) {
+        statusIndicator.classList.remove('disconnected');
+        statusIndicator.classList.add('connected');
+        statusText.textContent = 'Connected';
+    } else {
+        statusIndicator.classList.remove('connected');
+        statusIndicator.classList.add('disconnected');
+        statusText.textContent = 'Disconnected';
+    }
+}
 
-            container.scrollTop = container.scrollHeight / 3;
-            display.focus();
-        }
+function updatePeerCount() {
+    peerCountElement.textContent = connections.length;
+}
 
-        function interpretHTML() {
-            const content = display.innerHTML;
-            const interpretedContent = content.replace(
-                /&lt;(img|b|i|u|a)(\s+[^&]*)?&gt;(.*?)&lt;\/\1&gt;|&lt;(img|b|i|u|a)(\s+[^&]*)?(?:\/)?&gt;/gi,
-                (match, tag1, attributes1, innerContent, tag2, attributes2) => {
-                    const tag = tag1 || tag2;
-                    const attributes = attributes1 || attributes2 || '';
-                    
-                    if (tag !== 'img' && !match.includes(`&lt;/${tag}&gt;`)) {
-                        return match;
-                    }
+// Broadcast data to connected peers (you should insert the `broadcastData()` function here)
 
-                    switch (tag) {
-                        case 'img':
-                            return `<img ${attributes.replace(/&quot;/g, '"')} alt="User inserted image">`;
-                        case 'a':
-                            return `<a ${attributes.replace(/&quot;/g, '"')}>${innerContent}</a>`;
-                        case 'b':
-                        case 'i':
-                        case 'u':
-                            return `<${tag}>${innerContent}</${tag}>`;
-                        default:
-                            return match;
-                    }
-                }
-            );
-
-            if (content !== interpretedContent) {
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                const startContainer = range.startContainer;
-                const startOffset = range.startOffset;
-
-                display.innerHTML = interpretedContent;
-
-                const newRange = document.createRange();
-                newRange.setStart(startContainer, startOffset);
-                newRange.collapse(true);
-                selection.removeAllRanges();
-                selection.addRange(newRange);
-            }
-        }
-
-        function handleEnterKey(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                
-                const selection = window.getSelection();
-                const range = selection.getRangeAt(0);
-                const br = document.createElement('br');
-                
-                range.deleteContents();
-                range.insertNode(br);
-                
-                // Move the cursor after the newly inserted <br>
-                range.setStartAfter(br);
-                range.setEndAfter(br);
-                selection.removeAllRanges();
-                selection.addRange(range);
-            }
-        }
-
-        function handleScroll() {
-            const scrollTop = container.scrollTop;
-            const scrollHeight = container.scrollHeight;
-            const clientHeight = container.clientHeight;
-
-            if (scrollTop < clientHeight) {
-                const linesToAdd = Math.floor(clientHeight / lineHeight);
-                const fragment = document.createDocumentFragment();
-                for (let i = 0; i < linesToAdd; i++) {
-                    fragment.appendChild(document.createElement('br'));
-                }
-                display.insertBefore(fragment, display.firstChild);
-                container.scrollTop += linesToAdd * lineHeight;
-            }
-
-            if (scrollHeight - scrollTop - clientHeight < clientHeight) {
-                const linesToAdd = Math.floor(clientHeight / lineHeight);
-                const fragment = document.createDocumentFragment();
-                for (let i = 0; i < linesToAdd; i++) {
-                    fragment.appendChild(document.createElement('br'));
-                }
-                display.appendChild(fragment);
-            }
-
-            lastScrollTop = scrollTop;
-        }
-
-        function maintainEmptyLines() {
-            const content = display.innerHTML;
-            if (!content.endsWith('<br>')) {
-                display.innerHTML = content + '<br>';
-            }
-        }
-
-        function broadcastData() {
-            const content = display.innerHTML;
-            if (content !== lastSyncedContent) {
-                lastSyncedContent = content;
-                const peerId = window.location.hash.slice(1);
-                saveContentToStorage(peerId, content);
-                connections.forEach(conn => {
-                    if (conn.open) {
-                        conn.send({ type: 'content', data: content });
-                    }
-                });
-            }
-        }
+// Initialize PeerJS (you should insert the `initPeerJS()` function here)
 
         function initPeerJS() {
             const hash = window.location.hash;
@@ -179,137 +58,140 @@
             });
         }
 
-        function handleNewConnection(connection) {
-            connections.push(connection);
-            setupConnectionListeners(connection);
-            updatePeerCount();
+/*-------------------------------------------
+DISPLAY AND CONTENT MANAGEMENT
 
-            if (isServer) {
-                // Send current content to the new peer
-                connection.on('open', () => {
-                    connection.send({ type: 'content', data: display.innerHTML });
-                });
-            }
-        }
+This section is responsible for managing the content displayed in the content-editable area, 
+including loading content from localStorage, saving it, and handling scrolling and user input. 
+Key functions are `initNotes()`, `saveContentToStorage()`, `getContentFromStorage()`, 
+`handleEnterKey()`, and `handleScroll()`.
 
-        function connectToPeer(peerId) {
-            const conn = peer.connect(peerId);
-            connections.push(conn);
-            setupConnectionListeners(conn);
-        }
+-----------------------------------------------------------*/
 
-        function setupConnectionListeners(conn) {
-            conn.on('open', () => {
-                console.log('Connected to peer');
-                updateConnectionStatus(true);
-            });
+function saveContentToStorage(peerId, content) {
+    const lines = content.split('<br>');
+    localStorage.setItem(`notes_${peerId}`, JSON.stringify(lines));
+}
 
-            conn.on('data', handleIncomingData);
+function getContentFromStorage(peerId) {
+    const storedContent = localStorage.getItem(`notes_${peerId}`);
+    if (storedContent) {
+        return JSON.parse(storedContent).join('<br>');
+    }
+    return null;
+}
 
-            conn.on('close', () => {
-                console.log('Connection closed, attempting to reconnect...');
-                updateConnectionStatus(false);
-                connections = connections.filter(c => c !== conn);
-                updatePeerCount();
-                if (!isServer) {
-                    setTimeout(() => connectToPeer(conn.peer), 3000);
-                }
-            });
-        }
+function initNotes() {
+    const peerId = window.location.hash.slice(1);
+    const storedContent = getContentFromStorage(peerId);
 
-        function handleIncomingData(data) {
-            if (data.type === 'content') {
-                display.innerHTML = data.data;
-                lastSyncedContent = data.data;
-                const peerId = window.location.hash.slice(1);
-                saveContentToStorage(peerId, data.data);
-            }
-        }
+    if (storedContent) {
+        display.innerHTML = storedContent;
+    } else {
+        const viewportHeight = window.innerHeight;
+        const totalLines = Math.floor(viewportHeight / lineHeight) * 3;
+        display.innerHTML = '<br>'.repeat(totalLines);
+    }
 
-        function updateConnectionStatus(connected) {
-            statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
-            statusText.textContent = connected ? 'Connected' : 'Disconnected';
-        }
+    container.scrollTop = container.scrollHeight / 3;
+    display.focus();
+}
 
-        function updatePeerCount() {
-            peerCountElement.textContent = `Connected Peers: ${connections.length}`;
-        }
+function handleEnterKey(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        document.execCommand('insertHTML', false, '<br>');
+        broadcastData();
+    }
+}
 
-        function showToolbar() {
-            toolbar.classList.add('visible');
-        }
+function handleScroll() {
+    const scrollTop = container.scrollTop;
+    const viewportHeight = container.clientHeight;
+    const contentHeight = container.scrollHeight;
 
-        function hideToolbar() {
-            toolbar.classList.remove('visible');
-        }
+    if (scrollTop < lastScrollTop && scrollTop < viewportHeight) {
+        display.innerHTML = '<br>'.repeat(5) + display.innerHTML;
+        container.scrollTop = scrollTop + lineHeight * 5;
+    } else if (scrollTop > lastScrollTop && scrollTop + viewportHeight >= contentHeight) {
+        display.innerHTML += '<br>'.repeat(5);
+    }
 
-        function formatText(style) {
-            document.execCommand(style, false, null);
-            display.focus();
-        }
+    lastScrollTop = container.scrollTop;
+}
 
-        function insertLink() {
-            const url = prompt('Enter the URL:');
-            if (url) {
-                document.execCommand('createLink', false, url);
-            }
-            display.focus();
-        }
+// Event listeners for display and content management
+window.addEventListener('resize', () => {
+    lastScrollTop = container.scrollTop;
+    initNotes();
+});
 
-        function insertImage() {
-            const url = prompt('Enter the image URL:');
-            if (url) {
-                document.execCommand('insertImage', false, url);
-            }
-            display.focus();
-        }
+display.addEventListener('keydown', handleEnterKey);
+display.addEventListener('input', interpretHTML);
+container.addEventListener('scroll', handleScroll);
 
-        function handleSelection() {
-            if (window.getSelection().toString().trim()) {
-                showToolbar();
-            } else {
-                hideToolbar();
-            }
-        }
 
-        function handleToolbarClick(e) {
-            const buttonId = e.target.id;
-            switch (buttonId) {
-                case 'bold-button':
-                    formatText('bold');
-                    break;
-                case 'italic-button':
-                    formatText('italic');
-                    break;
-                case 'underline-button':
-                    formatText('underline');
-                    break;
-                case 'link-button':
-                    insertLink();
-                    break;
-                case 'image-button':
-                    insertImage();
-                    break;
-            }
-        }
+/*-------------------------------------------
+TOOLBAR FUNCTIONALITY
 
-        window.addEventListener('load', () => {
-            initPeerJS();
-            initNotes();
-        });
-        window.addEventListener('resize', () => {
-            const scrollPercentage = container.scrollTop / container.scrollHeight;
-            requestAnimationFrame(() => {
-                container.scrollTop = scrollPercentage * container.scrollHeight;
-            });
-        });
-        display.addEventListener('keydown', handleEnterKey);
-        display.addEventListener('input', () => {
-            interpretHTML();
-            maintainEmptyLines();
-            broadcastData();
-        });
-        display.addEventListener('mouseup', handleSelection);
-        display.addEventListener('keyup', handleSelection);
-        container.addEventListener('scroll', handleScroll);
-        toolbar.addEventListener('click', handleToolbarClick);
+This section manages the toolbar used for formatting text within the content-editable area. 
+It includes functions like `showToolbar()`, `hideToolbar()`, `formatText()`, `insertLink()`, 
+and `insertImage()` to handle text formatting, link insertion, and image insertion.
+
+-----------------------------------------------------------*/
+
+function showToolbar() {
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+
+    if (selectedText) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        toolbar.style.top = `${rect.top - 40}px`;
+        toolbar.style.left = `${rect.left}px`;
+        toolbar.style.display = 'block';
+    } else {
+        hideToolbar();
+    }
+}
+
+function hideToolbar() {
+    toolbar.style.display = 'none';
+}
+
+function formatText(style) {
+    document.execCommand(style);
+    broadcastData();
+}
+
+function insertLink() {
+    const url = prompt('Enter the URL:', 'http://');
+    if (url) {
+        document.execCommand('createLink', false, url);
+        broadcastData();
+    }
+}
+
+function insertImage() {
+    const imageUrl = prompt('Enter the image URL:', 'http://');
+    if (imageUrl) {
+        document.execCommand('insertImage', false, imageUrl);
+        broadcastData();
+    }
+}
+
+// Event listeners for toolbar functionality
+display.addEventListener('mouseup', showToolbar);
+toolbar.addEventListener('click', hideToolbar);
+document.getElementById('bold-btn').addEventListener('click', () => formatText('bold'));
+document.getElementById('italic-btn').addEventListener('click', () => formatText('italic'));
+document.getElementById('underline-btn').addEventListener('click', () => formatText('underline'));
+document.getElementById('link-btn').addEventListener('click', insertLink);
+document.getElementById('image-btn').addEventListener('click', insertImage);
+
+// Initialization code
+window.addEventListener('load', () => {
+    window.initPeerJS();
+    initNotes();
+});
+
