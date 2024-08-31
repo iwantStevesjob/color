@@ -1,5 +1,11 @@
-       // Collaborative Notes Application with P2P Synchronization
-// Summary: This script creates a collaborative notes application using PeerJS for peer-to-peer communication. The notes are displayed in a scrollable container and synchronized between connected peers. Users can format text, insert links and images, and the content is saved locally for persistence.
+// Collaborative Notes Application with P2P Synchronization
+// Summary: This script creates a collaborative notes application using PeerJS for peer-to-peer communication. 
+// The notes are displayed in a scrollable container and synchronized between connected peers. 
+// Users can format text, insert links and images, and the content is saved locally for persistence.
+// Sections: 
+// 1. Display and Content Management: Manages content display, local storage, and user input.
+// 2. PeerJS Connection and Communication: Handles P2P connections and content synchronization.
+// 3. Toolbar Functionality: Manages text formatting and user interactions via the toolbar.
 
 const display = document.getElementById('notes-display');
 const container = document.getElementById('notes-container');
@@ -10,14 +16,12 @@ const toolbar = document.getElementById('toolbar');
 const lineHeight = 21; // Approximate line height in pixels
 let peer, connections = [];
 let isServer = false;
-let lastSyncedContent = '';
-let lastScrollTop = 0;
 
-
-
-
-
-
+// Configuration object to store shared variables and settings
+const appConfig = {
+    lastSyncedContent: '',
+    peerId: window.location.hash.slice(1)
+};
 
 /*-------------------------------------------
 DISPLAY AND CONTENT MANAGEMENT
@@ -29,11 +33,9 @@ Key functions are `initNotes()`, `saveContentToStorage()`, `getContentFromStorag
 
 -----------------------------------------------------------*/
 
-
 // Initialize the notes display based on stored content or create a placeholder
 function initNotes() {
-    const peerId = window.location.hash.slice(1);
-    const storedContent = getContentFromStorage(peerId);
+    const storedContent = getContentFromStorage(appConfig.peerId);
 
     if (storedContent) {
         display.innerHTML = storedContent;
@@ -61,7 +63,6 @@ function getContentFromStorage(peerId) {
     }
     return null;
 }
-
 
 // Interpret HTML content and convert it from encoded format
 function interpretHTML() {
@@ -105,20 +106,22 @@ function interpretHTML() {
         selection.removeAllRanges();
         selection.addRange(newRange);
     }
+
+    return interpretedContent; // Ensure interpretHTML returns the interpreted content
 }
 
-// Handle Enter key to insert a new line without causing double line breaks
+// Handle Enter key to insert a new line without causing double line breaks or adding <div>
 function handleEnterKey(e) {
     if (e.key === 'Enter') {
         e.preventDefault();
-        
+
         const selection = window.getSelection();
         const range = selection.getRangeAt(0);
         const br = document.createElement('br');
-        
+
         range.deleteContents();
         range.insertNode(br);
-        
+
         // Move the cursor after the newly inserted <br>
         range.setStartAfter(br);
         range.setEndAfter(br);
@@ -151,8 +154,6 @@ function handleScroll() {
         }
         display.appendChild(fragment);
     }
-
-    lastScrollTop = scrollTop;
 }
 
 // Ensure that the content always ends with an empty line
@@ -163,27 +164,25 @@ function maintainEmptyLines() {
     }
 }
 
-
-
-
 /*-------------------------------------------
 PEERJS CONNECTION AND COMMUNICATION
 
 This section handles everything related to PeerJS connections and communication between peers. 
-It includes functions like `updateConnectionStatus()`, `updatePeerCount()`, and `broadcastData()` 
+It includes functions like `initPeerJS()`, `updateConnectionStatus()`, `updatePeerCount()`, and `broadcastData()` 
 to manage the connection status, update the peer count, and send data between peers.
 
 -----------------------------------------------------------*/
 
+// Function to broadcast the content to connected peers
+function broadcastData(content, connections, config) {
+    // Only broadcast if the content has changed
+    if (content !== config.lastSyncedContent) {
+        config.lastSyncedContent = content;
 
+        // Save the content locally (abstracted to a separate function)
+        saveContentToStorage(config.peerId, content);
 
-// Broadcast the current content to all connected peers
-function broadcastData() {
-    const content = display.innerHTML;
-    if (content !== lastSyncedContent) {
-        lastSyncedContent = content;
-        const peerId = window.location.hash.slice(1);
-        saveContentToStorage(peerId, content);
+        // Send content to all connected peers
         connections.forEach(conn => {
             if (conn.open) {
                 conn.send({ type: 'content', data: content });
@@ -206,10 +205,12 @@ function initPeerJS() {
             // Server Code
             isServer = true;
             window.location.hash = id;
+            appConfig.peerId = id; // Set the peerId when a new peer is created
             initNotes(); // Only initialize notes for the server
         } else {
             // Client Code
             const remotePeerId = hash.slice(1);
+            appConfig.peerId = remotePeerId; // Set the peerId from the hash for the client
             connectToPeer(remotePeerId);
         }
     });
@@ -264,125 +265,90 @@ function setupConnectionListeners(conn) {
     });
 }
 
-// Handle incoming data from peers and update the display
+// Handle incoming data from peers and update the content
 function handleIncomingData(data) {
     if (data.type === 'content') {
         display.innerHTML = data.data;
-        lastSyncedContent = data.data;
-        const peerId = window.location.hash.slice(1);
-        saveContentToStorage(peerId, data.data);
+        maintainEmptyLines();
+        saveContentToStorage(appConfig.peerId, data.data); // Save new content to storage
     }
 }
 
 // Update the connection status indicator
 function updateConnectionStatus(connected) {
-    statusIndicator.className = `status-indicator ${connected ? 'connected' : 'disconnected'}`;
+    statusIndicator.style.backgroundColor = connected ? '#00FF00' : '#FF0000';
     statusText.textContent = connected ? 'Connected' : 'Disconnected';
 }
 
-// Update the count of connected peers
+// Update the displayed peer count
 function updatePeerCount() {
-    peerCountElement.textContent = `Connected Peers: ${connections.length}`;
+    peerCountElement.textContent = `Peers: ${connections.length}`;
 }
 
+// Broadcast the data on input change
+display.addEventListener('input', () => {
+    const content = interpretHTML(); // Assuming interpretHTML returns the updated content
+    maintainEmptyLines();  // Ensure content integrity
+    broadcastData(content, connections, appConfig); // Pass connections and config as parameters
+});
 
+// Handle Enter key press for new line behavior
+display.addEventListener('keydown', handleEnterKey);
 
-
-
+// Handle scroll for infinite scroll functionality
+container.addEventListener('scroll', handleScroll);
 
 /*-------------------------------------------
 TOOLBAR FUNCTIONALITY
 
-This section manages the toolbar used for formatting text within the content-editable area. 
-It includes functions like `showToolbar()`, `hideToolbar()`, `formatText()`, `insertLink()`, 
-and `insertImage()` to handle text formatting, link insertion, and image insertion.
+This section manages the toolbar functionality for formatting text and inserting content 
+like links or images. It includes functions like `execCommand()` for executing text 
+formatting commands and `insertImage()` for inserting images into the content.
 
 -----------------------------------------------------------*/
 
-
-// Show the formatting toolbar
-function showToolbar() {
-    toolbar.classList.add('visible');
+// Execute a formatting command on the selected text
+function execCommand(command, value = null) {
+    document.execCommand(command, false, value);
 }
 
-// Hide the formatting toolbar
-function hideToolbar() {
-    toolbar.classList.remove('visible');
-}
-
-// Apply formatting to selected text
-function formatText(style) {
-    document.execCommand(style, false, null);
-    display.focus();
-}
-
-// Insert a hyperlink at the current cursor position
-function insertLink() {
-    const url = prompt('Enter the URL:');
-    if (url) {
-        document.execCommand('createLink', false, url);
-    }
-    display.focus();
-}
-
-// Insert an image at the current cursor position
+// Insert an image into the content at the current cursor position
 function insertImage() {
-    const url = prompt('Enter the image URL:');
-    if (url) {
-        document.execCommand('insertImage', false, url);
+    const imageUrl = prompt('Enter image URL:');
+    if (imageUrl) {
+        const img = document.createElement('img');
+        img.src = imageUrl;
+        img.alt = 'User inserted image';
+        img.style.maxWidth = '100%';
+
+        const selection = window.getSelection();
+        const range = selection.getRangeAt(0);
+        range.insertNode(img);
+
+        // Place cursor after the image
+        range.setStartAfter(img);
+        range.setEndAfter(img);
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        const content = interpretHTML(); // Interpret new content after inserting image
+        maintainEmptyLines();  // Ensure content integrity
+        broadcastData(content, connections, appConfig); // Broadcast the updated content
     }
-    display.focus();
 }
 
-// Handle selection changes to show or hide the toolbar
-function handleSelection() {
-    if (window.getSelection().toString().trim()) {
-        showToolbar();
-    } else {
-        hideToolbar();
-    }
-}
-
-// Handle toolbar button clicks for text formatting
-
-        function handleToolbarClick(e) {
-            const buttonId = e.target.id;
-            switch (buttonId) {
-                case 'bold-button':
-                    formatText('bold');
-                    break;
-                case 'italic-button':
-                    formatText('italic');
-                    break;
-                case 'underline-button':
-                    formatText('underline');
-                    break;
-                case 'link-button':
-                    insertLink();
-                    break;
-                case 'image-button':
-                    insertImage();
-                    break;
-            }
+// Bind toolbar buttons to their respective commands
+document.querySelectorAll('#toolbar button').forEach(button => {
+    button.addEventListener('click', () => {
+        const command = button.getAttribute('data-command');
+        if (command === 'insertImage') {
+            insertImage();
+        } else {
+            execCommand(command);
         }
+    });
+});
 
-        window.addEventListener('load', () => {
-            initPeerJS();
-            initNotes();
-        });
-        window.addEventListener('resize', () => {
-            const scrollPercentage = container.scrollTop / container.scrollHeight;
-            requestAnimationFrame(() => {
-                container.scrollTop = scrollPercentage * container.scrollHeight;
-            });
-        });
-        display.addEventListener('keydown', handleEnterKey);
-        display.addEventListener('input', () => {
-            interpretHTML();
-            maintainEmptyLines();
-            broadcastData();
-        });
-        display.addEventListener('mouseup', handleSelection);
-        display.addEventListener('keyup', handleSelection);
-        container.addEventListener('scroll', handleScroll);
-        toolbar.addEventListener('click', handleToolbarClick);
+// Initialize the application
+initPeerJS();
+initNotes();
