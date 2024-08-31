@@ -1,3 +1,4 @@
+
 // Collaborative Notes Application with P2P Synchronization
 // Summary: This script creates a collaborative notes application using PeerJS for peer-to-peer communication. 
 // The notes are displayed in a scrollable container and synchronized between connected peers. 
@@ -22,6 +23,8 @@ const appConfig = {
     lastSyncedContent: '',
     peerId: window.location.hash.slice(1)
 };
+
+
 
 /*-------------------------------------------
 DISPLAY AND CONTENT MANAGEMENT
@@ -52,12 +55,12 @@ function initNotes() {
 // Save the content to localStorage based on the peer ID
 function saveContentToStorage(peerId, content) {
     const lines = content.split('<br>');
-    localStorage.setItem(`notes_${peerId}`, JSON.stringify(lines));
+    localStorage.setItem(`#${peerId}`, JSON.stringify(lines));
 }
 
 // Retrieve the content from localStorage for a given peer ID
 function getContentFromStorage(peerId) {
-    const storedContent = localStorage.getItem(`notes_${peerId}`);
+    const storedContent = localStorage.getItem(`#${peerId}`);
     if (storedContent) {
         return JSON.parse(storedContent).join('<br>');
     }
@@ -164,6 +167,13 @@ function maintainEmptyLines() {
     }
 }
 
+// Handle Enter key press for new line behavior
+display.addEventListener('keydown', handleEnterKey);
+
+// Handle scroll for infinite scroll functionality
+container.addEventListener('scroll', handleScroll);
+
+
 /*-------------------------------------------
 PEERJS CONNECTION AND COMMUNICATION
 
@@ -190,7 +200,6 @@ function broadcastData(content, connections, config) {
         });
     }
 }
-
 
 // Initialize PeerJS for P2P communication
 function initPeerJS() {
@@ -281,6 +290,7 @@ function initPeerJS() {
 }
 
 
+
 // Handle new incoming connections and send current content if server
 function handleNewConnection(connection) {
     connections.push(connection);
@@ -348,12 +358,6 @@ display.addEventListener('input', () => {
     maintainEmptyLines();  // Ensure content integrity
     broadcastData(content, connections, appConfig); // Pass connections and config as parameters
 });
-
-// Handle Enter key press for new line behavior
-display.addEventListener('keydown', handleEnterKey);
-
-// Handle scroll for infinite scroll functionality
-container.addEventListener('scroll', handleScroll);
 
 /*-------------------------------------------
 TOOLBAR FUNCTIONALITY
