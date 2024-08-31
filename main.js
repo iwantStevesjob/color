@@ -185,9 +185,6 @@ This section handles everything related to the color login form
 
 -----------------------------------------------------------*/
 
-
-
-
 const colorInput = document.getElementById('color');
         const loginButton = document.querySelector('button[type="submit"]');
 
@@ -236,7 +233,7 @@ const colorInput = document.getElementById('color');
 PEERJS CONNECTION AND COMMUNICATION
 
 This section handles everything related to PeerJS connections and communication between peers. 
-It includes functions like `initPeerJS()`, `updateConnectionStatus()`, `updatePeerCount()`, and `broadcastData()` 
+It includes functions like initPeerJS(), updateConnectionStatus(), updatePeerCount(), and broadcastData() 
 to manage the connection status, update the peer count, and send data between peers.
 
 -----------------------------------------------------------*/
@@ -262,13 +259,11 @@ function broadcastData(content, connections, config) {
 // Initialize PeerJS for P2P communication
 function initPeerJS() {
     const hash = window.location.hash;
-    const form =  document.getElementById('login');
-        
+    const form = document.getElementById('login');
 
     if (!hash) {
-        // No hash in the URL, this user will act as the server
+        // No hash in the URL, this user will act as the server (or initial peer)
         isServer = true;
-
 
         // Handle form submission
         form.addEventListener('submit', (e) => {
@@ -289,14 +284,22 @@ function initPeerJS() {
 
                 peer.on('error', (err) => {
                     console.error('PeerJS Error:', err);
-                    alert('An error occurred with the P2P connection: ' + err.message);
+
+                    // Check if data exists in localStorage for this peer ID
+                    const storedData = localStorage.getItem(userPeerId);
+                    if (storedData) {
+                        alert('Peer connection error, but local data found.');
+                        loadContentFromStorage(userPeerId); // Load local data if connection fails
+                    } else {
+                        alert('An error occurred with the P2P connection: ' + err.message);
+                    }
                 });
             }
         });
     } else {
         // Hash exists, meaning this user is a client
         form.style.display = 'none'; // Hide the form for client
-       
+
         const remotePeerId = hash.slice(1);
         appConfig.peerId = remotePeerId; // Set the peerId from the hash
 
@@ -312,11 +315,18 @@ function initPeerJS() {
 
         peer.on('error', (err) => {
             console.error('PeerJS Error:', err);
-            alert('An error occurred with the P2P connection: ' + err.message);
+
+            // Check if data exists in localStorage for this peer ID
+            const storedData = localStorage.getItem(remotePeerId);
+            if (storedData) {
+                alert('Peer connection error, but local data found.');
+                loadContentFromStorage(remotePeerId); // Load local data if connection fails
+            } else {
+                alert('An error occurred with the P2P connection: ' + err.message);
+            }
         });
     }
 }
-
 
 // Handle new incoming connections and send current content if server
 function handleNewConnection(connection) {
@@ -324,12 +334,10 @@ function handleNewConnection(connection) {
     setupConnectionListeners(connection);
     updatePeerCount();
 
-    if (isServer) {
-        // Send current content to the new peer
-        connection.on('open', () => {
-            connection.send({ type: 'content', data: display.innerHTML });
-        });
-    }
+    // Send current content to the new peer
+    connection.on('open', () => {
+        connection.send({ type: 'content', data: display.innerHTML });
+    });
 }
 
 // Connect to a remote peer by ID
@@ -358,6 +366,42 @@ function setupConnectionListeners(conn) {
         }
     });
 }
+
+// Handle incoming data from peers and update the content
+function handleIncomingData(data) {
+    if (data.type === 'content') {
+        display.innerHTML = data.data;
+        maintainEmptyLines();
+        saveContentToStorage(appConfig.peerId, data.data); // Save new content to storage
+    } else if (data.type === 'peerCount') {
+        updatePeerCountDisplay(data.count);
+    }
+}
+
+// Update the connection status indicator
+function updateConnectionStatus(connected) {
+    statusIndicator.style.backgroundColor = connected ? '#00FF00' : '#FF0000';
+    statusText.textContent = connected ? 'Connected' : 'Disconnected';
+}
+
+// Update the displayed peer count and broadcast it to others
+function updatePeerCount() {
+    const peerCount = connections.length;
+    peerCountElement.textContent = `Peers: ${peerCount}`;
+
+    // Broadcast updated peer count to all connections
+    connections.forEach(conn => {
+        if (conn.open) {
+            conn.send({ type: 'peerCount', count: peerCount });
+        }
+    });
+}
+
+// Update the peer count display only (for incoming peer count updates)
+function updatePeerCountDisplay(count) {
+    peerCountElement.textContent = `Peers: ${count}`;
+}
+
 
 // Handle incoming data from peers and update the content
 function handleIncomingData(data) {
