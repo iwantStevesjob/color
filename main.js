@@ -196,78 +196,90 @@ function broadcastData(content, connections, config) {
 function initPeerJS() {
     const hash = window.location.hash;
 
-    peer = new Peer();
+    if (!hash) {
+        // No hash in the URL, this user will act as the server
+        isServer = true;
 
-    peer.on('open', (id) => {
-        updateConnectionStatus(true);
-        console.log(`Peer ID: ${id}`);
+        // Create and display an input form for the user to input their peer ID
+        const form = document.createElement('form');
+        form.style.position = 'absolute';
+        form.style.top = '50%';
+        form.style.left = '50%';
+        form.style.transform = 'translate(-50%, -50%)';
+        form.style.backgroundColor = '#fff';
+        form.style.padding = '20px';
+        form.style.borderRadius = '10px';
+        form.style.boxShadow = '0px 0px 10px rgba(0, 0, 0, 0.1)';
 
-        if (!hash) {
-            // No hash in the URL, so we present the user with a form to input their peer ID.
-            isServer = true; // Assume server mode until the user provides their own peer ID.
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'Enter your Peer ID';
+        input.style.width = '100%';
+        input.style.marginBottom = '10px';
+        input.style.padding = '10px';
+        input.style.border = '1px solid #ccc';
+        input.style.borderRadius = '5px';
 
-            // Create and display an input form for the user to input their peer ID.
-            const form = document.createElement('form');
-            form.style.position = 'absolute';
-            form.style.top = '50%';
-            form.style.left = '50%';
-            form.style.transform = 'translate(-50%, -50%)';
-            form.style.backgroundColor = '#fff';
-            form.style.padding = '20px';
-            form.style.borderRadius = '10px';
-            form.style.boxShadow = '0px 0px 10px rgba(0, 0, 0, 0.1)';
+        const submitButton = document.createElement('button');
+        submitButton.type = 'submit';
+        submitButton.textContent = 'Submit';
+        submitButton.style.width = '100%';
+        submitButton.style.padding = '10px';
+        submitButton.style.backgroundColor = '#007bff';
+        submitButton.style.color = '#fff';
+        submitButton.style.border = 'none';
+        submitButton.style.borderRadius = '5px';
+        submitButton.style.cursor = 'pointer';
 
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.placeholder = 'Enter your Peer ID';
-            input.style.width = '100%';
-            input.style.marginBottom = '10px';
-            input.style.padding = '10px';
-            input.style.border = '1px solid #ccc';
-            input.style.borderRadius = '5px';
+        form.appendChild(input);
+        form.appendChild(submitButton);
+        document.body.appendChild(form);
 
-            const submitButton = document.createElement('button');
-            submitButton.type = 'submit';
-            submitButton.textContent = 'Submit';
-            submitButton.style.width = '100%';
-            submitButton.style.padding = '10px';
-            submitButton.style.backgroundColor = '#007bff';
-            submitButton.style.color = '#fff';
-            submitButton.style.border = 'none';
-            submitButton.style.borderRadius = '5px';
-            submitButton.style.cursor = 'pointer';
+        // Handle form submission
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const userPeerId = input.value.trim();
+            if (userPeerId) {
+                peer = new Peer(userPeerId);
 
-            form.appendChild(input);
-            form.appendChild(submitButton);
-            document.body.appendChild(form);
-
-            // Handle form submission
-            form.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const userPeerId = input.value.trim();
-                if (userPeerId) {
-                    window.location.hash = userPeerId; // Append user inputted peer ID to the URL
-                    appConfig.peerId = userPeerId; // Set the peerId in the config
+                peer.on('open', (id) => {
+                    console.log(`Server Peer ID: ${id}`);
+                    window.location.hash = id; // Append peer ID to URL
+                    appConfig.peerId = id; // Set peerId in config
                     document.body.removeChild(form); // Remove the form from the document
                     initNotes(); // Initialize notes for the server
-                }
-            });
-        } else {
-            // Hash exists, meaning we're in client mode.
-            const remotePeerId = hash.slice(1);
-            appConfig.peerId = remotePeerId; // Set the peerId from the hash for the client
-            connectToPeer(remotePeerId);
-        }
-    });
+                });
 
-    peer.on('connection', handleNewConnection);
+                peer.on('connection', handleNewConnection);
 
-    peer.on('error', (err) => {
-        console.error('PeerJS Error:', err);
-        updateConnectionStatus(false);
-        alert('An error occurred with the P2P connection: ' + err.message);
-    });
+                peer.on('error', (err) => {
+                    console.error('PeerJS Error:', err);
+                    alert('An error occurred with the P2P connection: ' + err.message);
+                });
+            }
+        });
+    } else {
+        // Hash exists, meaning this user is a client
+        const remotePeerId = hash.slice(1);
+        appConfig.peerId = remotePeerId; // Set the peerId from the hash
+
+        // Create a new Peer without specifying a peer ID (let the server generate one)
+        peer = new Peer();
+
+        peer.on('open', (id) => {
+            console.log(`Client Peer ID: ${id}`);
+            connectToPeer(remotePeerId); // Connect to the server peer
+        });
+
+        peer.on('connection', handleNewConnection);
+
+        peer.on('error', (err) => {
+            console.error('PeerJS Error:', err);
+            alert('An error occurred with the P2P connection: ' + err.message);
+        });
+    }
 }
+
 
 // Handle new incoming connections and send current content if server
 function handleNewConnection(connection) {
