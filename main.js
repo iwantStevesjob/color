@@ -278,14 +278,16 @@ function broadcastData(content, connections, config) {
 // Initialize PeerJS for P2P communication
 function initPeerJS() {
     const hash = window.location.hash;
-    const isServer = !hash;
+    const form =  document.getElementById('login');
+        
 
-    if (isServer) {
+    if (!hash) {
         // No hash in the URL, this user will act as the server
-        document.getElementById('login').style.display = 'block'; // Show the form for server
+        isServer = true;
+
 
         // Handle form submission
-        document.getElementById('login').addEventListener('submit', (e) => {
+        form.addEventListener('submit', (e) => {
             e.preventDefault();
             const userPeerId = document.getElementById('color').value.trim();
             if (userPeerId) {
@@ -295,7 +297,7 @@ function initPeerJS() {
                     console.log(`Server Peer ID: ${id}`);
                     window.location.hash = id; // Append peer ID to URL
                     appConfig.peerId = id; // Set peerId in config
-                    document.getElementById('login').style.display = 'none'; // Hide the form after submission
+                    document.body.removeChild(form); // Remove the form from the document
                     initData(); // Initialize data for the server
                 });
 
@@ -309,7 +311,8 @@ function initPeerJS() {
         });
     } else {
         // Hash exists, meaning this user is a client
-        document.getElementById('login').style.display = 'none'; // Hide the form for client
+        form.style.display = 'none'; // Hide the form for client
+       
         const remotePeerId = hash.slice(1);
         appConfig.peerId = remotePeerId; // Set the peerId from the hash
 
