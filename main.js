@@ -301,54 +301,109 @@ container.addEventListener('scroll', handleScroll);
 /*-------------------------------------------
 TOOLBAR FUNCTIONALITY
 
-This section manages the toolbar functionality for formatting text and inserting content 
-like links or images. It includes functions like `execCommand()` for executing text 
-formatting commands and `insertImage()` for inserting images into the content.
+This section manages the toolbar used for formatting text within the content-editable area. 
+It includes functions like `showToolbar()`, `hideToolbar()`, `formatText()`, `insertLink()`, 
+and `insertImage()` to handle text formatting, link insertion, and image insertion.
 
 -----------------------------------------------------------*/
 
-// Execute a formatting command on the selected text
-function execCommand(command, value = null) {
-    document.execCommand(command, false, value);
+// Show the formatting toolbar
+function showToolbar() {
+    toolbar.classList.add('visible');
 }
 
-// Insert an image into the content at the current cursor position
+// Hide the formatting toolbar
+function hideToolbar() {
+    toolbar.classList.remove('visible');
+}
+
+// Apply formatting to selected text
+function formatText(style) {
+    document.execCommand(style, false, null);
+    display.focus();
+}
+
+// Insert a hyperlink at the current cursor position
+function insertLink() {
+    const url = prompt('Enter the URL:');
+    if (url) {
+        document.execCommand('createLink', false, url);
+    }
+    display.focus();
+}
+
+// Insert an image at the current cursor position
 function insertImage() {
-    const imageUrl = prompt('Enter image URL:');
-    if (imageUrl) {
-        const img = document.createElement('img');
-        img.src = imageUrl;
-        img.alt = 'User inserted image';
-        img.style.maxWidth = '100%';
+    const url = prompt('Enter the image URL:');
+    if (url) {
+        document.execCommand('insertImage', false, url);
+    }
+    display.focus();
+}
 
-        const selection = window.getSelection();
-        const range = selection.getRangeAt(0);
-        range.insertNode(img);
-
-        // Place cursor after the image
-        range.setStartAfter(img);
-        range.setEndAfter(img);
-        selection.removeAllRanges();
-        selection.addRange(range);
-
-        const content = interpretHTML(); // Interpret new content after inserting image
-        maintainEmptyLines();  // Ensure content integrity
-        broadcastData(content, connections, appConfig); // Broadcast the updated content
+// Handle selection changes to show or hide the toolbar
+function handleSelection() {
+    if (window.getSelection().toString().trim()) {
+        showToolbar();
+    } else {
+        hideToolbar();
     }
 }
 
-// Bind toolbar buttons to their respective commands
-document.querySelectorAll('#toolbar button').forEach(button => {
-    button.addEventListener('click', () => {
-        const command = button.getAttribute('data-command');
-        if (command === 'insertImage') {
+// Handle toolbar button clicks for text formatting
+function handleToolbarClick(e) {
+    const buttonId = e.target.id;
+    switch (buttonId) {
+        case 'bold-button':
+            formatText('bold');
+            break;
+        case 'italic-button':
+            formatText('italic');
+            break;
+        case 'underline-button':
+            formatText('underline');
+            break;
+        case 'link-button':
+            insertLink();
+            break;
+        case 'image-button':
             insertImage();
-        } else {
-            execCommand(command);
-        }
+            break;
+    }
+}
+
+/*-------------------------------------------
+INITIALIZATION AND EVENT BINDINGS
+
+This section is responsible for initializing the application, setting up event listeners 
+for user interactions, and binding the toolbar buttons to their respective functions.
+
+-----------------------------------------------------------*/
+
+// Initialize the application
+window.addEventListener('load', () => {
+    initPeerJS();
+    initNotes();
+});
+
+// Maintain scroll position during window resize
+window.addEventListener('resize', () => {
+    const scrollPercentage = container.scrollTop / container.scrollHeight;
+    requestAnimationFrame(() => {
+        container.scrollTop = scrollPercentage * container.scrollHeight;
     });
 });
 
-// Initialize the application
-initPeerJS();
-initNotes();
+// Bind the toolbar buttons to the corresponding formatting functions
+toolbar.addEventListener('click', handleToolbarClick);
+
+// Handle input, keydown, mouseup, and keyup events for content manipulation and toolbar interaction
+display.addEventListener('keydown', handleEnterKey);
+display.addEventListener('input', () => {
+    const content = interpretHTML();
+    maintainEmptyLines();
+    broadcastData(content, connections, appConfig);
+});
+display.addEventListener('mouseup', handleSelection);
+display.addEventListener('keyup', handleSelection);
+container.addEventListener('scroll', handleScroll);
