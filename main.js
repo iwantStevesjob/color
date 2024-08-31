@@ -1,19 +1,19 @@
 
-// Collaborative Notes Application with P2P Synchronization
-// Summary: This script creates a collaborative notes application using PeerJS for peer-to-peer communication. 
-// The notes are displayed in a scrollable container and synchronized between connected peers. 
+// Collaborative data Application with P2P Synchronization
+// Summary: This script creates a collaborative data application using PeerJS for peer-to-peer communication. 
+// The data are displayed in a scrollable container and synchronized between connected peers. 
 // Users can format text, insert links and images, and the content is saved locally for persistence.
 // Sections: 
 // 1. Display and Content Management: Manages content display, local storage, and user input.
 // 2. PeerJS Connection and Communication: Handles P2P connections and content synchronization.
-// 3. Toolbar Functionality: Manages text formatting and user interactions via the toolbar.
+// 3. Tools Functionality: Manages text formatting and user interactions via the tools.
 
-const display = document.getElementById('notes-display');
-const container = document.getElementById('notes-container');
+const display = document.getElementById('display');
+const container = document.getElementById('container');
 const statusIndicator = document.querySelector('.status-indicator');
 const statusText = document.getElementById('status-text');
 const peerCountElement = document.getElementById('peer-count');
-const toolbar = document.getElementById('toolbar');
+const tools = document.getElementById('tools');
 const lineHeight = 21; // Approximate line height in pixels
 let peer, connections = [];
 let isServer = false;
@@ -31,13 +31,13 @@ DISPLAY AND CONTENT MANAGEMENT
 
 This section is responsible for managing the content displayed in the content-editable area, 
 including loading content from localStorage, saving it, and handling scrolling and user input. 
-Key functions are `initNotes()`, `saveContentToStorage()`, `getContentFromStorage()`, 
+Key functions are `initData()`, `saveContentToStorage()`, `getContentFromStorage()`, 
 `handleEnterKey()`, and `handleScroll()`.
 
 -----------------------------------------------------------*/
 
-// Initialize the notes display based on stored content or create a placeholder
-function initNotes() {
+// Initialize the data display based on stored content or create a placeholder
+function initData() {
     const storedContent = getContentFromStorage(appConfig.peerId);
 
     if (storedContent) {
@@ -174,6 +174,80 @@ display.addEventListener('keydown', handleEnterKey);
 container.addEventListener('scroll', handleScroll);
 
 
+
+
+/*-------------------------------------------
+COLOR LOGIN
+
+This section handles everything related to the color login form 
+
+-----------------------------------------------------------*/
+
+
+ const colorInput = document.getElementById('color');
+        const loginButton = document.querySelector('button[type="submit"]');
+        const suggestionDiv = document.getElementById('suggestion');
+
+        function isLightColor(color) {
+            const hex = color.replace('#', '');
+            const r = parseInt(hex.substr(0, 2), 16);
+            const g = parseInt(hex.substr(2, 2), 16);
+            const b = parseInt(hex.substr(4, 2), 16);
+            const brightness = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+            return brightness > 155;
+        }
+
+        function updateButtonColor(color) {
+            loginButton.style.backgroundColor = color;
+            if (isLightColor(color)) {
+                loginButton.style.color = 'rgba(0, 0, 0, 0.8)';
+            } else {
+                loginButton.style.color = 'white';
+            }
+        }
+
+        function getSuggestion(value) {
+            switch (value.length) {
+                case 1: return value.repeat(6);
+                case 2: return value.repeat(3);
+                case 3: return value.repeat(2);
+                default: return '';
+            }
+        }
+
+        function lightenColor(color) {
+            return '#' + color.replace(/[0-9a-f]/g, char => {
+                const num = parseInt(char, 16);
+                return Math.min(15, num + 5).toString(16);
+            });
+        }
+
+        colorInput.addEventListener('keypress', function(e) {
+            const char = String.fromCharCode(e.charCode);
+            if (!/^[0-9a-f]$/i.test(char)) {
+                e.preventDefault();
+            }
+        });
+
+        colorInput.addEventListener('input', function() {
+            this.value = this.value.toLowerCase();
+            const color = this.value;
+            const suggestion = getSuggestion(color);
+
+            if (color.length <= 3) {
+                updateButtonColor('#' + suggestion);
+                suggestionDiv.textContent = suggestion.slice(color.length);
+                suggestionDiv.style.color = lightenColor(suggestion);
+            } else if (color.length === 6) {
+                updateButtonColor('#' + color);
+                suggestionDiv.textContent = '';
+            } else {
+                suggestionDiv.textContent = '';
+            }
+        });
+     
+        
+
 /*-------------------------------------------
 PEERJS CONNECTION AND COMMUNICATION
 
@@ -204,50 +278,16 @@ function broadcastData(content, connections, config) {
 // Initialize PeerJS for P2P communication
 function initPeerJS() {
     const hash = window.location.hash;
+    const isServer = !hash;
 
-    if (!hash) {
+    if (isServer) {
         // No hash in the URL, this user will act as the server
-        isServer = true;
-
-        // Create and display an input form for the user to input their peer ID
-        const form = document.createElement('form');
-        form.style.position = 'absolute';
-        form.style.top = '50%';
-        form.style.left = '50%';
-        form.style.transform = 'translate(-50%, -50%)';
-        form.style.backgroundColor = '#fff';
-        form.style.padding = '20px';
-        form.style.borderRadius = '10px';
-        form.style.boxShadow = '0px 0px 10px rgba(0, 0, 0, 0.1)';
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = 'Enter your Peer ID';
-        input.style.width = '100%';
-        input.style.marginBottom = '10px';
-        input.style.padding = '10px';
-        input.style.border = '1px solid #ccc';
-        input.style.borderRadius = '5px';
-
-        const submitButton = document.createElement('button');
-        submitButton.type = 'submit';
-        submitButton.textContent = 'Submit';
-        submitButton.style.width = '100%';
-        submitButton.style.padding = '10px';
-        submitButton.style.backgroundColor = '#007bff';
-        submitButton.style.color = '#fff';
-        submitButton.style.border = 'none';
-        submitButton.style.borderRadius = '5px';
-        submitButton.style.cursor = 'pointer';
-
-        form.appendChild(input);
-        form.appendChild(submitButton);
-        document.body.appendChild(form);
+        document.getElementById('login').style.display = 'block'; // Show the form for server
 
         // Handle form submission
-        form.addEventListener('submit', (e) => {
+        document.getElementById('login').addEventListener('submit', (e) => {
             e.preventDefault();
-            const userPeerId = input.value.trim();
+            const userPeerId = document.getElementById('color').value.trim();
             if (userPeerId) {
                 peer = new Peer(userPeerId);
 
@@ -255,8 +295,8 @@ function initPeerJS() {
                     console.log(`Server Peer ID: ${id}`);
                     window.location.hash = id; // Append peer ID to URL
                     appConfig.peerId = id; // Set peerId in config
-                    document.body.removeChild(form); // Remove the form from the document
-                    initNotes(); // Initialize notes for the server
+                    document.getElementById('login').style.display = 'none'; // Hide the form after submission
+                    initData(); // Initialize data for the server
                 });
 
                 peer.on('connection', handleNewConnection);
@@ -269,6 +309,7 @@ function initPeerJS() {
         });
     } else {
         // Hash exists, meaning this user is a client
+        document.getElementById('login').style.display = 'none'; // Hide the form for client
         const remotePeerId = hash.slice(1);
         appConfig.peerId = remotePeerId; // Set the peerId from the hash
 
@@ -288,7 +329,6 @@ function initPeerJS() {
         });
     }
 }
-
 
 
 // Handle new incoming connections and send current content if server
@@ -360,22 +400,22 @@ display.addEventListener('input', () => {
 });
 
 /*-------------------------------------------
-TOOLBAR FUNCTIONALITY
+TOOLS FUNCTIONALITY
 
-This section manages the toolbar used for formatting text within the content-editable area. 
-It includes functions like `showToolbar()`, `hideToolbar()`, `formatText()`, `insertLink()`, 
+This section manages the tools used for formatting text within the content-editable area. 
+It includes functions like `showTools()`, `hideTools()`, `formatText()`, `insertLink()`, 
 and `insertImage()` to handle text formatting, link insertion, and image insertion.
 
 -----------------------------------------------------------*/
 
-// Show the formatting toolbar
-function showToolbar() {
-    toolbar.classList.add('visible');
+// Show the formatting tools
+function showTools() {
+    tools.classList.add('visible');
 }
 
-// Hide the formatting toolbar
-function hideToolbar() {
-    toolbar.classList.remove('visible');
+// Hide the formatting tools
+function hideTools() {
+    tools.classList.remove('visible');
 }
 
 // Apply formatting to selected text
@@ -402,17 +442,17 @@ function insertImage() {
     display.focus();
 }
 
-// Handle selection changes to show or hide the toolbar
+// Handle selection changes to show or hide the tools
 function handleSelection() {
     if (window.getSelection().toString().trim()) {
-        showToolbar();
+        showTools();
     } else {
-        hideToolbar();
+        hideTools();
     }
 }
 
-// Handle toolbar button clicks for text formatting
-function handleToolbarClick(e) {
+// Handle tools button clicks for text formatting
+function handleToolsClick(e) {
     const buttonId = e.target.id;
     switch (buttonId) {
         case 'bold-button':
@@ -437,14 +477,14 @@ function handleToolbarClick(e) {
 INITIALIZATION AND EVENT BINDINGS
 
 This section is responsible for initializing the application, setting up event listeners 
-for user interactions, and binding the toolbar buttons to their respective functions.
+for user interactions, and binding the tools buttons to their respective functions.
 
 -----------------------------------------------------------*/
 
 // Initialize the application
 window.addEventListener('load', () => {
     initPeerJS();
-    initNotes();
+    initData();
 });
 
 // Maintain scroll position during window resize
@@ -455,10 +495,10 @@ window.addEventListener('resize', () => {
     });
 });
 
-// Bind the toolbar buttons to the corresponding formatting functions
-toolbar.addEventListener('click', handleToolbarClick);
+// Bind the tools buttons to the corresponding formatting functions
+tools.addEventListener('click', handleToolsClick);
 
-// Handle input, keydown, mouseup, and keyup events for content manipulation and toolbar interaction
+// Handle input, keydown, mouseup, and keyup events for content manipulation and tools interaction
 display.addEventListener('keydown', handleEnterKey);
 display.addEventListener('input', () => {
     const content = interpretHTML();
