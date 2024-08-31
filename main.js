@@ -403,33 +403,6 @@ function updatePeerCountDisplay(count) {
 }
 
 
-// Handle incoming data from peers and update the content
-function handleIncomingData(data) {
-    if (data.type === 'content') {
-        display.innerHTML = data.data;
-        maintainEmptyLines();
-        saveContentToStorage(appConfig.peerId, data.data); // Save new content to storage
-    }
-}
-
-// Update the connection status indicator
-function updateConnectionStatus(connected) {
-    statusIndicator.style.backgroundColor = connected ? '#00FF00' : '#FF0000';
-    statusText.textContent = connected ? 'Connected' : 'Disconnected';
-}
-
-// Update the displayed peer count
-function updatePeerCount() {
-    peerCountElement.textContent = `Peers: ${connections.length}`;
-}
-
-// Broadcast the data on input change
-display.addEventListener('input', () => {
-    const content = interpretHTML(); // Assuming interpretHTML returns the updated content
-    maintainEmptyLines();  // Ensure content integrity
-    broadcastData(content, connections, appConfig); // Pass connections and config as parameters
-});
-
 /*-------------------------------------------
 TOOLS FUNCTIONALITY
 
