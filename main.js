@@ -27,6 +27,7 @@ const appConfig = {
 
 
 /*-------------------------------------------
+
 DISPLAY AND CONTENT MANAGEMENT
 
 This section is responsible for managing the content displayed in the content-editable area, 
@@ -177,6 +178,7 @@ container.addEventListener('scroll', handleScroll);
 
 
 /*-------------------------------------------
+
 COLOR LOGIN
 
 This section handles everything related to the color login form 
@@ -184,9 +186,10 @@ This section handles everything related to the color login form
 -----------------------------------------------------------*/
 
 
-  
+
 const colorInput = document.getElementById('color');
         const loginButton = document.querySelector('button[type="submit"]');
+        const suggestionDiv = document.getElementById('suggestion');
 
         function isLightColor(color) {
             const hex = color.replace('#', '');
@@ -197,23 +200,42 @@ const colorInput = document.getElementById('color');
             return brightness > 155;
         }
 
-        colorInput.addEventListener('input', function(e) {
-    // Remove any character that isn't a valid hexadecimal digit (0-9, a-f)
-    this.value = this.value.replace(/[^0-9a-f]/gi, '').toLowerCase();
-    
-    const color = this.value;
-
-    if (/^[0-9a-f]{6}$/.test(color)) {
-        const fullColor = '#' + color;
-        loginButton.style.backgroundColor = fullColor;
-        
-        if (isLightColor(fullColor)) {
-            loginButton.style.color = 'rgba(0, 0, 0, 0.8)';
-        } else {
-            loginButton.style.color = 'white';
+        function updateButtonColor(color) {
+            loginButton.style.backgroundColor = color;
+            if (isLightColor(color)) {
+                loginButton.style.color = 'rgba(0, 0, 0, 0.8)';
+            } else {
+                loginButton.style.color = 'white';
+            }
         }
-    }
-});
+
+        function getSuggestion(value) {
+            switch (value.length) {
+                case 1: return value.repeat(6);
+                case 2: return value.repeat(3);
+                case 3: return value.repeat(2);
+                default: return '';
+            }
+        }
+
+        colorInput.addEventListener('input', function() {
+            this.value = this.value.replace(/[^0-9a-f]/gi, '').toLowerCase();
+
+            const color = this.value;
+            const suggestion = getSuggestion(color);
+
+            if (color.length <= 3) {
+                updateButtonColor('#' + suggestion);
+                suggestionDiv.textContent = `Suggestion: #${suggestion}`;
+            } else if (color.length === 6) {
+                updateButtonColor('#' + color);
+                suggestionDiv.textContent = '';
+            } else {
+                suggestionDiv.textContent = '';
+            }
+        });
+
+
      
         
 
