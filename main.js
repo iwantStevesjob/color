@@ -187,9 +187,9 @@ This section handles everything related to the color login form
 
 
 
+
 const colorInput = document.getElementById('color');
         const loginButton = document.querySelector('button[type="submit"]');
-        const suggestionDiv = document.getElementById('suggestion');
 
         function isLightColor(color) {
             const hex = color.replace('#', '');
@@ -226,17 +226,10 @@ const colorInput = document.getElementById('color');
 
             if (color.length <= 3) {
                 updateButtonColor('#' + suggestion);
-                suggestionDiv.textContent = `Suggestion: #${suggestion}`;
             } else if (color.length === 6) {
                 updateButtonColor('#' + color);
-                suggestionDiv.textContent = '';
-            } else {
-                suggestionDiv.textContent = '';
             }
         });
-
-
-     
         
 
 /*-------------------------------------------
