@@ -168,6 +168,42 @@ function maintainEmptyLines() {
     }
 }
 
+// Handle paste event to embed images
+display.addEventListener('paste', (e) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = document.createElement('img');
+                img.src = event.target.result; // Base64 string
+                insertImageAtCursor(img);
+            };
+            reader.readAsDataURL(file); // Convert to Base64
+            e.preventDefault(); // Prevent default paste behavior
+            break; // Only handle the first image
+        }
+    }
+});
+
+// Function to insert an image at the current cursor position
+function insertImageAtCursor(img) {
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents(); // Remove any selected text
+        range.insertNode(img); // Insert the image
+        range.collapse(false); // Move the cursor after the inserted image
+        selection.removeAllRanges();
+        selection.addRange(range);
+
+        // Broadcast the updated content after inserting the image
+        const updatedContent = display.innerHTML;
+        broadcastData(updatedContent, connections, appConfig);
+    }
+}
 // Handle Enter key press for new line behavior
 display.addEventListener('keydown', handleEnterKey);
 
@@ -263,120 +299,85 @@ function initPeerJS() {
 
     if (!hash) {
         // No hash in the URL, this user will act as the server (or initial peer)
-        isServer = true;
-
-        // Handle form submission
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const userPeerId = document.getElementById('color').value.trim();
-            if (userPeerId) {
-                peer = new Peer(userPeerId);
-
-                peer.on('open', (id) => {
-                    console.log(`Server Peer ID: ${id}`);
-                    window.location.hash = id; // Append peer ID to URL
-                    appConfig.peerId = id; // Set peerId in config
-                    document.body.removeChild(form); // Remove the form from the document
-                    initData(); // Initialize data for the server
-                });
-
-                peer.on('connection', handleNewConnection);
-
-                peer.on('error', (err) => {
-                    console.error('PeerJS Error:', err);
-
-                    // Check if data exists in localStorage for this peer ID
-                    const storedData = localStorage.getItem(userPeerId);
-                    if (storedData) {
-                        alert('Peer connection error, but local data found.');
-                        loadContentFromStorage(userPeerId); // Load local data if connection fails
-                    } else {
-                        alert('An error occurred with the P2P connection: ' + err.message);
-                    }
-                });
-            }
-        });
+        console.log('No hash found, setting up as server.');
+        form.style.display = 'block'; // Show the form for server
+        setupServer(form);
     } else {
-        // Hash exists, check for local storage data
+        // Hash exists, try to reconnect as a client
         const remotePeerId = hash.slice(1);
         appConfig.peerId = remotePeerId; // Set the peerId from the hash
-        const storedData = localStorage.getItem(remotePeerId);
-
-        if (storedData) {
-            // Data exists in local storage, try to connect as a client
-            form.style.display = 'none'; // Hide the form for client
-
-            peer = new Peer();
-
-            peer.on('open', (id) => {
-                console.log(`Client Peer ID: ${id}`);
-                connectToPeer(remotePeerId); // Connect to the server peer
-            });
-
-            peer.on('connection', handleNewConnection);
-
-            peer.on('error', (err) => {
-                console.error('PeerJS Error:', err);
-
-                // If connection fails, treat as a new connection
-                isServer = true;
-                form.style.display = 'block'; // Show the form for server
-
-                form.addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    const userPeerId = document.getElementById('color').value.trim();
-                    if (userPeerId) {
-                        peer = new Peer(userPeerId);
-
-                        peer.on('open', (id) => {
-                            console.log(`Server Peer ID: ${id}`);
-                            window.location.hash = id; // Append peer ID to URL
-                            appConfig.peerId = id; // Set peerId in config
-                            document.body.removeChild(form); // Remove the form from the document
-                            initData(); // Initialize data for the server
-                        });
-
-                        peer.on('connection', handleNewConnection);
-
-                        peer.on('error', (err) => {
-                            console.error('PeerJS Error:', err);
-                            alert('An error occurred with the P2P connection: ' + err.message);
-                        });
-                    }
-                });
-            });
-        } else {
-            // No data in local storage, treat as a new connection
-            isServer = true;
-            form.style.display = 'block'; // Show the form for server
-
-            form.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const userPeerId = document.getElementById('color').value.trim();
-                if (userPeerId) {
-                    peer = new Peer(userPeerId);
-
-                    peer.on('open', (id) => {
-                        console.log(`Server Peer ID: ${id}`);
-                        window.location.hash = id; // Append peer ID to URL
-                        appConfig.peerId = id; // Set peerId in config
-                        document.body.removeChild(form); // Remove the form from the document
-                        initData(); // Initialize data for the server
-                    });
-
-                    peer.on('connection', handleNewConnection);
-
-                    peer.on('error', (err) => {
-                        console.error('PeerJS Error:', err);
-                        alert('An error occurred with the P2P connection: ' + err.message);
-                    });
-                }
-            });
-        }
+        console.log(`Hash found: ${remotePeerId}, attempting to reconnect as client.`);
+        form.style.display = 'none'; // Hide the form for client
+        attemptClientReconnection(remotePeerId);
     }
 }
 
-// Handle new incoming connections and send current content if server
+function setupServer(form) {
+    isServer = true;
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const userPeerId = document.getElementById('color').value.trim();
+        if (userPeerId) {
+            initializePeer(userPeerId, form, true);
+        }
+    });
+}
+
+function attemptClientReconnection(remotePeerId) {
+    peer = new Peer(); // Create a new peer without specifying an ID
+
+    peer.on('open', (id) => {
+        console.log(`Client Peer ID: ${id}`);
+        connectToPeer(remotePeerId); // Connect to the server peer
+    });
+
+    peer.on('connection', handleNewConnection);
+
+    peer.on('error', (err) => {
+        console.error('PeerJS Error:', err);
+        // If connection fails, treat it as a new connection attempt using the hash
+        console.log('Client connection failed, attempting to reconnect using the hash.');
+        initializePeer(remotePeerId, document.getElementById('login'), false); // Attempt to reconnect
+    });
+
+    // Check if data exists in localStorage for this peer ID
+    const storedData = localStorage.getItem(`#${remotePeerId}`); // Ensure the key includes '#'
+    if (storedData) {
+        console.log('Local data found, loading content from storage.');
+        loadContentFromStorage(remotePeerId); // Load local data if connection fails
+    } else {
+        console.log('No local data found for this peer ID.');
+    }
+}
+
+function initializePeer(peerId, form, isServer) {
+    // Close any existing peer connection before creating a new one
+    if (peer) {
+        peer.destroy(); // Clean up the previous peer connection
+    }
+
+    peer = new Peer(peerId);
+
+    peer.on('open', (id) => {
+        console.log(`${isServer ? 'Server' : 'Client'} Peer ID: ${id}`);
+        window.location.hash = id; // Append peer ID to URL
+        appConfig.peerId = id; // Set peerId in config
+        if (isServer) {
+            document.body.removeChild(form); // Remove the form from the document
+            initData(); // Initialize data for the server
+            updateConnectionStatus(true); // Update connection status to connected
+        }
+    });
+
+    peer.on('connection', handleNewConnection);
+
+    peer.on('error', (err) => {
+        console.error('PeerJS Error:', err);
+        alert('An error occurred with the P2P connection: ' + err.message);
+    });
+}
+
 function handleNewConnection(connection) {
     connections.push(connection);
     setupConnectionListeners(connection);
@@ -385,17 +386,16 @@ function handleNewConnection(connection) {
     // Send current content to the new peer
     connection.on('open', () => {
         connection.send({ type: 'content', data: display.innerHTML });
+        broadcastPeerCount(); // Broadcast peer count to all peers
     });
 }
 
-// Connect to a remote peer by ID
 function connectToPeer(peerId) {
     const conn = peer.connect(peerId);
     connections.push(conn);
     setupConnectionListeners(conn);
 }
 
-// Setup event listeners for the connection
 function setupConnectionListeners(conn) {
     conn.on('open', () => {
         console.log('Connected to peer');
@@ -409,13 +409,13 @@ function setupConnectionListeners(conn) {
         updateConnectionStatus(false);
         connections = connections.filter(c => c !== conn);
         updatePeerCount();
+        broadcastPeerCount(); // Broadcast peer count to all peers
         if (!isServer) {
             setTimeout(() => connectToPeer(conn.peer), 3000);
         }
     });
 }
 
-// Handle incoming data from peers and update the content
 function handleIncomingData(data) {
     if (data.type === 'content') {
         display.innerHTML = data.data;
@@ -426,18 +426,23 @@ function handleIncomingData(data) {
     }
 }
 
-// Update the connection status indicator
 function updateConnectionStatus(connected) {
     statusIndicator.style.backgroundColor = connected ? '#00FF00' : '#FF0000';
     statusText.textContent = connected ? 'Connected' : 'Disconnected';
 }
 
-// Update the displayed peer count and broadcast it to others
 function updatePeerCount() {
     const peerCount = connections.length;
     peerCountElement.textContent = `Peers: ${peerCount}`;
+}
 
-    // Broadcast updated peer count to all connections
+function updatePeerCountDisplay(count) {
+    peerCountElement.textContent = `Peers: ${count}`;
+}
+
+// Function to broadcast the peer count to all connected peers
+function broadcastPeerCount() {
+    const peerCount = connections.length;
     connections.forEach(conn => {
         if (conn.open) {
             conn.send({ type: 'peerCount', count: peerCount });
@@ -445,9 +450,12 @@ function updatePeerCount() {
     });
 }
 
-// Update the peer count display only (for incoming peer count updates)
-function updatePeerCountDisplay(count) {
-    peerCountElement.textContent = `Peers: ${count}`;
+// Function to load content from localStorage
+function loadContentFromStorage(peerId) {
+    const storedContent = localStorage.getItem(`#${peerId}`);
+    if (storedContent) {
+        display.innerHTML = JSON.parse(storedContent).join('<br>');
+    }
 }
 
 
