@@ -570,3 +570,36 @@ display.addEventListener('input', () => {
 display.addEventListener('mouseup', handleSelection);
 display.addEventListener('keyup', handleSelection);
 container.addEventListener('scroll', handleScroll);
+
+// Handle paste event to embed images
+display.addEventListener('paste', (e) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = document.createElement('img');
+                img.src = event.target.result; // Base64 string
+                insertImageAtCursor(img);
+            };
+            reader.readAsDataURL(file); // Convert to Base64
+            e.preventDefault(); // Prevent default paste behavior
+            break; // Only handle the first image
+        }
+    }
+});
+
+// Function to insert an image at the current cursor position
+function insertImageAtCursor(img) {
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents(); // Remove any selected text
+        range.insertNode(img); // Insert the image
+        range.collapse(false); // Move the cursor after the inserted image
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+}
