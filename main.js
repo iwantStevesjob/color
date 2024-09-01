@@ -240,14 +240,10 @@ to manage the connection status, update the peer count, and send data between pe
 
 // Function to broadcast the content to connected peers
 function broadcastData(content, connections, config) {
-    // Only broadcast if the content has changed
     if (content !== config.lastSyncedContent) {
         config.lastSyncedContent = content;
-
-        // Save the content locally (abstracted to a separate function)
         saveContentToStorage(config.peerId, content);
 
-        // Send content to all connected peers
         connections.forEach(conn => {
             if (conn.open) {
                 conn.send({ type: 'content', data: content });
@@ -386,8 +382,8 @@ function setupConnectionListeners(conn) {
 // Handle incoming data from peers and update the content
 function handleIncomingData(data) {
     if (data.type === 'content') {
-        display.innerHTML = data.data;
-        maintainEmptyLines();
+        display.innerHTML = data.data; // Update the display with the new content
+        maintainEmptyLines(); // Ensure empty lines are maintained
         saveContentToStorage(appConfig.peerId, data.data); // Save new content to storage
     } else if (data.type === 'peerCount') {
         updatePeerCountDisplay(data.count);
@@ -601,5 +597,9 @@ function insertImageAtCursor(img) {
         range.collapse(false); // Move the cursor after the inserted image
         selection.removeAllRanges();
         selection.addRange(range);
+
+        // Broadcast the updated content after inserting the image
+        const updatedContent = display.innerHTML;
+        broadcastData(updatedContent, connections, appConfig);
     }
 }
