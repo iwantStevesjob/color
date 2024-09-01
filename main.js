@@ -263,69 +263,83 @@ function initPeerJS() {
 
     if (!hash) {
         // No hash in the URL, this user will act as the server (or initial peer)
-        isServer = true;
-
-        // Handle form submission
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const userPeerId = document.getElementById('color').value.trim();
-            if (userPeerId) {
-                peer = new Peer(userPeerId);
-
-                peer.on('open', (id) => {
-                    console.log(`Server Peer ID: ${id}`);
-                    window.location.hash = id; // Append peer ID to URL
-                    appConfig.peerId = id; // Set peerId in config
-                    document.body.removeChild(form); // Remove the form from the document
-                    initData(); // Initialize data for the server
-                });
-
-                peer.on('connection', handleNewConnection);
-
-                peer.on('error', (err) => {
-                    console.error('PeerJS Error:', err);
-
-                    // Check if data exists in localStorage for this peer ID
-                    const storedData = localStorage.getItem(userPeerId);
-                    if (storedData) {
-                        alert('Peer connection error, but local data found.');
-                        loadContentFromStorage(userPeerId); // Load local data if connection fails
-                    } else {
-                        alert('An error occurred with the P2P connection: ' + err.message);
-                    }
-                });
-            }
-        });
+        console.log('No hash found, setting up as server.');
+        form.style.display = 'block'; // Show the form for server
+        setupServer(form);
     } else {
-        // Hash exists, meaning this user is a client
-        form.style.display = 'none'; // Hide the form for client
-
+        // Hash exists, try to reconnect as a client
         const remotePeerId = hash.slice(1);
         appConfig.peerId = remotePeerId; // Set the peerId from the hash
-
-        // Create a new Peer without specifying a peer ID (let the server generate one)
-        peer = new Peer();
-
-        peer.on('open', (id) => {
-            console.log(`Client Peer ID: ${id}`);
-            connectToPeer(remotePeerId); // Connect to the server peer
-        });
-
-        peer.on('connection', handleNewConnection);
-
-        peer.on('error', (err) => {
-            console.error('PeerJS Error:', err);
-
-            // Check if data exists in localStorage for this peer ID
-            const storedData = localStorage.getItem(remotePeerId);
-            if (storedData) {
-                alert('Peer connection error, but local data found.');
-                loadContentFromStorage(remotePeerId); // Load local data if connection fails
-            } else {
-                alert('An error occurred with the P2P connection: ' + err.message);
-            }
-        });
+        console.log(`Hash found: ${remotePeerId}, attempting to reconnect as client.`);
+        form.style.display = 'none'; // Hide the form for client
+        attemptClientReconnection(remotePeerId);
     }
+}
+
+function setupServer(form) {
+    isServer = true;
+
+    form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const userPeerId = document.getElementById('color').value.trim();
+        if (userPeerId) {
+            initializePeer(userPeerId, form, true);
+        }
+    });
+}
+
+function attemptClientReconnection(remotePeerId) {
+    peer = new Peer(); // Create a new peer without specifying an ID
+
+    peer.on('open', (id) => {
+        console.log(`Client Peer ID: ${id}`);
+        connectToPeer(remotePeerId); // Connect to the server peer
+    });
+
+    peer.on('connection', handleNewConnection);
+
+    peer.on('error', (err) => {
+        console.error('PeerJS Error:', err);
+        // If connection fails, treat it as a new connection attempt using the hash
+        console.log('Client connection failed, attempting to reconnect using the hash.');
+        initializePeer(remotePeerId, document.getElementById('login'), false); // Attempt to reconnect
+    });
+
+    // Check if data exists in localStorage for this peer ID
+    const storedData = localStorage.getItem(`#${remotePeerId}`); // Ensure the key includes '#'
+    if (storedData) {
+        console.log('Local data found, loading content from storage.');
+        loadContentFromStorage(remotePeerId); // Load local data if connection fails
+    } else {
+        console.log('No local data found for this peer ID.');
+    }
+}
+
+function initializePeer(peerId, form, isServer) {
+    // Close any existing peer connection before creating a new one
+    if (peer) {
+        peer.destroy(); // Clean up the previous peer connection
+    }
+
+    peer = new Peer(peerId);
+
+    peer.on('open', (id) => {
+        console.log(`${isServer ? 'Server' : 'Client'} Peer ID: ${id}`);
+        window.location.hash = id; // Append peer ID to URL
+        appConfig.peerId = id; // Set peerId in config
+        if (isServer) {
+            document.body.removeChild(form); // Remove the form from the document
+            initData(); // Initialize data for the server
+            updateConnectionStatus(true); // Update connection status to connected
+        }
+    });
+
+    peer.on('connection', handleNewConnection);
+
+    peer.on('error', (err) => {
+        console.error('PeerJS Error:', err);
+        alert('An error occurred with the P2P connection: ' + err.message);
+    });
 }
 
 // Handle new incoming connections and send current content if server
@@ -337,6 +351,7 @@ function handleNewConnection(connection) {
     // Send current content to the new peer
     connection.on('open', () => {
         connection.send({ type: 'content', data: display.innerHTML });
+        broadcastPeerCount(); // Broadcast peer count to all peers
     });
 }
 
@@ -361,6 +376,7 @@ function setupConnectionListeners(conn) {
         updateConnectionStatus(false);
         connections = connections.filter(c => c !== conn);
         updatePeerCount();
+        broadcastPeerCount(); // Broadcast peer count to all peers
         if (!isServer) {
             setTimeout(() => connectToPeer(conn.peer), 3000);
         }
@@ -402,6 +418,23 @@ function updatePeerCountDisplay(count) {
     peerCountElement.textContent = `Peers: ${count}`;
 }
 
+// Function to broadcast the peer count to all connected peers
+function broadcastPeerCount() {
+    const peerCount = connections.length;
+    connections.forEach(conn => {
+        if (conn.open) {
+            conn.send({ type: 'peerCount', count: peerCount });
+        }
+    });
+}
+
+// Function to load content from localStorage
+function loadContentFromStorage(peerId) {
+    const storedContent = localStorage.getItem(`#${peerId}`);
+    if (storedContent) {
+        display.innerHTML = JSON.parse(storedContent).join('<br>');
+    }
+}
 
 /*-------------------------------------------
 TOOLS FUNCTIONALITY
@@ -445,6 +478,25 @@ function insertImage() {
     }
     display.focus();
 }
+// Change the font size of the selected text
+function changeFontSize(increment) {
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const selectedText = range.toString();
+        
+        if (selectedText) {
+            const span = document.createElement('span');
+            const currentSize = parseInt(window.getComputedStyle(display).fontSize);
+            span.style.fontSize = `${currentSize + increment}px`;
+            span.textContent = selectedText;
+
+            range.deleteContents(); // Remove the selected text
+            range.insertNode(span); // Insert the new span with updated font size
+            display.focus();
+        }
+    }
+}
 
 // Handle selection changes to show or hide the tools
 function handleSelection() {
@@ -473,6 +525,12 @@ function handleToolsClick(e) {
             break;
         case 'image-button':
             insertImage();
+            break;
+        case 'increase-heading':
+            changeFontSize(1); // Increase font size by 1px
+            break;
+        case 'decrease-heading':
+            changeFontSize(-1); // Decrease font size by 1px
             break;
     }
 }
