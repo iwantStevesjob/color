@@ -1,4 +1,3 @@
-
 // Collaborative data Application with P2P Synchronization
 // Summary: This script creates a collaborative data application using PeerJS for peer-to-peer communication. 
 // The data are displayed in a scrollable container and synchronized between connected peers. 
@@ -39,33 +38,70 @@ Key functions are `initData()`, `saveContentToStorage()`, `getContentFromStorage
 
 // Initialize the data display based on stored content or create a placeholder
 function initData() {
-    const storedContent = getContentFromStorage(appConfig.peerId);
+    getContentFromStorage(appConfig.peerId).then((storedContent) => {
+        if (storedContent) {
+            display.innerHTML = storedContent;
+        } else {
+            const viewportHeight = window.innerHeight;
+            const totalLines = Math.floor(viewportHeight / lineHeight) * 3;
+            display.innerHTML = '<br>'.repeat(totalLines);
+        }
 
-    if (storedContent) {
-        display.innerHTML = storedContent;
-    } else {
+        container.scrollTop = container.scrollHeight / 3;
+        display.focus();
+    }).catch((error) => {
+        console.error('Error loading content:', error);
         const viewportHeight = window.innerHeight;
         const totalLines = Math.floor(viewportHeight / lineHeight) * 3;
         display.innerHTML = '<br>'.repeat(totalLines);
-    }
-
-    container.scrollTop = container.scrollHeight / 3;
-    display.focus();
+        container.scrollTop = container.scrollHeight / 3;
+        display.focus();
+    });
 }
 
-// Save the content to localStorage based on the peer ID
+// Save the content to IndexedDB based on the peer ID
 function saveContentToStorage(peerId, content) {
-    const lines = content.split('<br>');
-    localStorage.setItem(`#${peerId}`, JSON.stringify(lines));
+    initStorage().then((db) => {
+        const transaction = db.transaction(['contentStore'], 'readwrite');
+        const store = transaction.objectStore('contentStore');
+        store.put({ peerId: `#${peerId}`, content: content.split('<br>') });
+
+        transaction.oncomplete = () => {
+            console.log('Content saved to IndexedDB');
+        };
+
+        transaction.onerror = (event) => {
+            console.error('IndexedDB transaction error: ' + event.target.errorCode);
+        };
+    }).catch((error) => {
+        console.error(error);
+    });
 }
 
-// Retrieve the content from localStorage for a given peer ID
+// Retrieve the content from IndexedDB for a given peer ID
 function getContentFromStorage(peerId) {
-    const storedContent = localStorage.getItem(`#${peerId}`);
-    if (storedContent) {
-        return JSON.parse(storedContent).join('<br>');
-    }
-    return null;
+    return new Promise((resolve, reject) => {
+        initStorage().then((db) => {
+            const transaction = db.transaction(['contentStore'], 'readonly');
+            const store = transaction.objectStore('contentStore');
+            const request = store.get(`#${peerId}`);
+
+            request.onsuccess = (event) => {
+                const result = event.target.result;
+                if (result) {
+                    resolve(result.content.join('<br>'));
+                } else {
+                    resolve(null);
+                }
+            };
+
+            request.onerror = (event) => {
+                reject('IndexedDB request error: ' + event.target.errorCode);
+            };
+        }).catch((error) => {
+            reject(error);
+        });
+    });
 }
 
 // Interpret HTML content and convert it from encoded format
@@ -167,7 +203,6 @@ function maintainEmptyLines() {
         display.innerHTML = content + '<br>';
     }
 }
-
 // Handle paste event to embed images
 display.addEventListener('paste', (e) => {
     const items = e.clipboardData.items;
@@ -177,9 +212,35 @@ display.addEventListener('paste', (e) => {
             const file = item.getAsFile();
             const reader = new FileReader();
             reader.onload = function(event) {
-                const img = document.createElement('img');
-                img.src = event.target.result; // Base64 string
-                insertImageAtCursor(img);
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    let width = img.width;
+                    let height = img.height;
+
+                    // Calculate the new dimensions while maintaining the aspect ratio
+                    if (width > height) {
+                        if (width > 400) {
+                            height *= 400 / width;
+                            width = 400;
+                        }
+                    } else {
+                        if (height > 400) {
+                            width *= 400 / height;
+                            height = 400;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    const resizedImg = document.createElement('img');
+                    resizedImg.src = canvas.toDataURL('image/jpeg', 0.7); // Base64 string with compression
+                    insertImageAtCursor(resizedImg);
+                };
+                img.src = event.target.result;
             };
             reader.readAsDataURL(file); // Convert to Base64
             e.preventDefault(); // Prevent default paste behavior
@@ -292,7 +353,7 @@ function broadcastData(content, connections, config) {
     }
 }
 
-// Initialize PeerJS for P2P communication
+// Initialize PeerJS for P2P communicatio
 function initPeerJS() {
     const hash = window.location.hash;
     const form = document.getElementById('login');
@@ -341,14 +402,17 @@ function attemptClientReconnection(remotePeerId) {
         initializePeer(remotePeerId, document.getElementById('login'), false); // Attempt to reconnect
     });
 
-    // Check if data exists in localStorage for this peer ID
-    const storedData = localStorage.getItem(`#${remotePeerId}`); // Ensure the key includes '#'
-    if (storedData) {
-        console.log('Local data found, loading content from storage.');
-        loadContentFromStorage(remotePeerId); // Load local data if connection fails
-    } else {
-        console.log('No local data found for this peer ID.');
-    }
+    // Check if data exists in IndexedDB for this peer ID
+    getContentFromStorage(remotePeerId).then((storedData) => {
+        if (storedData) {
+            console.log('Local data found, loading content from storage.');
+            loadContentFromStorage(remotePeerId); // Load local data if connection fails
+        } else {
+            console.log('No local data found for this peer ID.');
+        }
+    }).catch((error) => {
+        console.error(error);
+    });
 }
 
 function initializePeer(peerId, form, isServer) {
@@ -450,12 +514,37 @@ function broadcastPeerCount() {
     });
 }
 
-// Function to load content from localStorage
+// Function to load content from IndexedDB
 function loadContentFromStorage(peerId) {
-    const storedContent = localStorage.getItem(`#${peerId}`);
-    if (storedContent) {
-        display.innerHTML = JSON.parse(storedContent).join('<br>');
-    }
+    getContentFromStorage(peerId).then((content) => {
+        if (content) {
+            display.innerHTML = content;
+        }
+    }).catch((error) => {
+        console.error(error);
+    });
+}
+
+// Initialize IndexedDB
+function initStorage() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open('collaborativeApp', 1);
+
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains('contentStore')) {
+                db.createObjectStore('contentStore', { keyPath: 'peerId' });
+            }
+        };
+
+        request.onsuccess = (event) => {
+            resolve(event.target.result);
+        };
+
+        request.onerror = (event) => {
+            reject('IndexedDB initialization error: ' + event.target.errorCode);
+        };
+    });
 }
 
 
@@ -532,7 +621,6 @@ function handleToolsClick(e) {
             break;
     }
 }
-
 /*-------------------------------------------
 INITIALIZATION AND EVENT BINDINGS
 
@@ -568,3 +656,4 @@ display.addEventListener('input', () => {
 display.addEventListener('mouseup', handleSelection);
 display.addEventListener('keyup', handleSelection);
 container.addEventListener('scroll', handleScroll);
+
