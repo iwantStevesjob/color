@@ -1,3 +1,4 @@
+
 // Collaborative data Application with P2P Synchronization
 // Summary: This script creates a collaborative data application using PeerJS for peer-to-peer communication. 
 // The data are displayed in a scrollable container and synchronized between connected peers. 
