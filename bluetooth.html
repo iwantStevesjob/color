@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Bluetooth Sample App</title>
+    <title>Improved Web Bluetooth Sample App</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -18,6 +18,7 @@
             padding: 10px;
             font-size: 16px;
             cursor: pointer;
+            margin-right: 10px;
         }
         .device-item {
             margin: 10px 0;
@@ -25,65 +26,115 @@
             border: 1px solid #ccc;
             border-radius: 5px;
         }
+        #filterOptions {
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
-    <h1>Web Bluetooth Sample App</h1>
+    <h1>Improved Web Bluetooth Sample App</h1>
     <div id="status"></div>
     <div id="connectButtonContainer"></div>
+    <div id="filterOptions">
+        <label for="namePrefix">Device Name Prefix:</label>
+        <input type="text" id="namePrefix" placeholder="e.g., Android">
+        <button id="applyFilter">Apply Filter</button>
+    </div>
     <div id="deviceList"></div>
 
     <script>
         const statusEl = document.getElementById('status');
         const connectButtonContainer = document.getElementById('connectButtonContainer');
         const deviceListEl = document.getElementById('deviceList');
+        const namePrefixInput = document.getElementById('namePrefix');
+        const applyFilterButton = document.getElementById('applyFilter');
+
+        let namePrefix = '';
 
         // Check if Web Bluetooth API is available
         if ('bluetooth' in navigator) {
             statusEl.textContent = 'Web Bluetooth API is supported.';
             const connectButton = document.createElement('button');
-            connectButton.textContent = 'Connect';
-            connectButton.addEventListener('click', connectBluetooth);
+            connectButton.textContent = 'Scan for Devices';
+            connectButton.addEventListener('click', scanForDevices);
             connectButtonContainer.appendChild(connectButton);
         } else {
             statusEl.textContent = 'Error: Web Bluetooth API is not supported in this browser.';
         }
 
-        async function connectBluetooth() {
+        applyFilterButton.addEventListener('click', () => {
+            namePrefix = namePrefixInput.value.trim();
+            statusEl.textContent = `Filter applied: Looking for devices with name prefix "${namePrefix}"`;
+        });
+
+        async function scanForDevices() {
             try {
-                const device = await navigator.bluetooth.requestDevice({
+                statusEl.textContent = 'Scanning for devices...';
+                deviceListEl.innerHTML = ''; // Clear previous list
+
+                const options = {
                     acceptAllDevices: true,
                     optionalServices: ['generic_access']
-                });
+                };
 
-                statusEl.textContent = 'Connected to device: ' + device.name;
-                device.addEventListener('gattserverdisconnected', onDisconnected);
+                if (namePrefix) {
+                    options.filters = [{ namePrefix: namePrefix }];
+                    delete options.acceptAllDevices;
+                }
 
-                const server = await device.gatt.connect();
-                statusEl.textContent += ' (GATT server connected)';
+                const device = await navigator.bluetooth.requestDevice(options);
+                addDeviceToList(device);
 
-                // Attempt to read the device name
-                const service = await server.getPrimaryService('generic_access');
-                const characteristic = await service.getCharacteristic('gap.device_name');
-                const value = await characteristic.readValue();
-                const deviceName = new TextDecoder().decode(value);
-
-                addDeviceToList(deviceName, device.id);
+                statusEl.textContent = 'Scan complete. Click on a device to connect.';
             } catch (error) {
                 statusEl.textContent = 'Error: ' + error;
             }
         }
 
-        function onDisconnected(event) {
-            const device = event.target;
-            statusEl.textContent = `Device ${device.name} is disconnected.`;
+        async function connectToDevice(device) {
+            try {
+                statusEl.textContent = `Connecting to ${device.name || 'unnamed device'}...`;
+                const server = await device.gatt.connect();
+                statusEl.textContent = `Connected to ${device.name || 'unnamed device'}`;
+
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
+                // Try to read more device information
+                try {
+                    const service = await server.getPrimaryService('generic_access');
+                    const nameChar = await service.getCharacteristic('gap.device_name');
+                    const valueDataView = await nameChar.readValue();
+                    const deviceName = new TextDecoder().decode(valueDataView);
+                    updateDeviceInList(device, deviceName);
+                } catch (error) {
+                    console.log('Could not read device name:', error);
+                }
+            } catch (error) {
+                statusEl.textContent = 'Connection error: ' + error;
+            }
         }
 
-        function addDeviceToList(name, id) {
+        function onDisconnected(event) {
+            const device = event.target;
+            statusEl.textContent = `Device ${device.name || 'unnamed device'} is disconnected.`;
+        }
+
+        function addDeviceToList(device) {
             const deviceItem = document.createElement('div');
             deviceItem.className = 'device-item';
-            deviceItem.textContent = `Device: ${name} (ID: ${id})`;
+            deviceItem.textContent = `Device: ${device.name || 'Unknown'} (ID: ${device.id})`;
+            deviceItem.addEventListener('click', () => connectToDevice(device));
             deviceListEl.appendChild(deviceItem);
+        }
+
+        function updateDeviceInList(device, newName) {
+            const deviceItems = deviceListEl.getElementsByClassName('device-item');
+            for (let item of deviceItems) {
+                if (item.textContent.includes(device.id)) {
+                    item.textContent = `Device: ${newName} (ID: ${device.id})`;
+                    break;
+                }
+            }
         }
     </script>
 </body>
