@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Bluetooth Sample App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #status, #deviceList {
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .device-item {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Web Bluetooth Sample App</h1>
+    <div id="status"></div>
+    <div id="connectButtonContainer"></div>
+    <div id="deviceList"></div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const connectButtonContainer = document.getElementById('connectButtonContainer');
+        const deviceListEl = document.getElementById('deviceList');
+
+        // Check if Web Bluetooth API is available
+        if ('bluetooth' in navigator) {
+            statusEl.textContent = 'Web Bluetooth API is supported.';
+            const connectButton = document.createElement('button');
+            connectButton.textContent = 'Connect';
+            connectButton.addEventListener('click', connectBluetooth);
+            connectButtonContainer.appendChild(connectButton);
+        } else {
+            statusEl.textContent = 'Error: Web Bluetooth API is not supported in this browser.';
+        }
+
+        async function connectBluetooth() {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: ['generic_access']
+                });
+
+                statusEl.textContent = 'Connected to device: ' + device.name;
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
+                const server = await device.gatt.connect();
+                statusEl.textContent += ' (GATT server connected)';
+
+                // Attempt to read the device name
+                const service = await server.getPrimaryService('generic_access');
+                const characteristic = await service.getCharacteristic('gap.device_name');
+                const value = await characteristic.readValue();
+                const deviceName = new TextDecoder().decode(value);
+
+                addDeviceToList(deviceName, device.id);
+            } catch (error) {
+                statusEl.textContent = 'Error: ' + error;
+            }
+        }
+
+        function onDisconnected(event) {
+            const device = event.target;
+            statusEl.textContent = `Device ${device.name} is disconnected.`;
+        }
+
+        function addDeviceToList(name, id) {
+            const deviceItem = document.createElement('div');
+            deviceItem.className = 'device-item';
+            deviceItem.textContent = `Device: ${name} (ID: ${id})`;
+            deviceListEl.appendChild(deviceItem);
+        }
+    </script>
+</body>
+</html>
