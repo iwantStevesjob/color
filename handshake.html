@@ -5,14 +5,14 @@
   <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 </head>
 <body>
-  V2 <BR/>
-  <button id="button" onclick="createOffer()">Offer:</button>
-  <textarea id="offer" placeholder="Paste offer here"></textarea><br>
+  v3:<br/>
+  <button id="button" onclick="createOffer()">Create Offer</button><br>
+  Offer SDP: <textarea id="offer" placeholder="Paste offer here"></textarea><br>
   
-  Answer: <textarea id="answer"></textarea><br>
+  Answer SDP: <textarea id="answer" placeholder="Paste answer here"></textarea><br>
   <div id="div"></div>
   
-  Chat: <input id="chat"></input><br>
+  Chat: <input id="chat" placeholder="Type your message here"></input><br>
   
   <script>
     var server = { urls: "stun:stun.l.google.com:19302" };
@@ -20,12 +20,14 @@
 
     pc.ondatachannel = e => dcInit(dc = e.channel);
     pc.oniceconnectionstatechange = e => log("ICE state: " + pc.iceConnectionState);
-    
+
+    // Handle ICE candidate gathering and signaling
     pc.onicecandidate = e => {
       if (e.candidate) {
         log("ICE candidate: " + JSON.stringify(e.candidate));
       } else {
-        // No more candidates, means signaling is done
+        // All ICE candidates have been gathered, output SDP offer
+        log("All ICE candidates gathered.");
         offer.value = pc.localDescription.sdp;
         offer.select();
         answer.placeholder = "Paste answer here";
@@ -34,18 +36,18 @@
 
     function dcInit() {
       dc.onopen = () => log("Chat is open!");
-      dc.onmessage = e => log("Message: " + e.data);
+      dc.onmessage = e => log("Message received: " + e.data);
     }
 
     function createOffer() {
       button.disabled = true;
       dcInit(dc = pc.createDataChannel("chat"));
-      
       pc.createOffer().then(d => pc.setLocalDescription(d)).catch(log);
     }
 
-    offer.onkeypress = e => {
-      if (!enterPressed(e) || pc.signalingState != "stable") return;
+    // Handle offer SDP input from the other peer
+    offer.oninput = e => {
+      if (pc.signalingState != "stable") return;
       button.disabled = offer.disabled = true;
       
       var desc = new RTCSessionDescription({ type: "offer", sdp: offer.value });
@@ -55,22 +57,23 @@
         .catch(log);
     };
 
-    answer.onkeypress = e => {
-      if (!enterPressed(e) || pc.signalingState != "have-local-offer") return;
+    // Handle answer SDP input from the other peer
+    answer.oninput = e => {
+      if (pc.signalingState != "have-local-offer") return;
       answer.disabled = true;
 
       var desc = new RTCSessionDescription({ type: "answer", sdp: answer.value });
       pc.setRemoteDescription(desc).catch(log);
     };
 
+    // Send chat messages over data channel
     chat.onkeypress = e => {
-      if (!enterPressed(e)) return;
+      if (e.keyCode != 13 || !dc) return;
       dc.send(chat.value);
       log("Sent: " + chat.value);
       chat.value = "";
     };
 
-    var enterPressed = e => e.keyCode == 13;
     var log = msg => div.innerHTML += "<p>" + msg + "</p>";
   </script>
 </body>
