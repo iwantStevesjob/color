@@ -1,94 +1,103 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>WebRTC Chat</title>
+  <title>WebRTC Data Channel</title>
   <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
 </head>
 <body>
-  <button id="button" onclick="createOffer()">Offer:</button>
+  v6:<br/>
+  <button id="button" onclick="createOffer()">Create Offer</button>
   <textarea id="offer" placeholder="Paste offer here"></textarea><br>
   
   Answer: <textarea id="answer"></textarea><br>
-  <div id="div"></div>
+  <div id="log"></div>
   
-  Chat: <input id="chat"></input><br>
+  Chat: <input id="chat" placeholder="Type message here"></input><br>
   
   <script>
     var server = { urls: "stun:stun.l.google.com:19302" };
-    var dc, pc = new RTCPeerConnection({ iceServers: [server] });
-    
-    pc.ondatachannel = e => dcInit(dc = e.channel);
-    pc.oniceconnectionstatechange = e => log(pc.iceConnectionState);
+    var pc = new RTCPeerConnection({ iceServers: [server] });
+    var dc, isOfferer = false;
 
-    function dcInit() {
-      dc.onopen = () => log("Chat is open!");
-      dc.onmessage = e => log(e.data);
-    }
+    // ICE candidate handler
+    pc.onicecandidate = e => {
+      if (e.candidate) {
+        log("ICE Candidate: " + JSON.stringify(e.candidate));
+      } else {
+        log("All ICE candidates have been sent.");
+        if (isOfferer) {
+          offer.value = pc.localDescription.sdp;
+          offer.select();
+          answer.placeholder = "Paste answer here";
+        } else {
+          answer.value = pc.localDescription.sdp;
+          answer.select();
+        }
+      }
+    };
 
+    // Data channel handler
+    pc.ondatachannel = event => {
+      dc = event.channel;
+      dcInit();
+    };
+
+    // Create data channel and offer
     function createOffer() {
-      console.log("Creating offer...");
       button.disabled = true;
-      dcInit(dc = pc.createDataChannel("chat"));
-      pc.createOffer().then(d => {
-        console.log("Offer created: ", d.sdp);
-        return pc.setLocalDescription(d);
-      }).catch(log);
+      isOfferer = true;
+      dc = pc.createDataChannel("chat");
+      dcInit();
       
-      pc.onicecandidate = e => {
-        if (e.candidate) return;
-        console.log("Final offer SDP: ", pc.localDescription.sdp);
-        offer.value = pc.localDescription.sdp;
-        offer.select();
-        answer.placeholder = "Paste answer here";
-      };
+      pc.createOffer().then(offer => {
+        return pc.setLocalDescription(offer);
+      }).catch(log);
     }
 
+    // Handle offer input and create answer
     offer.onkeypress = e => {
-      if (!enterPressed(e) || pc.signalingState != "stable") return;
+      if (e.keyCode !== 13 || pc.signalingState !== "stable") return;
       button.disabled = offer.disabled = true;
-      console.log("Setting remote description for offer...");
-      var desc = new RTCSessionDescription({ type: "offer", sdp: offer.value });
-      pc.setRemoteDescription(desc)
-        .then(() => {
-          console.log("Remote offer description set, creating answer...");
-          return pc.createAnswer();
-        })
-        .then(d => {
-          console.log("Answer created: ", d.sdp);
-          return pc.setLocalDescription(d);
-        })
-        .catch(log);
-
-      pc.onicecandidate = e => {
-        if (e.candidate) return;
-        console.log("Final answer SDP: ", pc.localDescription.sdp);
-        answer.focus();
-        answer.value = pc.localDescription.sdp;
-        answer.select();
-      };
-    };
-
-    answer.onkeypress = e => {
-      if (!enterPressed(e) || pc.signalingState != "have-local-offer") return;
-      console.log("Setting remote description for answer...");
-      answer.disabled = true;
-      var desc = new RTCSessionDescription({ type: "answer", sdp: answer.value });
-      pc.setRemoteDescription(desc).then(() => {
-        console.log("Remote answer description set successfully.");
+      
+      var offerDesc = new RTCSessionDescription({ type: "offer", sdp: offer.value });
+      pc.setRemoteDescription(offerDesc).then(() => {
+        log("Remote offer description set, creating answer...");
+        return pc.createAnswer();
+      }).then(answer => {
+        return pc.setLocalDescription(answer);
+      }).then(() => {
+        log("Answer created: " + pc.localDescription.sdp);
       }).catch(log);
     };
 
+    // Handle answer input
+    answer.onkeypress = e => {
+      if (e.keyCode !== 13 || pc.signalingState !== "have-local-offer") return;
+      answer.disabled = true;
+      
+      var answerDesc = new RTCSessionDescription({ type: "answer", sdp: answer.value });
+      pc.setRemoteDescription(answerDesc).then(() => {
+        log("Remote answer description set.");
+      }).catch(log);
+    };
+
+    // Chat input handling
     chat.onkeypress = e => {
-      if (!enterPressed(e)) return;
+      if (e.keyCode !== 13) return;
       dc.send(chat.value);
-      log(chat.value);
+      log("Sent: " + chat.value);
       chat.value = "";
     };
 
-    var enterPressed = e => e.keyCode == 13;
+    // Data channel initialization
+    function dcInit() {
+      dc.onopen = () => log("Chat is open!");
+      dc.onmessage = e => log("Received: " + e.data);
+    }
+
+    // Logging function
     var log = msg => {
-      console.log(msg);  // Add log to console
-      div.innerHTML += "<p>" + msg + "</p>";
+      document.getElementById('log').innerHTML += "<p>" + msg + "</p>";
     };
   </script>
 </body>
