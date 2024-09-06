@@ -16,47 +16,48 @@
   <script>
     var server = { urls: "stun:stun.l.google.com:19302" };
     var dc, pc = new RTCPeerConnection({ iceServers: [server] });
-    
+
     pc.ondatachannel = e => dcInit(dc = e.channel);
-    pc.oniceconnectionstatechange = e => log(pc.iceConnectionState);
+    pc.oniceconnectionstatechange = e => log("ICE state: " + pc.iceConnectionState);
+    
+    pc.onicecandidate = e => {
+      if (e.candidate) {
+        log("ICE candidate: " + JSON.stringify(e.candidate));
+      } else {
+        // No more candidates, means signaling is done
+        offer.value = pc.localDescription.sdp;
+        offer.select();
+        answer.placeholder = "Paste answer here";
+      }
+    };
 
     function dcInit() {
       dc.onopen = () => log("Chat is open!");
-      dc.onmessage = e => log(e.data);
+      dc.onmessage = e => log("Message: " + e.data);
     }
 
     function createOffer() {
       button.disabled = true;
       dcInit(dc = pc.createDataChannel("chat"));
-      pc.createOffer().then(d => pc.setLocalDescription(d)).catch(log);
       
-      pc.onicecandidate = e => {
-        if (e.candidate) return;
-        offer.value = pc.localDescription.sdp;
-        offer.select();
-        answer.placeholder = "Paste answer here";
-      };
+      pc.createOffer().then(d => pc.setLocalDescription(d)).catch(log);
     }
 
     offer.onkeypress = e => {
       if (!enterPressed(e) || pc.signalingState != "stable") return;
       button.disabled = offer.disabled = true;
+      
       var desc = new RTCSessionDescription({ type: "offer", sdp: offer.value });
       pc.setRemoteDescription(desc)
-        .then(() => pc.createAnswer()).then(d => pc.setLocalDescription(d))
+        .then(() => pc.createAnswer())
+        .then(d => pc.setLocalDescription(d))
         .catch(log);
-
-      pc.onicecandidate = e => {
-        if (e.candidate) return;
-        answer.focus();
-        answer.value = pc.localDescription.sdp;
-        answer.select();
-      };
     };
 
     answer.onkeypress = e => {
       if (!enterPressed(e) || pc.signalingState != "have-local-offer") return;
       answer.disabled = true;
+
       var desc = new RTCSessionDescription({ type: "answer", sdp: answer.value });
       pc.setRemoteDescription(desc).catch(log);
     };
@@ -64,7 +65,7 @@
     chat.onkeypress = e => {
       if (!enterPressed(e)) return;
       dc.send(chat.value);
-      log(chat.value);
+      log("Sent: " + chat.value);
       chat.value = "";
     };
 
