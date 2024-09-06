@@ -1,95 +1,59 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web NFC Demo</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            padding: 20px;
-            max-width: 600px;
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NFC Reader/Writer Test</title>
+  <script>
+    async function initNFC() {
+      try {
+        const ndef = new NDEFReader();
+        let ignoreRead = false;
+
+        // Reading NFC tags
+        ndef.onreading = (event) => {
+          if (ignoreRead) {
+            return; // write pending, ignore read.
+          }
+          console.log("We read a tag, but not during pending write!");
+        };
+
+        // Writing to NFC tags
+        function write(data) {
+          ignoreRead = true;
+          return new Promise((resolve, reject) => {
+            ndef.addEventListener(
+              "reading",
+              (event) => {
+                ndef
+                  .write(data)
+                  .then(resolve, reject)
+                  .finally(() => (ignoreRead = false));
+              },
+              { once: true },
+            );
+          });
         }
-        button {
-            display: block;
-            margin: 10px 0;
-            padding: 10px;
-            font-size: 16px;
+
+        // Start NFC scan
+        await ndef.scan();
+
+        // Write to the NFC tag
+        try {
+          await write("Hello World");
+          console.log("We wrote to a tag!");
+        } catch (err) {
+          console.error("Something went wrong", err);
         }
-        input[type="text"] {
-            width: calc(100% - 22px);
-            padding: 10px;
-            font-size: 16px;
-        }
-        pre {
-            background-color: #f4f4f4;
-            padding: 10px;
-            border: 1px solid #ddd;
-        }
-    </style>
+      } catch (error) {
+        console.log("Error initializing NFC:", error);
+      }
+    }
+  </script>
 </head>
 <body>
-
-    <h1>Web NFC Test</h1>
-    <p>Use the buttons below to write or read NFC data using your browser.</p>
-
-    <label for="nfcInput">Enter data to write to NFC tag:</label>
-    <input type="text" id="nfcInput" placeholder="Type your message here">
-    
-    <button id="writeButton">Write to NFC Tag</button>
-    <button id="readButton">Read from NFC Tag</button>
-
-    <pre id="output"></pre>
-
-    <script>
-        async function writeToNFC() {
-            try {
-                if ('NDEFWriter' in window) {
-                    const nfcWriter = new NDEFWriter();
-                    const message = document.getElementById('nfcInput').value || "Default message";
-                    await nfcWriter.write(message);
-                    log("NFC data written successfully: " + message);
-                } else {
-                    log("NFC is not supported on this browser.");
-                }
-            } catch (error) {
-                log("Error writing to NFC: " + error);
-            }
-        }
-
-        async function readFromNFC() {
-            try {
-                if ('NDEFReader' in window) {
-                    const nfcReader = new NDEFReader();
-                    await nfcReader.scan();
-                    nfcReader.onreading = (event) => {
-                        const decoder = new TextDecoder();
-                        let message = "";
-                        for (const record of event.message.records) {
-                            message += decoder.decode(record.data) + "\n";
-                        }
-                        log("Received NFC message:\n" + message);
-                    };
-                    log("Waiting for NFC data...");
-                } else {
-                    log("NFC is not supported on this browser.");
-                }
-            } catch (error) {
-                log("Error reading NFC: " + error);
-            }
-        }
-
-        function log(message) {
-            const output = document.getElementById('output');
-            output.textContent += message + '\n';
-        }
-
-        // Add event listeners to buttons
-        document.getElementById('writeButton').addEventListener('click', writeToNFC);
-        document.getElementById('readButton').addEventListener('click', readFromNFC);
-    </script>
-
+  <h1>NFC Reader/Writer Test</h1>
+  <button onclick="initNFC()">Start NFC</button>
+  <p>Click the button to start scanning for NFC tags.</p>
 </body>
 </html>
