@@ -60,6 +60,28 @@ function initData() {
     });
 }
 
+// Initialize IndexedDB
+function initStorage() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open('collaborativeApp', 1);
+
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains('contentStore')) {
+                db.createObjectStore('contentStore', { keyPath: 'peerId' });
+            }
+        };
+
+        request.onsuccess = (event) => {
+            resolve(event.target.result);
+        };
+
+        request.onerror = (event) => {
+            reject('IndexedDB initialization error: ' + event.target.errorCode);
+        };
+    });
+}
+
 // Save the content to IndexedDB based on the peer ID
 function saveContentToStorage(peerId, content) {
     initStorage().then((db) => {
@@ -148,7 +170,16 @@ function interpretHTML() {
         selection.addRange(newRange);
     }
 
+    maintainEmptyLines(); // Ensure interpretHTML calls maintainEmptyLines
     return interpretedContent; // Ensure interpretHTML returns the interpreted content
+}
+
+// Ensure that the content always ends with an empty line
+function maintainEmptyLines() {
+    const content = display.innerHTML;
+    if (!content.endsWith('<br>')) {
+        display.innerHTML = content + '<br>';
+    }
 }
 
 // Handle Enter key to insert a new line without causing double line breaks or adding <div>
@@ -197,13 +228,6 @@ function handleScroll() {
     }
 }
 
-// Ensure that the content always ends with an empty line
-function maintainEmptyLines() {
-    const content = display.innerHTML;
-    if (!content.endsWith('<br>')) {
-        display.innerHTML = content + '<br>';
-    }
-}
 // Handle paste event to embed images
 display.addEventListener('paste', (e) => {
     const items = e.clipboardData.items;
@@ -266,6 +290,7 @@ function insertImageAtCursor(img) {
         broadcastData(updatedContent, connections, appConfig);
     }
 }
+
 // Handle Enter key press for new line behavior
 display.addEventListener('keydown', handleEnterKey);
 
@@ -361,16 +386,16 @@ function initPeerJS() {
 
     if (!hash) {
         // No hash in the URL, this user will act as the server (or initial peer)
-        console.log('No hash found, setting up as server.');
+        console.log('No hash found, show color form.');
         form.style.display = 'block'; // Show the form for server
         setupServer(form);
     } else {
         // Hash exists, try to reconnect as a client
-        const remotePeerId = hash.slice(1);
-        appConfig.peerId = remotePeerId; // Set the peerId from the hash
-        console.log(`Hash found: ${remotePeerId}, attempting to reconnect as client.`);
+        const color = hash.slice(1);
+        appConfig.peerId = color; // Set the peerId from the hash
+        console.log(`Hash found: ${color}, attempting to connect as peer.`);
         form.style.display = 'none'; // Hide the form for client
-        attemptClientReconnection(remotePeerId);
+        peerConnect(color);
     }
 }
 
@@ -381,67 +406,68 @@ function setupServer(form) {
         e.preventDefault();
         const userPeerId = document.getElementById('color').value.trim();
         if (userPeerId) {
-            initializePeer(userPeerId, form, true);
+            peerConnect(userPeerId);
         }
     });
 }
 
-function attemptClientReconnection(remotePeerId) {
-    peer = new Peer(); // Create a new peer without specifying an ID
+function peerConnect(color) {
+    peer = new Peer(color);
 
     peer.on('open', (id) => {
-        console.log(`Client Peer ID: ${id}`);
-        connectToPeer(remotePeerId); // Connect to the server peer
+        console.log(`Server Peer ID: ${id}`);
+        window.location.hash = id; // Append peer ID to URL
+        appConfig.peerId = id; // Set peerId in config
+            initData(); // Initialize data for the server
+            updateConnectionStatus(true); // Update connection status to connected
     });
-
-    peer.on('connection', handleNewConnection);
 
     peer.on('error', (err) => {
         console.error('PeerJS Error:', err);
-        // If connection fails, treat it as a new connection attempt using the hash
-        console.log('Client connection failed, attempting to reconnect using the hash.');
-        initializePeer(remotePeerId, document.getElementById('login'), false); // Attempt to reconnect
+        if (err.type === 'unavailable-id') {
+            console.log('Peer ID already taken, generating a random ID.');
+            peer = new Peer(); // Create a new peer without specifying an ID
+            peer.on('open', (id) => {
+                console.log(`Client Peer ID: ${id}`);
+                connectToPeer(color); // Connect to the server peer
+            });
+            peer.on('connection', handleNewConnection);
+            
+        } else {
+            console.log('There was an error creating a peer using the hash provided', err);
+       }
     });
 
+    peer.on('connection', handleNewConnection);
+   
+    
+
+
+
+
+
+
+
     // Check if data exists in IndexedDB for this peer ID
-    getContentFromStorage(remotePeerId).then((storedData) => {
+    getContentFromStorage(color).then((storedData) => {
         if (storedData) {
-            console.log('Local data found, loading content from storage.');
-            loadContentFromStorage(remotePeerId); // Load local data if connection fails
+            console.log('Local data found.');
+            display.innerHTML = storedData; // Load local data if connection fails
+
+
+
         } else {
-            console.log('No local data found for this peer ID.');
+            console.log('No local found. Will try to connect');
+
         }
     }).catch((error) => {
         console.error(error);
     });
+
+
+    
 }
 
-function initializePeer(peerId, form, isServer) {
-    // Close any existing peer connection before creating a new one
-    if (peer) {
-        peer.destroy(); // Clean up the previous peer connection
-    }
-
-    peer = new Peer(peerId);
-
-    peer.on('open', (id) => {
-        console.log(`${isServer ? 'Server' : 'Client'} Peer ID: ${id}`);
-        window.location.hash = id; // Append peer ID to URL
-        appConfig.peerId = id; // Set peerId in config
-        if (isServer) {
-            document.body.removeChild(form); // Remove the form from the document
-            initData(); // Initialize data for the server
-            updateConnectionStatus(true); // Update connection status to connected
-        }
-    });
-
-    peer.on('connection', handleNewConnection);
-
-    peer.on('error', (err) => {
-        console.error('PeerJS Error:', err);
-        alert('An error occurred with the P2P connection: ' + err.message);
-    });
-}
 
 function handleNewConnection(connection) {
     connections.push(connection);
@@ -473,7 +499,6 @@ function setupConnectionListeners(conn) {
         console.log('Connection closed, attempting to reconnect...');
         updateConnectionStatus(false);
         connections = connections.filter(c => c !== conn);
-        updatePeerCount();
         broadcastPeerCount(); // Broadcast peer count to all peers
         if (!isServer) {
             setTimeout(() => connectToPeer(conn.peer), 3000);
@@ -487,7 +512,7 @@ function handleIncomingData(data) {
         maintainEmptyLines();
         saveContentToStorage(appConfig.peerId, data.data); // Save new content to storage
     } else if (data.type === 'peerCount') {
-        updatePeerCountDisplay(data.count);
+        updatePeerCount(data.count); // Update peer count display
     }
 }
 
@@ -496,12 +521,7 @@ function updateConnectionStatus(connected) {
     statusText.textContent = connected ? 'Connected' : 'Disconnected';
 }
 
-function updatePeerCount() {
-    const peerCount = connections.length;
-    peerCountElement.textContent = `Peers: ${peerCount}`;
-}
-
-function updatePeerCountDisplay(count) {
+function updatePeerCount(count = connections.length) {
     peerCountElement.textContent = `Peers: ${count}`;
 }
 
@@ -513,17 +533,7 @@ function broadcastPeerCount() {
             conn.send({ type: 'peerCount', count: peerCount });
         }
     });
-}
-
-// Function to load content from IndexedDB
-function loadContentFromStorage(peerId) {
-    getContentFromStorage(peerId).then((content) => {
-        if (content) {
-            display.innerHTML = content;
-        }
-    }).catch((error) => {
-        console.error(error);
-    });
+    updatePeerCount(peerCount); // Update the peer count display
 }
 
 // Initialize IndexedDB

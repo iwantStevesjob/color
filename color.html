@@ -1,0 +1,1510 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Sphere</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+body {
+  font-family: Monospace;
+  background-color: #f0f0f0;
+  margin: 0px;
+  overflow: hidden;
+}
+.buttons {
+  display:none;
+  position: fixed;
+  top: 30px;
+  right: 30px;
+  padding: 16px;
+  font-size: 0.5cm;
+}
+.buttons button {
+  /*padding: 16px;*/
+  font-size: 0.5cm;
+  float: right;
+  margin-left: 16px;
+}
+.pass {
+  color: green;
+  font-weight: bold;
+}
+.fail {
+  color: red;
+  font-weight: bold;
+}
+
+/* Password Toggle */
+
+#toggleContainer {
+    display:none;
+    position: absolute;
+    left: 50%;
+    top: 85%; /* adjust this value to move the button up or down */
+    transform: translateX(-50%); /* centers the button horizontally */
+}
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 60px;
+  height: 34px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .4s;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:checked + .slider:before {
+  transform: translateX(26px);
+}
+
+/* Rounded sliders */
+.slider.round {
+  border-radius: 34px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+#loginButton{
+    border:0px solid #ffff;
+    border-radius: 5px;
+}
+    </style>
+	
+	<script src="three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+ <script type="text/javascript">
+
+
+var {
+  Geometry,
+  BufferGeometry,
+  Float32BufferAttribute,
+  Vector3,
+  Color
+} = THREE;
+
+// Common function to initialize parameters
+function initializeParameters(
+  radius,
+  widthSegments,
+  heightSegments,
+  phiStart,
+  phiLength,
+  thetaStart,
+  thetaLength
+) {
+  return {
+    radius: radius,
+    widthSegments: widthSegments,
+    heightSegments: heightSegments,
+    phiStart: phiStart,
+    phiLength: phiLength,
+    thetaStart: thetaStart,
+    thetaLength: thetaLength
+  };
+}
+
+// SphereBufferGeometry
+function HSVSphereBufferGeometry(
+  radius,
+  widthSegments,
+  heightSegments,
+  phiStart,
+  phiLength,
+  thetaStart,
+  thetaLength
+) {
+  BufferGeometry.call(this);
+
+  this.type = "SphereBufferGeometry";
+  this.parameters = initializeParameters(
+    radius,
+    widthSegments,
+    heightSegments,
+    phiStart,
+    phiLength,
+    thetaStart,
+    thetaLength
+  );
+
+  // Default values for undefined parameters
+  radius = radius || 1;
+  widthSegments = Math.max(3, Math.floor(widthSegments) || 8);
+  heightSegments = Math.max(2, Math.floor(heightSegments) || 6);
+  phiStart = phiStart !== undefined ? phiStart : 0;
+  phiLength = phiLength !== undefined ? phiLength : Math.PI * 2;
+  thetaStart = thetaStart !== undefined ? thetaStart : 0;
+  thetaLength = thetaLength !== undefined ? thetaLength : Math.PI;
+
+  var thetaEnd = thetaStart + thetaLength;
+
+  var ix, iy;
+
+  var index = 0;
+  var grid = [];
+
+  var vertex = new Vector3();
+  var normal = new Vector3();
+
+  // buffers
+
+  var indices = [];
+  var vertices = [];
+  var normals = [];
+  var colors = [];
+
+  // generate vertices, normals and uvs
+
+  var color = new Color();
+
+  for (iy = 0; iy <= heightSegments; iy++) {
+    var verticesRow = [];
+
+    var v = iy / heightSegments;
+
+    for (ix = 0; ix <= widthSegments; ix++) {
+      var u = ix / widthSegments;
+
+      // vertex
+
+      vertex.x =
+        -radius *
+        Math.cos(phiStart + u * phiLength) *
+        Math.sin(thetaStart + v * thetaLength);
+      vertex.y = radius * Math.cos(thetaStart + v * thetaLength);
+      vertex.z =
+        radius *
+        Math.sin(phiStart + u * phiLength) *
+        Math.sin(thetaStart + v * thetaLength);
+
+      vertices.push(vertex.x, vertex.y, vertex.z);
+
+      // normal
+
+      normal.set(vertex.x, vertex.y, vertex.z).normalize();
+      normals.push(normal.x, normal.y, normal.z);
+
+      // color
+// Convert vertex to polar coordinates in the xy-plane
+var angle = Math.atan2(vertex.y, vertex.x) + Math.PI / 2;
+if (angle < 0) angle += Math.PI * 2;
+
+// Set hue based on the angle
+var hue = angle / (Math.PI * 2);
+
+// Compute lightness based on z-coordinate
+var normalizedZ = (vertex.z / radius + 1) / 2;
+var lightness;
+
+if (normalizedZ < 0.5) {
+  // Black region: Power transformation with exponent 0.7
+  lightness = Math.pow(normalizedZ * 2, 0.4) / 2;
+} else {
+  // White region: Power transformation with exponent 1.5
+  lightness = 0.5 + Math.pow((normalizedZ - 0.5) * 2, 2) / 2.;
+}
+
+
+// color
+color.setHSL(hue, 1, lightness);
+colors.push(color.r, color.g, color.b);
+
+
+      verticesRow.push(index++);
+    }
+
+    grid.push(verticesRow);
+  }
+
+  // indices
+
+  for (iy = 0; iy < heightSegments; iy++) {
+    for (ix = 0; ix < widthSegments; ix++) {
+      var a = grid[iy][ix + 1];
+      var b = grid[iy][ix];
+      var c = grid[iy + 1][ix];
+      var d = grid[iy + 1][ix + 1];
+
+      if (iy !== 0 || thetaStart > 0) indices.push(a, b, d);
+      if (iy !== heightSegments - 1 || thetaEnd < Math.PI)
+        indices.push(b, c, d);
+    }
+  }
+
+  // build geometry
+
+  this.setIndex(indices);
+  this.addAttribute("position", new Float32BufferAttribute(vertices, 3));
+  this.addAttribute("normal", new Float32BufferAttribute(normals, 3));
+  this.addAttribute("color", new Float32BufferAttribute(colors, 3));
+}
+
+HSVSphereBufferGeometry.prototype = Object.create(BufferGeometry.prototype);
+HSVSphereBufferGeometry.prototype.constructor = HSVSphereBufferGeometry;
+
+("use strict");
+
+// options
+var COMPARE_DISTANCE = 11;
+// compare method must be one of: average first last best
+var COMPARE_METHOD = "best";
+var PASS_RATIO = 0.5; // 1 = 100%
+var SPHERE_RADIUS = 150;
+var HANDLE_RADIUS = 15;
+var HANDLE_MIN_DIST = 0; // minimum space between handles, can be negative
+var HANDLE_ORIG_MIN_SQR_DIST = Math.pow(HANDLE_RADIUS * 2 + HANDLE_MIN_DIST, 2);
+
+var arePathsVisible = true; // Variable to track visibility
+// Namespace
+var Defmech = Defmech || {};
+
+// adapted from https://github.com/WICG/EventListenerOptions/blob/gh-pages/explainer.md
+const detectPassiveEvents = {
+  update() {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.addEventListener === "function"
+    ) {
+      let passive = false;
+      const options = Object.defineProperty({}, "passive", {
+        get() {
+          passive = true;
+        }
+      });
+      // note: have to set and remove a no-op listener instead of null
+      // (which was used previously), becasue Edge v15 throws an error
+      // when providing a null callback.
+      // https://github.com/rafrex/detect-passive-events/pull/3
+      const noop = () => {};
+      window.addEventListener("testPassiveEventSupport", noop, options);
+      window.removeEventListener("testPassiveEventSupport", noop, options);
+      detectPassiveEvents.hasSupport = passive;
+    }
+  }
+};
+
+detectPassiveEvents.update();
+
+Defmech.RotationWithQuaternion = (function () {
+  "use_strict";
+
+  var container;
+
+  var camera, scene, renderer;
+  var labels = [];
+  var all_handles = [];
+  var sphere, boxGeometry, smallSphereGeometry, handle_material;
+
+  var mouseDown = false;
+  var previous_point = new THREE.Vector3(0, 0, 1);
+  var current_point = new THREE.Vector3(0, 0, 1);
+
+  var curQuaternion;
+  var windowHalfX = window.innerWidth / 2;
+  var windowHalfY = window.innerHeight / 2;
+  var lastMoveTimestamp = new Date(),
+    moveReleaseTimeDelta = 50;
+
+  var ray = new THREE.Raycaster();
+
+  var recording = [],
+    all_paths = [],
+    path_meshes = [],
+    handles = [],
+    handle_meshes = [],
+    best_path_index = 0,
+    is_playing = false,
+    is_recording = false,
+    playing_position = 0,
+    finish_path_timeout;
+
+
+  var UI_states = {
+    states: ["start_record", "recording", "playing", "comparing"],
+    state: "",
+    set_state: function (state) {
+      clearTimeout(finish_path_timeout);
+      console.log("changing to state: " + state);
+      if (this.states.indexOf(state) === -1) {
+        throw Error("Invalid state");
+      }
+      this.state = state;
+      for (var btn of document.querySelectorAll(".buttons button")) {
+        var show =
+          btn.classList.contains(state) || btn.classList.contains("all");
+        btn.style.display = show ? "" : "none";
+      }
+      is_recording = is_playing = false;
+      switch (state) {
+        case "start_record":
+          //show_paths();
+          //sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+          break;
+        case "playing":
+          // Store the last color in localStorage before starting playback
+          var lastColor = get_HSL(sphere);
+
+          var hexColor = "#" + lastColor.getHexString();
+          console.log('Storing last color before playback:', hexColor); // Debugging log
+          localStorage.setItem('lastSphereColor', hexColor);
+
+          // Create a form element
+          const form = document.createElement('form');
+          form.style.position = 'absolute';
+          form.style.left = '50%';
+          form.style.transform = 'translateX(-50%)';
+          form.style.top = 'calc(50% + 500px)'; // Adjust this value based on the sphere's size and position
+
+          // Create an input element
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.id = 'color';
+          input.style.width = '200px';
+          input.style.height = '30px';
+          input.style.fontSize = '24px'; // Make the text a bit larger
+          input.style.marginBottom = '10px';
+          input.style.border = 'none'; // Remove the border
+          input.style.backgroundColor = 'transparent'; // Make the background transparent
+          input.style.textAlign = 'center'; // Center the text
+          input.style.color = 'lightgrey'; // Set the text color to light grey
+          input.style.fontWeight = 'bold'; // Make the text bold
+
+          // Set the input value to the last stored color
+          var retrievedColor = localStorage.getItem('lastSphereColor');
+          console.log('Retrieved last color:', retrievedColor); // Debugging log
+          if (retrievedColor) {
+            input.value = retrievedColor;
+          }
+
+          // Append the input to the form
+          form.appendChild(input);
+
+          // Create a button element
+          const button = document.createElement('button');
+          button.innerText = 'LOGIN';
+          button.id = 'loginButton';
+          button.style.position = 'absolute';
+          button.style.width = '280px';
+          button.style.height = '50px';
+          // Set the background color to the last stored color
+          if (retrievedColor) {
+            button.style.backgroundColor = retrievedColor;
+          }
+          button.style.fontSize = '20px';
+          button.style.left = '50%';
+          button.style.transform = 'translateX(-50%)';
+          button.style.top = 'calc(50% + 550px)'; // Adjust this value based on the sphere's size and position
+          button.onclick = () => {
+            // Fade out the form
+            form.style.transition = 'opacity 0.5s';
+            form.style.opacity = '0';
+            setTimeout(() => {
+              form.remove();
+            }, 500);
+
+            // Animate the sphere
+            const canvas = document.querySelector('canvas');
+            canvas.style.transition = 'all 1s';
+            canvas.style.width = '50px';
+            canvas.style.height = '50px';
+            canvas.style.top = '10px';
+            canvas.style.left = '50%';
+            canvas.style.transform = 'translateX(-50%)';
+            canvas.style.position = 'fixed';
+
+            // Show the settings button after the animation
+            setTimeout(() => {
+              document.getElementById('settingsButton').style.display = 'block';
+            }, 1000);
+          };
+
+          // Append the form and button under the sphere
+            document.body.appendChild(form);
+            document.body.appendChild(button);
+
+          // trim recording
+          var [x1, y1, z1, w1, x2, y2, z2, w2] = recording.slice(
+            recording.length - 8
+          );
+          while (
+            recording.length > 8 &&
+            Math.abs(x1 - x2) +
+              Math.abs(y1 - y2) +
+              Math.abs(z1 - z2) +
+              Math.abs(w1 - w2) <
+              0.001
+          ) {
+            recording.splice(recording.length - 4);
+            var [x1, y1, z1, w1, x2, y2, z2, w2] = recording.slice(
+              recording.length - 8
+            );
+          }
+          // start playback
+          playing_position = recording.length;
+          is_playing = true;
+          // convert this recording to path
+          var current_path = recording_to_path(recording);
+          // compare
+          var ratio = 0;
+          var result_box = document.getElementById("compare-result");
+          if (all_paths.length >= 1) {
+            // Iterate through all the paths in the 'all_paths' array
+            for (var i = 0; i < all_paths.length; i++) {
+              var stored_path = all_paths[i].path;
+              //Check if toggle is clicked to either compare or guess paths
+              if (!arePathsVisible) {
+                
+                result_box.innerHTML = "calculating...";
+                var guess = guess_paths(stored_path, current_path);
+                if (guess == true) {
+                  result_box.innerHTML = "Success";
+                } else {
+                  
+                  result_box.innerHTML = "Failed login";
+                }
+
+              } else {
+                var ratio = compare_paths(stored_path, current_path, COMPARE_DISTANCE);
+                var pass = ratio >= PASS_RATIO;
+
+                result_box.innerHTML =
+                  ((ratio * 100) | 0) +
+                  "% match<br>" +
+                  (pass
+                    ? '<span class="pass">PASS</span>'
+                    : '<span class="fail">FAIL</span>');
+              }
+           
+              
+              // If a successful match is found, exit the loop
+              if (pass) {
+                setTimeout(function () {result_box.innerHTML = "";}, 2000);
+                break; // Exit the loop
+              }
+            }
+          }
+
+          if (pass || all_paths.length < 1) {
+            var color = get_HSL(sphere);
+            // Here is all data that is saved
+            var path_data = { path: current_path, ratio: ratio, color: color };
+            all_paths.push(path_data);
+            //add_weighted_average(path, all_paths.length);
+            // show all paths (including this one) and save
+            show_paths();
+            sphere.remove(currentPathMesh);
+            currentPathMesh = null; // Set to null to indicate there's no current path.
+            save_paths().catch(function (err) {
+              console.error(err);
+            });
+          } else {
+            // If there is a currentPathMesh and it's a child of the sphere, remove it.
+            if (currentPathMesh) {
+              sphere.remove(currentPathMesh);
+              currentPathMesh = null; // Set to null to indicate there's no current path.
+            }
+          }
+
+          break;
+        case "recording":
+              // Remove the form and button if they exist when starting the recording state
+            const existingLoginForm = document.querySelector('form');
+            const existingTitle = document.getElementById('title');
+            if (existingLoginForm) {
+                existingLoginForm.remove();
+            }
+            existingTitle.remove();
+            
+          recording = [];
+          is_recording = true;
+          break;
+        default:
+          // Remove the button if it exists when leaving the playing state
+          const existingButton = document.getElementById('loginButton');
+          if (existingButton) {
+            existingButton.remove();
+          }
+          break;
+      }
+    }
+  };
+
+  var buttons = {
+    delete_all: () => {
+      if (confirm("Delete all lines?")) {
+        delete_saved()
+          .then(function () {
+            for (var mesh of path_meshes) {
+              sphere.remove(mesh);
+            }
+            all_paths = [];
+            path_meshes = [];
+            best_path_index = 0;
+            console.log("Data is cleared!");
+          })
+          .catch(function (err) {
+            console.error(err);
+          });
+        UI_states.set_state("start_record");
+      }
+    }
+  };
+
+  var passiveEvent = detectPassiveEvents.hasSupport
+    ? { passive: false }
+    : false;
+
+  var setup = function () {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+
+    var info = document.createElement("div")
+    info.id = "title";
+    info.style.position = "absolute";
+    info.style.top = "100px";
+    info.style.width = "100%";
+    info.style.textAlign = "center";
+    info.innerHTML = "<b >COLOR</b><BR/>Pick you favorite color";
+    container.appendChild(info);
+
+    for (var btn of document.querySelectorAll(".buttons button")) {
+      btn.addEventListener(
+        "click",
+        function (event) {
+          event.stopPropagation();
+          var fname = this.getAttribute("data-action");
+          buttons[fname]();
+        },
+        false
+      );
+    }
+
+    camera = new THREE.PerspectiveCamera(
+      70,
+      window.innerWidth / window.innerHeight,
+      1,
+      1000
+    );
+    // camera.position.y = 150;
+    camera.position.z = 500;
+
+    scene = new THREE.Scene();
+    // scene.background = new THREE.Color(1,0,0)
+
+    var sphereGeometry = new HSVSphereBufferGeometry(SPHERE_RADIUS, 50, 25);
+    smallSphereGeometry = new HSVSphereBufferGeometry(HANDLE_RADIUS, 15, 15);
+    boxGeometry = new THREE.BoxGeometry(5, 5, 5);
+
+    var material = new THREE.MeshPhongMaterial({
+      vertexColors: THREE.FaceColors
+    });
+    handle_material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+    sphere = new THREE.Mesh(sphereGeometry, material);
+
+    // sphere.position.y = 100;
+    // sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI/2,0,0));
+    scene.add(sphere);
+
+    var light = new THREE.AmbientLight(0xffffff); // soft white light
+    scene.add(light);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setClearColor(0xf0f0f0);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    container.appendChild(renderer.domElement);
+
+    document.addEventListener("mousedown", onDocumentMouseDown, false);
+    document.addEventListener("touchstart", onTouchStart, passiveEvent);
+
+    window.addEventListener("resize", onWindowResize, false);
+
+    // Load previous data, using the localForageDriver we wrote before
+    localforage.setDriver(localStorage.localForageDriver);
+    console.log(
+      "Using localforage driver:",
+      localStorage.localForageDriver.replace("asyncStorage", "IndexedDB")
+    );
+    restore_paths()
+      .then(function () {
+        UI_states.set_state("start_record");
+      })
+      .catch(function (err) {
+        console.error(err);
+      });
+    animate();
+  };
+
+  function onWindowResize() {
+    windowHalfX = window.innerWidth / 2;
+    windowHalfY = window.innerHeight / 2;
+
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  function onTouchStart(event) {
+    if (event.touches.length == 1) {
+      event.clientX = event.touches[0].clientX;
+      event.clientY = event.touches[0].clientY;
+      onDocumentMouseDown(event);
+    }
+  }
+function getColorAtPoint(point) {
+  var localPoint = point.clone().applyQuaternion(sphere.getWorldQuaternion().inverse());
+  
+  // Invert only the X-coordinate in the hue calculation
+  var theta = Math.atan2(-localPoint.x, localPoint.y) + Math.PI;
+  var hue = theta / (2 * Math.PI);
+  
+  var normalizedZ = (localPoint.z / localPoint.length() + 1) / 2;
+  var lightness;
+
+  if (normalizedZ < 0.5) {
+    // Black region: Power transformation with exponent 0.4
+    lightness = Math.pow(normalizedZ * 2, 0.4) / 2;
+  } else {
+    // White region: Power transformation with exponent 1.4
+    lightness = 0.5 + Math.pow((normalizedZ - 0.5) * 2, 2) / 2;
+  }
+
+  var color = new THREE.Color();
+  color.setHSL(hue, 1, lightness);
+
+  return color;
+}
+
+
+
+
+
+
+  var currentMesh = null;
+
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // USER INTERACTIONS
+  // Events for when the user clicks on sphere and rotates it
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+
+  function onDocumentMouseDown(event) {
+    if (event.target.tagName == "BUTTON") {
+      return;
+    }
+    event.preventDefault();
+    if (UI_states.state === "start_record") {
+      UI_states.set_state("recording");
+    }
+    clearTimeout(finish_path_timeout);
+    window.addEventListener("mousemove", onDocumentMouseMove, false);
+    window.addEventListener("mouseup", onDocumentMouseUp, false);
+    window.addEventListener("touchmove", onTouchMove, passiveEvent);
+    window.addEventListener("touchend", onTouchEnd, false);
+
+    var vector = new THREE.Vector3();
+    vector.set(
+      (event.clientX / window.innerWidth) * 2 - 1,
+      -(event.clientY / window.innerHeight) * 2 + 1,
+      0.5
+    );
+
+    camera.updateMatrixWorld(); // Update the camera's matrix world
+    camera.updateProjectionMatrix(); // Update the camera's projection matrix
+    ray.setFromCamera(vector, camera); // Now use the updated camera in setFromCamera()
+
+    var results = ray.intersectObjects([sphere].concat(handle_meshes));
+
+    if (results[0]) {
+      var point = results[0].point;
+      var object = results[0].object; // This is the object that was intersected
+
+      var add_handle = true;
+
+      if (object !== sphere) {
+        add_handle = false; // Don't add a new handle if an existing handle was clicked
+      } else {
+        // Check if the clicked point is too close to any existing handle
+        for (var handle of handles) {
+          if (point.distanceToSquared(handle) < HANDLE_ORIG_MIN_SQR_DIST) {
+            add_handle = false;
+            break;
+          }
+        }
+      }
+
+      if (add_handle) {
+        var pointColor = getColorAtPoint(point);
+        var hexColor = "#" + pointColor.getHexString();
+        addHandle(point, pointColor, hexColor); // Call the new "addHandle" function
+      }
+      mouseDown = true;
+      previous_point.copy(point);
+      current_point.copy(point);
+    }
+  }
+
+  // ADD A HANDLE TO SPHERE
+  function addHandle(point, pointColor, hexColor) {
+    var smallSphere = new THREE.Mesh(
+      smallSphereGeometry,
+      new THREE.MeshBasicMaterial({ color: pointColor })
+    );
+
+    handles.push(point);
+    smallSphere.position.copy(point);
+    smallSphere.position.applyQuaternion(sphere.getWorldQuaternion().inverse());
+    sphere.add(smallSphere);
+    handle_meshes.push(smallSphere);
+
+    // create a canvas element
+    var canvas1 = document.createElement("canvas");
+    var context1 = canvas1.getContext("2d");
+    context1.font = "12px Arial";
+    context1.fillStyle = "rgba(0,0,0,1)";
+    context1.fillText(hexColor, 0, 50);
+
+    // canvas contents will be used for a texture
+    var texture1 = new THREE.Texture(canvas1);
+    texture1.needsUpdate = true;
+
+    var material1 = new THREE.MeshBasicMaterial({
+      map: texture1,
+      side: THREE.DoubleSide
+    });
+    material1.transparent = true;
+
+    var mesh1 = new THREE.Mesh(
+      new THREE.PlaneGeometry(canvas1.width, canvas1.height),
+      material1
+    );
+    mesh1.position.copy(point);
+    mesh1.position.lerp(camera.position, 0.01);
+    mesh1.position.applyQuaternion(sphere.getWorldQuaternion().inverse());
+    mesh1.lookAt(camera.position);
+    mesh1.rotation.x += Math.PI / 2;
+    sphere.add(mesh1);
+    labels.push(mesh1);
+
+    // Store the handle's position
+    all_handles.push({
+      handle: { x: point.x, y: point.y, z: point.z },
+      id: hexColor
+    });
+    localforage.setItem("handles", JSON.stringify(all_handles));
+  }
+
+  function onTouchMove(event) {
+    event.clientX = event.touches[0].clientX;
+    event.clientY = event.touches[0].clientY;
+    onDocumentMouseMove(event);
+  }
+
+  function onDocumentMouseMove(event) {
+    event.preventDefault();
+
+    if (!mouseDown) {
+      return;
+    }
+
+    previous_point.copy(current_point);
+
+    var vector = new THREE.Vector3();
+    vector.set(
+      (event.clientX / window.innerWidth) * 2 - 1,
+      -(event.clientY / window.innerHeight) * 2 + 1,
+      0.5
+    );
+
+    ray.setFromCamera(vector, camera);
+
+    var results = ray.intersectObject(sphere);
+
+    if (results[0]) {
+      current_point.copy(results[0].point);
+    } else {
+      // Calculate a point on the surface of an imaginary sphere centered at the mouse cursor
+      var distanceToSphere = camera.position.distanceTo(sphere.position);
+      var reducedDistance = distanceToSphere * 0.9;
+      var point = ray.ray.direction
+        .clone()
+        .multiplyScalar(reducedDistance)
+        .add(ray.ray.origin);
+      current_point.copy(point);
+    }
+
+    handleRotation();
+    lastMoveTimestamp = new Date();
+  }
+
+  function onTouchEnd(event) {
+    if (event.touches.length == 0) {
+      onDocumentMouseUp(event);
+    }
+  }
+
+  function onDocumentMouseUp(event) {
+    if (!mouseDown) return;
+
+    if (
+      new Date().getTime() - lastMoveTimestamp.getTime() >
+      moveReleaseTimeDelta
+    ) {
+      previous_point.copy(current_point);
+    }
+    if (UI_states.state === "recording" && recording.length > 8) {
+      clearTimeout(finish_path_timeout);
+      finish_path_timeout = setTimeout(() => {
+        UI_states.set_state("playing");
+      }, 2000);
+    }
+
+    mouseDown = false;
+
+    window.removeEventListener("mousemove", onDocumentMouseMove, false);
+    window.removeEventListener("mouseup", onDocumentMouseUp, false);
+    window.removeEventListener("touchmove", onTouchMove, passiveEvent);
+    window.removeEventListener("touchend", onTouchEnd, false);
+  }
+
+  function rotateMatrix(rotateStart, rotateEnd) {
+    var axis = new THREE.Vector3(),
+      quaternion = new THREE.Quaternion();
+
+    var angle = Math.acos(
+      rotateStart.dot(rotateEnd) / rotateStart.length() / rotateEnd.length()
+    );
+
+    if (angle) {
+      axis.crossVectors(rotateStart, rotateEnd).normalize();
+      quaternion.setFromAxisAngle(axis, angle);
+    }
+    return quaternion;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    // Fade in opacities
+    var goal = 1 / all_paths.length;
+    for (var i = 0; i < path_meshes.length; i++) {
+      var mesh = path_meshes[i];
+      var o = mesh.material.opacity;
+      mesh.material.opacity = o + (goal - o) * 0.01;
+    }
+    for (var i = 0; i < labels.length; i++) {
+      labels[i].quaternion.copy(sphere.getWorldQuaternion().inverse());
+    }
+    render();
+  }
+
+  function render() {
+    if (!mouseDown) {
+      var drag = 0.82;
+
+      previous_point.lerp(current_point, 1 - drag);
+
+      handleRotation();
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  var currentPathMesh = null;
+
+
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // HANDLE ROTATION
+  // Rotate sphere and draw the path as you do
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  var handleRotation = function () {
+    if (!is_playing) {
+      var rotateQuaternion = rotateMatrix(previous_point, current_point);
+      curQuaternion = sphere.quaternion;
+      curQuaternion.multiplyQuaternions(rotateQuaternion, curQuaternion);
+      curQuaternion.normalize();
+      sphere.setRotationFromQuaternion(curQuaternion);
+
+      // Calculate the total distance rotated
+      var distance = previous_point.distanceTo(current_point);
+
+      // Smoothly expand the sphere based on the total distance rotated
+      var scaleFactor = 1 + distance * 0.04; // Adjust the factor to control the expansion rate
+      var currentScale = sphere.scale.x; // Assuming uniform scaling
+      var targetScale = currentScale + distance * 0.04; // Incremental scaling
+      sphere.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.05); // Adjust the lerp factor to control the smoothness
+
+      if (is_recording) {
+        recording.push(
+          curQuaternion.x,
+          curQuaternion.y,
+          curQuaternion.z,
+          curQuaternion.w
+        );
+
+        // Remove the old path from the sphere
+        if (currentPathMesh) {
+          sphere.remove(currentPathMesh);
+        }
+
+        // Create a new path from the updated recording
+        var newPath = recording_to_path(recording);
+
+        // Convert the new path to a mesh
+        currentPathMesh = path_to_mesh(newPath);
+
+        // Add the new path mesh to the sphere
+        sphere.add(currentPathMesh);
+      }
+    } else {
+      var q = sphere.quaternion;
+      playing_position -= 4;
+      q.x = recording[playing_position];
+      q.y = recording[playing_position + 1];
+      q.z = recording[playing_position + 2];
+      q.w = recording[playing_position + 3];
+      if (playing_position <= 0) {
+        is_playing = false;
+        UI_states.set_state("start_record");
+      }
+    }
+
+    renderer.setClearColor(get_HSL(sphere), 1);
+  };
+
+function get_HSL(sphere) {
+  var q = new THREE.Quaternion();
+  q.copy(sphere.quaternion);
+  q.inverse();
+  var v = new THREE.Vector3(0, 0, 1);
+  v.applyQuaternion(q);
+  var angle = Math.atan2(v.y, v.x) + Math.PI / 2;
+  if (angle < 0) angle += Math.PI * 2;
+  var hue = angle / (Math.PI * 2);
+
+  // Apply the custom transformation for lightness
+  var normalizedZ = (v.z + 1) / 2;
+  var lightness;
+  if (normalizedZ < 0.5) {
+    lightness = Math.pow(normalizedZ * 2, 0.4) / 2;
+  } else {
+    lightness = 0.5 + Math.pow((normalizedZ - 0.5) * 2, 2) / 2;
+  }
+
+  return new THREE.Color().setHSL(hue, 1, lightness);
+}
+
+
+
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // STORE  PATHS
+  // Convert a quarternion recording to a mesh so the path can be stored and displayed on sphere
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+function recording_to_path(recording) {
+
+    var MAX_SQR_DIST = 5000;
+    var v, v2;
+    var q = new THREE.Quaternion();
+
+    var path = [];
+
+    for (var i = 0; i < recording.length; i += 4) {
+      q.set(...recording.slice(i, i + 4));
+      q.inverse();
+      v = new THREE.Vector3();
+      v.x = v.y = 0;
+      v.z = SPHERE_RADIUS;
+      v.applyQuaternion(q);
+
+      // Format the coordinates to 2 decimal places
+      if (path.length !== 0) {
+          // Insert intermediate points so it doesn't dive under the sphere
+          var prev = path[path.length - 1];
+          var dist = prev.distanceToSquared(v);
+          var count = Math.floor(dist / MAX_SQR_DIST);
+          var spacing = 1 / (count + 1);
+          var f = spacing;
+
+          while (f < 0.99) {
+              v2 = prev.clone();
+              v2.lerp(v, f);
+
+              v2.multiplyScalar(SPHERE_RADIUS / v2.length());
+
+              path.push(v2);
+              f += spacing;
+          }
+
+      }
+      path.push(v);
+
+  }
+ 
+var tolerance = 1; // Adjust as needed
+var simplified = simplifyPath(path, tolerance);
+
+return simplified;
+}
+
+
+  function roundVector(v) {
+  var factor = 100; // For 2 decimal places
+  return new THREE.Vector3(
+    Math.round(v.x * factor) / factor,
+    Math.round(v.y * factor) / factor,
+    Math.round(v.z * factor) / factor
+  );
+}
+
+ 
+function simplifyPath(path, tolerance) {
+  // If the path has less than 3 points, return it as-is
+  if (path.length < 3) return path;
+
+  // Store the first and last points
+  let firstPoint = path[0];
+  let lastPoint = path[path.length - 1];
+
+  // Perform simplification on the rest of the points
+  let simplified = [];
+  for (let i = 1; i < path.length - 1; i++) {
+    let prev = path[i - 1];
+    let current = path[i];
+    let next = path[i + 1];
+    let deviation = current.distanceTo(prev.lerp(next, 0.5));
+
+    if (deviation > tolerance) {
+      simplified.push(current);
+    }
+  }
+
+  // Add the first and last points
+  simplified.unshift(firstPoint);
+  simplified.push(lastPoint);
+
+  // Round simplified path coordinates
+  simplified.forEach(v => {
+    v.x = Math.floor(v.x);
+    v.y = Math.floor(v.y);
+    v.z = Math.floor(v.z);
+  });
+
+  var startingCoord = new THREE.Vector3(0, 0, 150);
+  simplified.unshift(startingCoord); // Add the specific coordinate to the beginning
+  
+  
+  return simplified;
+}
+
+
+  
+  
+  
+  
+  function path_to_mesh(path) {
+    var WIDTH = 5 / 2,
+      PROTRUDE = 0.02;
+    var tangents = [new THREE.Vector3()];
+    var p, v, n;
+    for (var i = 1; i < path.length; i++) {
+      v = new THREE.Vector3();
+      v.copy(path[i]);
+      v.sub(path[i - 1]);
+      v.cross(path[i]);
+      v.multiplyScalar(WIDTH / v.length());
+      tangents[i - 1].add(v);
+      tangents.push(v);
+    }
+    var vertices = new Float32Array(
+      (path.length - 1) * // segments
+        4 * // triangles
+        3 * // vectors
+        3 // floats
+    );
+    var vi = 0;
+    var p, v, pt, vt, s;
+    s = 1 + PROTRUDE;
+    for (var i = 1; i < path.length; i++) {
+      p = path[i - 1];
+      v = path[i];
+      vt = tangents[i];
+      pt = tangents[i - 1];
+      vertices[vi++] = (v.x + vt.x) * s;
+      vertices[vi++] = (v.y + vt.y) * s;
+      vertices[vi++] = (v.z + vt.z) * s;
+      vertices[vi++] = (v.x - vt.x) * s;
+      vertices[vi++] = (v.y - vt.y) * s;
+      vertices[vi++] = (v.z - vt.z) * s;
+      vertices[vi++] = (p.x - pt.x) * s;
+      vertices[vi++] = (p.y - pt.y) * s;
+      vertices[vi++] = (p.z - pt.z) * s;
+      vertices[vi++] = (v.x + vt.x) * s;
+      vertices[vi++] = (v.y + vt.y) * s;
+      vertices[vi++] = (v.z + vt.z) * s;
+      vertices[vi++] = (p.x - pt.x) * s;
+      vertices[vi++] = (p.y - pt.y) * s;
+      vertices[vi++] = (p.z - pt.z) * s;
+      vertices[vi++] = (p.x + pt.x) * s;
+      vertices[vi++] = (p.y + pt.y) * s;
+      vertices[vi++] = (p.z + pt.z) * s;
+
+      vertices[vi++] = (v.x - vt.x) * s;
+      vertices[vi++] = (v.y - vt.y) * s;
+      vertices[vi++] = (v.z - vt.z) * s;
+      vertices[vi++] = 0;
+      vertices[vi++] = 0;
+      vertices[vi++] = 0;
+      vertices[vi++] = (p.x - pt.x) * s;
+      vertices[vi++] = (p.y - pt.y) * s;
+      vertices[vi++] = (p.z - pt.z) * s;
+      vertices[vi++] = 0;
+      vertices[vi++] = 0;
+      vertices[vi++] = 0;
+      vertices[vi++] = (v.x + vt.x) * s;
+      vertices[vi++] = (v.y + vt.y) * s;
+      vertices[vi++] = (v.z + vt.z) * s;
+      vertices[vi++] = (p.x + pt.x) * s;
+      vertices[vi++] = (p.y + pt.y) * s;
+      vertices[vi++] = (p.z + pt.z) * s;
+    }
+
+    var geometry = new THREE.BufferGeometry();
+    geometry.addAttribute("position", new THREE.BufferAttribute(vertices, 3));
+    geometry.boundingSphere = new THREE.Sphere();
+    var material = new THREE.MeshBasicMaterial({
+      // color: 0xeeeeee,
+      transparent: true,
+      depthWrite: false
+    });
+    var mesh = new THREE.Mesh(geometry, material);
+    return mesh;
+  }
+
+  var average_mesh;
+
+  function show_paths() {
+    for (var i = 0; i < all_paths.length; i++) {
+      var path = all_paths[i].path;
+      var mesh = path_meshes[i];
+      if (!mesh) {
+        mesh = path_to_mesh(path);
+        path_meshes.push(mesh);
+        sphere.add(mesh);
+        mesh.material.opacity = 0; // Will fade in slowly
+      } else {
+        mesh.material.opacity = 1 / all_paths.length;
+      }
+    }
+  }
+
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // GUESS PATHS
+  // Uses a genetic algorithm to guess what path a looks like when it is unknown
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+
+  async function guess_paths(stored_path, current_path) {
+  var guess_path = await shapePreservingBlindSearch(stored_path, current_path, 1, 0.1, 10000);
+  if (guess_path) {
+    // Stored path and current path are a perfect match
+    return true;
+  } else {
+    // No match was found within 100 iterations
+    return false;
+  }
+}
+  function randomUniform(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
+  async function shapePreservingBlindSearch(stored_path, current_path, maxMutations, mutationAmount, maxIterations) {
+    for (let coordinate of ['x', 'y', 'z']) {
+        for (var iteration = 0; iteration < maxIterations; iteration++) {
+            var mutated_path = shapePreservingMutate(current_path, maxMutations, mutationAmount, coordinate);
+            if (isPerfectMatch(stored_path, mutated_path)) {
+                return mutated_path;
+            }
+
+            // Every 20 iterations, update the displayed path and yield control back to the browser
+            if (iteration % 20 === 0) {
+                updatePathDisplay(mutated_path);
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+        }
+    }
+    return null;
+}
+
+  
+  function shapePreservingMutate(path, maxMutations, mutationAmount, coordinate) {
+    // Convert to CatmullRomCurve
+    const curve = new THREE.CatmullRomCurve3(path);
+
+    // Perturb control points
+    for (let i = 0; i < maxMutations; i++) {
+        const pt = curve.points[Math.floor(Math.random() * curve.points.length)];
+        pt[coordinate] += randomUniform(-mutationAmount, mutationAmount);
+    }
+
+    // Sample new path from perturbed curve
+    const newPath = [];
+    const sampleCount = path.length;
+    for (let i = 0; i < sampleCount; i++) {
+        const t = i / (sampleCount - 1);
+        newPath.push(curve.getPoint(t));
+    }
+
+    // Apply rotations along path
+    const rotationAxis = new THREE.Vector3(0, 0, 1);
+    for (let i = 0; i < newPath.length; i++) {
+        const angle = randomUniform(-mutationAmount, mutationAmount);
+        newPath[i].applyAxisAngle(rotationAxis, angle);
+    }
+
+    // Add back starting point
+    newPath.unshift(new THREE.Vector3(0, 0, 150));
+
+    return newPath;
+}
+
+
+
+// Convert cartesian to spherical
+function cartesianToSpherical(x, y, z) {
+  const r = 150; // Set radius
+  const hypotenuse = Math.sqrt(x*x + y*y);
+  
+  const theta = Math.atan2(y, x);
+  const phi = Math.acos(z / r);
+
+  return [r, theta, phi]; 
+}
+
+// Convert spherical to cartesian 
+function sphericalToCartesian(r, theta, phi) {
+  const x = r * Math.sin(phi) * Math.cos(theta);
+  const y = r * Math.sin(phi) * Math.sin(theta);
+  const z = r * Math.cos(phi);
+
+  return [x, y, z];
+}
+
+function isPerfectMatch(stored_path, mutated_path) {
+  return JSON.stringify(stored_path) === JSON.stringify(mutated_path);
+}
+
+  function updatePathDisplay(path) {
+    // Update the path to visually represent the coordinates being generated by the shapePreservingMutate function
+   
+     if (currentPathMesh) {
+       sphere.remove(currentPathMesh);
+       currentPathMesh = null; // Set to null to indicate there's no current path.
+    }
+    
+    // Convert the new path to a mesh
+    currentPathMesh = path_to_mesh(path);
+
+    // Add the new path mesh to the sphere
+    sphere.add(currentPathMesh);
+  }
+
+  //Toggle button to show hide paths
+ document.addEventListener("DOMContentLoaded", function() {
+    document.getElementById('toggleButton').addEventListener('change', function() {
+       if (this.checked) {
+        for (let path of path_meshes) {
+          path.material.visible = false;
+        }
+        arePathsVisible = false; // Update visibility state
+      } else {
+        for (let path of path_meshes) {
+          path.material.visible = true;
+        }
+        arePathsVisible = true; // Update visibility state
+      }
+      render(); // Ensure the renderer updates after changing visibility
+    });
+});
+
+
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+  //
+  // COMPARE PATHS
+  //
+  ///////////////////////////////////////////////////////////////////////////////////////////////
+
+  var debug_cubes = [];
+
+  function compare_paths(path_a, path_b, max_dist) {
+    var max_dist_sq = max_dist * max_dist;
+    for (var cube of debug_cubes) {
+      sphere.remove(cube);
+    }
+    // Check which points of path_a is near path_b
+    var matching_a = get_matching(path_a, path_b, max_dist_sq);
+
+    // Check which points of path_b is near path_a
+    var matching_b = get_matching(path_b, path_a, max_dist_sq);
+
+    // make a list of chunks that are consecutive for both
+    var ia = 0,
+      ib = 0;
+    // TODO
+
+    // return ratio of matches
+    return (
+      matching_a.concat(matching_b).filter((x) => x).length /
+      (matching_a.length + matching_b.length)
+    );
+  }
+
+  function get_matching(path_a, path_b, max_dist_sq) {
+    var matching_a = []; // list of bools
+    var a,
+      b,
+      va = new THREE.Vector3(),
+      vb = new THREE.Vector3(),
+      b1,
+      b2;
+    // var material = new THREE.MeshPhongMaterial({color:0xff00ff});
+    for (var i = 0; i < path_a.length; i++) {
+      a = path_a[i];
+      var shortest = Infinity;
+      for (var j = 1; j < path_b.length; j++) {
+        // calculate distance from point a to segment of b
+        b1 = path_b[j - 1];
+        b2 = path_b[j];
+        va.copy(a);
+        va.sub(b1);
+        vb.copy(b2);
+        vb.sub(b1);
+        vb.multiplyScalar(Math.min(1, Math.max(0, va.dot(vb))));
+        shortest = Math.min(shortest, va.distanceToSquared(vb));
+      }
+      var is_match = shortest < max_dist_sq;
+      matching_a.push(is_match);
+    }
+    return matching_a;
+  }
+
+  // returns a promise
+  function save_paths() {
+    return Promise.all([localforage.setItem("paths_v1", all_paths)]);
+  }
+
+  // returns a promise
+  function restore_paths() {
+    return localforage.getItem("paths_v1").then(function (paths) {
+      if (paths) {
+        for (var i = 0; i < paths.length; i++) {
+          var path = paths[i].path;
+          for (var j = 0; j < path.length; j++) {
+            var v = path[j];
+            path[j] = new THREE.Vector3(v.x, v.y, v.z);
+          }
+        }
+        all_paths = paths;
+      }
+    });
+  }
+
+  function delete_saved() {
+    return Promise.all([
+      localforage.removeItem("paths_v1")
+    ]);
+  }
+
+  // PUBLIC INTERFACE
+  return {
+    init: function () {
+      setup();
+    }
+  };
+})();
+
+document.onreadystatechange = function () {
+  if (document.readyState === "complete") {
+    // Configure localForage
+    if (!localStorage.localForageDriver) {
+      var try_sql = localforage.INDEXEDDB;
+      // if(window.openDatabase){
+      //     try_sql = localforage.WEBSQL
+      // }
+      localforage
+        .setItem("test", [])
+        .then(function (value) {
+          localStorage.localForageDriver = try_sql;
+          Defmech.RotationWithQuaternion.init();
+        })
+        .catch(function (err) {
+          localStorage.localForageDriver = localforage.LOCALSTORAGE;
+          Defmech.RotationWithQuaternion.init();
+        });
+    } else {
+      Defmech.RotationWithQuaternion.init();
+    }
+  }
+};
+
+    </script>
+</head>
+
+
+<body>
+  <div class="buttons">
+    <button class="all" data-action="delete_all">Delete all</button>
+    <span id="compare-result"></span>
+  </div>
+  <div id="toggleContainer">
+      <label class="toggle-switch">
+          <input type="checkbox" id="toggleButton">
+          <span class="slider round"></span>
+      </label>
+    </div>
+</body>
+
+
+
+</html>
