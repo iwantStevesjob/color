@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mobile Keyboard with Swipe-to-Highlight</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            touch-action: pan-y;
+        }
+        #editor {
+            width: 100%;
+            height: 200px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 20px;
+            overflow-y: auto;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #keyboard {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: #f0f0f0;
+            padding: 10px;
+            box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
+        }
+        .keyboard-row {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 5px;
+        }
+        .key {
+            width: 30px;
+            height: 40px;
+            margin: 2px;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 16px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .key:active {
+            background-color: #e0e0e0;
+        }
+        .key-wide {
+            width: 60px;
+        }
+        .key-extra-wide {
+            width: 90px;
+        }
+        .highlighted {
+            background-color: yellow;
+        }
+    </style>
+</head>
+<body>
+    <div id="editor" contenteditable="true" inputmode="none" readonly>
+        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam auctor, nunc id aliquet tincidunt, nisi nunc tincidunt nunc, nec tincidunt nunc nunc id nunc. Sed euismod, nunc id aliquet tincidunt, nisi nunc tincidunt nunc, nec tincidunt nunc nunc id nunc. Sed euismod, nunc id aliquet tincidunt, nisi nunc tincidunt nunc, nec tincidunt nunc nunc id nunc.
+    </div>
+    <div id="keyboard">
+        <!-- Keyboard layout remains the same -->
+    </div>
+
+    <script>
+        const editor = document.getElementById('editor');
+        const keyboard = document.getElementById('keyboard');
+        const keys = document.querySelectorAll('.key');
+        let isKeyboardVisible = false;
+        let isHighlighting = false;
+        let lastTouchX = 0;
+
+        editor.addEventListener('focus', showKeyboard);
+        editor.addEventListener('click', showKeyboard);
+        editor.addEventListener('touchstart', showKeyboard);
+        document.addEventListener('click', handleDocumentClick);
+
+        function showKeyboard() {
+            keyboard.style.display = 'block';
+            isKeyboardVisible = true;
+            editor.removeAttribute('readonly');
+        }
+
+        function hideKeyboard() {
+            keyboard.style.display = 'none';
+            isKeyboardVisible = false;
+            editor.setAttribute('readonly', '');
+        }
+
+        function handleDocumentClick(e) {
+            if (!editor.contains(e.target) && !keyboard.contains(e.target)) {
+                hideKeyboard();
+            }
+        }
+
+        // Swipe-to-highlight functionality
+        editor.addEventListener('touchstart', handleTouchStart);
+        editor.addEventListener('touchmove', handleTouchMove);
+        editor.addEventListener('touchend', handleTouchEnd);
+
+        function handleTouchStart(e) {
+            isHighlighting = false;
+            lastTouchX = e.touches[0].clientX;
+        }
+
+        function handleTouchMove(e) {
+            const currentTouchX = e.touches[0].clientX;
+            const diff = Math.abs(currentTouchX - lastTouchX);
+            if (diff > 10 && currentTouchX < lastTouchX) {
+                isHighlighting = true;
+                highlightTextAtPoint(e.touches[0]);
+            }
+            lastTouchX = currentTouchX;
+        }
+
+        function handleTouchEnd() {
+            isHighlighting = false;
+        }
+
+        function highlightTextAtPoint(touch) {
+            const range = document.caretRangeFromPoint(touch.clientX, touch.clientY);
+            if (range) {
+                const selection = window.getSelection();
+                if (!selection.isCollapsed) {
+                    selection.extend(range.startContainer, range.startOffset);
+                } else {
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+
+                if (isHighlighting) {
+                    const span = document.createElement('span');
+                    span.className = 'highlighted';
+                    try {
+                        range.surroundContents(span);
+                    } catch (e) {
+                        console.error("Cannot highlight across element boundaries");
+                    }
+                }
+            }
+        }
+
+        keys.forEach(key => {
+            key.addEventListener('touchstart', handleKeyPress);
+            key.addEventListener('mousedown', handleKeyPress);
+        });
+
+        function handleKeyPress(e) {
+            e.preventDefault();
+            const keyText = e.target.textContent;
+            switch (keyText) {
+                case 'Shift':
+                    toggleShift();
+                    break;
+                case 'Backspace':
+                    deleteCharacter();
+                    break;
+                case 'Space':
+                    insertText(' ');
+                    break;
+                case 'Enter':
+                    insertText('\n');
+                    break;
+                case '123':
+                    // Toggle numbers and symbols (not implemented)
+                    break;
+                default:
+                    insertText(keyText);
+            }
+            editor.focus();
+        }
+
+        function insertText(text) {
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                range.deleteContents();
+                range.insertNode(document.createTextNode(text));
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            } else {
+                editor.innerHTML += text;
+            }
+        }
+
+        function deleteCharacter() {
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                if (range.collapsed && range.startOffset > 0) {
+                    range.setStart(range.startContainer, range.startOffset - 1);
+                }
+                range.deleteContents();
+            }
+        }
+
+        function toggleShift() {
+            keys.forEach(key => {
+                if (key.textContent.length === 1 && key.textContent.match(/[a-z]/i)) {
+                    key.textContent = key.textContent === key.textContent.toLowerCase() ?
+                        key.textContent.toUpperCase() : key.textContent.toLowerCase();
+                }
+            });
+        }
+
+        // Prevent default keyboard from showing up
+        editor.addEventListener('touchstart', (e) => {
+            if (!isKeyboardVisible) {
+                e.preventDefault();
+                showKeyboard();
+            }
+        });
+
+        document.addEventListener('touchstart', (e) => {
+            if (isKeyboardVisible && !editor.contains(e.target) && !keyboard.contains(e.target)) {
+                e.preventDefault();
+            }
+        });
+    </script>
+</body>
+</html>
