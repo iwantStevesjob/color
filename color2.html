@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Color Sphere Visualization</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.159.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.159.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+
+        // Set up the scene, camera, and renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Create a sphere geometry
+        const geometry = new THREE.SphereGeometry(1, 64, 64);
+
+        // Uniforms to pass rotation to the shader
+        const uniforms = {
+            uQuaternion: { value: new THREE.Quaternion() },
+        };
+
+        // Create a custom shader material
+        const material = new THREE.ShaderMaterial({
+            uniforms: uniforms,
+            vertexShader: `
+                varying vec3 vWorldNormal;
+                
+                void main() {
+                    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform vec4 uQuaternion; // Sphere's world rotation
+                varying vec3 vWorldNormal;
+
+                vec3 hsv2rgb(vec3 c) {
+                    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+                    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+                    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+                }
+
+                vec3 rotateNormalByQuaternion(vec3 normal, vec4 q) {
+                    // Apply quaternion rotation to the normal
+                    vec3 t = 2.0 * cross(q.xyz, normal);
+                    return normal + q.w * t + cross(q.xyz, t);
+                }
+
+                void main() {
+                    // Apply sphere's quaternion rotation to the normal
+                    vec3 rotatedNormal = rotateNormalByQuaternion(vWorldNormal, uQuaternion);
+
+                    // Calculate hue based on azimuthal angle
+                    float hue = atan(rotatedNormal.z, rotatedNormal.x) / (2.0 * 3.14159265359) + 0.5;
+
+                    // Calculate saturation based on distance from poles
+                    float saturation = 1.0 - abs(rotatedNormal.y);
+
+                    // Calculate value (brightness) based on y-coordinate
+                    float value = (rotatedNormal.y + 1.0) / 2.0;
+
+                    vec3 color = hsv2rgb(vec3(hue, saturation, value));
+
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `
+        });
+
+        // Create a mesh with the geometry and material
+        const sphere = new THREE.Mesh(geometry, material);
+        scene.add(sphere);
+        const handles = []; // Initialize handles array before animate function
+
+        // Position the camera
+        camera.position.z = 2;
+
+        // Animation loop
+        function animate() {
+            // Pass sphere's current world rotation (quaternion) to the shader
+            uniforms.uQuaternion.value.copy(sphere.quaternion);
+
+            // Rotate all handles with the sphere
+            handles.forEach(handle => {
+                const initialPosition = handle.userData.initialPosition.clone();
+                initialPosition.applyQuaternion(sphere.quaternion);
+                handle.position.copy(initialPosition);
+            });
+
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Handle window resizing
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Sphere Interactions (Arcball Rotation with Fixed Direction)
+        let mouseDown = false;
+        let previous_point = new THREE.Vector3(0, 0, 1);
+        let current_point = new THREE.Vector3(0, 0, 1);
+        const sphereRadius = 1; // Radius of the virtual arcball
+        const rotationSpeed = 2.0; // Adjust rotation speed if needed
+
+        // Handle creation of handle
+        const handleGeometry = new THREE.SphereGeometry(0.05, 32, 32);
+        const handleMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        handles.length = 0; // Reset the handles array without redeclaring it
+
+        // Raycasting setup for accurate handle placement
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // Calculate the projection of the mouse position onto the arcball
+        function projectOnToArcball(x, y) {
+            const length = x * x + y * y;
+            if (length <= sphereRadius * sphereRadius) {
+                // Inside the arcball, project to z = sqrt(r^2 - x^2 - y^2)
+                return new THREE.Vector3(x, y, Math.sqrt(sphereRadius * sphereRadius - length));
+            } else {
+                // Outside the arcball, project to z = 0 and normalize
+                return new THREE.Vector3(x, y, 0).normalize();
+            }
+        }
+
+        function onMouseDown(event) {
+            event.preventDefault();
+            mouseDown = true;
+
+            const x = (event.clientX / window.innerWidth) * 2 - 1;
+            const y = -(event.clientY / window.innerHeight) * 2 + 1;
+            mouse.set(x, y);
+
+            // Cast ray from camera through mouse coordinates
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(sphere);
+
+            if (intersects.length > 0) {
+                previous_point.copy(intersects[0].point); // Accurate point on the sphere
+
+                // Create handle at the clicked point
+                const handle = new THREE.Mesh(handleGeometry, handleMaterial);
+                handle.position.copy(previous_point);
+                handle.userData.initialPosition = previous_point.clone(); // Save initial position
+                scene.add(handle);
+                handles.push(handle); // Store the handle
+
+                window.addEventListener('mousemove', onMouseMove, false);
+                window.addEventListener('mouseup', onMouseUp, false);
+            }
+        }
+
+        function onMouseMove(event) {
+            if (!mouseDown) return;
+
+            event.preventDefault();
+
+            const x = (event.clientX / window.innerWidth) * 2 - 1;
+            const y = -(event.clientY / window.innerHeight) * 2 + 1;
+            mouse.set(x, y);
+
+            // Cast ray again during movement
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(sphere);
+
+            if (intersects.length > 0) {
+                current_point.copy(intersects[0].point); // Accurate point on sphere
+                handleRotation(); // Update rotation based on new point
+            }
+        }
+
+        function onMouseUp() {
+            mouseDown = false;
+
+            window.removeEventListener('mousemove', onMouseMove, false);
+            window.removeEventListener('mouseup', onMouseUp, false);
+        }
+
+        function handleRotation() {
+            const rotateQuaternion = rotateMatrix(previous_point, current_point);
+            const curQuaternion = sphere.quaternion;
+
+            curQuaternion.multiplyQuaternions(rotateQuaternion, curQuaternion);
+            curQuaternion.normalize();
+            sphere.setRotationFromQuaternion(curQuaternion);
+
+            // Update previous_point for continuous rotation
+            previous_point.copy(current_point);
+        }
+
+        function rotateMatrix(rotateStart, rotateEnd) {
+            const axis = new THREE.Vector3();
+            const quaternion = new THREE.Quaternion();
+
+            const angle = Math.acos(
+                rotateStart.dot(rotateEnd) / rotateStart.length() / rotateEnd.length()
+            );
+
+            if (angle) {
+                axis.crossVectors(rotateStart, rotateEnd).normalize();
+                quaternion.setFromAxisAngle(axis, -angle);
+            }
+            return quaternion;
+        }
+
+        renderer.domElement.addEventListener('mousedown', onMouseDown);
+    </script>
+</body>
+</html>

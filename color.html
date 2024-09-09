@@ -102,9 +102,61 @@ input:checked + .slider:before {
     </style>
 	
 	<script src="three.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+   
  <script type="text/javascript">
 
+//INDEX DB STUFF
+const DB_NAME = "colorlog.in";
+const STORE_NAME = "colors";
+const DB_VERSION = 1;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = function(event) {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+
+    request.onsuccess = function(event) {
+      resolve(event.target.result);
+    };
+
+    request.onerror = function(event) {
+      reject(event.target.error);
+    };
+  });
+}
+
+function performTransaction(storeName, mode, callback) {
+  return openDB().then(db => {
+    const transaction = db.transaction([storeName], mode);
+    const store = transaction.objectStore(storeName);
+    return callback(store);
+  });
+}
+
+function setItem(key, value) {
+  console.log(`Storing item with key: ${key}`, value); // Log the data being stored
+  return performTransaction(STORE_NAME, "readwrite", store => store.put(value, key))
+    .then(() => {
+      console.log(`Successfully stored item with key: ${key}`);
+    })
+    .catch(error => {
+      console.error(`Error storing item with key: ${key}`, error);
+    });
+}
+
+function getItem(key) {
+  return performTransaction(STORE_NAME, "readonly", store => store.get(key));
+}
+
+function removeItem(key) {
+  return performTransaction(STORE_NAME, "readwrite", store => store.delete(key));
+}
 
 var {
   Geometry,
@@ -368,7 +420,7 @@ Defmech.RotationWithQuaternion = (function () {
       is_recording = is_playing = false;
       switch (state) {
         case "start_record":
-          //show_paths();
+          show_paths();
           //sphere.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
           break;
         case "playing":
@@ -475,6 +527,11 @@ Defmech.RotationWithQuaternion = (function () {
           is_playing = true;
           // convert this recording to path
           var current_path = recording_to_path(recording);
+          setItem(hexColor, JSON.stringify(current_path));
+          
+          
+          console.log("current path:", current_path);
+          
           // compare
           var ratio = 0;
           var result_box = document.getElementById("compare-result");
@@ -482,6 +539,7 @@ Defmech.RotationWithQuaternion = (function () {
             // Iterate through all the paths in the 'all_paths' array
             for (var i = 0; i < all_paths.length; i++) {
               var stored_path = all_paths[i].path;
+          console.log("stored path:", stored_path);
               //Check if toggle is clicked to either compare or guess paths
               if (!arePathsVisible) {
                 
@@ -514,6 +572,8 @@ Defmech.RotationWithQuaternion = (function () {
               }
             }
           }
+          console.log("pass:", pass);
+          console.log("all_paths:", all_paths);
 
           if (pass || all_paths.length < 1) {
             var color = get_HSL(sphere);
@@ -525,9 +585,12 @@ Defmech.RotationWithQuaternion = (function () {
             show_paths();
             sphere.remove(currentPathMesh);
             currentPathMesh = null; // Set to null to indicate there's no current path.
+                      
             save_paths().catch(function (err) {
               console.error(err);
             });
+
+
           } else {
             // If there is a currentPathMesh and it's a child of the sphere, remove it.
             if (currentPathMesh) {
@@ -649,14 +712,7 @@ Defmech.RotationWithQuaternion = (function () {
     document.addEventListener("mousedown", onDocumentMouseDown, false);
     document.addEventListener("touchstart", onTouchStart, passiveEvent);
 
-    window.addEventListener("resize", onWindowResize, false);
-
-    // Load previous data, using the localForageDriver we wrote before
-    localforage.setDriver(localStorage.localForageDriver);
-    console.log(
-      "Using localforage driver:",
-      localStorage.localForageDriver.replace("asyncStorage", "IndexedDB")
-    );
+    window.addEventListener("resize", onWindowResize, false)
     restore_paths()
       .then(function () {
         UI_states.set_state("start_record");
@@ -825,7 +881,7 @@ function getColorAtPoint(point) {
       handle: { x: point.x, y: point.y, z: point.z },
       id: hexColor
     });
-    localforage.setItem("handles", JSON.stringify(all_handles));
+    setItem("handles", JSON.stringify(all_handles));
   }
 
   function onTouchMove(event) {
@@ -1429,14 +1485,14 @@ function isPerfectMatch(stored_path, mutated_path) {
     return matching_a;
   }
 
-  // returns a promise
-  function save_paths() {
-    return Promise.all([localforage.setItem("paths_v1", all_paths)]);
-  }
 
   // returns a promise
+    function save_paths(){
+        return Promise.all([setItem("paths", JSON.stringify(all_paths))])
+    }
+  // returns a promise
   function restore_paths() {
-    return localforage.getItem("paths_v1").then(function (paths) {
+    return getItem("paths").then(function (paths) {
       if (paths) {
         for (var i = 0; i < paths.length; i++) {
           var path = paths[i].path;
@@ -1452,7 +1508,7 @@ function isPerfectMatch(stored_path, mutated_path) {
 
   function delete_saved() {
     return Promise.all([
-      localforage.removeItem("paths_v1")
+      removeItem("paths")
     ]);
   }
 
@@ -1466,25 +1522,7 @@ function isPerfectMatch(stored_path, mutated_path) {
 
 document.onreadystatechange = function () {
   if (document.readyState === "complete") {
-    // Configure localForage
-    if (!localStorage.localForageDriver) {
-      var try_sql = localforage.INDEXEDDB;
-      // if(window.openDatabase){
-      //     try_sql = localforage.WEBSQL
-      // }
-      localforage
-        .setItem("test", [])
-        .then(function (value) {
-          localStorage.localForageDriver = try_sql;
-          Defmech.RotationWithQuaternion.init();
-        })
-        .catch(function (err) {
-          localStorage.localForageDriver = localforage.LOCALSTORAGE;
-          Defmech.RotationWithQuaternion.init();
-        });
-    } else {
-      Defmech.RotationWithQuaternion.init();
-    }
+    Defmech.RotationWithQuaternion.init();
   }
 };
 
