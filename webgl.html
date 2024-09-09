@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -17,6 +19,7 @@
 
         if (!gl) {
             alert('Unable to initialize WebGL. Your browser may not support it.');
+            return;
         }
 
         // Vertex shader program
@@ -29,240 +32,293 @@
             uniform mat4 uNormalMatrix;
             
             varying vec3 vNormal;
-varying vec3 vTransformedPosition;
-
-void main(void) {
-    gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-    vNormal = normalize(vec3(uNormalMatrix * vec4(aVertexNormal, 0.0)));
-    vTransformedPosition = vec3(uModelViewMatrix * aVertexPosition); // Pass transformed position to fragment shader
-}
+            
+            void main(void) {
+                gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+                vNormal = normalize(vec3(uNormalMatrix * vec4(aVertexNormal, 1.0)));
+            }
         `;
 
         // Fragment shader program
         const fsSource = `
             precision mediump float;
-
-varying vec3 vNormal;
-varying vec3 vTransformedPosition;
-
-vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-}
-
-void main(void) {
-    vec3 normal = normalize(vNormal);
-
-    // Use transformed position to calculate hue to rotate colors with the sphere
-    float hue = atan(vTransformedPosition.z, vTransformedPosition.x) / (2.0 * 3.14159265) + 0.5;
-    float saturation = 1.0 - abs(normal.y);
-    float value = (normal.y + 1.0) * 0.5;
-
-    vec3 color = hsv2rgb(vec3(hue, saturation, value));
-
-    gl_FragColor = vec4(color, 1.0);
-}
+            
+            varying vec3 vNormal;
+            
+            vec3 hsv2rgb(vec3 c) {
+                vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+                vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+                return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+            }
+            
+            void main(void) {
+                vec3 normal = normalize(vNormal);
+                
+                float hue = atan(normal.z, normal.x) / (2.0 * 3.14159265) + 0.5;
+                float saturation = 1.0 - abs(normal.y);
+                float value = (normal.y + 1.0) * 0.5;
+                
+                vec3 color = hsv2rgb(vec3(hue, saturation, value));
+                
+                gl_FragColor = vec4(color, 1.0);
+            }
         `;
 
-        // Initialize a shader program
-        function initShaderProgram(gl, vsSource, fsSource) {
-            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
-            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
-
-            const shaderProgram = gl.createProgram();
-            gl.attachShader(shaderProgram, vertexShader);
-            gl.attachShader(shaderProgram, fragmentShader);
-            gl.linkProgram(shaderProgram);
-
-            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-                alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
-                return null;
-            }
-
-            return shaderProgram;
+        // Helper function to create a 4x4 identity matrix
+        function mat4Create() {
+            return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
         }
 
-        // Create a shader of the given type, upload the source and compile it
-        function loadShader(gl, type, source) {
-            const shader = gl.createShader(type);
-            gl.shaderSource(shader, source);
-            gl.compileShader(shader);
-
-            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
-                gl.deleteShader(shader);
-                return null;
-            }
-
-            return shader;
+        // Perspective matrix
+        function mat4Perspective(out, fovy, aspect, near, far) {
+            const f = 1.0 / Math.tan(fovy / 2);
+            const nf = 1 / (near - far);
+            out[0] = f / aspect;
+            out[1] = 0;
+            out[2] = 0;
+            out[3] = 0;
+            out[4] = 0;
+            out[5] = f;
+            out[6] = 0;
+            out[7] = 0;
+            out[8] = 0;
+            out[9] = 0;
+            out[10] = (far + near) * nf;
+            out[11] = -1;
+            out[12] = 0;
+            out[13] = 0;
+            out[14] = 2 * far * near * nf;
+            out[15] = 0;
+            return out;
         }
 
-        // Initialize buffers for the sphere
-        function initBuffers(gl) {
-            const latitudeBands = 30;
-            const longitudeBands = 30;
-            const radius = 1;
+        // Translation matrix
+        function mat4Translate(out, a, v) {
+            const x = v[0], y = v[1], z = v[2];
+            if (a === out) {
+                out[12] = a[0] * x + a[4] * y + a[8] * z + a[12];
+                out[13] = a[1] * x + a[5] * y + a[9] * z + a[13];
+                out[14] = a[2] * x + a[6] * y + a[10] * z + a[14];
+                out[15] = a[3] * x + a[7] * y + a[11] * z + a[15];
+            } else {
+                const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+                const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+                const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
 
-            const positions = [];
-            const indices = [];
-            const normals = [];
+                out[0] = a00;
+                out[1] = a01;
+                out[2] = a02;
+                out[3] = a03;
+                out[4] = a10;
+                out[5] = a11;
+                out[6] = a12;
+                out[7] = a13;
+                out[8] = a20;
+                out[9] = a21;
+                out[10] = a22;
+                out[11] = a23;
 
-            for (let latNumber = 0; latNumber <= latitudeBands; latNumber++) {
-                const theta = latNumber * Math.PI / latitudeBands;
-                const sinTheta = Math.sin(theta);
-                const cosTheta = Math.cos(theta);
-
-                for (let longNumber = 0; longNumber <= longitudeBands; longNumber++) {
-                    const phi = longNumber * 2 * Math.PI / longitudeBands;
-                    const sinPhi = Math.sin(phi);
-                    const cosPhi = Math.cos(phi);
-
-                    const x = cosPhi * sinTheta;
-                    const y = cosTheta;
-                    const z = sinPhi * sinTheta;
-
-                    positions.push(radius * x);
-                    positions.push(radius * y);
-                    positions.push(radius * z);
-
-                    normals.push(x);
-                    normals.push(y);
-                    normals.push(z);
-                }
+                out[12] = a00 * x + a10 * y + a20 * z + a[12];
+                out[13] = a01 * x + a11 * y + a21 * z + a[13];
+                out[14] = a02 * x + a12 * y + a22 * z + a[14];
+                out[15] = a03 * x + a13 * y + a23 * z + a[15];
             }
-
-            for (let latNumber = 0; latNumber < latitudeBands; latNumber++) {
-                for (let longNumber = 0; longNumber < longitudeBands; longNumber++) {
-                    const first = (latNumber * (longitudeBands + 1)) + longNumber;
-                    const second = first + longitudeBands + 1;
-                    indices.push(first);
-                    indices.push(second);
-                    indices.push(first + 1);
-
-                    indices.push(second);
-                    indices.push(second + 1);
-                    indices.push(first + 1);
-                }
-            }
-
-            const positionBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
-
-            const normalBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
-
-            const indexBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
-
-            return {
-                position: positionBuffer,
-                normal: normalBuffer,
-                indices: indexBuffer,
-                count: indices.length,
-            };
+            return out;
         }
 
-        // Draw the scene
+        // Rotation matrix (around Y axis)
+        function mat4Rotate(out, a, rad, axis) {
+            let x = axis[0], y = axis[1], z = axis[2];
+            let len = Math.hypot(x, y, z);
+            if (len < 0.000001) return null;
+            len = 1 / len;
+            x *= len; y *= len; z *= len;
+            const s = Math.sin(rad), c = Math.cos(rad), t = 1 - c;
+            const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3];
+            const a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7];
+            const a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11];
+            const b00 = x * x * t + c, b01 = y * x * t + z * s, b02 = z * x * t - y * s;
+            const b10 = x * y * t - z * s, b11 = y * y * t + c, b12 = z * y * t + x * s;
+            const b20 = x * z * t + y * s, b21 = y * z * t - x * s, b22 = z * z * t + c;
+            out[0] = a00 * b00 + a10 * b01 + a20 * b02;
+            out[1] = a01 * b00 + a11 * b01 + a21 * b02;
+            out[2] = a02 * b00 + a12 * b01 + a22 * b02;
+            out[3] = a03 * b00 + a13 * b01 + a23 * b02;
+            out[4] = a00 * b10 + a10 * b11 + a20 * b12;
+            out[5] = a01 * b10 + a11 * b11 + a21 * b12;
+            out[6] = a02 * b10 + a12 * b11 + a22 * b12;
+            out[7] = a03 * b10 + a13 * b11 + a23 * b12;
+            out[8] = a00 * b20 + a10 * b21 + a20 * b22;
+            out[9] = a01 * b20 + a11 * b21 + a21 * b22;
+            out[10] = a02 * b20 + a12 * b21 + a22 * b22;
+            out[11] = a03 * b20 + a13 * b21 + a23 * b22;
+            out[12] = a[12];
+            out[13] = a[13];
+            out[14] = a[14];
+            out[15] = a[15];
+            return out;
+        }
+
+        // Inversion of a 4x4 matrix
+        function mat4Invert(out, a) {
+            const m = a;
+            const b = new Float32Array(16);
+
+            b[0]  =  m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+            b[4]  = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+            b[8]  =  m[4] * m[9]  * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+            b[12] = -m[4] * m[9]  * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+
+            b[1]  = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+            b[5]  =  m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+            b[9]  = -m[0] * m[9]  * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+            b[13] =  m[0] * m[9]  * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+
+            b[2]  =  m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+            b[6]  = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+            b[10] =  m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+            b[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+
+            b[3]  = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+            b[7]  =  m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+            b[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9]  + m[4] * m[1] * m[11] - m[4] * m[3] * m[9]  - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+            b[15] =  m[0] * m[5] * m[10] - m[0] * m[6] * m[9]  - m[4] * m[1] * m[10] + m[4] * m[2] * m[9]  + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+
+            let det = m[0] * b[0] + m[1] * b[4] + m[2] * b[8] + m[3] * b[12];
+            if (!det) return null;
+            det = 1.0 / det;
+
+            for (let i = 0; i < 16; i++) out[i] = b[i] * det;
+            return out;
+        }
+
+        // Transpose of a 4x4 matrix
+        function mat4Transpose(out, a) {
+            if (out === a) {
+                let a01 = a[1], a02 = a[2], a03 = a[3];
+                let a12 = a[6], a13 = a[7];
+                let a23 = a[11];
+                out[1] = a[4];
+                out[2] = a[8];
+                out[3] = a[12];
+                out[4] = a01;
+                out[6] = a[9];
+                out[7] = a[13];
+                out[8] = a02;
+                out[9] = a12;
+                out[11] = a[14];
+                out[12] = a03;
+                out[13] = a13;
+                out[14] = a23;
+            } else {
+                out[0] = a[0];
+                out[1] = a[4];
+                out[2] = a[8];
+                out[3] = a[12];
+                out[4] = a[1];
+                out[5] = a[5];
+                out[6] = a[9];
+                out[7] = a[13];
+                out[8] = a[2];
+                out[9] = a[6];
+                out[10] = a[10];
+                out[11] = a[14];
+                out[12] = a[3];
+                out[13] = a[7];
+                out[14] = a[11];
+                out[15] = a[15];
+            }
+            return out;
+        }
+
+        // Updated drawScene function to use custom matrix functions
         function drawScene(gl, programInfo, buffers, deltaTime) {
-            gl.clearColor(0.0, 0.0, 0.0, 1.0);
-            gl.clearDepth(1.0);
-            gl.enable(gl.DEPTH_TEST);
-            gl.depthFunc(gl.LEQUAL);
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);  // Clear to black, fully opaque
+            gl.clearDepth(1.0);                 // Clear everything
+            gl.enable(gl.DEPTH_TEST);           // Enable depth testing
+            gl.depthFunc(gl.LEQUAL);            // Near things obscure far things
 
+            // Clear the canvas before we start drawing on it.
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-            const fieldOfView = 45 * Math.PI / 180;
+            // Create a perspective matrix, a special matrix that is used to simulate the distortion of perspective in a camera. Our field of view is 45 degrees, with a width/height ratio that matches the display size of the canvas and we only want to see objects between 0.1 units and 100 units away from the camera.
+            const fieldOfView = 45 * Math.PI / 180;   // in radians
             const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
             const zNear = 0.1;
             const zFar = 100.0;
-            const projectionMatrix = mat4.create();
+            const projectionMatrix = mat4Create();
 
-            mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+            mat4Perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
 
-            const modelViewMatrix = mat4.create();
+            // Set the drawing position to the "identity" point, which is the center of the scene.
+            const modelViewMatrix = mat4Create();
 
-            mat4.translate(modelViewMatrix, modelViewMatrix, [0.0, 0.0, -5.0]);
-            mat4.rotate(modelViewMatrix, modelViewMatrix, performance.now() * 0.001, [0, 1, 0]);
+            // Move the drawing position a bit to where we want to start drawing the square.
+            mat4Translate(modelViewMatrix, modelViewMatrix, [0.0, 0.0, -5.0]); // amount to translate
+            mat4Rotate(modelViewMatrix, modelViewMatrix, performance.now() * 0.001, [0, 1, 0]); // rotate around the Y axis
 
-            const normalMatrix = mat4.create();
-            mat4.invert(normalMatrix, modelViewMatrix);
-            mat4.transpose(normalMatrix, normalMatrix);
+            // Create the normal matrix from the model view matrix
+            const normalMatrix = mat4Create();
+            mat4Invert(normalMatrix, modelViewMatrix);
+            mat4Transpose(normalMatrix, normalMatrix);
 
-            // Position attribute
+            // Tell WebGL how to pull out the positions from the position buffer into the vertexPosition attribute.
             gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
-            gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+            gl.vertexAttribPointer(
+                programInfo.attribLocations.vertexPosition,
+                3,            // numComponents
+                gl.FLOAT,     // type
+                false,        // normalize
+                0,            // stride
+                0             // offset
+            );
             gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
 
-            // Normal attribute
+            // Tell WebGL how to pull out the normals from the normal buffer into the vertexNormal attribute.
             gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normal);
-            gl.vertexAttribPointer(programInfo.attribLocations.vertexNormal, 3, gl.FLOAT, false, 0, 0);
+            gl.vertexAttribPointer(
+                programInfo.attribLocations.vertexNormal,
+                3,            // numComponents
+                gl.FLOAT,     // type
+                false,        // normalize
+                0,            // stride
+                0             // offset
+            );
             gl.enableVertexAttribArray(programInfo.attribLocations.vertexNormal);
 
+            // Tell WebGL to use our program when drawing.
             gl.useProgram(programInfo.program);
 
-            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
-            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
-            gl.uniformMatrix4fv(programInfo.uniformLocations.normalMatrix, false, normalMatrix);
+            // Set the shader uniforms.
+            gl.uniformMatrix4fv(
+                programInfo.uniformLocations.projectionMatrix,
+                false,
+                projectionMatrix
+            );
+            gl.uniformMatrix4fv(
+                programInfo.uniformLocations.modelViewMatrix,
+                false,
+                modelViewMatrix
+            );
+            gl.uniformMatrix4fv(
+                programInfo.uniformLocations.normalMatrix,
+                false,
+                normalMatrix
+            );
 
+            // Draw the sphere.
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indices);
             gl.drawElements(gl.TRIANGLES, buffers.count, gl.UNSIGNED_SHORT, 0);
         }
 
-        // Initialize WebGL
-        function main() {
-            if (!gl) return;
-
-            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
-
-            const programInfo = {
-                program: shaderProgram,
-                attribLocations: {
-                    vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
-                    vertexNormal: gl.getAttribLocation(shaderProgram, 'aVertexNormal'),
-                },
-                uniformLocations: {
-                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
-                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
-                    normalMatrix: gl.getUniformLocation(shaderProgram, 'uNormalMatrix'),
-                },
-            };
-
-            const buffers = initBuffers(gl);
-
-            let then = 0;
-
-            // Render loop
-            function render(now) {
-                now *= 0.001;  // convert to seconds
-                const deltaTime = now - then;
-                then = now;
-
-                drawScene(gl, programInfo, buffers, deltaTime);
-
-                requestAnimationFrame(render);
-            }
-            requestAnimationFrame(render);
-        }
-
-        // Include glMatrix library
-        const glMatrix = document.createElement('script');
-        glMatrix.src = 'https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js';
-        glMatrix.onload = main;
-        document.body.appendChild(glMatrix);
-
-        // Handle window resizing
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            gl.viewport(0, 0, canvas.width, canvas.height);
-        }
-
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
+        // Start the WebGL setup process
+        main();
     </script>
 </body>
 </html>
+
+
+
+
+
+
