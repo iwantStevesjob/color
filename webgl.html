@@ -12,6 +12,65 @@
 <body>
     <canvas id="glCanvas"></canvas>
     <script>
+
+//INDEX DB STUFF
+const DB_NAME = "colorlog.in";
+const STORE_NAME = "colors";
+const DB_VERSION = 1;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = function(event) {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+
+    request.onsuccess = function(event) {
+      resolve(event.target.result);
+    };
+
+    request.onerror = function(event) {
+      reject(event.target.error);
+    };
+  });
+}
+
+function performTransaction(storeName, mode, callback) {
+  return openDB().then(db => {
+    const transaction = db.transaction([storeName], mode);
+    const store = transaction.objectStore(storeName);
+    return callback(store);
+  });
+}
+
+function setItem(key, value) {
+  console.log(`Storing item with key: ${key}`, value); // Log the data being stored
+  return performTransaction(STORE_NAME, "readwrite", store => store.put(value, key))
+    .then(() => {
+      console.log(`Successfully stored item with key: ${key}`);
+    })
+    .catch(error => {
+      console.error(`Error storing item with key: ${key}`, error);
+    });
+}
+
+function getItem(key) {
+  return performTransaction(STORE_NAME, "readonly", store => store.get(key));
+}
+
+function removeItem(key) {
+  return performTransaction(STORE_NAME, "readwrite", store => store.delete(key));
+}
+
+
+
+
+
+
         const canvas = document.getElementById('glCanvas');
         const gl = canvas.getContext('webgl');
 
@@ -185,7 +244,7 @@
 
         // Draw the scene
         function drawScene(gl, programInfo, buffers) {
-            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clearColor(1.0, 1.0, 1.0, 1.0); // Change background to white
             gl.clearDepth(1.0);
             gl.enable(gl.DEPTH_TEST);
             gl.depthFunc(gl.LEQUAL);
@@ -242,47 +301,41 @@
         let isDragging = false;
         let lastMouseX, lastMouseY;
         let rotationX = 0, rotationY = 0; 
+        let colorTimeout; // Add this variable
+        let programInfo; // Add this variable
+        let buffers; // Add this variable
         
+        // Function to get the color at the center of the canvas
+        function getColorAtCenter() {
+            // Force a render to ensure the latest frame is displayed
+            drawScene(gl, programInfo, buffers);
+
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const pixels = new Uint8Array(4); // RGBA
+
+            gl.readPixels(centerX, centerY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+            const r = pixels[0];
+            const g = pixels[1];
+            const b = pixels[2];
+            const a = pixels[3] / 255;
+
+            // Convert the RGB value to Hex
+            let hex = rgbToHex(r, g, b);
+            setItem(hex, "F");  
+        }
+
+        // Function to convert RGB to Hex
+        function rgbToHex(r, g, b) {
+            return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+        }
         // Add these functions
-        function getMousePos(canvas, evt) {
-            const rect = canvas.getBoundingClientRect();
-            return {
-                x: evt.clientX - rect.left,
-                y: evt.clientY - rect.top
-            };
-        }
-
-        function intersectSphere(origin, direction) {
-            const radius = 1; // Sphere radius
-            const center = [0, 0, -5]; // Sphere center
-
-            const oc = [
-                origin[0] - center[0],
-                origin[1] - center[1],
-                origin[2] - center[2]
-            ];
-
-            const a = direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2];
-            const b = 2 * (oc[0] * direction[0] + oc[1] * direction[1] + oc[2] * direction[2]);
-            const c = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - radius * radius;
-
-            const discriminant = b * b - 4 * a * c;
-            if (discriminant < 0) {
-                return null;
-            }
-
-            const t = (-b - Math.sqrt(discriminant)) / (2 * a);
-            return [
-                origin[0] + t * direction[0],
-                origin[1] + t * direction[1],
-                origin[2] + t * direction[2]
-            ];
-        }
-
         function handleMouseDown(event) {
             isDragging = true;
-            lastMouseX = event.clientX;
-            lastMouseY = event.clientY;
+            lastMouseX = event.clientX || event.touches[0].clientX;
+            lastMouseY = event.clientY || event.touches[0].clientY;
+            clearTimeout(colorTimeout); // Clear the timeout when dragging starts
         }
 
         function handleMouseMove(event) {
@@ -296,21 +349,18 @@
 
             lastMouseX = event.clientX;
             lastMouseY = event.clientY;
+
+            clearTimeout(colorTimeout); // Clear the timeout on every move
         }
 
         function handleMouseUp() {
             isDragging = false;
+            clearTimeout(colorTimeout); // Clear the timeout when dragging stops
+            colorTimeout = setTimeout(() => {
+                drawScene(gl, programInfo, buffers); // Force a render before reading pixels
+                getColorAtCenter();
+            }, 2000); // Set a new timeout
         }
-
-
-         
-        ///////////////////////////////////////////////////////////
-        //
-        // INITIALIZE
-        //
-        ///////////////////////////////////////////////////////////
-        
-       
 
         // Initialize WebGL
         function main() {
@@ -318,7 +368,7 @@
 
             const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
 
-            const programInfo = {
+            programInfo = {
                 program: shaderProgram,
                 attribLocations: {
                     vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
@@ -332,7 +382,7 @@
                 },
             };
 
-            const buffers = initBuffers(gl);
+            buffers = initBuffers(gl);
 
             canvas.addEventListener('mousedown', handleMouseDown);
             canvas.addEventListener('mousemove', handleMouseMove);
@@ -365,4 +415,7 @@
     </script>
 </body>
 </html>
+
+        
+
         
