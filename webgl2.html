@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGL Sphere with Two Visible Embedded Points</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+    <style>
+        canvas { width: 100%; height: 100%; display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <script>
+        const vsSource = `
+            attribute vec3 aPosition;
+            attribute vec3 aColor;
+            uniform mat4 uModelViewMatrix;
+            uniform mat4 uProjectionMatrix;
+            uniform float uPointSize;
+            varying vec3 vColor;
+            void main() {
+                gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
+                gl_PointSize = uPointSize;
+                vColor = aColor;
+            }
+        `;
+
+        const fsSource = `
+            precision mediump float;
+            varying vec3 vColor;
+            void main() {
+                gl_FragColor = vec4(vColor, 1.0);
+            }
+        `;
+
+        function initShaderProgram(gl, vsSource, fsSource) {
+            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+            const shaderProgram = gl.createProgram();
+            gl.attachShader(shaderProgram, vertexShader);
+            gl.attachShader(shaderProgram, fragmentShader);
+            gl.linkProgram(shaderProgram);
+
+            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+                return null;
+            }
+
+            return shaderProgram;
+        }
+
+        function loadShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+
+            return shader;
+        }
+
+        function createSphere(radius, latitudeBands, longitudeBands) {
+            const positions = [];
+            const indices = [];
+            const colors = [];
+
+            for (let lat = 0; lat <= latitudeBands; lat++) {
+                const theta = lat * Math.PI / latitudeBands;
+                const sinTheta = Math.sin(theta);
+                const cosTheta = Math.cos(theta);
+
+                for (let long = 0; long <= longitudeBands; long++) {
+                    const phi = long * 2 * Math.PI / longitudeBands;
+                    const sinPhi = Math.sin(phi);
+                    const cosPhi = Math.cos(phi);
+
+                    const x = cosPhi * sinTheta;
+                    const y = cosTheta;
+                    const z = sinPhi * sinTheta;
+
+                    positions.push(radius * x, radius * y, radius * z);
+                    colors.push(0.7, 0.7, 0.7); // Light gray color for the sphere
+                }
+            }
+
+            for (let lat = 0; lat < latitudeBands; lat++) {
+                for (let long = 0; long < longitudeBands; long++) {
+                    const first = (lat * (longitudeBands + 1)) + long;
+                    const second = first + longitudeBands + 1;
+                    indices.push(first, second, first + 1);
+                    indices.push(second, second + 1, first + 1);
+                }
+            }
+
+            return { positions, indices, colors };
+        }
+
+        function main() {
+            const canvas = document.getElementById('glCanvas');
+            const gl = canvas.getContext('webgl');
+
+            if (!gl) {
+                console.error('Unable to initialize WebGL. Your browser may not support it.');
+                return;
+            }
+
+            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
+
+            const programInfo = {
+                program: shaderProgram,
+                attribLocations: {
+                    position: gl.getAttribLocation(shaderProgram, 'aPosition'),
+                    color: gl.getAttribLocation(shaderProgram, 'aColor'),
+                },
+                uniformLocations: {
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+                    pointSize: gl.getUniformLocation(shaderProgram, 'uPointSize'),
+                },
+            };
+
+            const sphereRadius = 1.0;
+            const sphere = createSphere(sphereRadius, 30, 30);
+
+            const sphereBuffers = {
+                position: gl.createBuffer(),
+                color: gl.createBuffer(),
+                indices: gl.createBuffer(),
+            };
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphere.positions), gl.STATIC_DRAW);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.color);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphere.colors), gl.STATIC_DRAW);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(sphere.indices), gl.STATIC_DRAW);
+
+            // Create two points slightly inside the sphere surface
+            const point1 = vec3.fromValues(sphereRadius * 0.9, 0, 0);
+            const point2 = vec3.fromValues(0, sphereRadius * 0.9, 0);
+
+            const pointPositions = [
+                ...point1,
+                ...point2
+            ];
+
+            const pointColors = [
+                1.0, 0.0, 0.0,  // Red
+                0.0, 1.0, 0.0   // Green
+            ];
+
+            const pointBuffers = {
+                position: gl.createBuffer(),
+                color: gl.createBuffer(),
+            };
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffers.position);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pointPositions), gl.STATIC_DRAW);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffers.color);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pointColors), gl.STATIC_DRAW);
+
+            function render() {
+                gl.clearColor(0.0, 0.0, 0.0, 1.0);
+                gl.clearDepth(1.0);
+                gl.enable(gl.DEPTH_TEST);
+                gl.depthFunc(gl.LEQUAL);
+                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                const fieldOfView = 45 * Math.PI / 180;
+                const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+                const zNear = 0.1;
+                const zFar = 100.0;
+                const projectionMatrix = mat4.create();
+                mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+
+                const modelViewMatrix = mat4.create();
+                mat4.translate(modelViewMatrix, modelViewMatrix, [0.0, 0.0, -5.0]);
+                mat4.rotate(modelViewMatrix, modelViewMatrix, performance.now() * 0.001, [0, 1, 0]);
+
+                gl.useProgram(programInfo.program);
+
+                gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+                gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+
+                // Draw sphere
+                gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
+                gl.vertexAttribPointer(programInfo.attribLocations.position, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(programInfo.attribLocations.position);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.color);
+                gl.vertexAttribPointer(programInfo.attribLocations.color, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(programInfo.attribLocations.color);
+
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
+                gl.drawElements(gl.LINES, sphere.indices.length, gl.UNSIGNED_SHORT, 0);
+
+                // Draw points
+                gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffers.position);
+                gl.vertexAttribPointer(programInfo.attribLocations.position, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(programInfo.attribLocations.position);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffers.color);
+                gl.vertexAttribPointer(programInfo.attribLocations.color, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(programInfo.attribLocations.color);
+
+                gl.uniform1f(programInfo.uniformLocations.pointSize, 10.0);
+                gl.drawArrays(gl.POINTS, 0, 2);
+
+                requestAnimationFrame(render);
+            }
+
+            render();
+        }
+
+        window.onload = main;
+    </script>
+</body>
+</html>
