@@ -1,20 +1,8 @@
-
-
-
-
-
-
-
-
-
-
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Color Sphere with Arcball Rotation</title>
+  <title>Color Sphere with Angular Velocity Threshold</title>
   <style>
     body, html {
       margin: 0;
@@ -73,6 +61,14 @@
     let sphereRadius = 1;
     let handlePoint = null;
     let initialRotationQuaternion = null;
+    let angularVelocity = vec3.create(); // Vector representing angular velocity (axis * speed)
+
+    // Editable friction variable (between 0 and 1)
+    // Lower values mean more friction (sphere stops sooner), higher values mean less friction (sphere spins longer)
+    let friction = 0.95; // You can adjust this value to control the slipperiness
+
+    // Minimum angular speed threshold
+    let minAngularSpeed = 0.007; // Adjust this value as needed
 
     // Camera position
     const cameraPosition = [0, 0, 5];
@@ -258,23 +254,32 @@
         isDragging = true;
         initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
         lastArcballPos = getArcballVector(e.clientX, e.clientY);
+        angularVelocity = vec3.create(); // Reset angular velocity
         handlePick(e.clientX, e.clientY);
       });
 
-      
-// Add the lerp function for scalar values
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-// Updated mousemove event handler
- canvas.addEventListener('mousemove', (e) => {
+      canvas.addEventListener('mousemove', (e) => {
         if (isDragging && lastArcballPos) {
-                
           const currentArcballPos = getArcballVector(e.clientX, e.clientY);
           const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
           if (rotation) {
+            // Update rotation quaternion
             quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
+
+            // Calculate angular velocity vector
+            const angle = 2 * Math.acos(rotation[3]);
+            const sinHalfAngle = Math.sqrt(1 - rotation[3] * rotation[3]);
+            let axis = vec3.create();
+            if (sinHalfAngle < 0.001) {
+              // If the angle is small, the axis is not important
+              axis = vec3.fromValues(1, 0, 0);
+            } else {
+              axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
+            }
+            vec3.normalize(axis, axis);
+
+            // Multiply axis by angle to get angular velocity vector
+            angularVelocity = vec3.scale(vec3.create(), axis, angle);
           }
           lastArcballPos = currentArcballPos;
 
@@ -286,11 +291,23 @@ function lerp(a, b, t) {
       canvas.addEventListener('mouseup', () => {
         isDragging = false;
         lastArcballPos = null;
+
+        // Check if angular speed is above threshold
+        const angularSpeed = vec3.length(angularVelocity);
+        if (angularSpeed < minAngularSpeed) {
+          vec3.set(angularVelocity, 0, 0, 0);
+        }
       });
 
       canvas.addEventListener('mouseleave', () => {
         isDragging = false;
         lastArcballPos = null;
+
+        // Check if angular speed is above threshold
+        const angularSpeed = vec3.length(angularVelocity);
+        if (angularSpeed < minAngularSpeed) {
+          vec3.set(angularVelocity, 0, 0, 0);
+        }
       });
 
       // Touch events
@@ -301,6 +318,7 @@ function lerp(a, b, t) {
           const touch = e.touches[0];
           initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
           lastArcballPos = getArcballVector(touch.clientX, touch.clientY);
+          angularVelocity = vec3.create(); // Reset angular velocity
           handlePick(touch.clientX, touch.clientY);
         }
       }, { passive: false });
@@ -312,7 +330,23 @@ function lerp(a, b, t) {
           const currentArcballPos = getArcballVector(touch.clientX, touch.clientY);
           const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
           if (rotation) {
+            // Update rotation quaternion
             quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
+
+            // Calculate angular velocity vector
+            const angle = 2 * Math.acos(rotation[3]);
+            const sinHalfAngle = Math.sqrt(1 - rotation[3] * rotation[3]);
+            let axis = vec3.create();
+            if (sinHalfAngle < 0.001) {
+              // If the angle is small, the axis is not important
+              axis = vec3.fromValues(1, 0, 0);
+            } else {
+              axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
+            }
+            vec3.normalize(axis, axis);
+
+            // Multiply axis by angle to get angular velocity vector
+            angularVelocity = vec3.scale(vec3.create(), axis, angle);
           }
           lastArcballPos = currentArcballPos;
 
@@ -325,6 +359,12 @@ function lerp(a, b, t) {
         e.preventDefault(); // Prevent default touch behavior
         isDragging = false;
         lastArcballPos = null;
+
+        // Check if angular speed is above threshold
+        const angularSpeed = vec3.length(angularVelocity);
+        if (angularSpeed < minAngularSpeed) {
+          vec3.set(angularVelocity, 0, 0, 0);
+        }
       });
 
       window.addEventListener('resize', resizeCanvas);
@@ -338,10 +378,26 @@ function lerp(a, b, t) {
      */
     function getArcballVector(clientX, clientY) {
       const rect = canvas.getBoundingClientRect();
-      const x = ((clientX - rect.left) / canvas.clientWidth) * 2 - 1;
-      const y = ((clientY - rect.top) / canvas.clientHeight) * -2 + 1;
-      const z2 = 1 - x * x - y * y;
-      const z = z2 > 0 ? Math.sqrt(z2) : 0;
+      const aspect = canvas.clientWidth / canvas.clientHeight;
+
+      // Map screen coordinates to [-1, 1] range
+      let x = ((clientX - rect.left) / canvas.clientWidth) * 2 - 1;
+      let y = ((clientY - rect.top) / canvas.clientHeight) * -2 + 1;
+
+      // Adjust for aspect ratio
+      x = x * aspect;
+
+      const lengthSquared = x * x + y * y;
+      let z;
+      if (lengthSquared <= 1) {
+        z = Math.sqrt(1 - lengthSquared);
+      } else {
+        const length = Math.sqrt(lengthSquared);
+        x /= length;
+        y /= length;
+        z = 0;
+      }
+
       return vec3.fromValues(x, y, z);
     }
 
@@ -426,8 +482,8 @@ function lerp(a, b, t) {
      */
     function getMouseRay(clientX, clientY) {
       const rect = canvas.getBoundingClientRect();
-      const x = ((clientX - rect.left) / canvas.clientWidth) * 2 - 1;
-      const y = ((clientY - rect.top) / canvas.clientHeight) * -2 + 1;
+      let x = ((clientX - rect.left) / canvas.clientWidth) * 2 - 1;
+      let y = ((clientY - rect.top) / canvas.clientHeight) * -2 + 1;
 
       const inverseProjectionView = mat4.multiply(mat4.create(), projectionMatrix, viewMatrix);
       mat4.invert(inverseProjectionView, inverseProjectionView);
@@ -552,6 +608,27 @@ function lerp(a, b, t) {
 
     function updateModelMatrix() {
       modelMatrix = mat4.create();
+
+      // Apply momentum when not dragging
+      if (!isDragging) {
+        // Compute rotation quaternion from angular velocity
+        const angle = vec3.length(angularVelocity);
+        if (angle > 0.0001) {
+          const axis = vec3.normalize(vec3.create(), angularVelocity);
+          const incrementalRotation = quat.create();
+          quat.setAxisAngle(incrementalRotation, axis, angle);
+
+          // Apply incremental rotation
+          quat.multiply(rotationQuaternion, incrementalRotation, rotationQuaternion);
+
+          // Apply friction to angular velocity
+          vec3.scale(angularVelocity, angularVelocity, friction);
+        } else {
+          // If angular velocity is very small, stop rotation
+          vec3.set(angularVelocity, 0, 0, 0);
+        }
+      }
+
       mat4.fromQuat(modelMatrix, rotationQuaternion);
       // Initial rotation to have white facing the user
       mat4.rotateX(modelMatrix, modelMatrix, -Math.PI / 2);
@@ -707,4 +784,3 @@ function lerp(a, b, t) {
   </script>
 </body>
 </html>
-
