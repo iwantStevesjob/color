@@ -1,226 +1,710 @@
+
+
+
+
+
+
+
+
+
+
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebGL Sphere with Two Visible Embedded Points</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
-    <style>
-        canvas { width: 100%; height: 100%; display: block; }
-    </style>
+  <meta charset="UTF-8">
+  <title>Color Sphere with Arcball Rotation</title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #ffffff; /* Initial background color */
+    }
+    #glCanvas {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    #colorDisplay {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      text-align: center;
+      font-family: Arial, sans-serif;
+      display: none; /* Hide on load */
+    }
+    #hexCode {
+      font-size: 25px;
+    }
+    #subtitle {
+      font-size: 18px;
+    }
+  </style>
 </head>
 <body>
-    <canvas id="glCanvas"></canvas>
-    <script>
-        const vsSource = `
-            attribute vec3 aPosition;
-            attribute vec3 aColor;
-            uniform mat4 uModelViewMatrix;
-            uniform mat4 uProjectionMatrix;
-            uniform float uPointSize;
-            varying vec3 vColor;
-            void main() {
-                gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
-                gl_PointSize = uPointSize;
-                vColor = aColor;
-            }
-        `;
+  <canvas id="glCanvas"></canvas>
+  <div id="colorDisplay">
+    <div id="hexCode"></div>
+    <div id="subtitle">is available.</div>
+  </div>
 
-        const fsSource = `
-            precision mediump float;
-            varying vec3 vColor;
-            void main() {
-                gl_FragColor = vec4(vColor, 1.0);
-            }
-        `;
+  <!-- Include glMatrix library for vector and matrix operations -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+  <script>
+    // WebGL and application variables
+    let canvas, gl;
+    let program;
+    let modelMatrix = mat4.create();
+    let viewMatrix = mat4.create();
+    let projectionMatrix = mat4.create();
+    let rotationQuaternion = quat.create();
+    let sphereBuffers;
+    let handles = [];
+    let isDragging = false;
+    let lastArcballPos = null; // Last position on the Arcball
+    let scale = 1.0;
+    let maxScale = 2.0; // Will be calculated based on canvas size
+    let rotationTimeout;
+    let lastCenterColor = '#ffffff'; // Initial center color
+    let sphereRadius = 1;
+    let handlePoint = null;
+    let initialRotationQuaternion = null;
 
-        function initShaderProgram(gl, vsSource, fsSource) {
-            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
-            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
-            const shaderProgram = gl.createProgram();
-            gl.attachShader(shaderProgram, vertexShader);
-            gl.attachShader(shaderProgram, fragmentShader);
-            gl.linkProgram(shaderProgram);
+    // Camera position
+    const cameraPosition = [0, 0, 5];
 
-            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-                console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
-                return null;
-            }
+    window.onload = function() {
+      initWebGL();
+      initShaders();
+      sphereBuffers = createSphere(sphereRadius, 50, 50);
+      initEventHandlers();
+      resizeCanvas();
+      requestAnimationFrame(render);
+    };
 
-            return shaderProgram;
+    function initWebGL() {
+      canvas = document.getElementById('glCanvas');
+      gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) {
+        alert('Unable to initialize WebGL. Your browser may not support it.');
+        return;
+      }
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+    }
+
+    function initShaders() {
+      const vertexShaderSource = `
+        attribute vec4 aVertexPosition;
+        attribute vec4 aVertexColor;
+        uniform mat4 uModelMatrix;
+        uniform mat4 uViewMatrix;
+        uniform mat4 uProjectionMatrix;
+        varying lowp vec4 vColor;
+        void main(void) {
+          gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * aVertexPosition;
+          vColor = aVertexColor;
         }
-
-        function loadShader(gl, type, source) {
-            const shader = gl.createShader(type);
-            gl.shaderSource(shader, source);
-            gl.compileShader(shader);
-
-            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
-                gl.deleteShader(shader);
-                return null;
-            }
-
-            return shader;
+      `;
+      const fragmentShaderSource = `
+        varying lowp vec4 vColor;
+        void main(void) {
+          gl_FragColor = vColor;
         }
+      `;
+      const vertexShader = loadShader(gl.VERTEX_SHADER, vertexShaderSource);
+      const fragmentShader = loadShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
 
-        function createSphere(radius, latitudeBands, longitudeBands) {
-            const positions = [];
-            const indices = [];
-            const colors = [];
+      program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
 
-            for (let lat = 0; lat <= latitudeBands; lat++) {
-                const theta = lat * Math.PI / latitudeBands;
-                const sinTheta = Math.sin(theta);
-                const cosTheta = Math.cos(theta);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+      }
+      gl.useProgram(program);
+    }
 
-                for (let long = 0; long <= longitudeBands; long++) {
-                    const phi = long * 2 * Math.PI / longitudeBands;
-                    const sinPhi = Math.sin(phi);
-                    const cosPhi = Math.cos(phi);
+    function loadShader(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
 
-                    const x = cosPhi * sinTheta;
-                    const y = cosTheta;
-                    const z = sinPhi * sinTheta;
+    function createSphere(radius, latitudeBands, longitudeBands) {
+      const positions = [];
+      const indices = [];
+      const colors = [];
 
-                    positions.push(radius * x, radius * y, radius * z);
-                    colors.push(0.7, 0.7, 0.7); // Light gray color for the sphere
-                }
-            }
+      for (let latNumber = 0; latNumber <= latitudeBands; latNumber++) {
+        const theta = (latNumber * Math.PI) / latitudeBands;
+        const sinTheta = Math.sin(theta);
+        const cosTheta = Math.cos(theta);
 
-            for (let lat = 0; lat < latitudeBands; lat++) {
-                for (let long = 0; long < longitudeBands; long++) {
-                    const first = (lat * (longitudeBands + 1)) + long;
-                    const second = first + longitudeBands + 1;
-                    indices.push(first, second, first + 1);
-                    indices.push(second, second + 1, first + 1);
-                }
-            }
+        for (let longNumber = 0; longNumber <= longitudeBands; longNumber++) {
+          const phi = (longNumber * 2 * Math.PI) / longitudeBands;
+          const sinPhi = Math.sin(phi);
+          const cosPhi = Math.cos(phi);
 
-            return { positions, indices, colors };
+          // Positions
+          const x = radius * sinTheta * cosPhi;
+          const y = radius * cosTheta;
+          const z = radius * sinTheta * sinPhi;
+          positions.push(x, y, z);
+
+          // Colors
+          const hsv = cartesianToHSV(x, y, z);
+          const rgb = HSVtoRGB(hsv.h, hsv.s, hsv.v);
+          colors.push(rgb.r, rgb.g, rgb.b, 1.0);
         }
+      }
 
-        function main() {
-            const canvas = document.getElementById('glCanvas');
-            const gl = canvas.getContext('webgl');
-
-            if (!gl) {
-                console.error('Unable to initialize WebGL. Your browser may not support it.');
-                return;
-            }
-
-            const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
-
-            const programInfo = {
-                program: shaderProgram,
-                attribLocations: {
-                    position: gl.getAttribLocation(shaderProgram, 'aPosition'),
-                    color: gl.getAttribLocation(shaderProgram, 'aColor'),
-                },
-                uniformLocations: {
-                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
-                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
-                    pointSize: gl.getUniformLocation(shaderProgram, 'uPointSize'),
-                },
-            };
-
-            const sphereRadius = 1.0;
-            const sphere = createSphere(sphereRadius, 30, 30);
-
-            const sphereBuffers = {
-                position: gl.createBuffer(),
-                color: gl.createBuffer(),
-                indices: gl.createBuffer(),
-            };
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphere.positions), gl.STATIC_DRAW);
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.color);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphere.colors), gl.STATIC_DRAW);
-
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(sphere.indices), gl.STATIC_DRAW);
-
-            // Create two points slightly inside the sphere surface
-            const point1 = vec3.fromValues(sphereRadius * 0.9, 0, 0);
-            const point2 = vec3.fromValues(0, sphereRadius * 0.9, 0);
-
-            const pointPositions = [
-                ...point1,
-                ...point2
-            ];
-
-            const pointColors = [
-                1.0, 0.0, 0.0,  // Red
-                0.0, 1.0, 0.0   // Green
-            ];
-
-            const pointBuffers = {
-                position: gl.createBuffer(),
-                color: gl.createBuffer(),
-            };
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffers.position);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pointPositions), gl.STATIC_DRAW);
-
-            gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffers.color);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pointColors), gl.STATIC_DRAW);
-
-            function render() {
-                gl.clearColor(0.0, 0.0, 0.0, 1.0);
-                gl.clearDepth(1.0);
-                gl.enable(gl.DEPTH_TEST);
-                gl.depthFunc(gl.LEQUAL);
-                gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-                const fieldOfView = 45 * Math.PI / 180;
-                const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-                const zNear = 0.1;
-                const zFar = 100.0;
-                const projectionMatrix = mat4.create();
-                mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
-
-                const modelViewMatrix = mat4.create();
-                mat4.translate(modelViewMatrix, modelViewMatrix, [0.0, 0.0, -5.0]);
-                mat4.rotate(modelViewMatrix, modelViewMatrix, performance.now() * 0.001, [0, 1, 0]);
-
-                gl.useProgram(programInfo.program);
-
-                gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
-                gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
-
-                // Draw sphere
-                gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
-                gl.vertexAttribPointer(programInfo.attribLocations.position, 3, gl.FLOAT, false, 0, 0);
-                gl.enableVertexAttribArray(programInfo.attribLocations.position);
-
-                gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.color);
-                gl.vertexAttribPointer(programInfo.attribLocations.color, 3, gl.FLOAT, false, 0, 0);
-                gl.enableVertexAttribArray(programInfo.attribLocations.color);
-
-                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
-                gl.drawElements(gl.LINES, sphere.indices.length, gl.UNSIGNED_SHORT, 0);
-
-                // Draw points
-                gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffers.position);
-                gl.vertexAttribPointer(programInfo.attribLocations.position, 3, gl.FLOAT, false, 0, 0);
-                gl.enableVertexAttribArray(programInfo.attribLocations.position);
-
-                gl.bindBuffer(gl.ARRAY_BUFFER, pointBuffers.color);
-                gl.vertexAttribPointer(programInfo.attribLocations.color, 3, gl.FLOAT, false, 0, 0);
-                gl.enableVertexAttribArray(programInfo.attribLocations.color);
-
-                gl.uniform1f(programInfo.uniformLocations.pointSize, 10.0);
-                gl.drawArrays(gl.POINTS, 0, 2);
-
-                requestAnimationFrame(render);
-            }
-
-            render();
+      // Indices
+      for (let latNumber = 0; latNumber < latitudeBands; latNumber++) {
+        for (let longNumber = 0; longNumber < longitudeBands; longNumber++) {
+          const first = latNumber * (longitudeBands + 1) + longNumber;
+          const second = first + longitudeBands + 1;
+          indices.push(first, second, first + 1);
+          indices.push(second, second + 1, first + 1);
         }
+      }
 
-        window.onload = main;
-    </script>
+      // Create and bind buffers
+      const positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+      const colorBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+
+      const indexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+      return {
+        position: positionBuffer,
+        color: colorBuffer,
+        indices: indexBuffer,
+        vertexCount: indices.length
+      };
+    }
+
+    function cartesianToHSV(x, y, z) {
+      // Convert Cartesian coordinates to spherical coordinates
+      const r = Math.sqrt(x * x + y * y + z * z);
+      const theta = Math.acos(y / r); // Polar angle
+      const phi = Math.atan2(z, x);   // Azimuthal angle
+
+      // Map theta and phi to HSV
+      let h = ((phi + Math.PI) / (2 * Math.PI)) * 360; // Hue
+      let s = Math.sin(theta);                         // Saturation (0 to 1)
+      let v = 1 - (y + 1) / 2;                         // Value (0 at top, 1 at bottom)
+
+      h = h % 360;
+      if (h < 0) h += 360;
+      s = Math.max(0, Math.min(1, s));
+      v = Math.max(0, Math.min(1, v));
+
+      return { h, s, v };
+    }
+
+    function HSVtoRGB(h, s, v) {
+      h = h % 360;
+      if (h < 0) h += 360;
+      s = Math.max(0, Math.min(1, s));
+      v = Math.max(0, Math.min(1, v));
+
+      const c = v * s;
+      const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+      const m = v - c;
+      let r = 0, g = 0, b = 0;
+
+      if (h >= 0 && h < 60) {
+        r = c; g = x; b = 0;
+      } else if (h >= 60 && h < 120) {
+        r = x; g = c; b = 0;
+      } else if (h >= 120 && h < 180) {
+        r = 0; g = c; b = x;
+      } else if (h >= 180 && h < 240) {
+        r = 0; g = x; b = c;
+      } else if (h >= 240 && h < 300) {
+        r = x; g = 0; b = c;
+      } else if (h >= 300 && h < 360) {
+        r = c; g = 0; b = x;
+      }
+
+      r = r + m;
+      g = g + m;
+      b = b + m;
+
+      return { r, g, b };
+    }
+
+    function initEventHandlers() {
+      // Mouse events
+      canvas.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
+        lastArcballPos = getArcballVector(e.clientX, e.clientY);
+        handlePick(e.clientX, e.clientY);
+      });
+
+      
+// Add the lerp function for scalar values
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+// Updated mousemove event handler
+ canvas.addEventListener('mousemove', (e) => {
+        if (isDragging && lastArcballPos) {
+                
+          const currentArcballPos = getArcballVector(e.clientX, e.clientY);
+          const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
+          if (rotation) {
+            quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
+          }
+          lastArcballPos = currentArcballPos;
+
+          clearTimeout(rotationTimeout);
+          rotationTimeout = setTimeout(onRotationStop, 2000);
+        }
+      });
+
+      canvas.addEventListener('mouseup', () => {
+        isDragging = false;
+        lastArcballPos = null;
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        isDragging = false;
+        lastArcballPos = null;
+      });
+
+      // Touch events
+      canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevent default touch behavior
+        if (e.touches.length === 1) { // Single touch
+          isDragging = true;
+          const touch = e.touches[0];
+          initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
+          lastArcballPos = getArcballVector(touch.clientX, touch.clientY);
+          handlePick(touch.clientX, touch.clientY);
+        }
+      }, { passive: false });
+
+      canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault(); // Prevent default touch behavior
+        if (isDragging && e.touches.length === 1 && lastArcballPos) {
+          const touch = e.touches[0];
+          const currentArcballPos = getArcballVector(touch.clientX, touch.clientY);
+          const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
+          if (rotation) {
+            quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
+          }
+          lastArcballPos = currentArcballPos;
+
+          clearTimeout(rotationTimeout);
+          rotationTimeout = setTimeout(onRotationStop, 2000);
+        }
+      }, { passive: false });
+
+      canvas.addEventListener('touchend', (e) => {
+        e.preventDefault(); // Prevent default touch behavior
+        isDragging = false;
+        lastArcballPos = null;
+      });
+
+      window.addEventListener('resize', resizeCanvas);
+    }
+
+    /**
+     * Maps 2D screen coordinates to a 3D point on the Arcball sphere.
+     * @param {number} clientX - The X coordinate of the cursor.
+     * @param {number} clientY - The Y coordinate of the cursor.
+     * @returns {vec3} - The 3D point on the Arcball.
+     */
+    function getArcballVector(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const x = ((clientX - rect.left) / canvas.clientWidth) * 2 - 1;
+      const y = ((clientY - rect.top) / canvas.clientHeight) * -2 + 1;
+      const z2 = 1 - x * x - y * y;
+      const z = z2 > 0 ? Math.sqrt(z2) : 0;
+      return vec3.fromValues(x, y, z);
+    }
+
+    /**
+     * Computes the rotation quaternion between two Arcball vectors.
+     * @param {vec3} v0 - The initial vector.
+     * @param {vec3} v1 - The final vector.
+     * @returns {quat} - The rotation quaternion.
+     */
+    function computeArcballRotation(v0, v1) {
+      const dot = vec3.dot(v0, v1);
+      const axis = vec3.create();
+      vec3.cross(axis, v0, v1);
+
+      if (vec3.length(axis) < 1e-6) {
+        // Vectors are nearly parallel
+        return null;
+      }
+
+      const rotation = quat.create();
+      quat.set(rotation, axis[0], axis[1], axis[2], dot);
+      quat.normalize(rotation, rotation);
+      return rotation;
+    }
+
+    /**
+     * Handles picking a point on the sphere when clicked or touched.
+     * @param {number} clientX - The X coordinate of the cursor.
+     * @param {number} clientY - The Y coordinate of the cursor.
+     */
+    function handlePick(clientX, clientY) {
+      const intersection = getIntersectionPoint(clientX, clientY);
+
+      if (intersection) {    
+        handlePoint = vec3.clone(intersection); // Store the handle point
+
+        const color = getColorAtPoint(intersection, true); // 'true' indicates it's in local coordinates
+        handles.push({ position: intersection, color: color }); // Store position in local coordinates
+
+        // Change background color to match the picked color
+        const hexColor = rgbToHex(color);
+        document.body.style.backgroundColor = hexColor;
+      }
+    }
+
+    /**
+     * Computes the intersection point on the sphere based on cursor position.
+     * @param {number} clientX - The X coordinate of the cursor.
+     * @param {number} clientY - The Y coordinate of the cursor.
+     * @returns {vec3|null} - The intersection point or null if no intersection.
+     */
+    function getIntersectionPoint(clientX, clientY) {
+      const ray = getMouseRay(clientX, clientY);
+
+      // Transform the ray into the sphere's local coordinate system
+      const inverseModelMatrix = mat4.invert(mat4.create(), modelMatrix);
+      const localRayOrigin = vec3.transformMat4(vec3.create(), ray.origin, inverseModelMatrix);
+      const localRayDirection4 = vec4.fromValues(ray.direction[0], ray.direction[1], ray.direction[2], 0);
+      const localRayDirectionTransformed = vec4.transformMat4(vec4.create(), localRayDirection4, inverseModelMatrix);
+      const localRayDirection = vec3.fromValues(
+        localRayDirectionTransformed[0],
+        localRayDirectionTransformed[1],
+        localRayDirectionTransformed[2]
+      );
+      vec3.normalize(localRayDirection, localRayDirection);
+
+      // Perform ray-sphere intersection in local space
+      const intersection = raySphereIntersect(localRayOrigin, localRayDirection, [0, 0, 0], sphereRadius);
+
+      if (intersection) {
+        return intersection;
+      } else {
+        return null;
+      }
+    }
+
+    /**
+     * Generates a ray from the camera through the cursor position.
+     * @param {number} clientX - The X coordinate of the cursor.
+     * @param {number} clientY - The Y coordinate of the cursor.
+     * @returns {Object} - An object containing the origin and direction of the ray.
+     */
+    function getMouseRay(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const x = ((clientX - rect.left) / canvas.clientWidth) * 2 - 1;
+      const y = ((clientY - rect.top) / canvas.clientHeight) * -2 + 1;
+
+      const inverseProjectionView = mat4.multiply(mat4.create(), projectionMatrix, viewMatrix);
+      mat4.invert(inverseProjectionView, inverseProjectionView);
+
+      const nearPoint = vec4.fromValues(x, y, -1.0, 1.0);
+      const farPoint = vec4.fromValues(x, y, 1.0, 1.0);
+
+      vec4.transformMat4(nearPoint, nearPoint, inverseProjectionView);
+      vec4.transformMat4(farPoint, farPoint, inverseProjectionView);
+
+      // Perspective divide
+      vec3.scale(nearPoint, nearPoint, 1 / nearPoint[3]);
+      vec3.scale(farPoint, farPoint, 1 / farPoint[3]);
+
+      const direction = vec3.create();
+      vec3.subtract(direction, farPoint, nearPoint);
+      vec3.normalize(direction, direction);
+
+      return { origin: vec3.fromValues(nearPoint[0], nearPoint[1], nearPoint[2]), direction: direction };
+    }
+
+    /**
+     * Performs ray-sphere intersection.
+     * @param {vec3} rayOrigin - The origin of the ray.
+     * @param {vec3} rayDirection - The direction of the ray.
+     * @param {vec3} sphereCenter - The center of the sphere.
+     * @param {number} sphereRadius - The radius of the sphere.
+     * @returns {vec3|null} - The intersection point or null if no intersection.
+     */
+    function raySphereIntersect(rayOrigin, rayDirection, sphereCenter, sphereRadius) {
+      const oc = vec3.subtract(vec3.create(), rayOrigin, sphereCenter);
+      const a = vec3.dot(rayDirection, rayDirection);
+      const b = 2.0 * vec3.dot(oc, rayDirection);
+      const c = vec3.dot(oc, oc) - sphereRadius * sphereRadius;
+      const discriminant = b * b - 4 * a * c;
+
+      if (discriminant < 0) {
+        return null;
+      } else {
+        const sqrtDisc = Math.sqrt(discriminant);
+        const t1 = (-b - sqrtDisc) / (2.0 * a);
+        const t2 = (-b + sqrtDisc) / (2.0 * a);
+        let t = t1;
+        if (t < 0) t = t2;
+        if (t < 0) {
+          return null; // Intersection behind the ray origin
+        }
+        const intersectionPoint = vec3.scaleAndAdd(vec3.create(), rayOrigin, rayDirection, t);
+        return intersectionPoint;
+      }
+    }
+
+    /**
+     * Retrieves the color at a given point on the sphere.
+     * @param {vec3} point - The point on the sphere.
+     * @param {boolean} isLocal - Whether the point is in local coordinates.
+     * @returns {Object} - The RGB color object.
+     */
+    function getColorAtPoint(point, isLocal = false) {
+      let localPoint = point;
+      if (!isLocal) {
+        // Transform point to sphere local coordinates
+        const inverseModelMatrix = mat4.invert(mat4.create(), modelMatrix);
+        localPoint = vec3.transformMat4(vec3.create(), point, inverseModelMatrix);
+      }
+
+      const hsv = cartesianToHSV(localPoint[0], localPoint[1], localPoint[2]);
+      const rgb = HSVtoRGB(hsv.h, hsv.s, hsv.v);
+      return { r: rgb.r, g: rgb.g, b: rgb.b };
+    }
+
+    /**
+     * Converts an RGB color object to a HEX string.
+     * @param {Object} color - The RGB color object.
+     * @returns {string} - The HEX color string.
+     */
+    function rgbToHex(color) {
+      const r = Math.round(color.r * 255).toString(16).padStart(2, '0');
+      const g = Math.round(color.g * 255).toString(16).padStart(2, '0');
+      const b = Math.round(color.b * 255).toString(16).padStart(2, '0');
+      return `#${r}${g}${b}`;
+    }
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+
+      const fieldOfView = 45 * Math.PI / 180;   // in radians
+      const aspect = canvas.clientWidth / canvas.clientHeight;
+      const zNear = 0.1;
+      const zFar = 100.0;
+      projectionMatrix = mat4.create();
+      mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+
+      viewMatrix = mat4.create();
+      mat4.lookAt(viewMatrix, cameraPosition, [0, 0, 0], [0, 1, 0]);
+
+      // Calculate maxScale to ensure sphere fills the screen
+      const fovY = fieldOfView;
+      const sphereScreenRadius = Math.tan(fovY / 2) * Math.abs(cameraPosition[2] - 0);
+      maxScale = sphereScreenRadius / sphereRadius;
+    }
+
+    function render() {
+      gl.clearColor(1.0, 1.0, 1.0, 1.0);  // Clear to white
+      gl.clearDepth(1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      updateModelMatrix();
+
+      // Draw the sphere
+      drawSphere();
+
+      // Draw handles
+      handles.forEach(handle => {
+        drawHandle(handle);
+      });
+
+      requestAnimationFrame(render);
+    }
+
+    function updateModelMatrix() {
+      modelMatrix = mat4.create();
+      mat4.fromQuat(modelMatrix, rotationQuaternion);
+      // Initial rotation to have white facing the user
+      mat4.rotateX(modelMatrix, modelMatrix, -Math.PI / 2);
+      mat4.scale(modelMatrix, modelMatrix, [scale, scale, scale]);
+    }
+
+    function drawSphere() {
+      // Position
+      {
+        const numComponents = 3;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        const positionLocation = gl.getAttribLocation(program, 'aVertexPosition');
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
+        gl.vertexAttribPointer(positionLocation, numComponents, type, normalize, stride, offset);
+        gl.enableVertexAttribArray(positionLocation);
+      }
+
+      // Color
+      {
+        const numComponents = 4;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        const colorLocation = gl.getAttribLocation(program, 'aVertexColor');
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.color);
+        gl.vertexAttribPointer(colorLocation, numComponents, type, normalize, stride, offset);
+        gl.enableVertexAttribArray(colorLocation);
+      }
+
+      // Indices
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
+
+      // Set shader uniforms
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uModelMatrix'), false, modelMatrix);
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uViewMatrix'), false, viewMatrix);
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uProjectionMatrix'), false, projectionMatrix);
+
+      // Draw
+      gl.drawElements(gl.TRIANGLES, sphereBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
+    }
+
+    /**
+     * Draws a handle as a small sphere attached to the main sphere.
+     * @param {Object} handle - The handle object containing position and color.
+     */
+    function drawHandle(handle) {
+      // Create a small sphere at the handle position
+      const handleBuffers = createSphere(0.1 * scale, 30, 30);
+
+      // Apply the same transformations as the main sphere
+      let handleModelMatrix = mat4.create();
+      mat4.fromQuat(handleModelMatrix, rotationQuaternion);
+      mat4.rotateX(handleModelMatrix, handleModelMatrix, -Math.PI / 2);
+      mat4.scale(handleModelMatrix, handleModelMatrix, [scale, scale, scale]);
+      mat4.translate(handleModelMatrix, handleModelMatrix, handle.position);
+
+      // Position
+      {
+        const numComponents = 3;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        const positionLocation = gl.getAttribLocation(program, 'aVertexPosition');
+        gl.bindBuffer(gl.ARRAY_BUFFER, handleBuffers.position);
+        gl.vertexAttribPointer(positionLocation, numComponents, type, normalize, stride, offset);
+        gl.enableVertexAttribArray(positionLocation);
+      }
+
+      // Color
+      {
+        const numComponents = 4;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        const colorLocation = gl.getAttribLocation(program, 'aVertexColor');
+        const colorData = [];
+        for (let i = 0; i < (handleBuffers.vertexCount); i++) {
+          colorData.push(handle.color.r, handle.color.g, handle.color.b, 1.0);
+        }
+        const handleColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, handleColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colorData), gl.STATIC_DRAW);
+        gl.vertexAttribPointer(colorLocation, numComponents, type, normalize, stride, offset);
+        gl.enableVertexAttribArray(colorLocation);
+      }
+
+      // Indices
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handleBuffers.indices);
+
+      // Set shader uniforms
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uModelMatrix'), false, handleModelMatrix);
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uViewMatrix'), false, viewMatrix);
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uProjectionMatrix'), false, projectionMatrix);
+
+      // Draw
+      gl.drawElements(gl.TRIANGLES, handleBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
+    }
+
+    function onRotationStop() {
+      const centerColor = getColorAtCenter();
+      const hexColor = rgbToHex(centerColor);
+      console.log('Center Color:', hexColor);
+      sessionStorage.setItem('centerColor', hexColor);
+      displayCenterColor(hexColor);
+      lastCenterColor = hexColor;
+      // Optionally draw a path from white to center
+    }
+
+    /**
+     * Retrieves the color at the center of the canvas.
+     * @returns {Object} - The RGB color object.
+     */
+    function getColorAtCenter() {
+      // Get the center coordinates of the canvas
+      const rect = canvas.getBoundingClientRect();
+      const clientX = rect.left + canvas.clientWidth / 2;
+      const clientY = rect.top + canvas.clientHeight / 2;
+
+      const intersection = getIntersectionPoint(clientX, clientY);
+
+      if (intersection) {
+        const color = getColorAtPoint(intersection, true); // 'true' indicates it's in local coordinates
+        return color;
+      } else {
+        // If the ray doesn't intersect the sphere, return a default color (e.g., white)
+        return { r: 1, g: 1, b: 1 };
+      }
+    }
+
+    function displayCenterColor(hexColor) {
+      const colorDisplay = document.getElementById('colorDisplay');
+      const hexCodeElement = document.getElementById('hexCode');
+      hexCodeElement.innerText = hexColor;
+      colorDisplay.style.display = 'block';
+
+      // Adjust text color based on background brightness
+      const brightness = parseInt(hexColor.substring(1, 3), 16) * 0.299 +
+                         parseInt(hexColor.substring(3, 5), 16) * 0.587 +
+                         parseInt(hexColor.substring(5, 7), 16) * 0.114;
+      if (brightness > 186) {
+        document.getElementById('colorDisplay').style.color = '#000000';
+      } else {
+        document.getElementById('colorDisplay').style.color = '#ffffff';
+      }
+    }
+
+  </script>
 </body>
 </html>
+
