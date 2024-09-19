@@ -43,9 +43,69 @@
   <!-- Include glMatrix library for vector and matrix operations -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
   <script>
+
     //////////////////////////////////////////////////////////////////////
     //
-    // General Main Sphere Setup
+    // INDEXDB
+    // Setup to work with indexdb
+    //
+    //////////////////////////////////////////////////////////////////////
+
+    const DB_NAME = "colorlog.in";
+    const STORE_NAME = "colors";
+    const DB_VERSION = 1;
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onupgradeneeded = function(event) {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+          }
+        };
+
+        request.onsuccess = function(event) {
+          resolve(event.target.result);
+        };
+
+        request.onerror = function(event) {
+          reject(event.target.error);
+        };
+      });
+    }
+    
+    function performTransaction(storeName, mode, callback) {
+      return openDB().then(db => {
+        const transaction = db.transaction([storeName], mode);
+        const store = transaction.objectStore(storeName);
+        return callback(store);
+      });
+    }
+
+    function setItem(key, value) {
+      console.log(`Storing item with key: ${key}`, value); // Log the data being stored
+      return performTransaction(STORE_NAME, "readwrite", store => store.put(value, key))
+        .then(() => {
+          console.log(`Successfully stored item with key: ${key}`);
+        })
+        .catch(error => {
+          console.error(`Error storing item with key: ${key}`, error);
+        });
+    }
+
+    function getItem(key) {
+      return performTransaction(STORE_NAME, "readonly", store => store.get(key));
+    }
+
+    function removeItem(key) {
+      return performTransaction(STORE_NAME, "readwrite", store => store.delete(key));
+    }
+
+    //////////////////////////////////////////////////////////////////////
+    //
+    // SPHERE
     // This section includes all WebGL initialization and functions to create and render the main sphere with its color.
     //
     //////////////////////////////////////////////////////////////////////
@@ -350,7 +410,7 @@
 
     //////////////////////////////////////////////////////////////////////
     //
-    // Handles
+    // HANDLES
     // This section is dedicated to all things related to the handles, including their creation and rendering.
     //
     //////////////////////////////////////////////////////////////////////
@@ -419,7 +479,7 @@
 
     //////////////////////////////////////////////////////////////////////
     //
-    // User Interactions
+    // INTERACTIONS
     // This section includes everything related to user interactions such as clicking and interacting with the main sphere.
     //
     //////////////////////////////////////////////////////////////////////
@@ -448,38 +508,13 @@
         handlePick(e.clientX, e.clientY);
       });
 
-      canvas.addEventListener('mousemove', (e) => {
-        if (isDragging && lastArcballPos) {
-        const intersection = getIntersectionPoint(e.clientX, e.clientY);
-        if (intersection) { // Only update rotation if inside the sphere
-          const currentArcballPos = getArcballVector(e.clientX, e.clientY);
-          const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
-          if (rotation) {
-            // Update rotation quaternion
-            quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
-
-            // Calculate angular velocity vector
-            const angle = 2 * Math.acos(rotation[3]);
-            const sinHalfAngle = Math.sqrt(1 - rotation[3] * rotation[3]);
-            let axis = vec3.create();
-            if (sinHalfAngle < 0.001) {
-              // If the angle is small, the axis is not important
-              axis = vec3.fromValues(1, 0, 0);
-            } else {
-              axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
-            }
-            vec3.normalize(axis, axis);
-
-            // Multiply axis by angle to get angular velocity vector
-            angularVelocity = vec3.scale(vec3.create(), axis, angle);
-          }
-          lastArcballPos = currentArcballPos;
-
-          clearTimeout(rotationTimeout);
-          rotationTimeout = setTimeout(onRotationStop, 2000);
-        }
-      }
-      });
+      
+      // Update mouse and touch event handlers
+      canvas.addEventListener('mousemove', handleMove);
+      canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault(); // Prevent default touch behavior
+        handleMove(e);
+      }, { passive: false });
 
       canvas.addEventListener('mouseup', () => {
         isDragging = false;
@@ -516,41 +551,6 @@
         }
       }, { passive: false });
 
-      canvas.addEventListener('touchmove', (e) => {
-        e.preventDefault(); // Prevent default touch behavior
-        if (isDragging && e.touches.length === 1 && lastArcballPos) {
-          const intersection = getIntersectionPoint(e.clientX, e.clientY);
-          if (intersection) {
-          const touch = e.touches[0];
-          const currentArcballPos = getArcballVector(touch.clientX, touch.clientY);
-          const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
-          if (rotation) {
-            // Update rotation quaternion
-            quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
-
-            // Calculate angular velocity vector
-            const angle = 2 * Math.acos(rotation[3]);
-            const sinHalfAngle = Math.sqrt(1 - rotation[3] * rotation[3]);
-            let axis = vec3.create();
-            if (sinHalfAngle < 0.001) {
-              // If the angle is small, the axis is not important
-              axis = vec3.fromValues(1, 0, 0);
-            } else {
-              axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
-            }
-            vec3.normalize(axis, axis);
-
-            // Multiply axis by angle to get angular velocity vector
-            angularVelocity = vec3.scale(vec3.create(), axis, angle);
-          }
-          lastArcballPos = currentArcballPos;
-
-          clearTimeout(rotationTimeout);
-          rotationTimeout = setTimeout(onRotationStop, 2000);
-        }
-        }
-      }, { passive: false });
-
       canvas.addEventListener('touchend', (e) => {
         e.preventDefault(); // Prevent default touch behavior
         isDragging = false;
@@ -565,6 +565,43 @@
 
       window.addEventListener('resize', resizeCanvas);
     }
+
+
+      function handleMove(event) {
+        const clientX = event.clientX || event.touches[0].clientX;
+        const clientY = event.clientY || event.touches[0].clientY;
+
+        if (isDragging && lastArcballPos) {
+          const intersection = getIntersectionPoint(clientX, clientY);
+          if (intersection) { // Only update rotation if inside the sphere
+            const currentArcballPos = getArcballVector(clientX, clientY);
+            const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
+            if (rotation) {
+              // Update rotation quaternion
+              quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
+
+              // Calculate angular velocity vector
+              const angle = 2 * Math.acos(rotation[3]);
+              const sinHalfAngle = Math.sqrt(1 - rotation[3] * rotation[3]);
+              let axis = vec3.create();
+              if (sinHalfAngle < 0.001) {
+                axis = vec3.fromValues(1, 0, 0);
+              } else {
+                axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
+              }
+              vec3.normalize(axis, axis);
+
+              // Multiply axis by angle to get angular velocity vector
+              angularVelocity = vec3.scale(vec3.create(), axis, angle);
+            }
+            lastArcballPos = currentArcballPos;
+
+            clearTimeout(rotationTimeout);
+            rotationTimeout = setTimeout(onRotationStop, 2000);
+          }
+        }
+      }
+
 
     /**
      * Maps 2D screen coordinates to a 3D point on the Arcball sphere.
@@ -768,16 +805,18 @@
       const hexColor = rgbToHex(centerColor);
       console.log('Center Color:', hexColor);
       sessionStorage.setItem('centerColor', hexColor);
+      setItem(hexColor, "path");
       displayCenterColor(hexColor);
       lastCenterColor = hexColor;
       // Optionally draw a path from white to center
     }
 
+    
     /**
      * Retrieves the color at the center of the canvas.
      * @returns {Object} - The RGB color object.
      */
-    function getColorAtCenter() {
+     function getColorAtCenter() {
       // Get the center coordinates of the canvas
       const rect = canvas.getBoundingClientRect();
       const clientX = rect.left + canvas.clientWidth / 2;
@@ -793,6 +832,7 @@
         return { r: 1, g: 1, b: 1 };
       }
     }
+
 
     function displayCenterColor(hexColor) {
       const colorDisplay = document.getElementById('colorDisplay');
