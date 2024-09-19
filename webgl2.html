@@ -43,6 +43,13 @@
   <!-- Include glMatrix library for vector and matrix operations -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
   <script>
+    //////////////////////////////////////////////////////////////////////
+    //
+    // General Main Sphere Setup
+    // This section includes all WebGL initialization and functions to create and render the main sphere with its color.
+    //
+    //////////////////////////////////////////////////////////////////////
+
     // WebGL and application variables
     let canvas, gl;
     let program;
@@ -51,24 +58,10 @@
     let projectionMatrix = mat4.create();
     let rotationQuaternion = quat.create();
     let sphereBuffers;
-    let handles = [];
-    let isDragging = false;
-    let lastArcballPos = null; // Last position on the Arcball
     let scale = 1.0;
     let maxScale = 2.0; // Will be calculated based on canvas size
-    let rotationTimeout;
-    let lastCenterColor = '#ffffff'; // Initial center color
     let sphereRadius = 1;
-    let handlePoint = null;
-    let initialRotationQuaternion = null;
-    let angularVelocity = vec3.create(); // Vector representing angular velocity (axis * speed)
-
-    // Editable friction variable (between 0 and 1)
-    // Lower values mean more friction (sphere stops sooner), higher values mean less friction (sphere spins longer)
-    let friction = 0.95; // You can adjust this value to control the slipperiness
-
-    // Minimum angular speed threshold
-    let minAngularSpeed = 0.007; // Adjust this value as needed
+    let lastCenterColor = '#ffffff'; // Initial center color
 
     // Camera position
     const cameraPosition = [0, 0, 5];
@@ -248,6 +241,203 @@
       return { r, g, b };
     }
 
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+
+      const fieldOfView = 45 * Math.PI / 180;   // in radians
+      const aspect = canvas.clientWidth / canvas.clientHeight;
+      const zNear = 0.1;
+      const zFar = 100.0;
+      projectionMatrix = mat4.create();
+      mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+
+      viewMatrix = mat4.create();
+      mat4.lookAt(viewMatrix, cameraPosition, [0, 0, 0], [0, 1, 0]);
+
+      // Calculate maxScale to ensure sphere fills the screen
+      const fovY = fieldOfView;
+      const sphereScreenRadius = Math.tan(fovY / 2) * Math.abs(cameraPosition[2] - 0);
+      maxScale = sphereScreenRadius / sphereRadius;
+    }
+
+    function render() {
+      gl.clearColor(1.0, 1.0, 1.0, 1.0);  // Clear to white
+      gl.clearDepth(1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      updateModelMatrix();
+
+      // Draw the sphere
+      drawSphere();
+
+      // Draw handles
+      handles.forEach(handle => {
+        drawHandle(handle);
+      });
+
+      requestAnimationFrame(render);
+    }
+
+    function updateModelMatrix() {
+      modelMatrix = mat4.create();
+
+      // Apply momentum when not dragging
+      if (!isDragging) {
+        // Compute rotation quaternion from angular velocity
+        const angle = vec3.length(angularVelocity);
+        if (angle > 0.0001) {
+          const axis = vec3.normalize(vec3.create(), angularVelocity);
+          const incrementalRotation = quat.create();
+          quat.setAxisAngle(incrementalRotation, axis, angle);
+
+          // Apply incremental rotation
+          quat.multiply(rotationQuaternion, incrementalRotation, rotationQuaternion);
+
+          // Apply friction to angular velocity
+          vec3.scale(angularVelocity, angularVelocity, friction);
+        } else {
+          // If angular velocity is very small, stop rotation
+          vec3.set(angularVelocity, 0, 0, 0);
+        }
+      }
+
+      mat4.fromQuat(modelMatrix, rotationQuaternion);
+      // Initial rotation to have white facing the user
+      mat4.rotateX(modelMatrix, modelMatrix, -Math.PI / 2);
+      mat4.scale(modelMatrix, modelMatrix, [scale, scale, scale]);
+    }
+
+    function drawSphere() {
+      // Position
+      {
+        const numComponents = 3;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        const positionLocation = gl.getAttribLocation(program, 'aVertexPosition');
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
+        gl.vertexAttribPointer(positionLocation, numComponents, type, normalize, stride, offset);
+        gl.enableVertexAttribArray(positionLocation);
+      }
+
+      // Color
+      {
+        const numComponents = 4;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        const colorLocation = gl.getAttribLocation(program, 'aVertexColor');
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.color);
+        gl.vertexAttribPointer(colorLocation, numComponents, type, normalize, stride, offset);
+        gl.enableVertexAttribArray(colorLocation);
+      }
+
+      // Indices
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
+
+      // Set shader uniforms
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uModelMatrix'), false, modelMatrix);
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uViewMatrix'), false, viewMatrix);
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uProjectionMatrix'), false, projectionMatrix);
+
+      // Draw
+      gl.drawElements(gl.TRIANGLES, sphereBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
+    }
+
+    //////////////////////////////////////////////////////////////////////
+    //
+    // Handles
+    // This section is dedicated to all things related to the handles, including their creation and rendering.
+    //
+    //////////////////////////////////////////////////////////////////////
+
+    let handles = [];
+    let handlePoint = null;
+
+    /**
+     * Draws a handle as a small sphere attached to the main sphere.
+     * @param {Object} handle - The handle object containing position and color.
+     */
+    function drawHandle(handle) {
+      // Create a small sphere at the handle position
+      const handleBuffers = createSphere(0.1 * scale, 30, 30);
+
+      // Apply the same transformations as the main sphere
+      let handleModelMatrix = mat4.create();
+      mat4.fromQuat(handleModelMatrix, rotationQuaternion);
+      mat4.rotateX(handleModelMatrix, handleModelMatrix, -Math.PI / 2);
+      mat4.scale(handleModelMatrix, handleModelMatrix, [scale, scale, scale]);
+      mat4.translate(handleModelMatrix, handleModelMatrix, handle.position);
+
+      // Position
+      {
+        const numComponents = 3;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        const positionLocation = gl.getAttribLocation(program, 'aVertexPosition');
+        gl.bindBuffer(gl.ARRAY_BUFFER, handleBuffers.position);
+        gl.vertexAttribPointer(positionLocation, numComponents, type, normalize, stride, offset);
+        gl.enableVertexAttribArray(positionLocation);
+      }
+
+      // Color
+      {
+        const numComponents = 4;
+        const type = gl.FLOAT;
+        const normalize = false;
+        const stride = 0;
+        const offset = 0;
+        const colorLocation = gl.getAttribLocation(program, 'aVertexColor');
+        const colorData = [];
+        for (let i = 0; i < (handleBuffers.vertexCount); i++) {
+          colorData.push(handle.color.r, handle.color.g, handle.color.b, 1.0);
+        }
+        const handleColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, handleColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colorData), gl.STATIC_DRAW);
+        gl.vertexAttribPointer(colorLocation, numComponents, type, normalize, stride, offset);
+        gl.enableVertexAttribArray(colorLocation);
+      }
+
+      // Indices
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handleBuffers.indices);
+
+      // Set shader uniforms
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uModelMatrix'), false, handleModelMatrix);
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uViewMatrix'), false, viewMatrix);
+      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uProjectionMatrix'), false, projectionMatrix);
+
+      // Draw
+      gl.drawElements(gl.TRIANGLES, handleBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
+    }
+
+    //////////////////////////////////////////////////////////////////////
+    //
+    // User Interactions
+    // This section includes everything related to user interactions such as clicking and interacting with the main sphere.
+    //
+    //////////////////////////////////////////////////////////////////////
+
+    let isDragging = false;
+    let lastArcballPos = null; // Last position on the Arcball
+    let initialRotationQuaternion = null;
+    let angularVelocity = vec3.create(); // Vector representing angular velocity (axis * speed)
+
+    // Editable friction variable (between 0 and 1)
+    // Lower values mean more friction (sphere stops sooner), higher values mean less friction (sphere spins longer)
+    let friction = 0.95; // You can adjust this value to control the slipperiness
+
+    // Minimum angular speed threshold
+    let minAngularSpeed = 0.007; // Adjust this value as needed
+
+    let rotationTimeout;
+
     function initEventHandlers() {
       // Mouse events
       canvas.addEventListener('mousedown', (e) => {
@@ -260,6 +450,8 @@
 
       canvas.addEventListener('mousemove', (e) => {
         if (isDragging && lastArcballPos) {
+        const intersection = getIntersectionPoint(e.clientX, e.clientY);
+        if (intersection) { // Only update rotation if inside the sphere
           const currentArcballPos = getArcballVector(e.clientX, e.clientY);
           const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
           if (rotation) {
@@ -286,6 +478,7 @@
           clearTimeout(rotationTimeout);
           rotationTimeout = setTimeout(onRotationStop, 2000);
         }
+      }
       });
 
       canvas.addEventListener('mouseup', () => {
@@ -326,6 +519,8 @@
       canvas.addEventListener('touchmove', (e) => {
         e.preventDefault(); // Prevent default touch behavior
         if (isDragging && e.touches.length === 1 && lastArcballPos) {
+          const intersection = getIntersectionPoint(e.clientX, e.clientY);
+          if (intersection) {
           const touch = e.touches[0];
           const currentArcballPos = getArcballVector(touch.clientX, touch.clientY);
           const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
@@ -352,6 +547,7 @@
 
           clearTimeout(rotationTimeout);
           rotationTimeout = setTimeout(onRotationStop, 2000);
+        }
         }
       }, { passive: false });
 
@@ -565,172 +761,6 @@
       const g = Math.round(color.g * 255).toString(16).padStart(2, '0');
       const b = Math.round(color.b * 255).toString(16).padStart(2, '0');
       return `#${r}${g}${b}`;
-    }
-
-    function resizeCanvas() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      gl.viewport(0, 0, canvas.width, canvas.height);
-
-      const fieldOfView = 45 * Math.PI / 180;   // in radians
-      const aspect = canvas.clientWidth / canvas.clientHeight;
-      const zNear = 0.1;
-      const zFar = 100.0;
-      projectionMatrix = mat4.create();
-      mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
-
-      viewMatrix = mat4.create();
-      mat4.lookAt(viewMatrix, cameraPosition, [0, 0, 0], [0, 1, 0]);
-
-      // Calculate maxScale to ensure sphere fills the screen
-      const fovY = fieldOfView;
-      const sphereScreenRadius = Math.tan(fovY / 2) * Math.abs(cameraPosition[2] - 0);
-      maxScale = sphereScreenRadius / sphereRadius;
-    }
-
-    function render() {
-      gl.clearColor(1.0, 1.0, 1.0, 1.0);  // Clear to white
-      gl.clearDepth(1.0);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-      updateModelMatrix();
-
-      // Draw the sphere
-      drawSphere();
-
-      // Draw handles
-      handles.forEach(handle => {
-        drawHandle(handle);
-      });
-
-      requestAnimationFrame(render);
-    }
-
-    function updateModelMatrix() {
-      modelMatrix = mat4.create();
-
-      // Apply momentum when not dragging
-      if (!isDragging) {
-        // Compute rotation quaternion from angular velocity
-        const angle = vec3.length(angularVelocity);
-        if (angle > 0.0001) {
-          const axis = vec3.normalize(vec3.create(), angularVelocity);
-          const incrementalRotation = quat.create();
-          quat.setAxisAngle(incrementalRotation, axis, angle);
-
-          // Apply incremental rotation
-          quat.multiply(rotationQuaternion, incrementalRotation, rotationQuaternion);
-
-          // Apply friction to angular velocity
-          vec3.scale(angularVelocity, angularVelocity, friction);
-        } else {
-          // If angular velocity is very small, stop rotation
-          vec3.set(angularVelocity, 0, 0, 0);
-        }
-      }
-
-      mat4.fromQuat(modelMatrix, rotationQuaternion);
-      // Initial rotation to have white facing the user
-      mat4.rotateX(modelMatrix, modelMatrix, -Math.PI / 2);
-      mat4.scale(modelMatrix, modelMatrix, [scale, scale, scale]);
-    }
-
-    function drawSphere() {
-      // Position
-      {
-        const numComponents = 3;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        const positionLocation = gl.getAttribLocation(program, 'aVertexPosition');
-        gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
-        gl.vertexAttribPointer(positionLocation, numComponents, type, normalize, stride, offset);
-        gl.enableVertexAttribArray(positionLocation);
-      }
-
-      // Color
-      {
-        const numComponents = 4;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        const colorLocation = gl.getAttribLocation(program, 'aVertexColor');
-        gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.color);
-        gl.vertexAttribPointer(colorLocation, numComponents, type, normalize, stride, offset);
-        gl.enableVertexAttribArray(colorLocation);
-      }
-
-      // Indices
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
-
-      // Set shader uniforms
-      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uModelMatrix'), false, modelMatrix);
-      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uViewMatrix'), false, viewMatrix);
-      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uProjectionMatrix'), false, projectionMatrix);
-
-      // Draw
-      gl.drawElements(gl.TRIANGLES, sphereBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
-    }
-
-    /**
-     * Draws a handle as a small sphere attached to the main sphere.
-     * @param {Object} handle - The handle object containing position and color.
-     */
-    function drawHandle(handle) {
-      // Create a small sphere at the handle position
-      const handleBuffers = createSphere(0.1 * scale, 30, 30);
-
-      // Apply the same transformations as the main sphere
-      let handleModelMatrix = mat4.create();
-      mat4.fromQuat(handleModelMatrix, rotationQuaternion);
-      mat4.rotateX(handleModelMatrix, handleModelMatrix, -Math.PI / 2);
-      mat4.scale(handleModelMatrix, handleModelMatrix, [scale, scale, scale]);
-      mat4.translate(handleModelMatrix, handleModelMatrix, handle.position);
-
-      // Position
-      {
-        const numComponents = 3;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        const positionLocation = gl.getAttribLocation(program, 'aVertexPosition');
-        gl.bindBuffer(gl.ARRAY_BUFFER, handleBuffers.position);
-        gl.vertexAttribPointer(positionLocation, numComponents, type, normalize, stride, offset);
-        gl.enableVertexAttribArray(positionLocation);
-      }
-
-      // Color
-      {
-        const numComponents = 4;
-        const type = gl.FLOAT;
-        const normalize = false;
-        const stride = 0;
-        const offset = 0;
-        const colorLocation = gl.getAttribLocation(program, 'aVertexColor');
-        const colorData = [];
-        for (let i = 0; i < (handleBuffers.vertexCount); i++) {
-          colorData.push(handle.color.r, handle.color.g, handle.color.b, 1.0);
-        }
-        const handleColorBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, handleColorBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colorData), gl.STATIC_DRAW);
-        gl.vertexAttribPointer(colorLocation, numComponents, type, normalize, stride, offset);
-        gl.enableVertexAttribArray(colorLocation);
-      }
-
-      // Indices
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, handleBuffers.indices);
-
-      // Set shader uniforms
-      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uModelMatrix'), false, handleModelMatrix);
-      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uViewMatrix'), false, viewMatrix);
-      gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uProjectionMatrix'), false, projectionMatrix);
-
-      // Draw
-      gl.drawElements(gl.TRIANGLES, handleBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
     }
 
     function onRotationStop() {
