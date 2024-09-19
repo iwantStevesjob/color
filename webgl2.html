@@ -499,75 +499,41 @@
     let rotationTimeout;
 
     function initEventHandlers() {
-      // Mouse events
-      canvas.addEventListener('mousedown', (e) => {
-        isDragging = true;
-        initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
-        lastArcballPos = getArcballVector(e.clientX, e.clientY);
-        angularVelocity = vec3.create(); // Reset angular velocity
-        handlePick(e.clientX, e.clientY);
-      });
+      // Mouse and touch event handlers
+      canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY));
+      canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevent default touch behavior
+        if (e.touches.length === 1) { // Single touch
+          const touch = e.touches[0];
+          handleStart(touch.clientX, touch.clientY);
+        }
+      }, { passive: false });
 
-      
-      // Update mouse and touch event handlers
       canvas.addEventListener('mousemove', handleMove);
       canvas.addEventListener('touchmove', (e) => {
         e.preventDefault(); // Prevent default touch behavior
         handleMove(e);
       }, { passive: false });
 
-      canvas.addEventListener('mouseup', () => {
-        isDragging = false;
-        lastArcballPos = null;
-
-        // Check if angular speed is above threshold
-        const angularSpeed = vec3.length(angularVelocity);
-        if (angularSpeed < minAngularSpeed) {
-          vec3.set(angularVelocity, 0, 0, 0);
-        }
-      });
-
-      canvas.addEventListener('mouseleave', () => {
-        isDragging = false;
-        lastArcballPos = null;
-
-        // Check if angular speed is above threshold
-        const angularSpeed = vec3.length(angularVelocity);
-        if (angularSpeed < minAngularSpeed) {
-          vec3.set(angularVelocity, 0, 0, 0);
-        }
-      });
-
-      // Touch events
-      canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault(); // Prevent default touch behavior
-        if (e.touches.length === 1) { // Single touch
-          isDragging = true;
-          const touch = e.touches[0];
-          initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
-          lastArcballPos = getArcballVector(touch.clientX, touch.clientY);
-          angularVelocity = vec3.create(); // Reset angular velocity
-          handlePick(touch.clientX, touch.clientY);
-        }
-      }, { passive: false });
-
+      canvas.addEventListener('mouseup', stopDragging);
+      canvas.addEventListener('mouseleave', stopDragging);
       canvas.addEventListener('touchend', (e) => {
         e.preventDefault(); // Prevent default touch behavior
-        isDragging = false;
-        lastArcballPos = null;
-
-        // Check if angular speed is above threshold
-        const angularSpeed = vec3.length(angularVelocity);
-        if (angularSpeed < minAngularSpeed) {
-          vec3.set(angularVelocity, 0, 0, 0);
-        }
+        stopDragging();
       });
 
       window.addEventListener('resize', resizeCanvas);
     }
 
+    function handleStart(clientX, clientY) {
+        isDragging = true;
+        initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
+        lastArcballPos = getArcballVector(clientX, clientY);
+        angularVelocity = vec3.create(); // Reset angular velocity
+        handlePick(clientX, clientY);
+    }
 
-      function handleMove(event) {
+    function handleMove(event) {
         const clientX = event.clientX || event.touches[0].clientX;
         const clientY = event.clientY || event.touches[0].clientY;
 
@@ -600,7 +566,19 @@
             rotationTimeout = setTimeout(onRotationStop, 2000);
           }
         }
+    }
+
+    function stopDragging() {
+      isDragging = false;
+      lastArcballPos = null;
+
+      // Check if angular speed is above threshold
+      const angularSpeed = vec3.length(angularVelocity);
+      if (angularSpeed < minAngularSpeed) {
+        vec3.set(angularVelocity, 0, 0, 0);
       }
+    }
+
 
 
     /**
@@ -832,7 +810,6 @@
         return { r: 1, g: 1, b: 1 };
       }
     }
-
 
     function displayCenterColor(hexColor) {
       const colorDisplay = document.getElementById('colorDisplay');
