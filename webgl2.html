@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Color2</title>
+  <title>Color3</title>
   <style>
     body, html {
       margin: 0;
@@ -312,24 +312,30 @@
   projectionMatrix = mat4.create();
   mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
 
-  // Adjust camera position based on aspect ratio
-  const baseDistance = 5;
-  cameraPosition[2] = baseDistance * Math.max(1, aspect);
+  // Adjust camera position based on desired sphere size
+  const targetProportion = 0.8; // 80% of screen width
+  const sphereWidthInPixels = canvas.width * targetProportion;
+  const sphereHeightInPixels = sphereWidthInPixels; // Maintain aspect ratio
+  
+  // Calculate the distance needed to make the sphere appear at the desired size
+  const distanceToFitSphere = (sphereRadius * 2) / (2 * Math.tan(fieldOfView / 2));
+  cameraPosition[2] = distanceToFitSphere * (canvas.height / sphereHeightInPixels);
 
   viewMatrix = mat4.create();
   mat4.lookAt(viewMatrix, cameraPosition, [0, 0, 0], [0, 1, 0]);
 
-  // Calculate scale to make sphere width a proportion of screen width
-  const targetProportion = 0.8; // 80% of screen width
-  const fovX = 2 * Math.atan(Math.tan(fieldOfView / 2) * aspect);
-  const sphereWidthInWorldUnits = 2 * Math.tan(fovX / 2) * cameraPosition[2] * targetProportion;
-  scale = sphereWidthInWorldUnits / (2 * sphereRadius);
+  // Calculate uniform scale to make sphere width a proportion of screen width
+  const viewportHeightInWorldUnits = 2 * Math.tan(fieldOfView / 2) * cameraPosition[2];
+  const viewportWidthInWorldUnits = viewportHeightInWorldUnits * aspect;
+  scale = (viewportWidthInWorldUnits * targetProportion) / (2 * sphereRadius);
 
   // Ensure scale doesn't exceed maxScale
   maxScale = 2.0;
   scale = Math.min(scale, maxScale);
 }
 
+// Add this to your initialization code if not already present
+window.addEventListener('resize', resizeCanvas);
 // Add this to your initialization code
 window.addEventListener('resize', resizeCanvas);
 
