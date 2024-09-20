@@ -86,13 +86,7 @@
 
     function setItem(key, value) {
       console.log(`Storing item with key: ${key}`, value); // Log the data being stored
-      return performTransaction(STORE_NAME, "readwrite", store => store.put(value, key))
-        .then(() => {
-          console.log(`Successfully stored item with key: ${key}`);
-        })
-        .catch(error => {
-          console.error(`Error storing item with key: ${key}`, error);
-        });
+      return performTransaction(STORE_NAME, "readwrite", store => store.put(value, key));
     }
 
     function getItem(key) {
@@ -120,8 +114,13 @@
     let sphereBuffers;
     let scale = 1.0;
     let maxScale = 2.0; // Will be calculated based on canvas size
-    let sphereRadius = 1;
+    let sphereRadius = 1; // Main sphere radius
+    let handleRadius = 0.1; // Handle radius
+    let extendedSphereRadius = sphereRadius + 0.2; // Extended sphere radius
     let lastCenterColor = '#ffffff'; // Initial center color
+
+    // Define the threshold for handle click detection
+    const HANDLE_CLICK_THRESHOLD = 0.1; // Radians (~5.7 degrees)
 
     // Camera position
     const cameraPosition = [0, 0, 5];
@@ -424,14 +423,17 @@
      */
     function drawHandle(handle) {
       // Create a small sphere at the handle position
-      const handleBuffers = createSphere(0.1 * scale, 30, 30);
+      const handleBuffers = createSphere(handleRadius, 30, 30);
 
       // Apply the same transformations as the main sphere
       let handleModelMatrix = mat4.create();
       mat4.fromQuat(handleModelMatrix, rotationQuaternion);
       mat4.rotateX(handleModelMatrix, handleModelMatrix, -Math.PI / 2);
       mat4.scale(handleModelMatrix, handleModelMatrix, [scale, scale, scale]);
-      mat4.translate(handleModelMatrix, handleModelMatrix, handle.position);
+
+      // Ensure the handle is placed exactly on the sphere's surface
+      const normalizedPosition = vec3.normalize(vec3.create(), handle.position);
+      mat4.translate(handleModelMatrix, handleModelMatrix, normalizedPosition);
 
       // Position
       {
@@ -493,6 +495,7 @@
     let minAngularSpeed = 0.007; // Adjust this value as needed
     let rotationTimeout;
     let lastCursorPos = { x: null, y: null };
+    let isInside = false; // Track if the current touch is inside the extended sphere
 
     // Mouse and touch event handlers
     function initEventHandlers() {
@@ -522,28 +525,42 @@
     }
 
     function grab(clientX, clientY) {
-        lastCursorPos.x = clientX;
-        lastCursorPos.y = clientY;
-        isDragging = true;
-        initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
+      lastCursorPos.x = clientX;
+      lastCursorPos.y = clientY;
+      isDragging = true;
+      initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
+      angularVelocity = vec3.create(); // Reset angular velocity
+
+      // Use extendedSphereRadius to determine if cursor is within the interactive boundary
+      const intersection = getIntersectionPoint(clientX, clientY, sphereRadius);
+      if (intersection) { // Touch is inside the extended sphere
         lastArcballPos = getArcballVector(clientX, clientY);
-        angularVelocity = vec3.create(); // Reset angular velocity
-        handle(clientX, clientY);
+        isInside = true;
+      } else { // Touch is outside the extended sphere
+        lastArcballPos = null;
+        isInside = false;
+      }
+
+      // Handle creation
+      handle(clientX, clientY);
     }
 
     function rotate(event) {
-    // Extract cursor positions for mouse and touch events
-    const clientX = event.clientX || (event.touches && event.touches[0].clientX);
-    const clientY = event.clientY || (event.touches && event.touches[0].clientY);
+      // Extract cursor positions for mouse and touch events
+      const clientX = event.clientX || (event.touches && event.touches[0].clientX);
+      const clientY = event.clientY || (event.touches && event.touches[0].clientY);
 
-    if (isDragging && lastArcballPos) {
-        const intersection = getIntersectionPoint(clientX, clientY);
+      if (isDragging) {
+        // Check if cursor is within the extended sphere
+        const intersection = getIntersectionPoint(clientX, clientY, extendedSphereRadius);
 
         if (intersection) { 
-            // **Arcball Rotation**: Existing behavior when cursor is inside the sphere
-            const currentArcballPos = getArcballVector(clientX, clientY);
-            const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
-            if (rotation) {
+          // **Arcball Rotation**
+          const currentArcballPos = getArcballVector(clientX, clientY);
+          if (isInside) { // Previously inside the extended sphere
+            if (lastArcballPos) { // Ensure lastArcballPos was set
+              const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
+              if (rotation) {
                 // Update rotation quaternion
                 quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
 
@@ -552,80 +569,87 @@
                 const sinHalfAngle = Math.sqrt(1 - rotation[3] * rotation[3]);
                 let axis = vec3.create();
                 if (sinHalfAngle < 0.001) {
-                    axis = vec3.fromValues(1, 0, 0);
+                  axis = vec3.fromValues(1, 0, 0);
                 } else {
-                    axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
+                  axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
                 }
                 vec3.normalize(axis, axis);
 
                 // Multiply axis by angle to get angular velocity vector
                 angularVelocity = vec3.scale(vec3.create(), axis, angle);
+              }
             }
+            lastArcballPos = currentArcballPos; // Update for next rotation
+          } else { // Transitioning from outside to inside the extended sphere
+            // Optionally, handle the transition smoothly
             lastArcballPos = currentArcballPos;
+            isInside = true;
+          }
 
-            // Reset lastAngle since we're switching back to arcball rotation
-            rotate.lastAngle = undefined;
+          // Reset lastAngle since we're using arcball rotation
+          rotate.lastAngle = undefined;
         } else { 
-            // **Z-Axis Rotation**: When cursor is outside the sphere
-            // Dynamically determine sphere center based on the canvas's bounding rectangle
-            const rect = canvas.getBoundingClientRect(); // Ensure 'canvas' is accessible here
-            const sphereCenterX = rect.left + rect.width / 2;
-            const sphereCenterY = rect.top + rect.height / 2;
+          // **Z-Axis Rotation**
+          if (isInside) { // Transitioning from inside to outside the extended sphere
+            isInside = false;
+            rotate.lastAngle = null; // Reset lastAngle
+          }
 
-            // Calculate cursor position relative to sphere center
-            const dx = clientX - sphereCenterX;
-            const dy = clientY - sphereCenterY;
-            const currentAngle = Math.atan2(dy, dx);
+          const rect = canvas.getBoundingClientRect();
+          const sphereCenterX = rect.left + rect.width / 2;
+          const sphereCenterY = rect.top + rect.height / 2;
 
-            // Initialize lastAngle if it's undefined
-            if (typeof rotate.lastAngle === 'undefined' || rotate.lastAngle === null) {
-                rotate.lastAngle = currentAngle;
-                return; // No rotation on the first move to prevent sudden jumps
-            }
+          const dx = clientX - sphereCenterX;
+          const dy = clientY - sphereCenterY;
+          const currentAngle = Math.atan2(dy, dx);
 
-            // Calculate change in angle (deltaAngle)
-            let deltaAngle = currentAngle - rotate.lastAngle;
+          if (typeof rotate.lastAngle === 'undefined' || rotate.lastAngle === null) {
+              rotate.lastAngle = currentAngle;
+              return; // No rotation on the first move to prevent sudden jumps
+          }
 
-            // Handle angle wrapping to keep deltaAngle within -PI to PI
-            if (deltaAngle > Math.PI) {
-                deltaAngle -= 2 * Math.PI;
-            } else if (deltaAngle < -Math.PI) {
-                deltaAngle += 2 * Math.PI;
-            }
+          let deltaAngle = currentAngle - rotate.lastAngle;
 
-            // Update lastAngle for the next rotation
-            rotate.lastAngle = currentAngle;
+          if (deltaAngle > Math.PI) {
+              deltaAngle -= 2 * Math.PI;
+          } else if (deltaAngle < -Math.PI) {
+              deltaAngle += 2 * Math.PI;
+          }
 
-            const rotationSpeed = 1.0; // Adjust this value to control rotation sensitivity
+          rotate.lastAngle = currentAngle;
 
-            // Apply rotation speed scaling
-            deltaAngle *= rotationSpeed;
+          const rotationSpeed = 1.0; // Adjust as needed
+          deltaAngle *= rotationSpeed;
+          deltaAngle = -deltaAngle;
 
-            // **Invert the deltaAngle to correct rotation direction**
-            deltaAngle = -deltaAngle;
+          const rotation = quat.create();
+          quat.setAxisAngle(rotation, [0, 0, 1], deltaAngle);
+          quat.normalize(rotation, rotation);
 
-            // Create a quaternion for rotation around Z-axis
-            const rotation = quat.create();
-            quat.setAxisAngle(rotation, [0, 0, 1], deltaAngle); // Z-axis rotation
-            quat.normalize(rotation, rotation);
+          // Apply rotation
+          quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
+          
+          // Set angular velocity for momentum
+          angularVelocity = vec3.fromValues(0, 0, deltaAngle);
 
-            // Apply the rotation
-            quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
-
-            // Set angular velocity based on the rotation angle around Z-axis
-            angularVelocity = vec3.fromValues(0, 0, deltaAngle);
+          // Handle Position Adjustment:
+          // Ensure the handle remains on the actual sphere's surface
+          if (handles.length > 0) {
+            const handle = handles[handles.length - 1];
+            // Project the handle's position onto the sphere's surface
+            handle.position = vec3.normalize(vec3.create(), handle.position);
+          }
         }
 
         // Update lastCursorPos for the next event
         lastCursorPos.x = clientX;
         lastCursorPos.y = clientY;
 
-        // Reset the rotation timeout (assuming onRotationStop handles inertia or stopping)
+        // Reset the rotation timeout
         clearTimeout(rotationTimeout);
         rotationTimeout = setTimeout(onRotationStop, 2000);
+      }
     }
-}
-
 
     function release() {
       isDragging = false;
@@ -674,7 +698,7 @@
      * Computes the rotation quaternion between two Arcball vectors.
      * @param {vec3} v0 - The initial vector.
      * @param {vec3} v1 - The final vector.
-     * @returns {quat} - The rotation quaternion.
+     * @returns {quat|null} - The rotation quaternion.
      */
     function computeArcballRotation(v0, v1) {
       const dot = vec3.dot(v0, v1);
@@ -693,22 +717,86 @@
     }
 
     /**
+     * Rotates the sphere so that the existing handle aligns with the clicked position.
+     * @param {vec3} fromVec - The current position of the handle.
+     * @param {vec3} toVec - The desired position (clicked position).
+     */
+    function rotateSphereToHandle(fromVec, toVec) {
+      // Calculate the rotation axis (cross product of fromVec and toVec)
+      const rotationAxis = vec3.create();
+      vec3.cross(rotationAxis, fromVec, toVec);
+
+      const axisLength = vec3.length(rotationAxis);
+      if (axisLength < 1e-6) {
+        // Vectors are parallel or antiparallel; no rotation needed or 180 degrees rotation
+        if (vec3.dot(fromVec, toVec) < 0) {
+          // 180 degrees rotation around any orthogonal axis
+          // Find an orthogonal axis
+          const arbitrary = vec3.fromValues(1, 0, 0);
+          if (Math.abs(vec3.dot(fromVec, arbitrary)) > 0.99) {
+            vec3.set(arbitrary, 0, 1, 0);
+          }
+          vec3.cross(rotationAxis, fromVec, arbitrary);
+          vec3.normalize(rotationAxis, rotationAxis);
+          quat.setAxisAngle(quat.create(), rotationAxis, Math.PI);
+        } else {
+          // Vectors are identical; no rotation needed
+          return;
+        }
+      } else {
+        vec3.normalize(rotationAxis, rotationAxis);
+      }
+
+      // Calculate the rotation angle (dot product)
+      const rotationAngle = Math.acos(Math.min(Math.max(vec3.dot(fromVec, toVec), -1), 1));
+
+      // Create the rotation quaternion
+      const rotationQuat = quat.create();
+      quat.setAxisAngle(rotationQuat, rotationAxis, rotationAngle);
+      quat.normalize(rotationQuat, rotationQuat);
+
+      // Apply the rotation to the sphere's rotationQuaternion
+      quat.multiply(rotationQuaternion, rotationQuat, rotationQuaternion);
+    }
+
+    /**
      * Handles picking a point on the sphere when clicked or touched.
      * @param {number} clientX - The X coordinate of the cursor.
      * @param {number} clientY - The Y coordinate of the cursor.
      */
     function handle(clientX, clientY) {
-      const intersection = getIntersectionPoint(clientX, clientY);
+      // Use sphereRadius for handle creation
+      const intersection = getIntersectionPoint(clientX, clientY, sphereRadius);
 
       if (intersection) {    
-        handlePoint = vec3.clone(intersection); // Store the handle point
+        // Normalize the intersection to ensure it's on the sphere's surface
+        const normalizedIntersection = vec3.normalize(vec3.create(), intersection);
 
-        const color = getColorAtPoint(intersection, true); // 'true' indicates it's in local coordinates
-        handles.push({ position: intersection, color: color }); // Store position in local coordinates
+        // Check if the click is on an existing handle
+        const existingHandle = handles.find(handle => {
+          const angle = Math.acos(vec3.dot(handle.position, normalizedIntersection));
+          return angle < HANDLE_CLICK_THRESHOLD;
+        });
 
-        // Change background color to match the picked color
-        const hexColor = rgbToHex(color);
-        document.body.style.backgroundColor = hexColor;
+        if (existingHandle) {
+          // Click is on an existing handle; rotate the sphere to center this handle at the clicked position
+          rotateSphereToHandle(existingHandle.position, normalizedIntersection);
+        } else {
+          // Click is on empty space; add a new handle
+          const color = getColorAtPoint(normalizedIntersection, true); // 'true' indicates it's in local coordinates
+
+          // Optionally limit the number of handles
+          // const MAX_HANDLES = 10;
+          // if (handles.length >= MAX_HANDLES) {
+          //   handles.shift(); // Remove the oldest handle
+          // }
+
+          handles.push({ position: normalizedIntersection, color: color }); // Add new handle
+
+          // Change background color to match the picked color
+          const hexColor = rgbToHex(color);
+          document.body.style.backgroundColor = hexColor;
+        }
       }
     }
 
@@ -716,9 +804,10 @@
      * Computes the intersection point on the sphere based on cursor position.
      * @param {number} clientX - The X coordinate of the cursor.
      * @param {number} clientY - The Y coordinate of the cursor.
+     * @param {number} sphereRadiusParam - The radius of the sphere to intersect against.
      * @returns {vec3|null} - The intersection point or null if no intersection.
      */
-    function getIntersectionPoint(clientX, clientY) {
+    function getIntersectionPoint(clientX, clientY, sphereRadiusParam = sphereRadius) {
       const ray = getMouseRay(clientX, clientY);
 
       // Transform the ray into the sphere's local coordinate system
@@ -734,7 +823,7 @@
       vec3.normalize(localRayDirection, localRayDirection);
 
       // Perform ray-sphere intersection in local space
-      const intersection = raySphereIntersect(localRayOrigin, localRayDirection, [0, 0, 0], sphereRadius);
+      const intersection = raySphereIntersect(localRayOrigin, localRayDirection, [0, 0, 0], sphereRadiusParam);
 
       if (intersection) {
         return intersection;
@@ -858,7 +947,7 @@
       const clientX = rect.left + canvas.clientWidth / 2;
       const clientY = rect.top + canvas.clientHeight / 2;
 
-      const intersection = getIntersectionPoint(clientX, clientY);
+      const intersection = getIntersectionPoint(clientX, clientY, sphereRadius);
 
       if (intersection) {
         const color = getColorAtPoint(intersection, true); // 'true' indicates it's in local coordinates
