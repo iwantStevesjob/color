@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Color Sphere with Angular Velocity Threshold</title>
+  <title>Color</title>
   <style>
     body, html {
       margin: 0;
@@ -477,6 +477,7 @@
       gl.drawElements(gl.TRIANGLES, handleBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
     }
 
+    
     //////////////////////////////////////////////////////////////////////
     //
     // INTERACTIONS
@@ -488,89 +489,148 @@
     let lastArcballPos = null; // Last position on the Arcball
     let initialRotationQuaternion = null;
     let angularVelocity = vec3.create(); // Vector representing angular velocity (axis * speed)
-
-    // Editable friction variable (between 0 and 1)
-    // Lower values mean more friction (sphere stops sooner), higher values mean less friction (sphere spins longer)
     let friction = 0.95; // You can adjust this value to control the slipperiness
-
-    // Minimum angular speed threshold
     let minAngularSpeed = 0.007; // Adjust this value as needed
-
     let rotationTimeout;
+    let lastCursorPos = { x: null, y: null };
 
+    // Mouse and touch event handlers
     function initEventHandlers() {
-      // Mouse and touch event handlers
-      canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY));
+      canvas.addEventListener('mousedown', (e) => grab(e.clientX, e.clientY));
       canvas.addEventListener('touchstart', (e) => {
         e.preventDefault(); // Prevent default touch behavior
         if (e.touches.length === 1) { // Single touch
           const touch = e.touches[0];
-          handleStart(touch.clientX, touch.clientY);
+          grab(touch.clientX, touch.clientY);
         }
       }, { passive: false });
 
-      canvas.addEventListener('mousemove', handleMove);
+      canvas.addEventListener('mousemove', rotate);
       canvas.addEventListener('touchmove', (e) => {
         e.preventDefault(); // Prevent default touch behavior
         handleMove(e);
       }, { passive: false });
 
-      canvas.addEventListener('mouseup', stopDragging);
-      canvas.addEventListener('mouseleave', stopDragging);
+      canvas.addEventListener('mouseup', release);
+      canvas.addEventListener('mouseleave', release);
       canvas.addEventListener('touchend', (e) => {
         e.preventDefault(); // Prevent default touch behavior
-        stopDragging();
+        release();
       });
 
       window.addEventListener('resize', resizeCanvas);
     }
 
-    function handleStart(clientX, clientY) {
+    function grab(clientX, clientY) {
+        lastCursorPos.x = clientX;
+        lastCursorPos.y = clientY;
         isDragging = true;
         initialRotationQuaternion = quat.clone(rotationQuaternion); // Store initial rotation
         lastArcballPos = getArcballVector(clientX, clientY);
         angularVelocity = vec3.create(); // Reset angular velocity
-        handlePick(clientX, clientY);
+        handle(clientX, clientY);
     }
 
-    function handleMove(event) {
-        const clientX = event.clientX || event.touches[0].clientX;
-        const clientY = event.clientY || event.touches[0].clientY;
+    function rotate(event) {
+    // Extract cursor positions for mouse and touch events
+    const clientX = event.clientX || (event.touches && event.touches[0].clientX);
+    const clientY = event.clientY || (event.touches && event.touches[0].clientY);
 
-        if (isDragging && lastArcballPos) {
-          const intersection = getIntersectionPoint(clientX, clientY);
-          if (intersection) { // Only update rotation if inside the sphere
+    if (isDragging && lastArcballPos) {
+        const intersection = getIntersectionPoint(clientX, clientY);
+
+        if (intersection) { 
+            // **Arcball Rotation**: Existing behavior when cursor is inside the sphere
             const currentArcballPos = getArcballVector(clientX, clientY);
             const rotation = computeArcballRotation(lastArcballPos, currentArcballPos);
             if (rotation) {
-              // Update rotation quaternion
-              quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
+                // Update rotation quaternion
+                quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
 
-              // Calculate angular velocity vector
-              const angle = 2 * Math.acos(rotation[3]);
-              const sinHalfAngle = Math.sqrt(1 - rotation[3] * rotation[3]);
-              let axis = vec3.create();
-              if (sinHalfAngle < 0.001) {
-                axis = vec3.fromValues(1, 0, 0);
-              } else {
-                axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
-              }
-              vec3.normalize(axis, axis);
+                // Calculate angular velocity vector
+                const angle = 2 * Math.acos(rotation[3]);
+                const sinHalfAngle = Math.sqrt(1 - rotation[3] * rotation[3]);
+                let axis = vec3.create();
+                if (sinHalfAngle < 0.001) {
+                    axis = vec3.fromValues(1, 0, 0);
+                } else {
+                    axis = vec3.fromValues(rotation[0] / sinHalfAngle, rotation[1] / sinHalfAngle, rotation[2] / sinHalfAngle);
+                }
+                vec3.normalize(axis, axis);
 
-              // Multiply axis by angle to get angular velocity vector
-              angularVelocity = vec3.scale(vec3.create(), axis, angle);
+                // Multiply axis by angle to get angular velocity vector
+                angularVelocity = vec3.scale(vec3.create(), axis, angle);
             }
             lastArcballPos = currentArcballPos;
 
-            clearTimeout(rotationTimeout);
-            rotationTimeout = setTimeout(onRotationStop, 2000);
-          }
-        }
-    }
+            // Reset lastAngle since we're switching back to arcball rotation
+            rotate.lastAngle = undefined;
+        } else { 
+            // **Z-Axis Rotation**: When cursor is outside the sphere
+            // Dynamically determine sphere center based on the canvas's bounding rectangle
+            const rect = canvas.getBoundingClientRect(); // Ensure 'canvas' is accessible here
+            const sphereCenterX = rect.left + rect.width / 2;
+            const sphereCenterY = rect.top + rect.height / 2;
 
-    function stopDragging() {
+            // Calculate cursor position relative to sphere center
+            const dx = clientX - sphereCenterX;
+            const dy = clientY - sphereCenterY;
+            const currentAngle = Math.atan2(dy, dx);
+
+            // Initialize lastAngle if it's undefined
+            if (typeof rotate.lastAngle === 'undefined' || rotate.lastAngle === null) {
+                rotate.lastAngle = currentAngle;
+                return; // No rotation on the first move to prevent sudden jumps
+            }
+
+            // Calculate change in angle (deltaAngle)
+            let deltaAngle = currentAngle - rotate.lastAngle;
+
+            // Handle angle wrapping to keep deltaAngle within -PI to PI
+            if (deltaAngle > Math.PI) {
+                deltaAngle -= 2 * Math.PI;
+            } else if (deltaAngle < -Math.PI) {
+                deltaAngle += 2 * Math.PI;
+            }
+
+            // Update lastAngle for the next rotation
+            rotate.lastAngle = currentAngle;
+
+            const rotationSpeed = 1.0; // Adjust this value to control rotation sensitivity
+
+            // Apply rotation speed scaling
+            deltaAngle *= rotationSpeed;
+
+            // **Invert the deltaAngle to correct rotation direction**
+            deltaAngle = -deltaAngle;
+
+            // Create a quaternion for rotation around Z-axis
+            const rotation = quat.create();
+            quat.setAxisAngle(rotation, [0, 0, 1], deltaAngle); // Z-axis rotation
+            quat.normalize(rotation, rotation);
+
+            // Apply the rotation
+            quat.multiply(rotationQuaternion, rotation, rotationQuaternion);
+
+            // Set angular velocity based on the rotation angle around Z-axis
+            angularVelocity = vec3.fromValues(0, 0, deltaAngle);
+        }
+
+        // Update lastCursorPos for the next event
+        lastCursorPos.x = clientX;
+        lastCursorPos.y = clientY;
+
+        // Reset the rotation timeout (assuming onRotationStop handles inertia or stopping)
+        clearTimeout(rotationTimeout);
+        rotationTimeout = setTimeout(onRotationStop, 2000);
+    }
+}
+
+
+    function release() {
       isDragging = false;
       lastArcballPos = null;
+      lastCursorPos = { x: null, y: null }; // Reset cursor position
 
       // Check if angular speed is above threshold
       const angularSpeed = vec3.length(angularVelocity);
@@ -578,8 +638,6 @@
         vec3.set(angularVelocity, 0, 0, 0);
       }
     }
-
-
 
     /**
      * Maps 2D screen coordinates to a 3D point on the Arcball sphere.
@@ -639,7 +697,7 @@
      * @param {number} clientX - The X coordinate of the cursor.
      * @param {number} clientY - The Y coordinate of the cursor.
      */
-    function handlePick(clientX, clientY) {
+    function handle(clientX, clientY) {
       const intersection = getIntersectionPoint(clientX, clientY);
 
       if (intersection) {    
