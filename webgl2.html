@@ -306,28 +306,32 @@
   gl.viewport(0, 0, canvas.width, canvas.height);
 
   const fieldOfView = 45 * Math.PI / 180;   // in radians
-  const aspect = canvas.clientWidth / canvas.clientHeight;
+  const aspect = canvas.width / canvas.height;
   const zNear = 0.1;
   const zFar = 100.0;
   projectionMatrix = mat4.create();
   mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
 
+  // Adjust camera position based on aspect ratio
+  const baseDistance = 5;
+  cameraPosition[2] = baseDistance * Math.max(1, aspect);
+
   viewMatrix = mat4.create();
   mat4.lookAt(viewMatrix, cameraPosition, [0, 0, 0], [0, 1, 0]);
 
-  // Calculate scale to make sphere width 300px
-  const fovY = fieldOfView;
-  const targetWidth = 400; // pixels
-  const distanceToCamera = Math.abs(cameraPosition[2]);
-  const viewportHeight = 2 * Math.tan(fovY / 2) * distanceToCamera;
-  const viewportWidth = viewportHeight * aspect;
-  const pixelsPerUnit = canvas.width / viewportWidth;
-  scale = (targetWidth / pixelsPerUnit) / (2 * sphereRadius);
+  // Calculate scale to make sphere width a proportion of screen width
+  const targetProportion = 0.8; // 80% of screen width
+  const fovX = 2 * Math.atan(Math.tan(fieldOfView / 2) * aspect);
+  const sphereWidthInWorldUnits = 2 * Math.tan(fovX / 2) * cameraPosition[2] * targetProportion;
+  scale = sphereWidthInWorldUnits / (2 * sphereRadius);
 
   // Ensure scale doesn't exceed maxScale
-  maxScale = Math.min(scale, 2.0);
+  maxScale = 2.0;
   scale = Math.min(scale, maxScale);
 }
+
+// Add this to your initialization code
+window.addEventListener('resize', resizeCanvas);
 
     function render() {
       gl.clearColor(1.0, 1.0, 1.0, 1.0);  // Clear to white
