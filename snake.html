@@ -1,332 +1,195 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>3D Snake Game on Sphere</title>
+    <meta charset="UTF-8">
+    <title>3D Snake on Sphere - Pure WebGL</title>
     <style>
-        body { margin: 0; overflow: hidden; }
-        canvas { width: 100%; height: 100%; display: block; }
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #glCanvas { width: 100vw; height: 100vh; display: block; }
+        #score { position: absolute; top: 10px; left: 10px; color: white; font-family: Arial, sans-serif; font-size: 20px; }
     </style>
 </head>
 <body>
-    <canvas id="glcanvas"></canvas>
-    <!-- Include glMatrix library for matrix operations -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+    <canvas id="glCanvas"></canvas>
+    <div id="score">Score: 0</div>
     <script>
-        const canvas = document.getElementById('glcanvas');
-        const gl = canvas.getContext('webgl');
-
-        if (!gl) {
-            alert('WebGL not supported in this browser');
-        }
-
-        // Vertex shader program
-        const vsSource = `
-            attribute vec4 aVertexPosition;
-            attribute vec4 aVertexColor;
-
+        // Vertex Shader
+        const vertexShaderSrc = `
+            attribute vec3 aPosition;
+            attribute vec3 aColor;
             uniform mat4 uModelViewMatrix;
             uniform mat4 uProjectionMatrix;
-
-            varying lowp vec4 vColor;
-
+            varying vec3 vColor;
             void main(void) {
-                gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-                vColor = aVertexColor;
+                gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
+                vColor = aColor;
             }
         `;
 
-        // Fragment shader program
-        const fsSource = `
-            varying lowp vec4 vColor;
-
+        // Fragment Shader
+        const fragmentShaderSrc = `
+            precision mediump float;
+            varying vec3 vColor;
             void main(void) {
-                gl_FragColor = vColor;
+                gl_FragColor = vec4(vColor, 1.0);
             }
         `;
 
-        // Initialize shader program
-        const shaderProgram = initShaderProgram(gl, vsSource, fsSource);
-
-        // Collect shader info
-        const programInfo = {
-            program: shaderProgram,
-            attribLocations: {
-                vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
-                vertexColor: gl.getAttribLocation(shaderProgram, 'aVertexColor'),
-            },
-            uniformLocations: {
-                projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
-                modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
-            },
-        };
-
-        // Initialize buffers
-        const sphereBuffers = initBuffers(gl);
-        const cubeBuffers = initCubeBuffers(gl);
-
-        // Game state variables
-        let snake = [];
-        const snakeLength = 3;
-        let snakeDirection = 0;
-        let snakeSpeed = 0.02;
-
-        let theta = Math.PI / 2;
-        let phi = 0;
-
-        const radius = 10;
-
-        for (let i = 0; i < snakeLength; i++) {
-            snake.push({ theta: theta, phi: phi - i * 0.1 });
+        // Initialize WebGL
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) {
+            alert("WebGL not supported, please use a different browser.");
         }
 
-        let turningLeft = false;
-        let turningRight = false;
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
 
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'ArrowLeft') {
-                turningLeft = true;
-            } else if (event.key === 'ArrowRight') {
-                turningRight = true;
-            }
-        });
-
-        document.addEventListener('keyup', function(event) {
-            if (event.key === 'ArrowLeft') {
-                turningLeft = false;
-            } else if (event.key === 'ArrowRight') {
-                turningRight = false;
-            }
-        });
-
-        // Start rendering
-        requestAnimationFrame(render);
-
-        function render(now) {
-            now *= 0.001;  // convert to seconds
-
-            updateGame();
-
-            drawScene(gl, programInfo, sphereBuffers, cubeBuffers);
-
-            requestAnimationFrame(render);
-        }
-
-        function updateGame() {
-            // Update direction
-            if (turningLeft) {
-                snakeDirection -= 0.05;
-            }
-            if (turningRight) {
-                snakeDirection += 0.05;
-            }
-
-            // Move forward
-            const deltaPhi = snakeSpeed * Math.cos(snakeDirection);
-            const deltaTheta = snakeSpeed * Math.sin(snakeDirection);
-
-            theta += deltaTheta;
-            phi += deltaPhi;
-
-            // Keep theta and phi within bounds
-            if (theta < 0) theta += Math.PI;
-            if (theta > Math.PI) theta -= Math.PI;
-
-            if (phi < 0) phi += 2 * Math.PI;
-            if (phi > 2 * Math.PI) phi -= 2 * Math.PI;
-
-            // Update snake
-            snake.unshift({ theta: theta, phi: phi });
-            if (snake.length > snakeLength) {
-                snake.pop();
-            }
-        }
-
-        function drawScene(gl, programInfo, sphereBuffers, cubeBuffers) {
-            gl.clearColor(0.0, 0.0, 0.0, 1.0);
-            gl.clearDepth(1.0);
-            gl.enable(gl.DEPTH_TEST);
-            gl.depthFunc(gl.LEQUAL);
-
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-            const fieldOfView = 45 * Math.PI / 180;
-            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
-            const zNear = 0.1;
-            const zFar = 100.0;
-            const projectionMatrix = mat4.create();
-
-            mat4.perspective(projectionMatrix,
-                            fieldOfView,
-                            aspect,
-                            zNear,
-                            zFar);
-
-            let modelViewMatrix = mat4.create();
-
-            mat4.translate(modelViewMatrix,
-                        modelViewMatrix,
-                        [0.0, 0.0, -30.0]);
-
-            const cameraTheta = theta - Math.PI / 2;
-            const cameraPhi = phi;
-
-            mat4.rotate(modelViewMatrix, modelViewMatrix, -cameraTheta, [1, 0, 0]);
-            mat4.rotate(modelViewMatrix, modelViewMatrix, -cameraPhi, [0, 1, 0]);
-
-            // Draw sphere
-            {
-                const numComponents = 3;
-                const type = gl.FLOAT;
-                const normalize = false;
-                const stride = 0;
-                const offset = 0;
-
-                gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
-                gl.vertexAttribPointer(
-                    programInfo.attribLocations.vertexPosition,
-                    numComponents,
-                    type,
-                    normalize,
-                    stride,
-                    offset);
-                gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
-
-                gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.color);
-                gl.vertexAttribPointer(
-                    programInfo.attribLocations.vertexColor,
-                    4,
-                    type,
-                    normalize,
-                    stride,
-                    offset);
-                gl.enableVertexAttribArray(programInfo.attribLocations.vertexColor);
-
-                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
-
-                gl.useProgram(programInfo.program);
-
-                gl.uniformMatrix4fv(
-                    programInfo.uniformLocations.projectionMatrix,
-                    false,
-                    projectionMatrix);
-                gl.uniformMatrix4fv(
-                    programInfo.uniformLocations.modelViewMatrix,
-                    false,
-                    modelViewMatrix);
-
-                {
-                    const vertexCount = sphereBuffers.vertexCount;
-                    const type = gl.UNSIGNED_SHORT;
-                    const offset = 0;
-                    gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
-                }
-            }
-
-            // Draw snake
-            for (let i = 0; i < snake.length; i++) {
-                const segment = snake[i];
-
-                const x = radius * Math.sin(segment.theta) * Math.cos(segment.phi);
-                const y = radius * Math.cos(segment.theta);
-                const z = radius * Math.sin(segment.theta) * Math.sin(segment.phi);
-
-                let cubeModelViewMatrix = mat4.clone(modelViewMatrix);
-
-                mat4.translate(cubeModelViewMatrix, cubeModelViewMatrix, [x, y, z]);
-
-                mat4.scale(cubeModelViewMatrix, cubeModelViewMatrix, [1.5, 1.5, 1.5]);
-
-                {
-                    const numComponents = 3;
-                    const type = gl.FLOAT;
-                    const normalize = false;
-                    const stride = 0;
-                    const offset = 0;
-
-                    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffers.position);
-                    gl.vertexAttribPointer(
-                        programInfo.attribLocations.vertexPosition,
-                        numComponents,
-                        type,
-                        normalize,
-                        stride,
-                        offset);
-                    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
-
-                    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffers.color);
-                    gl.vertexAttribPointer(
-                        programInfo.attribLocations.vertexColor,
-                        4,
-                        type,
-                        normalize,
-                        stride,
-                        offset);
-                    gl.enableVertexAttribArray(programInfo.attribLocations.vertexColor);
-
-                    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeBuffers.indices);
-
-                    gl.useProgram(programInfo.program);
-
-                    gl.uniformMatrix4fv(
-                        programInfo.uniformLocations.projectionMatrix,
-                        false,
-                        projectionMatrix);
-                    gl.uniformMatrix4fv(
-                        programInfo.uniformLocations.modelViewMatrix,
-                        false,
-                        cubeModelViewMatrix);
-
-                    {
-                        const vertexCount = cubeBuffers.vertexCount;
-                        const type = gl.UNSIGNED_SHORT;
-                        const offset = 0;
-                        gl.drawElements(gl.TRIANGLES, vertexCount, type, offset);
-                    }
-                }
-            }
-        }
-
-        function initShaderProgram(gl, vsSource, fsSource) {
-            const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
-            const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
-
-            const shaderProgram = gl.createProgram();
-            gl.attachShader(shaderProgram, vertexShader);
-            gl.attachShader(shaderProgram, fragmentShader);
-            gl.linkProgram(shaderProgram);
-
-            if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-                alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
-                return null;
-            }
-
-            return shaderProgram;
-        }
-
-        function loadShader(gl, type, source) {
+        // Compile Shader
+        function compileShader(source, type) {
             const shader = gl.createShader(type);
-
             gl.shaderSource(shader, source);
-
             gl.compileShader(shader);
-
             if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                alert('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+                console.error("Shader compile failed with: " + gl.getShaderInfoLog(shader));
                 gl.deleteShader(shader);
                 return null;
             }
-
             return shader;
         }
 
-        function initBuffers(gl) {
-            const latitudeBands = 30;
-            const longitudeBands = 30;
+        const vertexShader = compileShader(vertexShaderSrc, gl.VERTEX_SHADER);
+        const fragmentShader = compileShader(fragmentShaderSrc, gl.FRAGMENT_SHADER);
 
-            const vertexPositionData = [];
-            const colorData = [];
-            const indexData = [];
+        // Create Program
+        const shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            console.error("Program failed to link: " + gl.getProgramInfoLog(shaderProgram));
+        }
+        gl.useProgram(shaderProgram);
 
+        // Attributes and Uniforms
+        const aPositionLoc = gl.getAttribLocation(shaderProgram, 'aPosition');
+        const aColorLoc = gl.getAttribLocation(shaderProgram, 'aColor');
+        const uModelViewMatrixLoc = gl.getUniformLocation(shaderProgram, 'uModelViewMatrix');
+        const uProjectionMatrixLoc = gl.getUniformLocation(shaderProgram, 'uProjectionMatrix');
+
+        // Matrices
+        function createMatrix() {
+            return new Float32Array(16);
+        }
+
+        function loadIdentity() {
+            const m = createMatrix();
+            m[0] = 1; m[5] = 1; m[10] = 1; m[15] = 1;
+            return m;
+        }
+
+        function multiplyMatrices(a, b) {
+            const result = createMatrix();
+            for (let row = 0; row < 4; row++) {
+                for (let col = 0; col < 4; col++) {
+                    result[row * 4 + col] = 
+                        a[row * 4 + 0] * b[0 * 4 + col] +
+                        a[row * 4 + 1] * b[1 * 4 + col] +
+                        a[row * 4 + 2] * b[2 * 4 + col] +
+                        a[row * 4 + 3] * b[3 * 4 + col];
+                }
+            }
+            return result;
+        }
+
+        function perspectiveMatrix(fovy, aspect, near, far) {
+            const f = 1.0 / Math.tan(fovy / 2);
+            const m = createMatrix();
+            m[0] = f / aspect;
+            m[5] = f;
+            m[10] = (far + near) / (near - far);
+            m[11] = -1;
+            m[14] = (2 * far * near) / (near - far);
+            return m;
+        }
+
+        function rotationMatrix(axis, angle) {
+            const x = axis[0], y = axis[1], z = axis[2];
+            const len = Math.sqrt(x*x + y*y + z*z);
+            const s = Math.sin(angle);
+            const c = Math.cos(angle);
+            const t = 1 - c;
+            return new Float32Array([
+                t*x*x + c,   t*x*y - z*s, t*x*z + y*s, 0,
+                t*x*y + z*s, t*y*y + c,   t*y*z - x*s, 0,
+                t*x*z - y*s, t*y*z + x*s, t*z*z + c,   0,
+                0,           0,           0,           1
+            ]);
+        }
+
+        function translationMatrix(tx, ty, tz) {
+            const m = loadIdentity();
+            m[12] = tx;
+            m[13] = ty;
+            m[14] = tz;
+            return m;
+        }
+
+        // Define Cube
+        const cubeVertices = [
+            // Front face
+            -0.5, -0.5,  0.5,
+             0.5, -0.5,  0.5,
+             0.5,  0.5,  0.5,
+            -0.5,  0.5,  0.5,
+            // Back face
+            -0.5, -0.5, -0.5,
+             0.5, -0.5, -0.5,
+             0.5,  0.5, -0.5,
+            -0.5,  0.5, -0.5,
+        ];
+
+        const cubeIndices = [
+            0,1,2,  0,2,3, // Front
+            4,5,6,  4,6,7, // Back
+            0,1,5,  0,5,4, // Bottom
+            2,3,7,  2,7,6, // Top
+            0,3,7,  0,7,4, // Left
+            1,2,6,  1,6,5  // Right
+        ];
+
+        const cubeColors = [
+            // Front face (red)
+            1.0, 0.0, 0.0,
+            1.0, 0.0, 0.0,
+            1.0, 0.0, 0.0,
+            1.0, 0.0, 0.0,
+            // Back face (green)
+            0.0, 1.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 1.0, 0.0,
+        ];
+
+        // Create Buffers for Cube
+        const cubeVBO = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, cubeVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cubeVertices), gl.STATIC_DRAW);
+
+        const cubeColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, cubeColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cubeColors), gl.STATIC_DRAW);
+
+        const cubeIBO = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIBO);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(cubeIndices), gl.STATIC_DRAW);
+
+        // Define Sphere (for background)
+        function createSphere(radius, latitudeBands, longitudeBands) {
+            const vertices = [];
+            const colors = [];
+            const indices = [];
             for (let latNumber = 0; latNumber <= latitudeBands; latNumber++) {
                 const theta = latNumber * Math.PI / latitudeBands;
                 const sinTheta = Math.sin(theta);
@@ -340,12 +203,9 @@
                     const x = cosPhi * sinTheta;
                     const y = cosTheta;
                     const z = sinPhi * sinTheta;
-
-                    vertexPositionData.push(radius * x);
-                    vertexPositionData.push(radius * y);
-                    vertexPositionData.push(radius * z);
-
-                    colorData.push(0.5, 0.5, 0.5, 1.0);
+                    vertices.push(radius * x, radius * y, radius * z);
+                    // Simple coloring: light blue
+                    colors.push(0.2, 0.6, 1.0);
                 }
             }
 
@@ -353,114 +213,180 @@
                 for (let longNumber = 0; longNumber < longitudeBands; longNumber++) {
                     const first = (latNumber * (longitudeBands + 1)) + longNumber;
                     const second = first + longitudeBands + 1;
-                    indexData.push(first);
-                    indexData.push(second);
-                    indexData.push(first + 1);
-
-                    indexData.push(second);
-                    indexData.push(second + 1);
-                    indexData.push(first + 1);
+                    indices.push(first, second, first + 1);
+                    indices.push(second, second + 1, first + 1);
                 }
             }
 
-            const spherePositionBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, spherePositionBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexPositionData), gl.STATIC_DRAW);
-
-            const sphereColorBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, sphereColorBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colorData), gl.STATIC_DRAW);
-
-            const sphereIndexBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereIndexBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indexData), gl.STATIC_DRAW);
-
-            return {
-                position: spherePositionBuffer,
-                color: sphereColorBuffer,
-                indices: sphereIndexBuffer,
-                vertexCount: indexData.length,
-            };
+            return { vertices, colors, indices };
         }
 
-        function initCubeBuffers(gl) {
-            const positions = [
-                -1.0, -1.0,  1.0,
-                 1.0, -1.0,  1.0,
-                 1.0,  1.0,  1.0,
-                -1.0,  1.0,  1.0,
+        const sphereData = createSphere(5, 30, 30);
+        const sphereVBO = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereData.vertices), gl.STATIC_DRAW);
 
-                -1.0, -1.0, -1.0,
-                -1.0,  1.0, -1.0,
-                 1.0,  1.0, -1.0,
-                 1.0, -1.0, -1.0,
+        const sphereColorBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, sphereColorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(sphereData.colors), gl.STATIC_DRAW);
 
-                -1.0,  1.0, -1.0,
-                -1.0,  1.0,  1.0,
-                 1.0,  1.0,  1.0,
-                 1.0,  1.0, -1.0,
+        const sphereIBO = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereIBO);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(sphereData.indices), gl.STATIC_DRAW);
 
-                -1.0, -1.0, -1.0,
-                 1.0, -1.0, -1.0,
-                 1.0, -1.0,  1.0,
-                -1.0, -1.0,  1.0,
+        // Snake Variables
+        const snake = [];
+        const initialLength = 3;
+        let direction = { theta: 0, phi: 0 }; // Angles on the sphere
+        let nextDirection = { theta: 0, phi: 0 };
+        const moveInterval = 500; // milliseconds
+        let lastMoveTime = Date.now();
+        let score = 0;
 
-                 1.0, -1.0, -1.0,
-                 1.0,  1.0, -1.0,
-                 1.0,  1.0,  1.0,
-                 1.0, -1.0,  1.0,
+        // Initialize Snake
+        for (let i = initialLength -1; i >=0; i--) {
+            const theta = direction.theta;
+            const phi = direction.phi - i * 0.1;
+            const x = 5 * Math.sin(theta) * Math.cos(phi);
+            const y = 5 * Math.cos(theta);
+            const z = 5 * Math.sin(theta) * Math.sin(phi);
+            snake.push({ x, y, z });
+        }
 
-                -1.0, -1.0, -1.0,
-                -1.0, -1.0,  1.0,
-                -1.0,  1.0,  1.0,
-                -1.0,  1.0, -1.0,
-            ];
+        // Input Handling
+        let isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        if (isMobile && window.DeviceOrientationEvent) {
+            window.addEventListener('deviceorientation', function(event) {
+                const gamma = event.gamma; // Left to right
+                if (gamma > 10) {
+                    nextDirection.theta += 0.05;
+                } else if (gamma < -10) {
+                    nextDirection.theta -= 0.05;
+                }
+            }, true);
+        } else {
+            // Desktop: Mouse movement
+            let mouseX = 0;
+            window.addEventListener('mousemove', function(event) {
+                const deltaX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
+                nextDirection.theta += deltaX * 0.005;
+            }, false);
+        }
 
-            const faceColors = [
-                [0.9, 0.0, 0.0, 1.0],
-                [0.0, 0.9, 0.0, 1.0],
-                [0.0, 0.0, 0.9, 1.0],
-                [0.9, 0.9, 0.0, 1.0],
-                [0.9, 0.0, 0.9, 1.0],
-                [0.0, 0.9, 0.9, 1.0],
-            ];
+        // Resize Handling
+        window.addEventListener('resize', function() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        });
 
-            let colors = [];
-
-            for (let j = 0; j < faceColors.length; ++j) {
-                const c = faceColors[j];
-
-                colors = colors.concat(c, c, c, c);
+        // Game Loop
+        function gameLoop() {
+            const now = Date.now();
+            if (now - lastMoveTime > moveInterval) {
+                moveSnake();
+                lastMoveTime = now;
             }
-
-            const indices = [
-                0,  1,  2,      0,  2,  3,
-                4,  5,  6,      4,  6,  7,
-                8,  9, 10,      8, 10, 11,
-                12, 13, 14,     12, 14, 15,
-                16, 17, 18,     16, 18, 19,
-                20, 21, 22,     20, 22, 23,
-            ];
-
-            const cubePositionBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, cubePositionBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
-
-            const cubeColorBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, cubeColorBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
-
-            const cubeIndexBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIndexBuffer);
-            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
-
-            return {
-                position: cubePositionBuffer,
-                color: cubeColorBuffer,
-                indices: cubeIndexBuffer,
-                vertexCount: indices.length,
-            };
+            render();
+            requestAnimationFrame(gameLoop);
         }
+
+        // Move Snake
+        function moveSnake() {
+            direction.theta += nextDirection.theta;
+            direction.phi += nextDirection.phi;
+            // Keep angles within reasonable range
+            direction.theta = Math.max(0.1, Math.min(Math.PI - 0.1, direction.theta));
+            // Calculate new head position
+            const x = 5 * Math.sin(direction.theta) * Math.cos(direction.phi);
+            const y = 5 * Math.cos(direction.theta);
+            const z = 5 * Math.sin(direction.theta) * Math.sin(direction.phi);
+            // Check collision with self
+            for (let segment of snake) {
+                const dx = segment.x - x;
+                const dy = segment.y - y;
+                const dz = segment.z - z;
+                const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                if (distance < 1.0) {
+                    alert("Game Over! Your score: " + score);
+                    window.location.reload();
+                }
+            }
+            // Add new head
+            snake.unshift({x, y, z});
+            // Remove last segment
+            snake.pop();
+            // Update score
+            score++;
+            document.getElementById('score').innerText = "Score: " + score;
+            // Reset direction change
+            nextDirection.theta = 0;
+            nextDirection.phi = 0;
+        }
+
+        // Render Function
+        function render() {
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.enable(gl.DEPTH_TEST);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // Projection Matrix
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+            const projectionMatrix = perspectiveMatrix(Math.PI / 4, aspect, 0.1, 100.0);
+
+            // ModelView Matrix
+            let modelViewMatrix = loadIdentity();
+            // Translate back
+            modelViewMatrix = multiplyMatrices(modelViewMatrix, translationMatrix(0, 0, -15));
+            // Rotate to follow the snake
+            modelViewMatrix = multiplyMatrices(modelViewMatrix, rotationMatrix([0,1,0], -direction.phi));
+            modelViewMatrix = multiplyMatrices(modelViewMatrix, rotationMatrix([1,0,0], -direction.theta + Math.PI/2));
+
+            // Draw Sphere
+            gl.bindBuffer(gl.ARRAY_BUFFER, sphereVBO);
+            gl.vertexAttribPointer(aPositionLoc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(aPositionLoc);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, sphereColorBuffer);
+            gl.vertexAttribPointer(aColorLoc, 3, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(aColorLoc);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereIBO);
+
+            gl.uniformMatrix4fv(uModelViewMatrixLoc, false, modelViewMatrix);
+            gl.uniformMatrix4fv(uProjectionMatrixLoc, false, projectionMatrix);
+
+            gl.drawElements(gl.TRIANGLES, sphereData.indices.length, gl.UNSIGNED_SHORT, 0);
+
+            // Draw Snake
+            for (let segment of snake) {
+                // Calculate segment position relative to camera
+                const segmentMatrix = loadIdentity();
+                segmentMatrix = multiplyMatrices(segmentMatrix, translationMatrix(segment.x, segment.y, segment.z));
+                // Scale the cube
+                const scaleMatrix = loadIdentity();
+                scaleMatrix[0] = 1; scaleMatrix[5] = 1; scaleMatrix[10] =1;
+                segmentMatrix = multiplyMatrices(segmentMatrix, scaleMatrix);
+                // Combine with ModelView
+                const finalMatrix = multiplyMatrices(modelViewMatrix, segmentMatrix);
+                gl.uniformMatrix4fv(uModelViewMatrixLoc, false, finalMatrix);
+
+                // Alternate colors for segments
+                gl.bindBuffer(gl.ARRAY_BUFFER, cubeColorBuffer);
+                gl.vertexAttribPointer(aColorLoc, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aColorLoc);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, cubeVBO);
+                gl.vertexAttribPointer(aPositionLoc, 3, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(aPositionLoc);
+
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cubeIBO);
+                gl.drawElements(gl.TRIANGLES, cubeIndices.length, gl.UNSIGNED_SHORT, 0);
+            }
+        }
+
+        // Start the game loop
+        requestAnimationFrame(gameLoop);
     </script>
 </body>
 </html>
