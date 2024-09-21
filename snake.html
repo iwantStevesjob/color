@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Snake on a Sphere</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: black; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('glCanvas');
+        const gl = canvas.getContext('webgl');
+
+        if (!gl) {
+            alert("Unable to initialize WebGL.");
+            throw new Error('WebGL not supported');
+        }
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+
+        const vertexShaderSource = `
+        attribute vec3 position;
+        uniform mat4 modelViewMatrix;
+        uniform mat4 projectionMatrix;
+        varying vec3 vColor;
+        void main() {
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            vColor = vec3(1.0, 0.6, 0.3); // Retro color for snake cubes
+        }
+        `;
+
+        const fragmentShaderSource = `
+        precision mediump float;
+        varying vec3 vColor;
+        void main() {
+            gl_FragColor = vec4(vColor, 1.0);
+        }
+        `;
+
+        function compileShader(source, type) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShader = compileShader(vertexShaderSource, gl.VERTEX_SHADER);
+        const fragmentShader = compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER);
+
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error(gl.getProgramInfoLog(program));
+            gl.deleteProgram(program);
+        }
+
+        gl.useProgram(program);
+
+        const cubeVertices = new Float32Array([
+            // Front face
+            -0.1, -0.1,  0.1,  0.1, -0.1,  0.1,  0.1,  0.1,  0.1, -0.1,  0.1,  0.1,
+            // Back face
+            -0.1, -0.1, -0.1,  0.1, -0.1, -0.1,  0.1,  0.1, -0.1, -0.1,  0.1, -0.1,
+        ]);
+
+        const positionLocation = gl.getAttribLocation(program, 'position');
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, cubeVertices, gl.STATIC_DRAW);
+
+        gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(positionLocation);
+
+        const modelViewMatrix = mat4.create();
+        const projectionMatrix = mat4.create();
+
+        const modelViewMatrixLocation = gl.getUniformLocation(program, 'modelViewMatrix');
+        const projectionMatrixLocation = gl.getUniformLocation(program, 'projectionMatrix');
+
+        mat4.perspective(projectionMatrix, Math.PI / 4, canvas.width / canvas.height, 0.1, 100.0);
+        mat4.translate(modelViewMatrix, modelViewMatrix, [0, 0, -2]);
+
+        gl.uniformMatrix4fv(modelViewMatrixLocation, false, modelViewMatrix);
+        gl.uniformMatrix4fv(projectionMatrixLocation, false, projectionMatrix);
+
+        let snake = [{ x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: 0.8 }, { x: 0, y: 0, z: 0.6 }];
+        let direction = { x: 0, y: 0, z: 0.1 };
+
+        const keysPressed = { left: false, right: false };
+        document.addEventListener('keydown', (event) => {
+            if (event.code === 'ArrowLeft') keysPressed.left = true;
+            if (event.code === 'ArrowRight') keysPressed.right = true;
+        });
+        document.addEventListener('keyup', (event) => {
+            if (event.code === 'ArrowLeft') keysPressed.left = false;
+            if (event.code === 'ArrowRight') keysPressed.right = false;
+        });
+
+        function updateSnake() {
+            const head = snake[0];
+            let newHead = {
+                x: head.x + direction.x,
+                y: head.y + direction.y,
+                z: head.z + direction.z,
+            };
+
+            // Wrap around sphere logic
+            const mag = Math.sqrt(newHead.x * newHead.x + newHead.y * newHead.y + newHead.z * newHead.z);
+            newHead.x /= mag;
+            newHead.y /= mag;
+            newHead.z /= mag;
+
+            snake.unshift(newHead);
+            snake.pop();
+        }
+
+        function drawSnake() {
+            snake.forEach((segment, index) => {
+                mat4.identity(modelViewMatrix);
+                mat4.translate(modelViewMatrix, modelViewMatrix, [segment.x, segment.y, segment.z]);
+                gl.uniformMatrix4fv(modelViewMatrixLocation, false, modelViewMatrix);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+            });
+        }
+
+        function animate() {
+            updateSnake();
+
+            if (keysPressed.left) {
+                const tmp = direction.x;
+                direction.x = direction.y;
+                direction.y = -tmp;
+            }
+            if (keysPressed.right) {
+                const tmp = direction.x;
+                direction.x = -direction.y;
+                direction.y = tmp;
+            }
+
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            drawSnake();
+
+            requestAnimationFrame(animate);
+        }
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+
+        animate();
+    </script>
+</body>
+</html>
