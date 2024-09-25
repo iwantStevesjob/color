@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RGB</title>
+    <title>RGB Spotlights on Sphere</title>
     <style>
         body { margin: 0; overflow: hidden; }
         canvas { display: block; width: 100%; height: 100%; }
@@ -11,21 +11,30 @@
             position: absolute;
             width: 15px;
             height: 15px;
+            border: 2px solid black;
             border-radius: 50%;
-            pointer-events: none;
+            cursor: pointer;
+            pointer-events: all;
         }
-        #red-indicator { background-color: red; }
-        #green-indicator { background-color: green; }
-        #blue-indicator { background-color: blue; }
+        #spotlight-indicator-red {
+            background-color: red;
+        }
+        #spotlight-indicator-green {
+            background-color: green;
+        }
+        #spotlight-indicator-blue {
+            background-color: blue;
+        }
     </style>
 </head>
 <body>
     <canvas id="glCanvas"></canvas>
-    <div id="red-indicator" class="spotlight-indicator"></div>
-    <div id="green-indicator" class="spotlight-indicator"></div>
-    <div id="blue-indicator" class="spotlight-indicator"></div>
+    <!-- Added three indicators for RGB spotlights -->
+    <div id="spotlight-indicator-red" class="spotlight-indicator"></div>
+    <div id="spotlight-indicator-green" class="spotlight-indicator"></div>
+    <div id="spotlight-indicator-blue" class="spotlight-indicator"></div>
     <script>
-        // Define mat4 object
+        // Define mat4 object (unchanged)
         const mat4 = {
             create: function() {
                 let out = new Float32Array(16);
@@ -113,17 +122,13 @@
         let sphereVertexPositionBuffer;
         let sphereVertexNormalBuffer;
         let sphereVertexIndexBuffer;
-        let lightPositions = [
-            [0, 0, 5], // Red light
-            [0, 0, 5], // Green light
-            [0, 0, 5]  // Blue light
-        ];
-        const lightColors = [
-            [1.0, 0.0, 0.0], // Red
-            [0.0, 1.0, 0.0], // Green
-            [0.0, 0.0, 1.0]  // Blue
-        ];
 
+        // Define three light positions
+        let lightRedPos = [0, 0, 5];
+        let lightGreenPos = [0, 0, 5];
+        let lightBluePos = [0, 0, 5];
+
+        // Shader sources updated to handle three lights
         const vsSource = `
             attribute vec3 aVertexPosition;
             attribute vec3 aVertexNormal;
@@ -133,7 +138,7 @@
             varying vec3 vPosition;
             void main(void) {
                 vPosition = (uMVMatrix * vec4(aVertexPosition, 1.0)).xyz;
-                vNormal = normalize((uMVMatrix * vec4(aVertexNormal, 0.0)).xyz);
+                vNormal = (uMVMatrix * vec4(aVertexNormal, 0.0)).xyz;
                 gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
             }
         `;
@@ -142,24 +147,32 @@
             precision mediump float;
             varying vec3 vNormal;
             varying vec3 vPosition;
-            uniform vec3 uLightPositions[3];
-            uniform vec3 uLightColors[3];
+            uniform vec3 uLightPositionRed;
+            uniform vec3 uLightPositionGreen;
+            uniform vec3 uLightPositionBlue;
             void main(void) {
-                vec3 totalDiffuse = vec3(0.0, 0.0, 0.0);
-                for(int i = 0; i < 3; i++) {
-                    vec3 lightDir = normalize(uLightPositions[i] - vPosition);
-                    float diff = max(dot(vNormal, lightDir), 0.0);
-                    totalDiffuse += diff * uLightColors[i];
-                }
-                // Clamp the final color to [0.0, 1.0]
-                totalDiffuse = clamp(totalDiffuse, 0.0, 1.0);
-                gl_FragColor = vec4(totalDiffuse, 1.0);
+                // Red Light
+                vec3 lightDirRed = normalize(uLightPositionRed - vPosition);
+                float diffRed = max(dot(normalize(vNormal), lightDirRed), 0.0);
+                
+                // Green Light
+                vec3 lightDirGreen = normalize(uLightPositionGreen - vPosition);
+                float diffGreen = max(dot(normalize(vNormal), lightDirGreen), 0.0);
+                
+                // Blue Light
+                vec3 lightDirBlue = normalize(uLightPositionBlue - vPosition);
+                float diffBlue = max(dot(normalize(vNormal), lightDirBlue), 0.0);
+                
+                // Combine the diffuse components with respective colors
+                vec3 diffuse = vec3(diffRed, diffGreen, diffBlue);
+                
+                gl_FragColor = vec4(diffuse, 1.0);
             }
         `;
 
         function initGL(canvas) {
             try {
-                gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+                gl = canvas.getContext("webgl");
                 gl.viewportWidth = canvas.width;
                 gl.viewportHeight = canvas.height;
             } catch (e) {}
@@ -189,10 +202,12 @@
             shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
             gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
 
+            // Updated to include three light position uniforms
             shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
             shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
-            shaderProgram.lightPositionsUniform = gl.getUniformLocation(shaderProgram, "uLightPositions");
-            shaderProgram.lightColorsUniform = gl.getUniformLocation(shaderProgram, "uLightColors");
+            shaderProgram.lightPositionRedUniform = gl.getUniformLocation(shaderProgram, "uLightPositionRed");
+            shaderProgram.lightPositionGreenUniform = gl.getUniformLocation(shaderProgram, "uLightPositionGreen");
+            shaderProgram.lightPositionBlueUniform = gl.getUniformLocation(shaderProgram, "uLightPositionBlue");
         }
 
         function loadShader(type, source) {
@@ -299,26 +314,132 @@
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereVertexIndexBuffer);
             setMatrixUniforms();
 
-            // Pass light positions and colors to the shader
-            gl.uniform3fv(shaderProgram.lightPositionsUniform, new Float32Array(lightPositions.flat()));
-            gl.uniform3fv(shaderProgram.lightColorsUniform, new Float32Array(lightColors.flat()));
+            // Pass three light positions to the shader
+            gl.uniform3fv(shaderProgram.lightPositionRedUniform, lightRedPos);
+            gl.uniform3fv(shaderProgram.lightPositionGreenUniform, lightGreenPos);
+            gl.uniform3fv(shaderProgram.lightPositionBlueUniform, lightBluePos);
 
             gl.drawElements(gl.TRIANGLES, sphereVertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
         }
 
-        function updateSpotlightIndicators(xRed, yRed, xGreen, yGreen, xBlue, yBlue) {
-            const redIndicator = document.getElementById('red-indicator');
-            const greenIndicator = document.getElementById('green-indicator');
-            const blueIndicator = document.getElementById('blue-indicator');
+        // Utility function to convert screen coordinates to normalized device coordinates
+        function screenToNDC(x, y, canvas) {
+            const rect = canvas.getBoundingClientRect();
+            const ndcX = ((x - rect.left) / canvas.width) * 2 - 1;
+            const ndcY = -((y - rect.top) / canvas.height) * 2 + 1;
+            return [ndcX, ndcY];
+        }
 
-            redIndicator.style.left = `${xRed}px`;
-            redIndicator.style.top = `${yRed}px`;
+        // Initialize spotlight indicators positions at center
+        function initializeIndicators() {
+            const canvas = document.getElementById("glCanvas");
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
 
-            greenIndicator.style.left = `${xGreen}px`;
-            greenIndicator.style.top = `${yGreen}px`;
+            // Position all indicators at the center initially
+            document.getElementById('spotlight-indicator-red').style.left = `${centerX - 30}px`;
+            document.getElementById('spotlight-indicator-red').style.top = `${centerY}px`;
 
-            blueIndicator.style.left = `${xBlue}px`;
-            blueIndicator.style.top = `${yBlue}px`;
+            document.getElementById('spotlight-indicator-green').style.left = `${centerX}px`;
+            document.getElementById('spotlight-indicator-green').style.top = `${centerY}px`;
+
+            document.getElementById('spotlight-indicator-blue').style.left = `${centerX + 30}px`;
+            document.getElementById('spotlight-indicator-blue').style.top = `${centerY}px`;
+        }
+
+        // Function to handle dragging of indicators
+        function makeDraggable(indicatorId, color) {
+            const indicator = document.getElementById(indicatorId);
+            let isDragging = false;
+
+            indicator.addEventListener('mousedown', function(e) {
+                isDragging = true;
+            });
+
+            window.addEventListener('mousemove', function(e) {
+                if (isDragging) {
+                    const canvas = document.getElementById("glCanvas");
+                    const x = e.clientX;
+                    const y = e.clientY;
+
+                    // Update indicator position
+                    indicator.style.left = `${x - 7.5}px`; // Center the indicator
+                    indicator.style.top = `${y - 7.5}px`;
+
+                    // Convert screen coordinates to normalized device coordinates
+                    const [ndcX, ndcY] = screenToNDC(x, y, canvas);
+
+                    // Calculate z based on position
+                    let z;
+                    if (1 - ndcX * ndcX - ndcY * ndcY >= 0) {
+                        z = Math.sqrt(1 - ndcX * ndcX - ndcY * ndcY);
+                    } else {
+                        z = -Math.sqrt(ndcX * ndcX + ndcY * ndcY - 1);
+                    }
+
+                    // Update corresponding light position
+                    const scale = 5; // Same scale as before
+                    if (color === 'red') {
+                        lightRedPos = [ndcX * scale, ndcY * scale, z * scale];
+                    } else if (color === 'green') {
+                        lightGreenPos = [ndcX * scale, ndcY * scale, z * scale];
+                    } else if (color === 'blue') {
+                        lightBluePos = [ndcX * scale, ndcY * scale, z * scale];
+                    }
+
+                    drawScene();
+                }
+            });
+
+            window.addEventListener('mouseup', function(e) {
+                isDragging = false;
+            });
+
+            // Touch events for mobile devices
+            indicator.addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                isDragging = true;
+            });
+
+            window.addEventListener('touchmove', function(e) {
+                if (isDragging) {
+                    const touch = e.touches[0];
+                    const canvas = document.getElementById("glCanvas");
+                    const x = touch.clientX;
+                    const y = touch.clientY;
+
+                    // Update indicator position
+                    indicator.style.left = `${x - 7.5}px`; // Center the indicator
+                    indicator.style.top = `${y - 7.5}px`;
+
+                    // Convert screen coordinates to normalized device coordinates
+                    const [ndcX, ndcY] = screenToNDC(x, y, canvas);
+
+                    // Calculate z based on position
+                    let z;
+                    if (1 - ndcX * ndcX - ndcY * ndcY >= 0) {
+                        z = Math.sqrt(1 - ndcX * ndcX - ndcY * ndcY);
+                    } else {
+                        z = -Math.sqrt(ndcX * ndcX + ndcY * ndcY - 1);
+                    }
+
+                    // Update corresponding light position
+                    const scale = 5; // Same scale as before
+                    if (color === 'red') {
+                        lightRedPos = [ndcX * scale, ndcY * scale, z * scale];
+                    } else if (color === 'green') {
+                        lightGreenPos = [ndcX * scale, ndcY * scale, z * scale];
+                    } else if (color === 'blue') {
+                        lightBluePos = [ndcX * scale, ndcY * scale, z * scale];
+                    }
+
+                    drawScene();
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchend', function(e) {
+                isDragging = false;
+            });
         }
 
         function webGLStart() {
@@ -328,83 +449,15 @@
             initGL(canvas);
             initShaders();
             initBuffers();
+            initializeIndicators();
 
             gl.clearColor(0.0, 0.0, 0.0, 1.0);
             gl.enable(gl.DEPTH_TEST);
 
-            // Initialize light positions to center
-            lightPositions = [
-                [0, 0, 5], // Red
-                [0, 0, 5], // Green
-                [0, 0, 5]  // Blue
-            ];
-
-            canvas.onmousemove = function(event) {
-                const rect = canvas.getBoundingClientRect();
-
-                // Calculate normalized coordinates for each light
-                // For simplicity, let's position all lights based on the mouse position
-                const x = ((event.clientX - rect.left) / canvas.width) * 2 - 1;
-                const y = -((event.clientY - rect.top) / canvas.height) * 2 + 1;
-
-                const distanceSquared = x * x + y * y;
-
-                // Calculate z for each light
-                const zRed = (1 - distanceSquared >= 0) 
-                    ? Math.sqrt(1 - distanceSquared) 
-                    : -Math.sqrt(distanceSquared - 1);
-                const zGreen = zRed; // Same for simplicity
-                const zBlue = zRed;  // Same for simplicity
-
-                // Scale light positions
-                lightPositions = [
-                    [x * 5, y * 5, zRed * 5],    // Red
-                    [x * 5, y * 5, zGreen * 5],  // Green
-                    [x * 5, y * 5, zBlue * 5]    // Blue
-                ];
-
-                // Update indicators positions
-                const indicatorX = event.clientX;
-                const indicatorY = event.clientY;
-
-                updateSpotlightIndicators(indicatorX, indicatorY, indicatorX, indicatorY, indicatorX, indicatorY);
-
-                drawScene();
-            };
-
-            canvas.ontouchmove = function(event) {
-                event.preventDefault();
-                const rect = canvas.getBoundingClientRect();
-                const touch = event.touches[0];
-
-                // Calculate normalized coordinates for each light
-                const x = ((touch.clientX - rect.left) / canvas.width) * 2 - 1;
-                const y = -((touch.clientY - rect.top) / canvas.height) * 2 + 1;
-
-                const distanceSquared = x * x + y * y;
-
-                // Calculate z for each light
-                const zRed = (1 - distanceSquared >= 0) 
-                    ? Math.sqrt(1 - distanceSquared) 
-                    : -Math.sqrt(distanceSquared - 1);
-                const zGreen = zRed; // Same for simplicity
-                const zBlue = zRed;  // Same for simplicity
-
-                // Scale light positions
-                lightPositions = [
-                    [x * 5, y * 5, zRed * 5],    // Red
-                    [x * 5, y * 5, zGreen * 5],  // Green
-                    [x * 5, y * 5, zBlue * 5]    // Blue
-                ];
-
-                // Update indicators positions
-                const indicatorX = touch.clientX;
-                const indicatorY = touch.clientY;
-
-                updateSpotlightIndicators(indicatorX, indicatorY, indicatorX, indicatorY, indicatorX, indicatorY);
-
-                drawScene();
-            };
+            // Make each indicator draggable
+            makeDraggable('spotlight-indicator-red', 'red');
+            makeDraggable('spotlight-indicator-green', 'green');
+            makeDraggable('spotlight-indicator-blue', 'blue');
 
             drawScene();
         }
