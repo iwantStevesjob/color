@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebGL Sphere with Movable Spotlight</title>
+  <style>
+    body { margin: 0; }
+    canvas { width: 100vw; height: 100vh; display: block; }
+  </style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+<script>
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+if (!gl) { alert('WebGL not supported'); }
+
+// Vertex Shader
+const vsSource = `
+  attribute vec3 aPosition;
+  attribute vec3 aNormal;
+  
+  uniform mat4 uModelViewMatrix;
+  uniform mat4 uProjectionMatrix;
+  
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  
+  void main(void) {
+    vNormal = mat3(uModelViewMatrix) * aNormal;
+    vPosition = vec3(uModelViewMatrix * vec4(aPosition, 1.0));
+    gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
+  }
+`;
+
+// Fragment Shader
+const fsSource = `
+  precision mediump float;
+  
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  
+  uniform vec3 uLightPosition;
+  uniform vec3 uLightColor;
+  uniform vec3 uObjectColor;
+  
+  void main(void) {
+    vec3 normal = normalize(vNormal);
+    vec3 lightDir = normalize(uLightPosition - vPosition);
+    float diff = max(dot(normal, lightDir), 0.0);
+    
+    // Eclipse effect: darken when light is behind
+    float visibility = step(0.0, dot(normal, lightDir));
+    
+    vec3 diffuse = diff * uLightColor * visibility;
+    vec3 ambient = 0.1 * uObjectColor;
+    
+    gl_FragColor = vec4(diffuse + ambient, 1.0);
+  }
+`;
+
+// Compile Shader
+function compileShader(source, type) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if(!gl.getShaderParameter(shader, gl.COMPILE_STATUS)){
+    console.error('Shader compile failed with: ' + gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
+  return shader;
+}
+
+// Create Shader Program
+const vertexShader = compileShader(vsSource, gl.VERTEX_SHADER);
+const fragmentShader = compileShader(fsSource, gl.FRAGMENT_SHADER);
+const shaderProgram = gl.createProgram();
+gl.attachShader(shaderProgram, vertexShader);
+gl.attachShader(shaderProgram, fragmentShader);
+gl.linkProgram(shaderProgram);
+if(!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)){
+  console.error('Program failed to link: ' + gl.getProgramInfoLog(shaderProgram));
+}
+gl.useProgram(shaderProgram);
+
+// Get attribute and uniform locations
+const attribLocations = {
+  position: gl.getAttribLocation(shaderProgram, 'aPosition'),
+  normal: gl.getAttribLocation(shaderProgram, 'aNormal'),
+};
+const uniformLocations = {
+  projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+  modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+  lightPosition: gl.getUniformLocation(shaderProgram, 'uLightPosition'),
+  lightColor: gl.getUniformLocation(shaderProgram, 'uLightColor'),
+  objectColor: gl.getUniformLocation(shaderProgram, 'uObjectColor'),
+};
+
+// Geometry Creation
+function createSphere(radius, latBands, longBands) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+  
+  for(let lat=0; lat<=latBands; lat++) {
+    const theta = lat * Math.PI / latBands;
+    const sinTheta = Math.sin(theta);
+    const cosTheta = Math.cos(theta);
+    
+    for(let long=0; long<=longBands; long++) {
+      const phi = long * 2 * Math.PI / longBands;
+      const sinPhi = Math.sin(phi);
+      const cosPhi = Math.cos(phi);
+      
+      const x = cosPhi * sinTheta;
+      const y = cosTheta;
+      const z = sinPhi * sinTheta;
+      
+      positions.push(radius * x, radius * y, radius * z);
+      normals.push(x, y, z);
+    }
+  }
+  
+  for(let lat=0; lat<latBands; lat++) {
+    for(let long=0; long<longBands; long++) {
+      const first = (lat * (longBands +1)) + long;
+      const second = first + longBands +1;
+      
+      indices.push(first, second, first+1);
+      indices.push(second, second+1, first+1);
+    }
+  }
+  
+  return { positions, normals, indices };
+}
+
+function createCone(radius, height, segments) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+  
+  // Apex
+  positions.push(0, height, 0);
+  normals.push(0, 1, 0);
+  
+  // Base circle
+  for(let i=0; i<=segments; i++) {
+    const theta = i * 2 * Math.PI / segments;
+    const x = radius * Math.cos(theta);
+    const z = radius * Math.sin(theta);
+    positions.push(x, 0, z);
+    normals.push(x, radius / height, z); // Simple normal
+  }
+  
+  // Side faces
+  for(let i=1; i<=segments; i++) {
+    indices.push(0, i, i+1);
+  }
+  
+  return { positions, normals, indices };
+}
+
+// Create Sphere and Cone
+const sphere = createSphere(1, 30, 30);
+const cone = createCone(0.3, 2, 30);
+
+// Combine geometries
+const positions = sphere.positions.concat(cone.positions);
+const normals = sphere.normals.concat(cone.normals);
+const indices = sphere.indices.concat(sphere.positions.length /3 + cone.indices.map(i => i + sphere.positions.length /3));
+
+// Create Buffers
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+const normalBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
+const indexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+// Enable attributes
+gl.enableVertexAttribArray(attribLocations.position);
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+gl.vertexAttribPointer(attribLocations.position, 3, gl.FLOAT, false, 0, 0);
+
+gl.enableVertexAttribArray(attribLocations.normal);
+gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+gl.vertexAttribPointer(attribLocations.normal, 3, gl.FLOAT, false, 0, 0);
+
+// Set clear color and enable depth
+gl.clearColor(0.1, 0.1, 0.1, 1.0);
+gl.enable(gl.DEPTH_TEST);
+
+// Projection Matrix
+const fieldOfView = 45 * Math.PI / 180;
+const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+const zNear = 0.1;
+const zFar = 100.0;
+const projectionMatrix = mat4.create();
+mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar);
+gl.uniformMatrix4fv(uniformLocations.projectionMatrix, false, projectionMatrix);
+
+// ModelView Matrix
+const modelViewMatrix = mat4.create();
+mat4.translate(modelViewMatrix, modelViewMatrix, [0, -0.5, -6]);
+gl.uniformMatrix4fv(uniformLocations.modelViewMatrix, false, modelViewMatrix);
+
+// Lighting
+gl.uniform3f(uniformLocations.lightColor, 1.0, 1.0, 1.0);
+gl.uniform3f(uniformLocations.objectColor, 0.6, 0.6, 0.8);
+
+// Handle Mouse Movement
+let mouseX = 0;
+let mouseY = 0;
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.clientX - rect.left) / rect.width * 2 -1;
+  mouseY = -((e.clientY - rect.top) / rect.height * 2 -1);
+});
+
+// Render Loop
+function render() {
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  
+  // Calculate light position
+  let lightX = mouseX * 3;
+  let lightY = mouseY * 3;
+  let lightZ = 2;
+  
+  // Check if cursor is over the sphere (simple projection)
+  const distance = Math.sqrt(mouseX * mouseX + mouseY * mouseY);
+  if(distance <= 1) {
+    lightZ = 0;
+  } else {
+    // Move light behind the sphere based on distance
+    lightZ = -distance;
+  }
+  
+  gl.uniform3f(uniformLocations.lightPosition, lightX, lightY, lightZ);
+  
+  // Draw
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+  gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+  
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// Simple Matrix Library (glMatrix minimal functions)
+const mat4 = {
+  create: function() {
+    return new Float32Array([1,0,0,0,
+                             0,1,0,0,
+                             0,0,1,0,
+                             0,0,0,1]);
+  },
+  perspective: function(out, fovy, aspect, near, far) {
+    const f = 1.0 / Math.tan(fovy /2);
+    out[0] = f / aspect;
+    out[1] = 0;
+    out[2] =0;
+    out[3] =0;
+    
+    out[4] =0;
+    out[5] =f;
+    out[6] =0;
+    out[7] =0;
+    
+    out[8] =0;
+    out[9] =0;
+    out[10] = (far + near) / (near - far);
+    out[11] = -1;
+    
+    out[12] =0;
+    out[13] =0;
+    out[14] = (2 * far * near) / (near - far);
+    out[15] =0;
+  },
+  translate: function(out, a, v) {
+    out[12] = a[0]*v[0] + a[4]*v[1] + a[8]*v[2] + a[12];
+    out[13] = a[1]*v[0] + a[5]*v[1] + a[9]*v[2] + a[13];
+    out[14] = a[2]*v[0] + a[6]*v[1] + a[10]*v[2] + a[14];
+    out[15] = a[3]*v[0] + a[7]*v[1] + a[11]*v[2] + a[15];
+  }
+};
+</script>
+</body>
+</html>
