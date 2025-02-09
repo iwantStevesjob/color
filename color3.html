@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Interactive 3D Sphere with RGB Spotlights</title>
+  <title>color</title>
   <style>
     /* The canvas fills the entire viewport */
     html, body {
@@ -109,7 +109,7 @@
         out[14] = tz;
         return out;
       },
-      // Create a rotation matrix given an angle (radians) and an axis
+      // Create a rotation matrix given an angle (in radians) and an axis
       rotation: function(angle, axis) {
         let [x, y, z] = vec3.normalize(axis);
         let s = Math.sin(angle);
@@ -123,6 +123,16 @@
         ];
       }
     };
+
+    // Helper to transpose a 4x4 matrix (converts our row–major matrix to column–major order)
+    function transposeMatrix(m) {
+      return [
+        m[0], m[4], m[8],  m[12],
+        m[1], m[5], m[9],  m[13],
+        m[2], m[6], m[10], m[14],
+        m[3], m[7], m[11], m[15]
+      ];
+    }
 
     // =================== Global Variables and State ===================
     let canvas, gl;
@@ -396,13 +406,16 @@
       let proj = mat4.perspective(fov, aspect, near, far);
       let eye = [0, 0, distance];
       let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
-      // Note: the sphere’s model includes both its rotation and scale.
+      // The sphere’s model includes both its rotation and scale.
       let model = mat4.multiply(sphereRotation, mat4.scale(sphereScale, sphereScale, sphereScale));
       let mvp = mat4.multiply(proj, mat4.multiply(view, model));
+      // Our math functions use row–major order, so we need to treat mvp as column–major
+      // (i.e. effectively use the transposed matrix for vector multiplication).
+      let cmvp = transposeMatrix(mvp);
       let p = [point[0], point[1], point[2], 1];
       let tp = [0, 0, 0, 0];
       for (let i = 0; i < 4; i++) {
-        tp[i] = p[0]*mvp[i] + p[1]*mvp[i+4] + p[2]*mvp[i+8] + p[3]*mvp[i+12];
+        tp[i] = p[0]*cmvp[i*4+0] + p[1]*cmvp[i*4+1] + p[2]*cmvp[i*4+2] + p[3]*cmvp[i*4+3];
       }
       if (tp[3] !== 0) {
         tp[0] /= tp[3];
@@ -485,9 +498,10 @@
       let scaleMat = mat4.scale(sphereScale, sphereScale, sphereScale);
       let model = mat4.multiply(sphereRotation, scaleMat);
       let mvp = mat4.multiply(proj, mat4.multiply(view, model));
-      gl.uniformMatrix4fv(uMVP, true, new Float32Array(mvp));
-      gl.uniformMatrix4fv(uModel, true, new Float32Array(model));
-      gl.uniformMatrix4fv(uView, true, new Float32Array(view));
+      // Transpose our row–major matrices into column–major order for WebGL.
+      gl.uniformMatrix4fv(uMVP, false, new Float32Array(transposeMatrix(mvp)));
+      gl.uniformMatrix4fv(uModel, false, new Float32Array(transposeMatrix(model)));
+      gl.uniformMatrix4fv(uView, false, new Float32Array(transposeMatrix(view)));
 
       // Compute light positions from the cones.
       let lightPositions = [];
@@ -502,18 +516,4 @@
 
       // Bind sphere buffers and attributes.
       let aPosition = gl.getAttribLocation(sphereProgram, "aPosition");
-      gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.vertexBuffer);
-      gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
-      gl.enableVertexAttribArray(aPosition);
-
-      let aNormal = gl.getAttribLocation(sphereProgram, "aNormal");
-      gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.normalBuffer);
-      gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
-      gl.enableVertexAttribArray(aNormal);
-
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indexBuffer);
-      gl.drawElements(gl.TRIANGLES, sphereBuffers.indexCount, gl.UNSIGNED_SHORT, 0);
-
-      // ===== Draw the Cones =====
-      gl.useProgram(coneProgram);
-      let uMVP_cone = gl.getUniformLoca
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuf
