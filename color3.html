@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Interactive 3D Sphere with RGB Spotlights</title>
+  <style>
+    /* Make the canvas centered and sized responsively */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    canvas {
+      /* On mobile portrait, use ~80% of the smaller screen dimension;
+         on desktop/landscape, cap at 300px */
+      width: 80vmin;
+      height: 80vmin;
+      max-width: 300px;
+      max-height: 300px;
+      border: 1px solid #ccc;
+      touch-action: none; /* Prevent default gestures */
+    }
+  </style>
+</head>
+<body>
+  <canvas id="glcanvas"></canvas>
+  <script>
+    // === Minimal Vector and Matrix Math (all matrices are stored in row–major order) ===
+    const vec3 = {
+      create: function(x = 0, y = 0, z = 0) { return [x, y, z]; },
+      add: function(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; },
+      subtract: function(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; },
+      scale: function(a, s) { return [a[0]*s, a[1]*s, a[2]*s]; },
+      dot: function(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; },
+      cross: function(a, b) {
+        return [
+          a[1]*b[2] - a[2]*b[1],
+          a[2]*b[0] - a[0]*b[2],
+          a[0]*b[1] - a[1]*b[0]
+        ];
+      },
+      length: function(a) { return Math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2]); },
+      normalize: function(a) {
+        let len = vec3.length(a);
+        return (len > 0.00001) ? [a[0]/len, a[1]/len, a[2]/len] : [0, 0, 0];
+      }
+    };
+
+    const mat4 = {
+      identity: function() {
+        return [
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1
+        ];
+      },
+      // Row-major multiplication: out = a * b
+      multiply: function(a, b) {
+        let out = [];
+        for (let i = 0; i < 4; i++) {
+          for (let j = 0; j < 4; j++) {
+            out[i*4+j] = a[i*4+0]*b[0*4+j] +
+                         a[i*4+1]*b[1*4+j] +
+                         a[i*4+2]*b[2*4+j] +
+                         a[i*4+3]*b[3*4+j];
+          }
+        }
+        return out;
+      },
+      // Perspective projection matrix (row–major)
+      perspective: function(fovy, aspect, near, far) {
+        let f = 1.0 / Math.tan(fovy/2);
+        let nf = 1 / (near - far);
+        let out = mat4.identity();
+        out[0]  = f / aspect;
+        out[5]  = f;
+        out[10] = (far + near) * nf;
+        out[11] = -1;
+        out[14] = (2 * far * near) * nf;
+        out[15] = 0;
+        return out;
+      },
+      // LookAt matrix (row–major)
+      lookAt: function(eye, center, up) {
+        let z = vec3.normalize(vec3.subtract(eye, center));
+        let x = vec3.normalize(vec3.cross(up, z));
+        let y = vec3.cross(z, x);
+        let out = mat4.identity();
+        // First row
+        out[0] = x[0]; out[1] = x[1]; out[2] = x[2];
+        // Second row
+        out[4] = y[0]; out[5] = y[1]; out[6] = y[2];
+        // Third row
+        out[8] = z[0]; out[9] = z[1]; out[10] = z[2];
+        // Translation
+        out[12] = -vec3.dot(x, eye);
+        out[13] = -vec3.dot(y, eye);
+        out[14] = -vec3.dot(z, eye);
+        return out;
+      },
+      translation: function(tx, ty, tz) {
+        let out = mat4.identity();
+        out[12] = tx;
+        out[13] = ty;
+        out[14] = tz;
+        return out;
+      },
+      // Create a rotation matrix given an angle (in radians) and an axis
+      rotation: function(angle, axis) {
+        let [x, y, z] = vec3.normalize(axis);
+        let s = Math.sin(angle);
+        let c = Math.cos(angle);
+        let t = 1 - c;
+        return [
+          t*x*x + c,     t*x*y - s*z,   t*x*z + s*y,   0,
+          t*x*y + s*z,   t*y*y + c,     t*y*z - s*x,   0,
+          t*x*z - s*y,   t*y*z + s*x,   t*z*z + c,     0,
+          0,             0,             0,             1
+        ];
+      }
+    };
+
+    // === Global Variables and State ===
+    let canvas, gl;
+    let sphereProgram, coneProgram;
+    let sphereBuffers, coneBuffers;
+    let sphereRotation = mat4.identity();
+    let sphereAngularVelocity = null; // For inertia (object with .axis and .angle)
+
+    // Define three cones with their RGB colors and an "orbit" unit–vector.
+    // Their initial orbit vectors are chosen arbitrarily.
+    let cones = [
+      { color: [1, 0, 0], orbit: vec3.normalize([0, 1, 0]) },
+      { color: [0, 1, 0], orbit: vec3.normalize([1, 0, 0]) },
+      { color: [0, 0, 1], orbit: vec3.normalize([0, 0, 1]) }
+    ];
+    // The cones will be placed at a distance of sphere radius (1) plus an offset.
+    // For a sphere roughly 300px in diameter, an offset of ~50 pixels is ~0.33 in world units.
+    const coneDistance = 1.33;
+
+    // For interaction
+    let isDragging = false;
+    let activeInteraction = null; // "sphere" or "cone"
+    let activeConeIndex = -1;
+    let lastPointerPos = { x: 0, y: 0 };
+    let trackballStartVec = null;
+
+    // === Shader Sources ===
+    const sphereVSSource = `
+      attribute vec3 aPosition;
+      attribute vec3 aNormal;
+      uniform mat4 uMVP;
+      uniform mat4 uModel;
+      uniform mat4 uView;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+      void main() {
+          gl_Position = uMVP * vec4(aPosition, 1.0);
+          vPosition = vec3(uModel * vec4(aPosition, 1.0));
+          // For pure rotations, the upper–left 3x3 of uModel is orthonormal.
+          vNormal = (mat3(uModel)) * aNormal;
+      }
+    `;
+
+    const sphereFSSource = `
+      precision mediump float;
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+      uniform vec3 uLightPositions[3];
+      uniform vec3 uLightColors[3];
+      void main() {
+          vec3 normal = normalize(vNormal);
+          vec3 color = vec3(0.0);
+          for (int i = 0; i < 3; i++) {
+              vec3 lightPos = uLightPositions[i];
+              vec3 lightColor = uLightColors[i];
+              // The light direction is from the light toward the sphere’s center (0,0,0)
+              vec3 lightDir = normalize(-lightPos);
+              // Compute a spotlight effect.
+              // Here we assume a cutoff of 30° and an exponent of 10.
+              float cutoff = cos(radians(30.0));
+              float spotEffect = dot(lightDir, normalize(-vPosition));
+              if (spotEffect > cutoff) {
+                  spotEffect = pow(spotEffect, 10.0);
+              } else {
+                  spotEffect = 0.0;
+              }
+              float diff = max(dot(normal, lightDir), 0.0);
+              color += lightColor * diff * spotEffect;
+          }
+          gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    const coneVSSource = `
+      attribute vec3 aPosition;
+      attribute vec3 aNormal;
+      uniform mat4 uMVP;
+      void main() {
+          gl_Position = uMVP * vec4(aPosition, 1.0);
+      }
+    `;
+
+    const coneFSSource = `
+      precision mediump float;
+      uniform vec4 uColor;
+      void main() {
+          gl_FragColor = uColor;
+      }
+    `;
+
+    // === Geometry Generation Functions ===
+
+    // Generate a sphere mesh (with positions, normals, and indices)
+    function generateSphereMesh(radius, latBands, longBands) {
+      let vertices = [];
+      let normals = [];
+      let indices = [];
+      for (let lat = 0; lat <= latBands; lat++) {
+        let theta = lat * Math.PI / latBands;
+        let sinTheta = Math.sin(theta);
+        let cosTheta = Math.cos(theta);
+        for (let lon = 0; lon <= longBands; lon++) {
+          let phi = lon * 2 * Math.PI / longBands;
+          let sinPhi = Math.sin(phi);
+          let cosPhi = Math.cos(phi);
+          let x = cosPhi * sinTheta;
+          let y = cosTheta;
+          let z = sinPhi * sinTheta;
+          vertices.push(radius * x, radius * y, radius * z);
+          normals.push(x, y, z);
+        }
+      }
+      for (let lat = 0; lat < latBands; lat++) {
+        for (let lon = 0; lon < longBands; lon++) {
+          let first = (lat * (longBands + 1)) + lon;
+          let second = first + longBands + 1;
+          indices.push(first, second, first + 1);
+          indices.push(second, second + 1, first + 1);
+        }
+      }
+      return { vertices, normals, indices };
+    }
+
+    // Generate a cone mesh (a simple cone for the light indicator).
+    // The cone is generated so that its tip is at the origin and its base is a circle at y = height.
+    // It will be rotated later so that it points toward the sphere center.
+    function generateConeMesh(baseRadius, height, segments) {
+      let vertices = [];
+      let normals = [];
+      let indices = [];
+      // Compute the slant length and the sine and cosine of the side angle.
+      let slant = Math.sqrt(height*height + baseRadius*baseRadius);
+      let sinTheta = baseRadius / slant;
+      let cosTheta = height / slant;
+      // Tip vertex (index 0)
+      vertices.push(0, 0, 0);
+      // For the tip normal, we use the average of the side normals.
+      normals.push(0, cosTheta, 0);
+      // Base circle vertices (indices 1..segments)
+      for (let i = 0; i < segments; i++) {
+        let angle = i * 2 * Math.PI / segments;
+        let x = baseRadius * Math.cos(angle);
+        let z = baseRadius * Math.sin(angle);
+        vertices.push(x, height, z);
+        // The side normal for this vertex:
+        normals.push(Math.cos(angle) * sinTheta, cosTheta, Math.sin(angle) * sinTheta);
+      }
+      // Create triangles (a fan from the tip)
+      for (let i = 0; i < segments; i++) {
+        indices.push(0, 1 + i, 1 + ((i + 1) % segments));
+      }
+      return { vertices, normals, indices };
+    }
+
+    // === WebGL Setup and Buffer Helpers ===
+
+    // Compile a shader of the given type from source code.
+    function compileShader(source, type) {
+      let shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error("Shader compile error:", gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+
+    // Create a shader program from vertex and fragment shader sources.
+    function createProgram(vsSource, fsSource) {
+      let vertexShader = compileShader(vsSource, gl.VERTEX_SHADER);
+      let fragmentShader = compileShader(fsSource, gl.FRAGMENT_SHADER);
+      let program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error("Program link error:", gl.getProgramInfoLog(program));
+        return null;
+      }
+      return program;
+    }
+
+    // Initialize buffers for a given mesh (with vertices, normals, and indices).
+    function initBufferForMesh(mesh) {
+      let buffers = {};
+      buffers.vertexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffers.vertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.vertices), gl.STATIC_DRAW);
+
+      buffers.normalBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normalBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.normals), gl.STATIC_DRAW);
+
+      buffers.indexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indexBuffer);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(mesh.indices), gl.STATIC_DRAW);
+
+      buffers.indexCount = mesh.indices.length;
+      return buffers;
+    }
+
+    // === Trackball Helper ===
+    // Map a pointer (mouse or touch) position to a 3D vector on a virtual trackball.
+    function getTrackballVector(x, y) {
+      let rect = canvas.getBoundingClientRect();
+      // Map x and y to range [-1, 1]
+      let sx = (x - rect.left) / rect.width * 2 - 1;
+      let sy = 1 - (y - rect.top) / rect.height * 2;
+      let z2 = 1 - sx*sx - sy*sy;
+      let sz = (z2 > 0) ? Math.sqrt(z2) : 0;
+      return vec3.normalize([sx, sy, sz]);
+    }
+
+    // === Interaction Event Handlers ===
+    function pointerDown(e) {
+      e.preventDefault();
+      isDragging = true;
+      let x = e.clientX || (e.touches && e.touches[0].clientX);
+      let y = e.clientY || (e.touches && e.touches[0].clientY);
+      lastPointerPos = { x, y };
+      trackballStartVec = getTrackballVector(x, y);
+      // Check if we are clicking near one of the cones.
+      activeConeIndex = -1;
+      let rect = canvas.getBoundingClientRect();
+      for (let i = 0; i < cones.length; i++) {
+        let conePos = getConeWorldPosition(cones[i].orbit);
+        let screenPos = project(conePos);
+        let dx = screenPos.x - (x - rect.left);
+        let dy = screenPos.y - (y - rect.top);
+        if (Math.sqrt(dx*dx + dy*dy) < 20) {
+          activeConeIndex = i;
+          break;
+        }
+      }
+      activeInteraction = (activeConeIndex >= 0) ? "cone" : "sphere";
+    }
+
+    function pointerMove(e) {
+      if (!isDragging) return;
+      e.preventDefault();
+      let x = e.clientX || (e.touches && e.touches[0].clientX);
+      let y = e.clientY || (e.touches && e.touches[0].clientY);
+      let currentVec = getTrackballVector(x, y);
+      let axis = vec3.cross(trackballStartVec, currentVec);
+      let dotVal = vec3.dot(trackballStartVec, currentVec);
+      // Clamp the dot to avoid numerical issues
+      if (dotVal > 1) dotVal = 1;
+      if (dotVal < -1) dotVal = -1;
+      let angle = Math.acos(dotVal);
+      if (isNaN(angle)) angle = 0;
+      let rotMat = mat4.rotation(angle, axis);
+      if (activeInteraction === "sphere") {
+        sphereRotation = mat4.multiply(rotMat, sphereRotation);
+        // Store the angular velocity for inertia
+        sphereAngularVelocity = { axis: axis, angle: angle };
+      } else if (activeInteraction === "cone") {
+        // Update only the active cone's orbit vector.
+        let orbit = cones[activeConeIndex].orbit;
+        let newOrbit = [
+          rotMat[0]*orbit[0] + rotMat[4]*orbit[1] + rotMat[8]*orbit[2],
+          rotMat[1]*orbit[0] + rotMat[5]*orbit[1] + rotMat[9]*orbit[2],
+          rotMat[2]*orbit[0] + rotMat[6]*orbit[1] + rotMat[10]*orbit[2]
+        ];
+        cones[activeConeIndex].orbit = vec3.normalize(newOrbit);
+      }
+      trackballStartVec = currentVec;
+      lastPointerPos = { x, y };
+    }
+
+    function pointerUp(e) {
+      isDragging = false;
+      activeInteraction = null;
+      activeConeIndex = -1;
+    }
+
+    // === Utility: Project a 3D point to 2D canvas coordinates ===
+    function project(point) {
+      // Compute the Model–View–Projection matrix used for the sphere.
+      let aspect = canvas.width / canvas.height;
+      let proj = mat4.perspective(Math.PI/4, aspect, 0.1, 100);
+      let eye = [0, 0, 5];
+      let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
+      let model = sphereRotation; // The cones follow the sphere’s rotation.
+      let mvp = mat4.multiply(proj, mat4.multiply(view, model));
+      // Multiply the point (as a 4D vector)
+      let p = [point[0], point[1], point[2], 1];
+      let tp = [0, 0, 0, 0];
+      for (let i = 0; i < 4; i++) {
+        tp[i] = p[0]*mvp[i] + p[1]*mvp[i+4] + p[2]*mvp[i+8] + p[3]*mvp[i+12];
+      }
+      // Perspective divide
+      if (tp[3] !== 0) {
+        tp[0] /= tp[3];
+        tp[1] /= tp[3];
+      }
+      // Convert normalized device coordinates to canvas coordinates
+      return {
+        x: (tp[0] * 0.5 + 0.5) * canvas.width,
+        y: ((-tp[1]) * 0.5 + 0.5) * canvas.height
+      };
+    }
+
+    // Given a cone’s orbit vector (in local space), compute its world position.
+    // We first apply the sphere’s rotation (so that the cone stays attached to the sphere)
+    // and then multiply by coneDistance.
+    function getConeWorldPosition(orbit) {
+      let x = sphereRotation[0]*orbit[0] + sphereRotation[4]*orbit[1] + sphereRotation[8]*orbit[2];
+      let y = sphereRotation[1]*orbit[0] + sphereRotation[5]*orbit[1] + sphereRotation[9]*orbit[2];
+      let z = sphereRotation[2]*orbit[0] + sphereRotation[6]*orbit[1] + sphereRotation[10]*orbit[2];
+      return [x * coneDistance, y * coneDistance, z * coneDistance];
+    }
+
+    // === Main Render Loop ===
+    let lastTime = 0;
+    function render(time) {
+      let deltaTime = (time - lastTime) / 1000;
+      lastTime = time;
+      // If not dragging, apply inertia to the sphere’s rotation.
+      if (!isDragging && sphereAngularVelocity) {
+        let friction = 0.98;
+        sphereAngularVelocity.angle *= friction;
+        if (sphereAngularVelocity.angle < 0.001) {
+          sphereAngularVelocity = null;
+        } else {
+          let rotMat = mat4.rotation(sphereAngularVelocity.angle, sphereAngularVelocity.axis);
+          sphereRotation = mat4.multiply(rotMat, sphereRotation);
+        }
+      }
+
+      gl.clearColor(1, 1, 1, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST);
+
+      let aspect = canvas.width / canvas.height;
+      let proj = mat4.perspective(Math.PI/4, aspect, 0.1, 100);
+      let eye = [0, 0, 5];
+      let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
+
+      // === Draw the Sphere ===
+      gl.useProgram(sphereProgram);
+      let uMVP = gl.getUniformLocation(sphereProgram, "uMVP");
+      let uModel = gl.getUniformLocation(sphereProgram, "uModel");
+      let uView = gl.getUniformLocation(sphereProgram, "uView");
+      let uLightPositions = gl.getUniformLocation(sphereProgram, "uLightPositions");
+      let uLightColors = gl.getUniformLocation(sphereProgram, "uLightColors");
+
+      let model = sphereRotation;
+      let mvp = mat4.multiply(proj, mat4.multiply(view, model));
+      // Since our matrices are in row–major order, pass true for the transpose parameter.
+      gl.uniformMatrix4fv(uMVP, true, new Float32Array(mvp));
+      gl.uniformMatrix4fv(uModel, true, new Float32Array(model));
+      gl.uniformMatrix4fv(uView, true, new Float32Array(view));
+
+      // Compute light positions from the cones.
+      let lightPositions = [];
+      let lightColors = [];
+      for (let i = 0; i < cones.length; i++) {
+        let pos = getConeWorldPosition(cones[i].orbit);
+        lightPositions.push(pos[0], pos[1], pos[2]);
+        lightColors.push(cones[i].color[0], cones[i].color[1], cones[i].color[2]);
+      }
+      gl.uniform3fv(uLightPositions, new Float32Array(lightPositions));
+      gl.uniform3fv(uLightColors, new Float32Array(lightColors));
+
+      // Bind sphere buffers and attributes.
+      let aPosition = gl.getAttribLocation(sphereProgram, "aPosition");
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.vertexBuffer);
+      gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+      gl.enableVertexAttribArray(aPosition);
+
+      let aNormal = gl.getAttribLocation(sphereProgram, "aNormal");
+      gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.normalBuffer);
+      gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+      gl.enableVertexAttribArray(aNormal);
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indexBuffer);
+      gl.drawElements(gl.TRIANGLES, sphereBuffers.indexCount, gl.UNSIGNED_SHORT, 0);
+
+      // === Draw the Cones ===
+      gl.useProgram(coneProgram);
+      let uMVP_cone = gl.getUniformLocation(coneProgram, "uMVP");
+      let uColor = gl.getUniformLocation(coneProgram, "uColor");
+      let aPositionCone = gl.getAttribLocation(coneProgram, "aPosition");
+      let aNormalCone = gl.getAttribLocation(coneProgram, "aNormal");
+
+      // For each cone, compute its model matrix so that:
+      // 1. It is translated to its computed world position.
+      // 2. It is rotated so its (default) tip (pointing in the +Y direction) faces the sphere center.
+      for (let i = 0; i < cones.length; i++) {
+        let pos = getConeWorldPosition(cones[i].orbit);
+        // Compute the direction from the cone to the center (0,0,0).
+        let targetDir = vec3.normalize(vec3.scale(pos, -1));
+        let defaultDir = [0, 1, 0];
+ 
