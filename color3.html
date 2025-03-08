@@ -1,519 +1,1793 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>color</title>
-  <style>
-    /* The canvas fills the entire viewport */
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      overflow: hidden;
-      background: #fff;
-    }
-    canvas {
-      display: block;
-      width: 100vw;
-      height: 100vh;
-      touch-action: none; /* Prevent default touch gestures */
-    }
-  </style>
-</head>
-<body>
-  <canvas id="glcanvas"></canvas>
-  <script>
-    // =================== Minimal Vector and Matrix Math ===================
-    const vec3 = {
-      create: function(x = 0, y = 0, z = 0) { return [x, y, z]; },
-      add: function(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; },
-      subtract: function(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; },
-      scale: function(a, s) { return [a[0]*s, a[1]*s, a[2]*s]; },
-      dot: function(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; },
-      cross: function(a, b) {
-        return [
-          a[1]*b[2] - a[2]*b[1],
-          a[2]*b[0] - a[0]*b[2],
-          a[0]*b[1] - a[1]*b[0]
-        ];
-      },
-      length: function(a) { return Math.sqrt(a[0]*a[0] + a[1]*a[1] + a[2]*a[2]); },
-      normalize: function(a) {
-        let len = vec3.length(a);
-        return (len > 0.00001) ? [a[0]/len, a[1]/len, a[2]/len] : [0, 0, 0];
-      }
-    };
+  <!DOCTYPE html>
+   <html lang="en">
+   <head>
+     <meta charset="UTF-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <title>WebGL Sphere with Multiple Spotlights</title>
+     <style>
+       * { margin: 0; padding: 0; overflow: hidden; }
+       body { background-color: #000; }
+       canvas { display: block; width: 100vw; height: 100vh; }
+     </style>
+   </head>
+   <body>
+     <canvas id="webgl-canvas"></canvas>
+     <script>
 
-    const mat4 = {
-      identity: function() {
-        return [
-          1, 0, 0, 0,
-          0, 1, 0, 0,
-          0, 0, 1, 0,
-          0, 0, 0, 1
-        ];
-      },
-      // Row–major multiplication: out = a * b
-      multiply: function(a, b) {
-        let out = [];
-        for (let i = 0; i < 4; i++) {
-          for (let j = 0; j < 4; j++) {
-            out[i*4+j] = a[i*4+0]*b[0*4+j] +
-                         a[i*4+1]*b[1*4+j] +
-                         a[i*4+2]*b[2*4+j] +
-                         a[i*4+3]*b[3*4+j];
-          }
+// Core WebGL Setup
+function initGL(canvas) {
+  const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+  if (!gl) {
+    alert("WebGL is not supported by your browser.");
+    return null;
+  }
+
+  // Enable depth testing
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LEQUAL);
+  
+  // Enable blending for transparency
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  
+  // Set clear color to black
+  gl.clearColor(0.0, 0.0, 0.0, 1.0);
+  
+  return gl;
+}
+
+// ==================== Vector Operations ====================
+
+const Vector3 = {
+  create: function(x = 0, y = 0, z = 0) {
+    return [x, y, z];
+  },
+  
+  copy: function(vec) {
+    return [vec[0], vec[1], vec[2]];
+  },
+  
+  add: function(a, b) {
+    return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  },
+  
+  subtract: function(a, b) {
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  },
+  
+  scale: function(vec, scalar) {
+    return [vec[0] * scalar, vec[1] * scalar, vec[2] * scalar];
+  },
+  
+  dot: function(a, b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  },
+  
+  cross: function(a, b) {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ];
+  },
+  
+  length: function(vec) {
+    return Math.sqrt(this.dot(vec, vec));
+  },
+  
+  normalize: function(vec) {
+    const len = this.length(vec);
+    if (len === 0) {
+      return [0, 0, 0];
+    }
+    return [vec[0] / len, vec[1] / len, vec[2] / len];
+  },
+  
+  distance: function(a, b) {
+    return this.length(this.subtract(a, b));
+  }
+};
+
+// ==================== Matrix Operations ====================
+
+const Matrix4 = {
+  create: function() {
+    return [
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1
+    ];
+  },
+  
+  identity: function() {
+    return this.create();
+  },
+  
+  copy: function(mat) {
+    return [...mat];
+  },
+  
+  multiply: function(a, b) {
+    const result = new Array(16);
+    
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        let sum = 0;
+        for (let k = 0; k < 4; k++) {
+          sum += a[i * 4 + k] * b[k * 4 + j];
         }
-        return out;
-      },
-      // Creates a scale matrix.
-      scale: function(sx, sy, sz) {
-        return [
-          sx, 0,  0,  0,
-          0, sy,  0,  0,
-          0,  0, sz,  0,
-          0,  0,  0,  1
-        ];
-      },
-      // Perspective projection matrix (row–major)
-      perspective: function(fovy, aspect, near, far) {
-        let f = 1.0 / Math.tan(fovy/2);
-        let nf = 1 / (near - far);
-        let out = mat4.identity();
-        out[0]  = f / aspect;
-        out[5]  = f;
-        out[10] = (far + near) * nf;
-        out[11] = -1;
-        out[14] = (2 * far * near) * nf;
-        out[15] = 0;
-        return out;
-      },
-      // LookAt matrix (row–major)
-      lookAt: function(eye, center, up) {
-        let z = vec3.normalize(vec3.subtract(eye, center));
-        let x = vec3.normalize(vec3.cross(up, z));
-        let y = vec3.cross(z, x);
-        let out = mat4.identity();
-        out[0] = x[0]; out[1] = x[1]; out[2] = x[2];
-        out[4] = y[0]; out[5] = y[1]; out[6] = y[2];
-        out[8] = z[0]; out[9] = z[1]; out[10] = z[2];
-        out[12] = -vec3.dot(x, eye);
-        out[13] = -vec3.dot(y, eye);
-        out[14] = -vec3.dot(z, eye);
-        return out;
-      },
-      translation: function(tx, ty, tz) {
-        let out = mat4.identity();
-        out[12] = tx;
-        out[13] = ty;
-        out[14] = tz;
-        return out;
-      },
-      // Create a rotation matrix given an angle (in radians) and an axis
-      rotation: function(angle, axis) {
-        let [x, y, z] = vec3.normalize(axis);
-        let s = Math.sin(angle);
-        let c = Math.cos(angle);
-        let t = 1 - c;
-        return [
-          t*x*x + c,     t*x*y - s*z,   t*x*z + s*y,   0,
-          t*x*y + s*z,   t*y*y + c,     t*y*z - s*x,   0,
-          t*x*z - s*y,   t*y*z + s*x,   t*z*z + c,     0,
-          0,             0,             0,             1
-        ];
+        result[i * 4 + j] = sum;
       }
-    };
+    }
+    
+    return result;
+  },
+  
+  translate: function(mat, vec) {
+    const result = this.copy(mat);
+    
+    result[12] = mat[0] * vec[0] + mat[4] * vec[1] + mat[8] * vec[2] + mat[12];
+    result[13] = mat[1] * vec[0] + mat[5] * vec[1] + mat[9] * vec[2] + mat[13];
+    result[14] = mat[2] * vec[0] + mat[6] * vec[1] + mat[10] * vec[2] + mat[14];
+    result[15] = mat[3] * vec[0] + mat[7] * vec[1] + mat[11] * vec[2] + mat[15];
+    
+    return result;
+  },
+  
+  rotateX: function(mat, angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    
+    const rotation = [
+      1, 0, 0, 0,
+      0, c, s, 0,
+      0, -s, c, 0,
+      0, 0, 0, 1
+    ];
+    
+    return this.multiply(mat, rotation);
+  },
+  
+  rotateY: function(mat, angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    
+    const rotation = [
+      c, 0, -s, 0,
+      0, 1, 0, 0,
+      s, 0, c, 0,
+      0, 0, 0, 1
+    ];
+    
+    return this.multiply(mat, rotation);
+  },
+  
+  rotateZ: function(mat, angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    
+    const rotation = [
+      c, s, 0, 0,
+      -s, c, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1
+    ];
+    
+    return this.multiply(mat, rotation);
+  },
+  
+  scale: function(mat, vec) {
+    const result = this.copy(mat);
+    
+    result[0] *= vec[0];
+    result[1] *= vec[0];
+    result[2] *= vec[0];
+    result[3] *= vec[0];
+    
+    result[4] *= vec[1];
+    result[5] *= vec[1];
+    result[6] *= vec[1];
+    result[7] *= vec[1];
+    
+    result[8] *= vec[2];
+    result[9] *= vec[2];
+    result[10] *= vec[2];
+    result[11] *= vec[2];
+    
+    return result;
+  },
+  
+  perspective: function(fovy, aspect, near, far) {
+    const f = 1.0 / Math.tan(fovy / 2);
+    const nf = 1 / (near - far);
+    
+    return [
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, 2 * far * near * nf, 0
+    ];
+  },
+  
+  lookAt: function(eye, center, up) {
+    const z = Vector3.normalize(Vector3.subtract(eye, center));
+    const x = Vector3.normalize(Vector3.cross(up, z));
+    const y = Vector3.normalize(Vector3.cross(z, x));
+    
+    return [
+      x[0], y[0], z[0], 0,
+      x[1], y[1], z[1], 0,
+      x[2], y[2], z[2], 0,
+      -Vector3.dot(x, eye), -Vector3.dot(y, eye), -Vector3.dot(z, eye), 1
+    ];
+  },
+  
+  transpose: function(mat) {
+    return [
+      mat[0], mat[4], mat[8], mat[12],
+      mat[1], mat[5], mat[9], mat[13],
+      mat[2], mat[6], mat[10], mat[14],
+      mat[3], mat[7], mat[11], mat[15]
+    ];
+  },
+  
+  inverse: function(mat) {
+    const a00 = mat[0], a01 = mat[1], a02 = mat[2], a03 = mat[3];
+    const a10 = mat[4], a11 = mat[5], a12 = mat[6], a13 = mat[7];
+    const a20 = mat[8], a21 = mat[9], a22 = mat[10], a23 = mat[11];
+    const a30 = mat[12], a31 = mat[13], a32 = mat[14], a33 = mat[15];
+    
+    const b00 = a00 * a11 - a01 * a10;
+    const b01 = a00 * a12 - a02 * a10;
+    const b02 = a00 * a13 - a03 * a10;
+    const b03 = a01 * a12 - a02 * a11;
+    const b04 = a01 * a13 - a03 * a11;
+    const b05 = a02 * a13 - a03 * a12;
+    const b06 = a20 * a31 - a21 * a30;
+    const b07 = a20 * a32 - a22 * a30;
+    const b08 = a20 * a33 - a23 * a30;
+    const b09 = a21 * a32 - a22 * a31;
+    const b10 = a21 * a33 - a23 * a31;
+    const b11 = a22 * a33 - a23 * a32;
+    
+    const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+    
+    if (!det) {
+      return null;
+    }
+    
+    const invDet = 1.0 / det;
+    
+    return [
+      (a11 * b11 - a12 * b10 + a13 * b09) * invDet,
+      (a02 * b10 - a01 * b11 - a03 * b09) * invDet,
+      (a31 * b05 - a32 * b04 + a33 * b03) * invDet,
+      (a22 * b04 - a21 * b05 - a23 * b03) * invDet,
+      (a12 * b08 - a10 * b11 - a13 * b07) * invDet,
+      (a00 * b11 - a02 * b08 + a03 * b07) * invDet,
+      (a32 * b02 - a30 * b05 - a33 * b01) * invDet,
+      (a20 * b05 - a22 * b02 + a23 * b01) * invDet,
+      (a10 * b10 - a11 * b08 + a13 * b06) * invDet,
+      (a01 * b08 - a00 * b10 - a03 * b06) * invDet,
+      (a30 * b04 - a31 * b02 + a33 * b00) * invDet,
+      (a21 * b02 - a20 * b04 - a23 * b00) * invDet,
+      (a11 * b07 - a10 * b09 - a12 * b06) * invDet,
+      (a00 * b09 - a01 * b07 + a02 * b06) * invDet,
+      (a31 * b01 - a30 * b03 - a32 * b00) * invDet,
+      (a20 * b03 - a21 * b01 + a22 * b00) * invDet
+    ];
+  }
+};
 
-    // Helper to transpose a 4x4 matrix (converts our row–major matrix to column–major order)
-    function transposeMatrix(m) {
+// ==================== Quaternion Operations ====================
+
+const Quaternion = {
+  create: function(x = 0, y = 0, z = 0, w = 1) {
+    return [x, y, z, w];
+  },
+  
+  fromAxisAngle: function(axis, angle) {
+    const halfAngle = angle / 2;
+    const s = Math.sin(halfAngle);
+    const normalizedAxis = Vector3.normalize(axis);
+    
+    return [
+      normalizedAxis[0] * s,
+      normalizedAxis[1] * s,
+      normalizedAxis[2] * s,
+      Math.cos(halfAngle)
+    ];
+  },
+  
+  multiply: function(a, b) {
+    const ax = a[0], ay = a[1], az = a[2], aw = a[3];
+    const bx = b[0], by = b[1], bz = b[2], bw = b[3];
+    
+    return [
+      aw * bx + ax * bw + ay * bz - az * by,
+      aw * by + ay * bw + az * bx - ax * bz,
+      aw * bz + az * bw + ax * by - ay * bx,
+      aw * bw - ax * bx - ay * by - az * bz
+    ];
+  },
+  
+  normalize: function(q) {
+    const len = Math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    
+    if (len === 0) {
+      return [0, 0, 0, 1];
+    }
+    
+    return [q[0] / len, q[1] / len, q[2] / len, q[3] / len];
+  },
+  
+  slerp: function(a, b, t) {
+    // Ensure a and b are normalized
+    const aNorm = this.normalize(a);
+    const bNorm = this.normalize(b);
+    
+    // Calculate cosine of angle between quaternions
+    let cosHalfTheta = aNorm[0] * bNorm[0] + aNorm[1] * bNorm[1] + aNorm[2] * bNorm[2] + aNorm[3] * bNorm[3];
+    
+    // If a and b are very close, linearly interpolate
+    if (Math.abs(cosHalfTheta) >= 1.0) {
       return [
-        m[0], m[4], m[8],  m[12],
-        m[1], m[5], m[9],  m[13],
-        m[2], m[6], m[10], m[14],
-        m[3], m[7], m[11], m[15]
+        aNorm[0] + t * (bNorm[0] - aNorm[0]),
+        aNorm[1] + t * (bNorm[1] - aNorm[1]),
+        aNorm[2] + t * (bNorm[2] - aNorm[2]),
+        aNorm[3] + t * (bNorm[3] - aNorm[3])
       ];
     }
-
-    // =================== Global Variables and State ===================
-    let canvas, gl;
-    let sphereProgram, coneProgram;
-    let sphereBuffers, coneBuffers;
-    let sphereRotation = mat4.identity();
-    let sphereAngularVelocity = null; // For inertia
-
-    // Three cones for the RGB lights.
-    // Each cone stores its color and an "orbit" unit–vector.
-    let cones = [
-      { color: [1, 0, 0], orbit: vec3.normalize([0, 1, 0]) },
-      { color: [0, 1, 0], orbit: vec3.normalize([1, 0, 0]) },
-      { color: [0, 0, 1], orbit: vec3.normalize([0, 0, 1]) }
+    
+    // Calculate temporary values
+    const halfTheta = Math.acos(cosHalfTheta);
+    const sinHalfTheta = Math.sqrt(1.0 - cosHalfTheta * cosHalfTheta);
+    
+    // If theta = 180 degrees, rotation isn't defined
+    if (Math.abs(sinHalfTheta) < 0.001) {
+      return [
+        aNorm[0] * 0.5 + bNorm[0] * 0.5,
+        aNorm[1] * 0.5 + bNorm[1] * 0.5,
+        aNorm[2] * 0.5 + bNorm[2] * 0.5,
+        aNorm[3] * 0.5 + bNorm[3] * 0.5
+      ];
+    }
+    
+    const ratioA = Math.sin((1 - t) * halfTheta) / sinHalfTheta;
+    const ratioB = Math.sin(t * halfTheta) / sinHalfTheta;
+    
+    return [
+      aNorm[0] * ratioA + bNorm[0] * ratioB,
+      aNorm[1] * ratioA + bNorm[1] * ratioB,
+      aNorm[2] * ratioA + bNorm[2] * ratioB,
+      aNorm[3] * ratioA + bNorm[3] * ratioB
     ];
+  },
+  
+  toMatrix: function(q) {
+    const x = q[0], y = q[1], z = q[2], w = q[3];
+    const x2 = x + x, y2 = y + y, z2 = z + z;
+    const xx = x * x2, xy = x * y2, xz = x * z2;
+    const yy = y * y2, yz = y * z2, zz = z * z2;
+    const wx = w * x2, wy = w * y2, wz = w * z2;
+    
+    return [
+      1 - (yy + zz), xy + wz, xz - wy, 0,
+      xy - wz, 1 - (xx + zz), yz + wx, 0,
+      xz + wy, yz - wx, 1 - (xx + yy), 0,
+      0, 0, 0, 1
+    ];
+  },
+  
+  fromEuler: function(x, y, z) {
+    const halfX = x / 2;
+    const halfY = y / 2;
+    const halfZ = z / 2;
+    
+    const cx = Math.cos(halfX);
+    const sx = Math.sin(halfX);
+    const cy = Math.cos(halfY);
+    const sy = Math.sin(halfY);
+    const cz = Math.cos(halfZ);
+    const sz = Math.sin(halfZ);
+    
+    return [
+      sx * cy * cz - cx * sy * sz,
+      cx * sy * cz + sx * cy * sz,
+      cx * cy * sz - sx * sy * cz,
+      cx * cy * cz + sx * sy * sz
+    ];
+  }
+};
 
-    // These globals are recomputed when the canvas size changes.
-    let sphereScale = 1;   // World–space radius scaling for the sphere.
-    let coneDistance = 1.33; // Distance from sphere center where cones orbit.
-    let offsetWorld = 0.33;  // World offset corresponding to 50px in screen space.
+// ==================== Shader Utilities ====================
 
-    // Camera and projection settings.
-    const fov = Math.PI/4;  // 45° field–of–view.
-    const distance = 5;     // Camera is at (0,0,5).
-    const near = 0.1, far = 100;
+function createShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+    gl.deleteShader(shader);
+    return null;
+  }
+  
+  return shader;
+}
 
-    // For interaction (both mouse and touch)
-    let isDragging = false;
-    let activeInteraction = null; // "sphere" or "cone"
-    let activeConeIndex = -1;
-    let lastPointerPos = { x: 0, y: 0 };
-    let trackballStartVec = null;
+function createProgram(gl, vertexShader, fragmentShader) {
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error('Program linking error:', gl.getProgramInfoLog(program));
+    gl.deleteProgram(program);
+    return null;
+  }
+  
+  return program;
+}
 
-    // =================== Shader Sources ===================
-    const sphereVSSource = `
-      attribute vec3 aPosition;
-      attribute vec3 aNormal;
-      uniform mat4 uMVP;
-      uniform mat4 uModel;
-      uniform mat4 uView;
-      varying vec3 vNormal;
-      varying vec3 vPosition;
-      void main() {
-          gl_Position = uMVP * vec4(aPosition, 1.0);
-          vPosition = vec3(uModel * vec4(aPosition, 1.0));
-          vNormal = (mat3(uModel)) * aNormal;
-      }
-    `;
-    const sphereFSSource = `
-      precision mediump float;
-      varying vec3 vNormal;
-      varying vec3 vPosition;
-      uniform vec3 uLightPositions[3];
-      uniform vec3 uLightColors[3];
-      void main() {
-          vec3 normal = normalize(vNormal);
-          vec3 color = vec3(0.0);
-          for (int i = 0; i < 3; i++) {
-              vec3 lightPos = uLightPositions[i];
-              vec3 lightColor = uLightColors[i];
-              // Light direction: from the light toward the sphere’s center
-              vec3 lightDir = normalize(-lightPos);
-              // Compute a simple spotlight effect (cutoff ~30° with exponent 10)
-              float cutoff = cos(radians(30.0));
-              float spotEffect = dot(lightDir, normalize(-vPosition));
-              if (spotEffect > cutoff) {
-                  spotEffect = pow(spotEffect, 10.0);
-              } else {
-                  spotEffect = 0.0;
-              }
-              float diff = max(dot(normal, lightDir), 0.0);
-              color += lightColor * diff * spotEffect;
-          }
-          gl_FragColor = vec4(color, 1.0);
-      }
-    `;
-    const coneVSSource = `
-      attribute vec3 aPosition;
-      attribute vec3 aNormal;
-      uniform mat4 uMVP;
-      void main() {
-          gl_Position = uMVP * vec4(aPosition, 1.0);
-      }
-    `;
-    const coneFSSource = `
-      precision mediump float;
-      uniform vec4 uColor;
-      void main() {
-          gl_FragColor = uColor;
-      }
-    `;
+// ==================== Buffer Utilities ====================
 
-    // =================== Geometry Generation Functions ===================
-    // Generate a sphere mesh with positions, normals, and indices.
-    function generateSphereMesh(radius, latBands, longBands) {
-      let vertices = [];
-      let normals = [];
-      let indices = [];
-      for (let lat = 0; lat <= latBands; lat++) {
-        let theta = lat * Math.PI / latBands;
-        let sinTheta = Math.sin(theta);
-        let cosTheta = Math.cos(theta);
-        for (let lon = 0; lon <= longBands; lon++) {
-          let phi = lon * 2 * Math.PI / longBands;
-          let sinPhi = Math.sin(phi);
-          let cosPhi = Math.cos(phi);
-          let x = cosPhi * sinTheta;
-          let y = cosTheta;
-          let z = sinPhi * sinTheta;
-          vertices.push(radius * x, radius * y, radius * z);
-          normals.push(x, y, z);
-        }
-      }
-      for (let lat = 0; lat < latBands; lat++) {
-        for (let lon = 0; lon < longBands; lon++) {
-          let first = (lat * (longBands + 1)) + lon;
-          let second = first + longBands + 1;
-          indices.push(first, second, first + 1);
-          indices.push(second, second + 1, first + 1);
-        }
-      }
-      return { vertices, normals, indices };
+function createBuffer(gl, data, type = gl.ARRAY_BUFFER, usage = gl.STATIC_DRAW) {
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(type, buffer);
+  gl.bufferData(type, data, usage);
+  return buffer;
+}
+
+// ==================== Texture Utilities ====================
+
+function createTexture(gl, width, height, format = gl.RGBA, type = gl.UNSIGNED_BYTE, data = null, filter = gl.LINEAR) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  
+  gl.texImage2D(gl.TEXTURE_2D, 0, format, width, height, 0, format, type, data);
+  
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  
+  return texture;
+}
+
+// ==================== Miscellaneous Utilities ====================
+
+function radToDeg(rad) {
+  return rad * 180 / Math.PI;
+}
+
+function degToRad(deg) {
+  return deg * Math.PI / 180;
+}
+
+// Convert screen coordinates to clip space coordinates
+function screenToClipSpace(x, y, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const clipX = (x - rect.left) / rect.width * 2 - 1;
+  const clipY = (y - rect.top) / rect.height * -2 + 1; // Invert Y
+  return [clipX, clipY];
+}
+
+// Project a 2D point onto a sphere
+function projectToSphere(x, y) {
+  const r = 1.0; // Sphere radius
+  const d = Math.sqrt(x * x + y * y);
+  
+  // If point is inside the sphere
+  if (d < r) {
+    return [x, y, Math.sqrt(r * r - d * d)];
+  } else {
+    // If point is outside the sphere, project to the nearest point on the sphere
+    const z = 0;
+    return Vector3.normalize([x, y, z]);
+  }
+}
+
+
+
+
+
+// ==================== Sphere Geometry ====================
+
+function generateSphereGeometry(radius = 1.0, latitudeBands = 30, longitudeBands = 30) {
+  const positions = [];
+  const normals = [];
+  const texCoords = [];
+  const indices = [];
+  
+  // Generate vertices, normals, and texture coordinates
+  for (let lat = 0; lat <= latitudeBands; lat++) {
+    const theta = lat * Math.PI / latitudeBands;
+    const sinTheta = Math.sin(theta);
+    const cosTheta = Math.cos(theta);
+    
+    for (let lon = 0; lon <= longitudeBands; lon++) {
+      const phi = lon * 2 * Math.PI / longitudeBands;
+      const sinPhi = Math.sin(phi);
+      const cosPhi = Math.cos(phi);
+      
+      // Position
+      const x = cosPhi * sinTheta;
+      const y = cosTheta;
+      const z = sinPhi * sinTheta;
+      
+      // Scaled position
+      positions.push(radius * x);
+      positions.push(radius * y);
+      positions.push(radius * z);
+      
+      // Normal (unit vector from origin to position)
+      normals.push(x);
+      normals.push(y);
+      normals.push(z);
+      
+      // Texture coordinate
+      texCoords.push(1 - (lon / longitudeBands));
+      texCoords.push(1 - (lat / latitudeBands));
     }
-
-    // Generate a cone mesh.
-    // The cone is generated with its tip at the origin and its base in the +Y direction.
-    function generateConeMesh(baseRadius, height, segments) {
-      let vertices = [];
-      let normals = [];
-      let indices = [];
-      let slant = Math.sqrt(height*height + baseRadius*baseRadius);
-      let sinTheta = baseRadius / slant;
-      let cosTheta = height / slant;
-      // Tip vertex (index 0)
-      vertices.push(0, 0, 0);
-      normals.push(0, cosTheta, 0);
-      // Base circle vertices (indices 1..segments)
-      for (let i = 0; i < segments; i++) {
-        let angle = i * 2 * Math.PI / segments;
-        let x = baseRadius * Math.cos(angle);
-        let z = baseRadius * Math.sin(angle);
-        vertices.push(x, height, z);
-        normals.push(Math.cos(angle) * sinTheta, cosTheta, Math.sin(angle) * sinTheta);
-      }
-      // Create triangles (fan from the tip)
-      for (let i = 0; i < segments; i++) {
-        indices.push(0, 1 + i, 1 + ((i + 1) % segments));
-      }
-      return { vertices, normals, indices };
+  }
+  
+  // Generate indices
+  for (let lat = 0; lat < latitudeBands; lat++) {
+    for (let lon = 0; lon < longitudeBands; lon++) {
+      const first = (lat * (longitudeBands + 1)) + lon;
+      const second = first + longitudeBands + 1;
+      
+      // First triangle
+      indices.push(first);
+      indices.push(second);
+      indices.push(first + 1);
+      
+      // Second triangle
+      indices.push(second);
+      indices.push(second + 1);
+      indices.push(first + 1);
     }
+  }
+  
+  return {
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    texCoords: new Float32Array(texCoords),
+    indices: new Uint16Array(indices)
+  };
+}
 
-    // =================== WebGL Setup and Buffer Helpers ===================
-    function compileShader(source, type) {
-      let shader = gl.createShader(type);
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error("Shader compile error:", gl.getShaderInfoLog(shader));
-        gl.deleteShader(shader);
-        return null;
-      }
-      return shader;
+// ==================== Cone Geometry ====================
+
+function generateConeGeometry(radius = 0.5, height = 1.0, segments = 20) {
+  const positions = [];
+  const normals = [];
+  const texCoords = [];
+  const indices = [];
+  
+  // Tip vertex
+  positions.push(0, height, 0);
+  normals.push(0, 1, 0);
+  texCoords.push(0.5, 0);
+  
+  // Base center vertex
+  positions.push(0, 0, 0);
+  normals.push(0, -1, 0);
+  texCoords.push(0.5, 1);
+  
+  // Base vertices
+  for (let i = 0; i <= segments; i++) {
+    const angle = i * Math.PI * 2 / segments;
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    
+    // Position
+    positions.push(x, 0, z);
+    
+    // Normal for the base
+    normals.push(0, -1, 0);
+    
+    // Texture coordinate
+    texCoords.push(i / segments, 1);
+    
+    // Add a duplicate vertex for the side with a different normal
+    if (i < segments) {
+      positions.push(x, 0, z);
+      
+      // Calculate normal for the side face
+      // This normal is perpendicular to the line from the base point to the tip,
+      // and also perpendicular to the tangent of the base circle
+      const nx = x / Math.sqrt(x*x + z*z);
+      const nz = z / Math.sqrt(x*x + z*z);
+      const sideNormal = [nx, radius / height, nz];
+      const length = Math.sqrt(sideNormal[0]*sideNormal[0] + sideNormal[1]*sideNormal[1] + sideNormal[2]*sideNormal[2]);
+      
+      normals.push(sideNormal[0]/length, sideNormal[1]/length, sideNormal[2]/length);
+      texCoords.push(i / segments, 0.5);
     }
+  }
+  
+  // Indices for the side faces
+  for (let i = 0; i < segments; i++) {
+    const baseIndex = 2 + i * 2; // Starting from the first duplicated vertex
+    
+    // Triangle from tip to base edge
+    indices.push(0); // Tip
+    indices.push(baseIndex);
+    indices.push(baseIndex + 2);
+  }
+  
+  // Indices for the base (as a triangle fan)
+  for (let i = 0; i < segments; i++) {
+    const baseVert = 2 + i * 2; // Original base vertices (not duplicated)
+    const nextVert = 2 + ((i + 1) % segments) * 2;
+    
+    indices.push(1); // Base center
+    indices.push(baseVert);
+    indices.push(nextVert);
+  }
+  
+  return {
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    texCoords: new Float32Array(texCoords),
+    indices: new Uint16Array(indices)
+  };
+}
 
-    function createProgram(vsSource, fsSource) {
-      let vertexShader = compileShader(vsSource, gl.VERTEX_SHADER);
-      let fragmentShader = compileShader(fsSource, gl.FRAGMENT_SHADER);
-      let program = gl.createProgram();
-      gl.attachShader(program, vertexShader);
-      gl.attachShader(program, fragmentShader);
-      gl.linkProgram(program);
-      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        console.error("Program link error:", gl.getProgramInfoLog(program));
-        return null;
-      }
-      return program;
+// ==================== Mesh Creation Utilities ====================
+
+function createMesh(gl, geometry) {
+  const mesh = {
+    vertexBuffer: null,
+    normalBuffer: null,
+    texCoordBuffer: null,
+    indexBuffer: null,
+    numIndices: geometry.indices.length,
+  };
+  
+  // Create and bind the position buffer
+  mesh.vertexBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, geometry.positions, gl.STATIC_DRAW);
+  
+  // Create and bind the normal buffer
+  mesh.normalBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, mesh.normalBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, geometry.normals, gl.STATIC_DRAW);
+  
+  // Create and bind the texture coordinate buffer
+  mesh.texCoordBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, mesh.texCoordBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, geometry.texCoords, gl.STATIC_DRAW);
+  
+  // Create and bind the index buffer
+  mesh.indexBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geometry.indices, gl.STATIC_DRAW);
+  
+  return mesh;
+}
+
+// Function to create a sphere mesh
+function createSphereMesh(gl, radius = 1.0, latitudeBands = 30, longitudeBands = 30) {
+  const geometry = generateSphereGeometry(radius, latitudeBands, longitudeBands);
+  return createMesh(gl, geometry);
+}
+
+// Function to create a cone mesh
+function createConeMesh(gl, radius = 0.5, height = 1.0, segments = 20) {
+  const geometry = generateConeGeometry(radius, height, segments);
+  return createMesh(gl, geometry);
+}
+
+// Function to render a mesh
+function renderMesh(gl, mesh, program, modelMatrix, viewMatrix, projectionMatrix) {
+  // Set the model-view-projection matrix
+  const modelViewMatrix = Matrix4.multiply(viewMatrix, modelMatrix);
+  const mvpMatrix = Matrix4.multiply(projectionMatrix, modelViewMatrix);
+  
+  // Set the normal matrix (transpose of inverse of model-view matrix)
+  const normalMatrix = Matrix4.transpose(Matrix4.inverse(modelViewMatrix));
+  
+  // Set the uniforms
+  gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uMVPMatrix'), false, new Float32Array(mvpMatrix));
+  gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uModelViewMatrix'), false, new Float32Array(modelViewMatrix));
+  gl.uniformMatrix4fv(gl.getUniformLocation(program, 'uNormalMatrix'), false, new Float32Array(normalMatrix));
+  
+  // Bind vertex buffer
+  gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(0);
+  
+  // Bind normal buffer
+  gl.bindBuffer(gl.ARRAY_BUFFER, mesh.normalBuffer);
+  gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(1);
+  
+  // Bind texture coordinate buffer
+  gl.bindBuffer(gl.ARRAY_BUFFER, mesh.texCoordBuffer);
+  gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(2);
+  
+  // Bind index buffer
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
+  
+  // Draw the mesh
+  gl.drawElements(gl.TRIANGLES, mesh.numIndices, gl.UNSIGNED_SHORT, 0);
+  
+  // Clean up
+  gl.disableVertexAttribArray(0);
+  gl.disableVertexAttribArray(1);
+  gl.disableVertexAttribArray(2);
+}
+
+
+
+
+
+
+
+
+// ==================== Shader Sources ====================
+
+// Vertex shader for both sphere and cones
+const vertexShaderSource = `
+  precision highp float;
+  
+  attribute vec3 aPosition;
+  attribute vec3 aNormal;
+  attribute vec2 aTexCoord;
+  
+  uniform mat4 uModelViewMatrix;
+  uniform mat4 uMVPMatrix;
+  uniform mat4 uNormalMatrix;
+  
+  varying vec3 vPosition;
+  varying vec3 vNormal;
+  varying vec2 vTexCoord;
+  
+  void main() {
+    // Transform vertex position
+    gl_Position = uMVPMatrix * vec4(aPosition, 1.0);
+    
+    // Pass position in view space
+    vPosition = (uModelViewMatrix * vec4(aPosition, 1.0)).xyz;
+    
+    // Transform normal
+    vNormal = normalize((uNormalMatrix * vec4(aNormal, 0.0)).xyz);
+    
+    // Pass texture coordinates
+    vTexCoord = aTexCoord;
+  }
+`;
+
+// Fragment shader for the sphere with multiple spotlights
+const sphereFragmentShaderSource = `
+  precision highp float;
+  
+  varying vec3 vPosition;
+  varying vec3 vNormal;
+  varying vec2 vTexCoord;
+  
+  // White main light
+  uniform vec3 uMainLightPosition;
+  uniform vec3 uMainLightDirection;
+  uniform float uMainLightCutoff;
+  uniform float uMainLightOuterCutoff;
+  uniform vec3 uMainLightColor;
+  
+  // Red, Green, Blue spotlights
+  #define MAX_COLORED_LIGHTS 3
+  uniform vec3 uColoredLightPositions[MAX_COLORED_LIGHTS];
+  uniform vec3 uColoredLightDirections[MAX_COLORED_LIGHTS];
+  uniform float uColoredLightCutoffs[MAX_COLORED_LIGHTS];
+  uniform float uColoredLightOuterCutoffs[MAX_COLORED_LIGHTS];
+  uniform vec3 uColoredLightColors[MAX_COLORED_LIGHTS];
+  
+  // Material properties
+  uniform vec3 uAmbientColor;
+  uniform vec3 uDiffuseColor;
+  uniform vec3 uSpecularColor;
+  uniform float uShininess;
+  
+  // Calculate spotlight contribution
+  vec3 calculateSpotlight(
+    vec3 normal,
+    vec3 viewDir,
+    vec3 lightPos,
+    vec3 lightDir,
+    float cutoff,
+    float outerCutoff,
+    vec3 lightColor
+  ) {
+    // Light direction from fragment to light source
+    vec3 lightDirFromFrag = normalize(lightPos - vPosition);
+    
+    // Calculate spot effect
+    float theta = dot(lightDirFromFrag, normalize(-lightDir));
+    float epsilon = cutoff - outerCutoff;
+    float intensity = clamp((theta - outerCutoff) / epsilon, 0.0, 1.0);
+    
+    // If outside the spotlight cone, return no contribution
+    if (intensity <= 0.0) {
+      return vec3(0.0);
     }
-
-    function initBufferForMesh(mesh) {
-      let buffers = {};
-      buffers.vertexBuffer = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, buffers.vertexBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.vertices), gl.STATIC_DRAW);
-
-      buffers.normalBuffer = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, buffers.normalBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.normals), gl.STATIC_DRAW);
-
-      buffers.indexBuffer = gl.createBuffer();
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.indexBuffer);
-      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(mesh.indices), gl.STATIC_DRAW);
-
-      buffers.indexCount = mesh.indices.length;
-      return buffers;
+    
+    // Calculate diffuse lighting
+    float diff = max(dot(normal, lightDirFromFrag), 0.0);
+    vec3 diffuse = diff * lightColor;
+    
+    // Calculate specular lighting (Blinn-Phong)
+    vec3 halfwayDir = normalize(lightDirFromFrag + viewDir);
+    float spec = pow(max(dot(normal, halfwayDir), 0.0), uShininess);
+    vec3 specular = spec * uSpecularColor * lightColor;
+    
+    // Apply spotlight intensity
+    diffuse *= intensity;
+    specular *= intensity;
+    
+    // Calculate attenuation
+    float distance = length(lightPos - vPosition);
+    float attenuation = 1.0 / (1.0 + 0.09 * distance + 0.032 * distance * distance);
+    
+    diffuse *= attenuation;
+    specular *= attenuation;
+    
+    return diffuse + specular;
+  }
+  
+  void main() {
+    // Normal and view direction
+    vec3 normal = normalize(vNormal);
+    vec3 viewDir = normalize(-vPosition);
+    
+    // Ambient component
+    vec3 ambient = uAmbientColor * uDiffuseColor;
+    
+    // Calculate contribution from main (white) spotlight
+    vec3 mainLightContribution = calculateSpotlight(
+      normal,
+      viewDir,
+      uMainLightPosition,
+      uMainLightDirection,
+      uMainLightCutoff,
+      uMainLightOuterCutoff,
+      uMainLightColor
+    ) * uDiffuseColor;
+    
+    // Calculate contribution from colored spotlights
+    vec3 coloredLightsContribution = vec3(0.0);
+    for (int i = 0; i < MAX_COLORED_LIGHTS; i++) {
+      coloredLightsContribution += calculateSpotlight(
+        normal,
+        viewDir,
+        uColoredLightPositions[i],
+        uColoredLightDirections[i],
+        uColoredLightCutoffs[i],
+        uColoredLightOuterCutoffs[i],
+        uColoredLightColors[i]
+      );
     }
+    
+    // Final color
+    vec3 finalColor = ambient + mainLightContribution + coloredLightsContribution;
+    
+    // Apply gamma correction
+    finalColor = pow(finalColor, vec3(1.0/2.2));
+    
+    gl_FragColor = vec4(finalColor, 1.0);
+  }
+`;
 
-    // =================== Trackball Helper ===================
-    // Map a pointer position (mouse or touch) to a 3D vector on a virtual trackball.
-    function getTrackballVector(x, y) {
-      let rect = canvas.getBoundingClientRect();
-      // Map (x,y) to [-1, 1]
-      let sx = (x - rect.left) / rect.width * 2 - 1;
-      let sy = 1 - (y - rect.top) / rect.height * 2;
-      let z2 = 1 - sx*sx - sy*sy;
-      let sz = (z2 > 0) ? Math.sqrt(z2) : 0;
-      return vec3.normalize([sx, sy, sz]);
+// Fragment shader for cones (spotlights)
+const coneFragmentShaderSource = `
+  precision highp float;
+  
+  varying vec3 vPosition;
+  varying vec3 vNormal;
+  varying vec2 vTexCoord;
+  
+  // Cone color
+  uniform vec3 uConeColor;
+  
+  // Material properties
+  uniform vec3 uAmbientColor;
+  
+  void main() {
+    // Simple ambient lighting for the cone
+    vec3 ambient = uAmbientColor * uConeColor;
+    
+    // Very basic diffuse lighting just to give some shape to the cone
+    vec3 lightDir = normalize(vec3(0.0, 0.0, 1.0));
+    vec3 normal = normalize(vNormal);
+    float diff = max(dot(normal, lightDir), 0.0);
+    vec3 diffuse = diff * uConeColor;
+    
+    // Final color
+    vec3 finalColor = ambient + diffuse;
+    
+    // Apply gamma correction
+    finalColor = pow(finalColor, vec3(1.0/2.2));
+    
+    gl_FragColor = vec4(finalColor, 1.0);
+  }
+`;
+
+// ==================== Shader Compilation ====================
+
+function initShaders(gl) {
+  // Compile vertex shader
+  const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+  if (!vertexShader) {
+    console.error('Failed to compile vertex shader');
+    return null;
+  }
+  
+  // Compile sphere fragment shader
+  const sphereFragmentShader = createShader(gl, gl.FRAGMENT_SHADER, sphereFragmentShaderSource);
+  if (!sphereFragmentShader) {
+    console.error('Failed to compile sphere fragment shader');
+    gl.deleteShader(vertexShader);
+    return null;
+  }
+  
+  // Compile cone fragment shader
+  const coneFragmentShader = createShader(gl, gl.FRAGMENT_SHADER, coneFragmentShaderSource);
+  if (!coneFragmentShader) {
+    console.error('Failed to compile cone fragment shader');
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(sphereFragmentShader);
+    return null;
+  }
+  
+  // Create sphere shader program
+  const sphereProgram = createProgram(gl, vertexShader, sphereFragmentShader);
+  if (!sphereProgram) {
+    console.error('Failed to create sphere shader program');
+    return null;
+  }
+  
+  // Create cone shader program
+  const coneProgram = createProgram(gl, vertexShader, coneFragmentShader);
+  if (!coneProgram) {
+    console.error('Failed to create cone shader program');
+    gl.deleteProgram(sphereProgram);
+    return null;
+  }
+  
+  return {
+    sphere: sphereProgram,
+    cone: coneProgram
+  };
+}
+
+// ==================== Light Setup ====================
+
+function createLights() {
+  // Create a main white spotlight
+  const mainLight = {
+    position: [0, 0, 2],      // 2 units above on Z-axis
+    direction: [0, 0, -1],     // Pointing towards the origin
+    cutoff: Math.cos(degToRad(20)),   // 20 degree inner cone
+    outerCutoff: Math.cos(degToRad(25)), // 25 degree outer cone
+    color: [1.0, 1.0, 1.0],    // White light
+    model: Matrix4.identity()  // Initial model matrix
+  };
+  
+  // Create colored spotlights
+  const coloredLights = [
+    {
+      position: [1.5, 0, 0],     // Right side
+      direction: [-1, 0, 0],     // Pointing towards the origin
+      cutoff: Math.cos(degToRad(25)),
+      outerCutoff: Math.cos(degToRad(35)),
+      color: [1.0, 0.0, 0.0],    // Red light
+      model: Matrix4.identity()
+    },
+    {
+      position: [0, 1.5, 0],     // Top
+      direction: [0, -1, 0],     // Pointing towards the origin
+      cutoff: Math.cos(degToRad(25)),
+      outerCutoff: Math.cos(degToRad(35)),
+      color: [0.0, 1.0, 0.0],    // Green light
+      model: Matrix4.identity()
+    },
+    {
+      position: [-1.5, 0, 0],    // Left side
+      direction: [1, 0, 0],      // Pointing towards the origin
+      cutoff: Math.cos(degToRad(25)),
+      outerCutoff: Math.cos(degToRad(35)),
+      color: [0.0, 0.0, 1.0],    // Blue light
+      model: Matrix4.identity()
     }
+  ];
+  
+  return {
+    main: mainLight,
+    colored: coloredLights
+  };
+}
 
-    // =================== Interaction Event Handlers ===================
-    function pointerDown(e) {
-      e.preventDefault();
-      isDragging = true;
-      let x = e.clientX || (e.touches && e.touches[0].clientX);
-      let y = e.clientY || (e.touches && e.touches[0].clientY);
-      lastPointerPos = { x, y };
-      trackballStartVec = getTrackballVector(x, y);
-      // Check if we are clicking near one of the cones.
-      activeConeIndex = -1;
-      let rect = canvas.getBoundingClientRect();
-      for (let i = 0; i < cones.length; i++) {
-        let conePos = getConeWorldPosition(cones[i].orbit);
-        let screenPos = project(conePos);
-        let dx = screenPos.x - (x - rect.left);
-        let dy = screenPos.y - (y - rect.top);
-        if (Math.sqrt(dx*dx + dy*dy) < 20) {
-          activeConeIndex = i;
-          break;
-        }
-      }
-      activeInteraction = (activeConeIndex >= 0) ? "cone" : "sphere";
+// ==================== Lighting Uniform Setters ====================
+
+function setSphereLightUniforms(gl, program, lights, viewMatrix) {
+  // Set material properties
+  gl.uniform3f(gl.getUniformLocation(program, 'uAmbientColor'), 0.1, 0.1, 0.1);
+  gl.uniform3f(gl.getUniformLocation(program, 'uDiffuseColor'), 1.0, 1.0, 1.0);
+  gl.uniform3f(gl.getUniformLocation(program, 'uSpecularColor'), 0.7, 0.7, 0.7);
+  gl.uniform1f(gl.getUniformLocation(program, 'uShininess'), 32.0);
+  
+  // Set main light properties
+  const mainViewPos = Vector3.transformMat4(lights.main.position, viewMatrix);
+  const mainViewDir = Vector3.transformMat4Direction(lights.main.direction, viewMatrix);
+  
+  gl.uniform3fv(gl.getUniformLocation(program, 'uMainLightPosition'), new Float32Array(mainViewPos));
+  gl.uniform3fv(gl.getUniformLocation(program, 'uMainLightDirection'), new Float32Array(mainViewDir));
+  gl.uniform1f(gl.getUniformLocation(program, 'uMainLightCutoff'), lights.main.cutoff);
+  gl.uniform1f(gl.getUniformLocation(program, 'uMainLightOuterCutoff'), lights.main.outerCutoff);
+  gl.uniform3fv(gl.getUniformLocation(program, 'uMainLightColor'), new Float32Array(lights.main.color));
+  
+  // Set colored lights properties
+  const coloredLightPositions = [];
+  const coloredLightDirections = [];
+  const coloredLightCutoffs = [];
+  const coloredLightOuterCutoffs = [];
+  const coloredLightColors = [];
+  
+  for (let i = 0; i < lights.colored.length; i++) {
+    const light = lights.colored[i];
+    const viewPos = Vector3.transformMat4(light.position, viewMatrix);
+    const viewDir = Vector3.transformMat4Direction(light.direction, viewMatrix);
+    
+    coloredLightPositions.push(...viewPos);
+    coloredLightDirections.push(...viewDir);
+    coloredLightCutoffs.push(light.cutoff);
+    coloredLightOuterCutoffs.push(light.outerCutoff);
+    coloredLightColors.push(...light.color);
+  }
+  
+  gl.uniform3fv(gl.getUniformLocation(program, 'uColoredLightPositions'), new Float32Array(coloredLightPositions));
+  gl.uniform3fv(gl.getUniformLocation(program, 'uColoredLightDirections'), new Float32Array(coloredLightDirections));
+  gl.uniform1fv(gl.getUniformLocation(program, 'uColoredLightCutoffs'), new Float32Array(coloredLightCutoffs));
+  gl.uniform1fv(gl.getUniformLocation(program, 'uColoredLightOuterCutoffs'), new Float32Array(coloredLightOuterCutoffs));
+  gl.uniform3fv(gl.getUniformLocation(program, 'uColoredLightColors'), new Float32Array(coloredLightColors));
+}
+
+function setConeLightUniforms(gl, program, lightColor) {
+  gl.uniform3f(gl.getUniformLocation(program, 'uAmbientColor'), 0.1, 0.1, 0.1);
+  gl.uniform3fv(gl.getUniformLocation(program, 'uConeColor'), new Float32Array(lightColor));
+}
+
+// Helper function to transform a direction vector by a matrix
+Vector3.transformMat4Direction = function(vec, mat) {
+  // Create a point at the end of the direction vector
+  const point = [vec[0] + 0.0001, vec[1] + 0.0001, vec[2] + 0.0001];
+  
+  // Transform both the origin and the point
+  const origin = [0, 0, 0];
+  const transformedOrigin = Vector3.transformMat4(origin, mat);
+  const transformedPoint = Vector3.transformMat4(point, mat);
+  
+  // Get the new direction by subtracting and normalizing
+  const newDir = Vector3.subtract(transformedPoint, transformedOrigin);
+  return Vector3.normalize(newDir);
+};
+
+// Helper function to transform a point by a matrix
+Vector3.transformMat4 = function(vec, mat) {
+  const x = vec[0], y = vec[1], z = vec[2];
+  const w = mat[3] * x + mat[7] * y + mat[11] * z + mat[15];
+  
+  return [
+    (mat[0] * x + mat[4] * y + mat[8] * z + mat[12]) / w,
+    (mat[1] * x + mat[5] * y + mat[9] * z + mat[13]) / w,
+    (mat[2] * x + mat[6] * y + mat[10] * z + mat[14]) / w
+  ];
+};
+
+
+
+
+
+
+
+
+
+
+
+
+// ====================Interaction System ====================
+
+// Object to track the current state of user interaction
+const InteractionState = {
+  isMouseDown: false,
+  lastMouseX: 0,
+  lastMouseY: 0,
+  isDragging: false,
+  currentObject: null, // 'sphere' or index of light cone (0 = main, 1-3 = colored)
+  rotationQuaternion: Quaternion.create(0, 0, 0, 1),
+  inertia: {
+    active: false,
+    velocity: [0, 0], // Angular velocity in radians per frame
+    decay: 0.95 // Decay factor (0 = immediate stop, 1 = no decay)
+  },
+  raycaster: {
+    origin: [0, 0, 0],
+    direction: [0, 0, 0]
+  },
+  initialContactPoint: [0, 0, 0] // Initial point of contact on the sphere
+};
+
+// ==================== Mouse/Touch Event Handlers ====================
+
+function setupInteraction(canvas, scene) {
+  // Setup mouse event listeners
+  canvas.addEventListener('mousedown', (event) => onMouseDown(event, canvas, scene));
+  canvas.addEventListener('mousemove', (event) => onMouseMove(event, canvas, scene));
+  canvas.addEventListener('mouseup', onMouseUp);
+  canvas.addEventListener('mouseleave', onMouseUp);
+  
+  // Setup touch event listeners for mobile
+  canvas.addEventListener('touchstart', (event) => {
+    event.preventDefault();
+    const touch = event.touches[0];
+    const mouseEvent = new MouseEvent('mousedown', {
+      clientX: touch.clientX,
+      clientY: touch.clientY
+    });
+    onMouseDown(mouseEvent, canvas, scene);
+  });
+  
+  canvas.addEventListener('touchmove', (event) => {
+    event.preventDefault();
+    const touch = event.touches[0];
+    const mouseEvent = new MouseEvent('mousemove', {
+      clientX: touch.clientX,
+      clientY: touch.clientY
+    });
+    onMouseMove(mouseEvent, canvas, scene);
+  });
+  
+  canvas.addEventListener('touchend', (event) => {
+    event.preventDefault();
+    onMouseUp();
+  });
+}
+
+function onMouseDown(event, canvas, scene) {
+  event.preventDefault();
+  
+  InteractionState.isMouseDown = true;
+  InteractionState.lastMouseX = event.clientX;
+  InteractionState.lastMouseY = event.clientY;
+  InteractionState.isDragging = false;
+  
+  // Stop any ongoing inertia
+  InteractionState.inertia.active = false;
+  
+  // Determine which object was clicked (sphere or one of the cones)
+  const rect = canvas.getBoundingClientRect();
+  const clipX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const clipY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  
+  // Create a ray from camera
+  const ray = createRayFromCamera(clipX, clipY, scene.camera);
+  InteractionState.raycaster.origin = ray.origin;
+  InteractionState.raycaster.direction = ray.direction;
+  
+  // First check for intersection with cones (they have priority in picking)
+  let hitCone = false;
+  let closestConeDistance = Infinity;
+  let closestConeIndex = -1;
+  
+  // Check main light cone first
+  const mainLightPos = Vector3.transformMat4(
+    scene.lights.main.position, 
+    scene.sphere.model
+  );
+  const mainConeIntersection = raySphereIntersection(
+    ray.origin, 
+    ray.direction, 
+    mainLightPos, 
+    0.2 // Small sphere around cone tip for easier picking
+  );
+  
+  if (mainConeIntersection) {
+    hitCone = true;
+    closestConeDistance = mainConeIntersection.distance;
+    closestConeIndex = 0; // 0 for main light
+  }
+  
+  // Check each colored light cone
+  for (let i = 0; i < scene.lights.colored.length; i++) {
+    const lightPos = Vector3.transformMat4(
+      scene.lights.colored[i].position, 
+      scene.sphere.model
+    );
+    
+    const coneIntersection = raySphereIntersection(
+      ray.origin, 
+      ray.direction, 
+      lightPos, 
+      0.2 // Small sphere for picking
+    );
+    
+    if (coneIntersection && coneIntersection.distance < closestConeDistance) {
+      hitCone = true;
+      closestConeDistance = coneIntersection.distance;
+      closestConeIndex = i + 1; // +1 because index 0 is the main light
     }
+  }
+  
+  // If we hit a cone, select it
+  if (hitCone) {
+    InteractionState.currentObject = closestConeIndex;
+    return;
+  }
+  
+  // Check for intersection with the sphere
+  const sphereIntersection = raySphereIntersection(
+    ray.origin, 
+    ray.direction, 
+    [0, 0, 0], // Sphere is at origin
+    1.0 // Radius of 1
+  );
+  
+  if (sphereIntersection) {
+    InteractionState.currentObject = 'sphere';
+    InteractionState.initialContactPoint = sphereIntersection.point;
+    return;
+  }
+  
+  // If we're here, nothing was clicked
+  InteractionState.currentObject = null;
+}
 
-    function pointerMove(e) {
-      if (!isDragging) return;
-      e.preventDefault();
-      let x = e.clientX || (e.touches && e.touches[0].clientX);
-      let y = e.clientY || (e.touches && e.touches[0].clientY);
-      let currentVec = getTrackballVector(x, y);
-      let axis = vec3.cross(trackballStartVec, currentVec);
-      let dotVal = vec3.dot(trackballStartVec, currentVec);
-      dotVal = Math.max(-1, Math.min(1, dotVal));
-      let angle = Math.acos(dotVal);
-      if (isNaN(angle)) angle = 0;
-      let rotMat = mat4.rotation(angle, axis);
-      if (activeInteraction === "sphere") {
-        sphereRotation = mat4.multiply(rotMat, sphereRotation);
-        sphereAngularVelocity = { axis: axis, angle: angle };
-      } else if (activeInteraction === "cone") {
-        let orbit = cones[activeConeIndex].orbit;
-        let newOrbit = [
-          rotMat[0]*orbit[0] + rotMat[4]*orbit[1] + rotMat[8]*orbit[2],
-          rotMat[1]*orbit[0] + rotMat[5]*orbit[1] + rotMat[9]*orbit[2],
-          rotMat[2]*orbit[0] + rotMat[6]*orbit[1] + rotMat[10]*orbit[2]
-        ];
-        cones[activeConeIndex].orbit = vec3.normalize(newOrbit);
-      }
-      trackballStartVec = currentVec;
-      lastPointerPos = { x, y };
+function onMouseMove(event, canvas, scene) {
+  if (!InteractionState.isMouseDown) return;
+  
+  const currentX = event.clientX;
+  const currentY = event.clientY;
+  
+  // Calculate how much the mouse has moved
+  const deltaX = currentX - InteractionState.lastMouseX;
+  const deltaY = currentY - InteractionState.lastMouseY;
+  
+  if (!InteractionState.isDragging && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
+    InteractionState.isDragging = true;
+  }
+  
+  if (InteractionState.isDragging && InteractionState.currentObject !== null) {
+    if (InteractionState.currentObject === 'sphere') {
+      // Rotate the sphere with trackball rotation
+      rotateSphere(deltaX, deltaY, canvas, scene);
+    } else {
+      // Rotate a specific cone around the sphere
+      rotateCone(InteractionState.currentObject, deltaX, deltaY, scene);
     }
+  }
+  
+  // Store current mouse position for next move event
+  InteractionState.lastMouseX = currentX;
+  InteractionState.lastMouseY = currentY;
+  
+  // Store velocity for inertia
+  if (InteractionState.currentObject === 'sphere') {
+    InteractionState.inertia.velocity = [
+      deltaX * 0.005, 
+      deltaY * 0.005
+    ];
+  }
+}
 
-    function pointerUp(e) {
-      isDragging = false;
-      activeInteraction = null;
-      activeConeIndex = -1;
+function onMouseUp() {
+  if (InteractionState.isDragging && 
+      InteractionState.currentObject === 'sphere' && 
+      (Math.abs(InteractionState.inertia.velocity[0]) > 0.001 || 
+       Math.abs(InteractionState.inertia.velocity[1]) > 0.001)) {
+    InteractionState.inertia.active = true;
+  }
+  
+  InteractionState.isMouseDown = false;
+  InteractionState.isDragging = false;
+}
+
+// ==================== Rotation Functions ====================
+
+function rotateSphere(deltaX, deltaY, canvas, scene) {
+  // Get the canvas dimensions
+  const canvasWidth = canvas.width;
+  const canvasHeight = canvas.height;
+  
+  // Calculate rotation angle based on mouse movement
+  const angleX = (2 * Math.PI * deltaY) / canvasHeight;
+  const angleY = (2 * Math.PI * deltaX) / canvasWidth;
+  
+  // Create rotation quaternions for x and y rotations
+  const rotationX = Quaternion.fromAxisAngle([1, 0, 0], angleX);
+  const rotationY = Quaternion.fromAxisAngle([0, 1, 0], angleY);
+  
+  // Combine rotations
+  const rotation = Quaternion.multiply(rotationY, rotationX);
+  
+  // Update the sphere's rotation quaternion
+  InteractionState.rotationQuaternion = Quaternion.multiply(
+    rotation, 
+    InteractionState.rotationQuaternion
+  );
+  
+  // Convert quaternion to rotation matrix
+  const rotationMatrix = Quaternion.toMatrix(
+    Quaternion.normalize(InteractionState.rotationQuaternion)
+  );
+  
+  // Update sphere model matrix
+  scene.sphere.model = rotationMatrix;
+  
+  // Rotate lights with the sphere
+  updateLightsWithSphere(scene);
+}
+
+function rotateCone(coneIndex, deltaX, deltaY, scene) {
+  const rotationSpeed = 0.01;
+  
+  // Get the current light object
+  let light;
+  if (coneIndex === 0) {
+    light = scene.lights.main;
+  } else {
+    light = scene.lights.colored[coneIndex - 1];
+  }
+  
+  // Calculate the rotation angles
+  const angleX = deltaY * rotationSpeed;
+  const angleY = deltaX * rotationSpeed;
+  
+  // Get the current light position and direction
+  let position = Vector3.copy(light.position);
+  let direction = Vector3.copy(light.direction);
+  
+  // Create rotation matrices
+  let rotationMatrix = Matrix4.identity();
+  rotationMatrix = Matrix4.rotateY(rotationMatrix, angleY);
+  rotationMatrix = Matrix4.rotateX(rotationMatrix, angleX);
+  
+  // Apply rotation to light position and direction
+  position = Vector3.transformMat4(position, rotationMatrix);
+  direction = Vector3.transformMat4Direction(direction, rotationMatrix);
+  
+  // Normalize the light position to maintain constant distance
+  const length = Vector3.length(position);
+  position = Vector3.scale(Vector3.normalize(position), 1.5); // Fixed distance of 1.5
+  
+  // Update the light position and direction
+  if (coneIndex === 0) {
+    scene.lights.main.position = position;
+    scene.lights.main.direction = Vector3.normalize(
+      Vector3.scale(position, -1)
+    ); // Point towards origin
+  } else {
+    scene.lights.colored[coneIndex - 1].position = position;
+    scene.lights.colored[coneIndex - 1].direction = Vector3.normalize(
+      Vector3.scale(position, -1)
+    ); // Point towards origin
+  }
+}
+
+function updateLightsWithSphere(scene) {
+  // Get the sphere's model matrix
+  const sphereModel = scene.sphere.model;
+  
+  // Update main light
+  const mainLightOriginalPos = [0, 0, 2]; // Original position
+  const mainLightOriginalDir = [0, 0, -1]; // Original direction
+  
+  scene.lights.main.position = Vector3.transformMat4(
+    mainLightOriginalPos, 
+    sphereModel
+  );
+  scene.lights.main.direction = Vector3.transformMat4Direction(
+    mainLightOriginalDir, 
+    sphereModel
+  );
+  
+  // Update colored lights
+  const originalPositions = [
+    [1.5, 0, 0],   // Right (red)
+    [0, 1.5, 0],   // Top (green)
+    [-1.5, 0, 0]   // Left (blue)
+  ];
+  
+  const originalDirections = [
+    [-1, 0, 0],    // Pointing left
+    [0, -1, 0],    // Pointing down
+    [1, 0, 0]      // Pointing right
+  ];
+  
+  for (let i = 0; i < scene.lights.colored.length; i++) {
+    scene.lights.colored[i].position = Vector3.transformMat4(
+      originalPositions[i], 
+      sphereModel
+    );
+    scene.lights.colored[i].direction = Vector3.transformMat4Direction(
+      originalDirections[i], 
+      sphereModel
+    );
+  }
+}
+
+// ==================== Inertia and Physics ====================
+
+function updateInertia(scene) {
+  if (!InteractionState.inertia.active) return;
+  
+  // Apply decay to velocity
+  InteractionState.inertia.velocity[0] *= InteractionState.inertia.decay;
+  InteractionState.inertia.velocity[1] *= InteractionState.inertia.decay;
+  
+  // Stop inertia if velocity becomes too small
+  if (Math.abs(InteractionState.inertia.velocity[0]) < 0.0001 && 
+      Math.abs(InteractionState.inertia.velocity[1]) < 0.0001) {
+    InteractionState.inertia.active = false;
+    return;
+  }
+  
+  // Continue rotation with current velocity
+  rotateSphere(
+    InteractionState.inertia.velocity[0] * 20, 
+    InteractionState.inertia.velocity[1] * 20, 
+    { width: 1, height: 1 }, // Dummy canvas for scaling
+    scene
+  );
+}
+
+// ==================== Raycasting Utilities ====================
+
+function createRayFromCamera(clipX, clipY, camera) {
+  // Get the inverse of the projection matrix
+  const projInverse = Matrix4.inverse(camera.projection);
+  
+  // Get the inverse of the view matrix
+  const viewInverse = Matrix4.inverse(camera.view);
+  
+  // Create a point in clip space
+  const clipPoint = [clipX, clipY, -1, 1]; // Near plane
+  
+  // Transform to view space
+  const viewPoint = Vector4.transformMat4(clipPoint, projInverse);
+  viewPoint[2] = -1; // Reset z to -1
+  viewPoint[3] = 0;  // Set w to 0 for direction vector
+  
+  // Transform to world space
+  const worldPoint = Vector4.transformMat4(viewPoint, viewInverse);
+  
+  // Normalize the direction
+  const direction = Vector3.normalize([worldPoint[0], worldPoint[1], worldPoint[2]]);
+  
+  // Origin is the camera position
+  const origin = [
+    camera.position[0],
+    camera.position[1],
+    camera.position[2]
+  ];
+  
+  return {
+    origin: origin,
+    direction: direction
+  };
+}
+
+// Helper function for Vector4 transform
+const Vector4 = {
+  transformMat4: function(vec, mat) {
+    const x = vec[0], y = vec[1], z = vec[2], w = vec[3];
+    
+    return [
+      mat[0] * x + mat[4] * y + mat[8] * z + mat[12] * w,
+      mat[1] * x + mat[5] * y + mat[9] * z + mat[13] * w,
+      mat[2] * x + mat[6] * y + mat[10] * z + mat[14] * w,
+      mat[3] * x + mat[7] * y + mat[11] * z + mat[15] * w
+    ];
+  }
+};
+
+function raySphereIntersection(rayOrigin, rayDirection, sphereCenter, sphereRadius) {
+  // Calculate the vector from ray origin to sphere center
+  const oc = Vector3.subtract(rayOrigin, sphereCenter);
+  
+  // Calculate quadratic equation coefficients
+  const a = Vector3.dot(rayDirection, rayDirection);
+  const b = 2.0 * Vector3.dot(oc, rayDirection);
+  const c = Vector3.dot(oc, oc) - sphereRadius * sphereRadius;
+  
+  // Calculate discriminant
+  const discriminant = b * b - 4 * a * c;
+  
+  if (discriminant < 0) {
+    // No intersection
+    return null;
+  }
+  
+  // Calculate the two intersection points
+  const t1 = (-b - Math.sqrt(discriminant)) / (2.0 * a);
+  const t2 = (-b + Math.sqrt(discriminant)) / (2.0 * a);
+  
+  // Return the closest intersection point in front of the ray
+  let t = t1;
+  if (t < 0) {
+    t = t2; // If t1 is behind the ray, try t2
+    if (t < 0) {
+      return null; // Both intersections are behind the ray
     }
+  }
+  
+  // Calculate the intersection point
+  const point = [
+    rayOrigin[0] + rayDirection[0] * t,
+    rayOrigin[1] + rayDirection[1] * t,
+    rayOrigin[2] + rayDirection[2] * t
+  ];
+  
+  // Calculate the normal at the intersection point
+  const normal = Vector3.normalize(
+    Vector3.subtract(point, sphereCenter)
+  );
+  
+  return {
+    point: point,
+    normal: normal,
+    distance: t
+  };
+}
 
-    // =================== Utility: Project a 3D Point to 2D ===================
-    function project(point) {
-      // Use the same MVP as for the sphere.
-      let aspect = canvas.width / canvas.height;
-      let proj = mat4.perspective(fov, aspect, near, far);
-      let eye = [0, 0, distance];
-      let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
-      // The sphere’s model includes both its rotation and scale.
-      let model = mat4.multiply(sphereRotation, mat4.scale(sphereScale, sphereScale, sphereScale));
-      let mvp = mat4.multiply(proj, mat4.multiply(view, model));
-      // Our math functions use row–major order, so we need to treat mvp as column–major
-      // (i.e. effectively use the transposed matrix for vector multiplication).
-      let cmvp = transposeMatrix(mvp);
-      let p = [point[0], point[1], point[2], 1];
-      let tp = [0, 0, 0, 0];
-      for (let i = 0; i < 4; i++) {
-        tp[i] = p[0]*cmvp[i*4+0] + p[1]*cmvp[i*4+1] + p[2]*cmvp[i*4+2] + p[3]*cmvp[i*4+3];
-      }
-      if (tp[3] !== 0) {
-        tp[0] /= tp[3];
-        tp[1] /= tp[3];
-      }
-      return {
-        x: (tp[0] * 0.5 + 0.5) * canvas.width,
-        y: ((-tp[1]) * 0.5 + 0.5) * canvas.height
-      };
-    }
 
-    // =================== Cone World Position ===================
-    // Given a cone’s orbit vector, compute its world position.
-    // The cone is attached to the sphere (which is rotated by sphereRotation)
-    // and lies at a distance of (sphereScale + offsetWorld) from the center.
-    function getConeWorldPosition(orbit) {
-      let x = sphereRotation[0]*orbit[0] + sphereRotation[4]*orbit[1] + sphereRotation[8]*orbit[2];
-      let y = sphereRotation[1]*orbit[0] + sphereRotation[5]*orbit[1] + sphereRotation[9]*orbit[2];
-      let z = sphereRotation[2]*orbit[0] + sphereRotation[6]*orbit[1] + sphereRotation[10]*orbit[2];
-      return [x * coneDistance, y * coneDistance, z * coneDistance];
-    }
 
-    // =================== Resize and Scale Setup ===================
-    // We want the sphere’s projected radius (in pixels) to be at most 300px.
-    // When the canvas is full–screen the scale is computed so that, with our perspective,
-    // the sphere (a unit sphere scaled by sphereScale) projects to a radius:
-    //   projectedRadius = sphereScale * (f/distance) * (canvas.height/2)
-    // Solving for sphereScale when projectedRadius = target:
-    //   sphereScale = target * distance / (f*(canvas.height/2))
-    // We choose target = min(300, 90% of half the canvas height) so that on small screens it scales down.
-    function updateSizes() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      let f = 1 / Math.tan(fov/2);
-      // target projected radius in pixels:
-      let target = Math.min(300, (canvas.height/2)*0.9);
-      sphereScale = target * distance / (f*(canvas.height/2));
-      // Compute the world–space offset corresponding to 50px.
-      offsetWorld = 50 * distance / (f*(canvas.height/2));
-      coneDistance = sphereScale + offsetWorld;
-    }
-    window.addEventListener("resize", updateSizes);
 
-    // =================== Main Render Loop ===================
-    let lastTime = 0;
-    function render(time) {
-      let deltaTime = (time - lastTime) / 1000;
-      lastTime = time;
-      // Apply inertia for sphere rotation.
-      if (!isDragging && sphereAngularVelocity) {
-        let friction = 0.98;
-        sphereAngularVelocity.angle *= friction;
-        if (sphereAngularVelocity.angle < 0.001) {
-          sphereAngularVelocity = null;
-        } else {
-          let rotMat = mat4.rotation(sphereAngularVelocity.angle, sphereAngularVelocity.axis);
-          sphereRotation = mat4.multiply(rotMat, sphereRotation);
-        }
-      }
 
-      gl.clearColor(1, 1, 1, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      gl.enable(gl.DEPTH_TEST);
 
-      let aspect = canvas.width / canvas.height;
-      let proj = mat4.perspective(fov, aspect, near, far);
-      let eye = [0, 0, distance];
-      let view = mat4.lookAt(eye, [0, 0, 0], [0, 1, 0]);
 
-      // ===== Draw the Sphere =====
-      gl.useProgram(sphereProgram);
-      let uMVP = gl.getUniformLocation(sphereProgram, "uMVP");
-      let uModel = gl.getUniformLocation(sphereProgram, "uModel");
-      let uView = gl.getUniformLocation(sphereProgram, "uView");
-      let uLightPositions = gl.getUniformLocation(sphereProgram, "uLightPositions");
-      let uLightColors = gl.getUniformLocation(sphereProgram, "uLightColors");
 
-      // The sphere’s model matrix is its rotation combined with its scale.
-      let scaleMat = mat4.scale(sphereScale, sphereScale, sphereScale);
-      let model = mat4.multiply(sphereRotation, scaleMat);
-      let mvp = mat4.multiply(proj, mat4.multiply(view, model));
-      // Transpose our row–major matrices into column–major order for WebGL.
-      gl.uniformMatrix4fv(uMVP, false, new Float32Array(transposeMatrix(mvp)));
-      gl.uniformMatrix4fv(uModel, false, new Float32Array(transposeMatrix(model)));
-      gl.uniformMatrix4fv(uView, false, new Float32Array(transposeMatrix(view)));
+// ==================== Main Application ====================
 
-      // Compute light positions from the cones.
-      let lightPositions = [];
-      let lightColors = [];
-      for (let i = 0; i < cones.length; i++) {
-        let pos = getConeWorldPosition(cones[i].orbit);
-        lightPositions.push(pos[0], pos[1], pos[2]);
-        lightColors.push(cones[i].color[0], cones[i].color[1], cones[i].color[2]);
-      }
-      gl.uniform3fv(uLightPositions, new Float32Array(lightPositions));
-      gl.uniform3fv(uLightColors, new Float32Array(lightColors));
+// Scene object to hold all scene data
+let scene = {
+  sphere: {
+    mesh: null,
+    model: Matrix4.identity()
+  },
+  cones: [],
+  lights: null,
+  camera: {
+    position: [0, 0, 5],
+    target: [0, 0, 0],
+    up: [0, 1, 0],
+    fov: 45,
+    aspect: 1,
+    near: 0.1,
+    far: 100,
+    view: null,
+    projection: null
+  },
+  shaders: null,
+  time: 0,
+  gl: null
+};
 
-      // Bind sphere buffers and attributes.
-      let aPosition = gl.getAttribLocation(sphereProgram, "aPosition");
-      gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuf
+// Main initialization function
+function init() {
+  // Get the canvas element
+  const canvas = document.getElementById('webgl-canvas');
+  
+  // Make canvas responsive to window size
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    scene.camera.aspect = canvas.width / canvas.height;
+    scene.gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+  
+  // Set initial canvas size
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  
+  // Listen for window resize events
+  window.addEventListener('resize', resizeCanvas);
+  
+  // Initialize WebGL
+  const gl = initGL(canvas);
+  if (!gl) {
+    return;
+  }
+  scene.gl = gl;
+  
+  // Initialize shaders
+  const shaders = initShaders(gl);
+  if (!shaders) {
+    return;
+  }
+  scene.shaders = shaders;
+  
+  // Create sphere mesh
+  const sphereMesh = createSphereMesh(gl, 1.0, 32, 32);
+  scene.sphere.mesh = sphereMesh;
+  
+  // Create lights
+  scene.lights = createLights();
+  
+  // Create cone meshes for each light
+  // Main light cone (white)
+  scene.cones.push({
+    mesh: createConeMesh(gl, 0.2, 0.5, 16),
+    color: scene.lights.main.color,
+    type: 'main'
+  });
+  
+  // Colored light cones
+  for (let i = 0; i < scene.lights.colored.length; i++) {
+    scene.cones.push({
+      mesh: createConeMesh(gl, 0.2, 0.5, 16),
+      color: scene.lights.colored[i].color,
+      type: 'colored',
+      index: i
+    });
+  }
+  
+  // Set up camera matrices
+  updateCameraMatrices();
+  
+  // Set up user interaction
+  setupInteraction(canvas, scene);
+  
+  // Start the render loop
+  requestAnimationFrame(render);
+}
+
+// Update camera matrices
+function updateCameraMatrices() {
+  // Update view matrix
+  scene.camera.view = Matrix4.lookAt(
+    scene.camera.position,
+    scene.camera.target,
+    scene.camera.up
+  );
+  
+  // Update projection matrix
+  scene.camera.projection = Matrix4.perspective(
+    degToRad(scene.camera.fov),
+    scene.camera.aspect,
+    scene.camera.near,
+    scene.camera.far
+  );
+}
+
+// Main render function
+function render() {
+  const gl = scene.gl;
+  
+  // Clear the canvas
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  
+  // Update time
+  scene.time += 0.016; // Approximately 60 fps
+  
+  // Update inertia if active
+  updateInertia(scene);
+  
+  // Update camera matrices
+  updateCameraMatrices();
+  
+  // Render sphere
+  renderSphere();
+  
+  // Render cones
+  renderCones();
+  
+  // Request next frame
+  requestAnimationFrame(render);
+}
+
+// Render the sphere
+function renderSphere() {
+  const gl = scene.gl;
+  const program = scene.shaders.sphere;
+  
+  // Use sphere shader program
+  gl.useProgram(program);
+  
+  // Set light uniforms
+  setSphereLightUniforms(gl, program, scene.lights, scene.camera.view);
+  
+  // Render the sphere with its model matrix
+  renderMesh(
+    gl,
+    scene.sphere.mesh,
+    program,
+    scene.sphere.model,
+    scene.camera.view,
+    scene.camera.projection
+  );
+}
+
+// Render the light cones
+function renderCones() {
+  const gl = scene.gl;
+  const program = scene.shaders.cone;
+  
+  // Use cone shader program
+  gl.useProgram(program);
+  
+  // Render main light cone
+  renderLightCone(0);
+  
+  // Render colored light cones
+  for (let i = 0; i < scene.lights.colored.length; i++) {
+    renderLightCone(i + 1);
+  }
+}
+
+// Render a specific light cone
+function renderLightCone(index) {
+  const gl = scene.gl;
+  const program = scene.shaders.cone;
+  const cone = scene.cones[index];
+  
+  // Set cone color uniform
+  setConeLightUniforms(gl, program, cone.color);
+  
+  // Calculate cone model matrix
+  let lightPos, lightDir;
+  
+  if (index === 0) {
+    // Main light
+    lightPos = scene.lights.main.position;
+    lightDir = scene.lights.main.direction;
+  } else {
+    // Colored light
+    lightPos = scene.lights.colored[index - 1].position;
+    lightDir = scene.lights.colored[index - 1].direction;
+  }
+  
+  // Create model matrix for cone
+  // First, create translation matrix to position cone at light position
+  let modelMatrix = Matrix4.identity();
+  modelMatrix = Matrix4.translate(modelMatrix, lightPos);
+  
+  // Next, calculate rotation to point cone along light direction
+  // This requires a bit of math to align the cone's up vector with the light direction
+  const coneUpVector = [0, 1, 0]; // Cone points up in model space
+  
+  // Calculate the rotation axis and angle between up vector and light direction
+  const rotationAxis = Vector3.cross(coneUpVector, Vector3.normalize(lightDir));
+  let rotationAngle = Math.acos(Vector3.dot(coneUpVector, Vector3.normalize(lightDir)));
+  
+  // Apply rotation if needed
+  if (Vector3.length(rotationAxis) > 0.001) {
+    const rotationQuat = Quaternion.fromAxisAngle(
+      Vector3.normalize(rotationAxis),
+      -rotationAngle
+    );
+    const rotationMat = Quaternion.toMatrix(rotationQuat);
+    modelMatrix = Matrix4.multiply(modelMatrix, rotationMat);
+  }
+  
+  // Render the cone with calculated model matrix
+  renderMesh(
+    gl,
+    cone.mesh,
+    program,
+    modelMatrix,
+    scene.camera.view,
+    scene.camera.projection
+  );
+}
+
+// When DOM is loaded, initialize the application
+window.onload = init;
+
+     </script>
+   </body>
+   </html>
