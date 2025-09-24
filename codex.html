@@ -20,57 +20,75 @@
     uniform mat4 uModelViewMatrix;
     uniform mat4 uProjectionMatrix;
     uniform mat4 uNormalMatrix;
-    uniform highp vec3 uLightPositionView; // ADDED highp
+
+    const int MAX_LIGHTS = 3;
+    uniform int uLightCount;
+    uniform highp vec3 uLightPositionsView[MAX_LIGHTS];
+    uniform highp vec3 uLightColors[MAX_LIGHTS];
 
     varying highp vec3 vLighting;
-    varying highp vec3 vNormalView;   
-    varying highp vec3 vPositionView; 
+    varying highp vec3 vNormalView;
+    varying highp vec3 vPositionView;
 
     void main(void) {
-        // ... (rest of vsSource is the same)
         gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
         vPositionView = vec3(uModelViewMatrix * aVertexPosition);
         vNormalView = normalize(vec3(uNormalMatrix * vec4(aVertexNormal, 0.0)));
-        highp vec3 ambientLight = vec3(0.2, 0.2, 0.2); 
-        highp vec3 diffuseLightColor = vec3(1.0, 1.0, 1.0);
-        highp vec3 lightDirection = normalize(uLightPositionView - vPositionView);
-        highp float diffuseIntensity = max(dot(vNormalView, lightDirection), 0.0);
-        vLighting = ambientLight + (diffuseLightColor * diffuseIntensity);
+        highp vec3 ambientLight = vec3(0.2, 0.2, 0.2);
+        highp vec3 diffuseAccumulation = vec3(0.0, 0.0, 0.0);
+        for (int i = 0; i < MAX_LIGHTS; ++i) {
+            if (i >= uLightCount) {
+                break;
+            }
+            highp vec3 lightDirection = normalize(uLightPositionsView[i] - vPositionView);
+            highp float diffuseIntensity = max(dot(vNormalView, lightDirection), 0.0);
+            diffuseAccumulation += uLightColors[i] * diffuseIntensity;
+        }
+        vLighting = ambientLight + diffuseAccumulation;
     }
 `;
 const fsSource = `
     precision mediump float; // Default for most things in FS
 
-    varying highp vec3 vLighting; 
-    varying highp vec3 vNormalView;   
-    varying highp vec3 vPositionView; 
+    varying highp vec3 vLighting;
+    varying highp vec3 vNormalView;
+    varying highp vec3 vPositionView;
 
     uniform vec4 uColor;
     uniform bool uUseLighting;
-    uniform highp vec3 uLightPositionView; // ADDED highp
+
+    const int MAX_LIGHTS = 3;
+    uniform int uLightCount;
+    uniform highp vec3 uLightPositionsView[MAX_LIGHTS];
+    uniform highp vec3 uLightColors[MAX_LIGHTS];
 
     // Halo Effect Uniforms
     uniform highp vec3 uHaloColor;        // Also good to be highp
     uniform highp float uHaloIntensity;   // Floats also inherit default or can be specified
-    uniform highp float uHaloSharpness;   
-    uniform highp float uBehindFactorPower; 
+    uniform highp float uHaloSharpness;
+    uniform highp float uBehindFactorPower;
 
     void main(void) {
-        // ... (rest of fsSource is the same)
         vec3 finalColor = vec3(0.0);
         if (uUseLighting) {
             finalColor = uColor.rgb * vLighting;
         } else {
             finalColor = uColor.rgb;
         }
-        if (uUseLighting) { 
-            vec3 viewDir = normalize(-vPositionView);
-            float rimDot = abs(dot(viewDir, vNormalView)); 
-            float rimFactor = pow(1.0 - rimDot, uHaloSharpness);
-            vec3 lightDirFromFragment = normalize(uLightPositionView - vPositionView);
-            float lightBehindFragmentScore = -dot(viewDir, lightDirFromFragment); 
-            float behindFactor = pow(max(0.0, lightBehindFragmentScore), uBehindFactorPower);
-            vec3 haloContribution = uHaloColor * rimFactor * behindFactor * uHaloIntensity;
+        if (uUseLighting) {
+            highp vec3 viewDir = normalize(-vPositionView);
+            highp float rimDot = abs(dot(viewDir, vNormalView));
+            highp float rimFactor = pow(1.0 - rimDot, uHaloSharpness);
+            highp float accumulatedBehindFactor = 0.0;
+            for (int i = 0; i < MAX_LIGHTS; ++i) {
+                if (i >= uLightCount) {
+                    break;
+                }
+                highp vec3 lightDirFromFragment = normalize(uLightPositionsView[i] - vPositionView);
+                highp float lightBehindFragmentScore = -dot(viewDir, lightDirFromFragment);
+                accumulatedBehindFactor += pow(max(0.0, lightBehindFragmentScore), uBehindFactorPower);
+            }
+            vec3 haloContribution = uHaloColor * rimFactor * accumulatedBehindFactor * uHaloIntensity;
             finalColor += haloContribution;
         }
         gl_FragColor = vec4(finalColor, uColor.a);
@@ -95,6 +113,12 @@ const fsSource = `
         const satelliteConeHeight = satelliteConeRadius * 2.0;
         const satelliteConeSegments = 24;
         const satelliteGuidanceRadius = 4.0;
+
+        const lightSources = [
+            { color: [1.0, 0.0, 0.0], azimuthOffset: 0.0, inclinationOffset: 0.0 },
+            { color: [0.0, 1.0, 0.0], azimuthOffset: (2 * Math.PI) / 3, inclinationOffset: 0.0 },
+            { color: [0.0, 0.0, 1.0], azimuthOffset: (4 * Math.PI) / 3, inclinationOffset: 0.0 },
+        ];
 
         let satelliteAzimuth = Math.PI / 4;    
         let satelliteInclination = Math.PI / 3; 
@@ -137,13 +161,15 @@ const fsSource = `
                     vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'), 
                     vertexNormal: gl.getAttribLocation(shaderProgram, 'aVertexNormal'), 
                 },
-                uniformLocations: { 
-                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'), 
-                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'), 
-                    normalMatrix: gl.getUniformLocation(shaderProgram, 'uNormalMatrix'), 
-                    color: gl.getUniformLocation(shaderProgram, 'uColor'), 
-                    useLighting: gl.getUniformLocation(shaderProgram, 'uUseLighting'), 
-                    lightPositionView: gl.getUniformLocation(shaderProgram, 'uLightPositionView'),
+                uniformLocations: {
+                    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
+                    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
+                    normalMatrix: gl.getUniformLocation(shaderProgram, 'uNormalMatrix'),
+                    color: gl.getUniformLocation(shaderProgram, 'uColor'),
+                    useLighting: gl.getUniformLocation(shaderProgram, 'uUseLighting'),
+                    lightPositionsView: gl.getUniformLocation(shaderProgram, 'uLightPositionsView[0]'),
+                    lightColors: gl.getUniformLocation(shaderProgram, 'uLightColors[0]'),
+                    lightCount: gl.getUniformLocation(shaderProgram, 'uLightCount'),
                     // Halo Uniforms
                     haloColor: gl.getUniformLocation(shaderProgram, 'uHaloColor'),
                     haloIntensity: gl.getUniformLocation(shaderProgram, 'uHaloIntensity'),
@@ -315,6 +341,100 @@ const fsSource = `
             requestAnimationFrame(render);
         }
 
+        function buildConeOrientationMatrix(rotationMatrix, position) {
+            mat4.identity(rotationMatrix);
+            const directionLength = Math.hypot(position[0], position[1], position[2]);
+            if (directionLength <= 1e-5) {
+                return false;
+            }
+
+            let axisY = [
+                -position[0] / directionLength,
+                -position[1] / directionLength,
+                -position[2] / directionLength,
+            ];
+            const axisYLength = Math.hypot(axisY[0], axisY[1], axisY[2]);
+            if (axisYLength > 1e-5) {
+                axisY = [
+                    axisY[0] / axisYLength,
+                    axisY[1] / axisYLength,
+                    axisY[2] / axisYLength,
+                ];
+            }
+
+            let referenceForward = [0, 0, 1];
+            const axisDotRef = axisY[0] * referenceForward[0] + axisY[1] * referenceForward[1] + axisY[2] * referenceForward[2];
+            if (Math.abs(axisDotRef) > 0.999) {
+                referenceForward = [1, 0, 0];
+            }
+
+            let right = [
+                axisY[1] * referenceForward[2] - axisY[2] * referenceForward[1],
+                axisY[2] * referenceForward[0] - axisY[0] * referenceForward[2],
+                axisY[0] * referenceForward[1] - axisY[1] * referenceForward[0],
+            ];
+            let rightLength = Math.hypot(right[0], right[1], right[2]);
+            if (rightLength < 1e-5) {
+                right = [1, 0, 0];
+                rightLength = 1;
+            }
+            right = [right[0] / rightLength, right[1] / rightLength, right[2] / rightLength];
+
+            let forward = [
+                right[1] * axisY[2] - right[2] * axisY[1],
+                right[2] * axisY[0] - right[0] * axisY[2],
+                right[0] * axisY[1] - right[1] * axisY[0],
+            ];
+            let forwardLength = Math.hypot(forward[0], forward[1], forward[2]);
+            if (forwardLength < 1e-5) {
+                forward = [0, 0, 1];
+                forwardLength = 1;
+            }
+            forward = [forward[0] / forwardLength, forward[1] / forwardLength, forward[2] / forwardLength];
+
+            right = [
+                axisY[1] * forward[2] - axisY[2] * forward[1],
+                axisY[2] * forward[0] - axisY[0] * forward[2],
+                axisY[0] * forward[1] - axisY[1] * forward[0],
+            ];
+            rightLength = Math.hypot(right[0], right[1], right[2]);
+            if (rightLength < 1e-5) {
+                right = [1, 0, 0];
+                rightLength = 1;
+            }
+            right = [right[0] / rightLength, right[1] / rightLength, right[2] / rightLength];
+
+            forward = [
+                right[1] * axisY[2] - right[2] * axisY[1],
+                right[2] * axisY[0] - right[0] * axisY[2],
+                right[0] * axisY[1] - right[1] * axisY[0],
+            ];
+            forwardLength = Math.hypot(forward[0], forward[1], forward[2]);
+            if (forwardLength < 1e-5) {
+                forward = [0, 0, 1];
+                forwardLength = 1;
+            }
+            forward = [forward[0] / forwardLength, forward[1] / forwardLength, forward[2] / forwardLength];
+
+            rotationMatrix[0] = right[0];
+            rotationMatrix[1] = right[1];
+            rotationMatrix[2] = right[2];
+            rotationMatrix[3] = 0;
+            rotationMatrix[4] = axisY[0];
+            rotationMatrix[5] = axisY[1];
+            rotationMatrix[6] = axisY[2];
+            rotationMatrix[7] = 0;
+            rotationMatrix[8] = forward[0];
+            rotationMatrix[9] = forward[1];
+            rotationMatrix[10] = forward[2];
+            rotationMatrix[11] = 0;
+            rotationMatrix[12] = 0;
+            rotationMatrix[13] = 0;
+            rotationMatrix[14] = 0;
+            rotationMatrix[15] = 1;
+            return true;
+        }
+
         // --- Drawing ---
         function drawScene() {
             gl.clearColor(0.1, 0.1, 0.15, 1.0); gl.clearDepth(1.0);
@@ -326,17 +446,53 @@ const fsSource = `
             mat4.lookAt(viewMatrix, cameraPosition, cameraTarget, cameraUp);
             gl.useProgram(programInfo.program);
 
-            const r = satelliteGuidanceRadius, incl = satelliteInclination, azim = satelliteAzimuth;
-            const satelliteX = r * Math.sin(incl) * Math.cos(azim);
-            const satelliteY = r * Math.cos(incl);
-            const satelliteZ = r * Math.sin(incl) * Math.sin(azim);
-            const satelliteWorldPosVec4 = vec4.fromValues(satelliteX, satelliteY, satelliteZ, 1.0);
-            const satelliteViewPosVec4 = vec4.create();
-            vec4.transformMat4(satelliteViewPosVec4, satelliteWorldPosVec4, viewMatrix);
-            gl.uniform3f(programInfo.uniformLocations.lightPositionView, satelliteViewPosVec4[0], satelliteViewPosVec4[1], satelliteViewPosVec4[2]);
+            const r = satelliteGuidanceRadius;
+            const baseInclination = satelliteInclination;
+            const baseAzimuth = satelliteAzimuth;
+
+            const lightPositionsView = new Float32Array(lightSources.length * 3);
+            const lightColorsFlat = new Float32Array(lightSources.length * 3);
+            const lightWorldPositions = [];
+
+            for (let i = 0; i < lightSources.length; i++) {
+                const config = lightSources[i];
+                let lightInclination = baseInclination + config.inclinationOffset;
+                lightInclination = Math.max(1e-4, Math.min(Math.PI - 1e-4, lightInclination));
+                const lightAzimuth = baseAzimuth + config.azimuthOffset;
+
+                const sinInclination = Math.sin(lightInclination);
+                const lightX = r * sinInclination * Math.cos(lightAzimuth);
+                const lightY = r * Math.cos(lightInclination);
+                const lightZ = r * sinInclination * Math.sin(lightAzimuth);
+                const worldPosition = [lightX, lightY, lightZ];
+                lightWorldPositions.push(worldPosition);
+
+                const worldPosVec4 = vec4.fromValues(lightX, lightY, lightZ, 1.0);
+                const viewPosVec4 = vec4.create();
+                vec4.transformMat4(viewPosVec4, worldPosVec4, viewMatrix);
+
+                const baseIndex = i * 3;
+                lightPositionsView[baseIndex] = viewPosVec4[0];
+                lightPositionsView[baseIndex + 1] = viewPosVec4[1];
+                lightPositionsView[baseIndex + 2] = viewPosVec4[2];
+
+                lightColorsFlat[baseIndex] = config.color[0];
+                lightColorsFlat[baseIndex + 1] = config.color[1];
+                lightColorsFlat[baseIndex + 2] = config.color[2];
+            }
+
+            if (programInfo.uniformLocations.lightCount !== null) {
+                gl.uniform1i(programInfo.uniformLocations.lightCount, lightSources.length);
+            }
+            if (programInfo.uniformLocations.lightPositionsView) {
+                gl.uniform3fv(programInfo.uniformLocations.lightPositionsView, lightPositionsView);
+            }
+            if (programInfo.uniformLocations.lightColors) {
+                gl.uniform3fv(programInfo.uniformLocations.lightColors, lightColorsFlat);
+            }
 
             // --- Draw Central Sphere ---
-            mat4.identity(modelMatrix); 
+            mat4.identity(modelMatrix);
             const modelViewMatrix = mat4.create(); mat4.multiply(modelViewMatrix, viewMatrix, modelMatrix);
             const normalMatrix = mat4.create(); mat4.invert(normalMatrix, modelViewMatrix); mat4.transpose(normalMatrix, normalMatrix);
             gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
@@ -351,72 +507,28 @@ const fsSource = `
             gl.uniform1f(programInfo.uniformLocations.behindFactorPower, behindFactorPower);
             bindAndDrawMesh(centralSphereBuffer);
 
-            // --- Draw Satellite Cone ---
-            mat4.identity(modelMatrix);
-            const rotationMatrix = mat4.create();
-            let hasRotation = false;
-            const directionLength = Math.hypot(satelliteX, satelliteY, satelliteZ);
-            if (directionLength > 1e-5) {
-                const axisY = [-satelliteX / directionLength, -satelliteY / directionLength, -satelliteZ / directionLength];
-                let referenceForward = [0, 0, 1];
-                const axisDotRef = axisY[0] * referenceForward[0] + axisY[1] * referenceForward[1] + axisY[2] * referenceForward[2];
-                if (Math.abs(axisDotRef) > 0.999) {
-                    referenceForward = [1, 0, 0];
+            // --- Draw Light Cones ---
+            for (let i = 0; i < lightSources.length; i++) {
+                const worldPosition = lightWorldPositions[i];
+                mat4.identity(modelMatrix);
+                const rotationMatrix = mat4.create();
+                const hasRotation = buildConeOrientationMatrix(rotationMatrix, worldPosition);
+                mat4.translate(modelMatrix, modelMatrix, worldPosition);
+                if (hasRotation) {
+                    mat4.multiply(modelMatrix, modelMatrix, rotationMatrix);
                 }
-                let right = [
-                    referenceForward[1] * axisY[2] - referenceForward[2] * axisY[1],
-                    referenceForward[2] * axisY[0] - referenceForward[0] * axisY[2],
-                    referenceForward[0] * axisY[1] - referenceForward[1] * axisY[0]
-                ];
-                let rightLength = Math.hypot(right[0], right[1], right[2]);
-                if (rightLength < 1e-5) {
-                    right = [1, 0, 0];
-                } else {
-                    right = [right[0] / rightLength, right[1] / rightLength, right[2] / rightLength];
-                }
-                let forward = [
-                    axisY[1] * right[2] - axisY[2] * right[1],
-                    axisY[2] * right[0] - axisY[0] * right[2],
-                    axisY[0] * right[1] - axisY[1] * right[0]
-                ];
-                const forwardLength = Math.hypot(forward[0], forward[1], forward[2]);
-                if (forwardLength < 1e-5) {
-                    forward = [0, 0, 1];
-                } else {
-                    forward = [forward[0] / forwardLength, forward[1] / forwardLength, forward[2] / forwardLength];
-                }
-                rotationMatrix[0] = right[0];
-                rotationMatrix[1] = right[1];
-                rotationMatrix[2] = right[2];
-                rotationMatrix[3] = 0;
-                rotationMatrix[4] = axisY[0];
-                rotationMatrix[5] = axisY[1];
-                rotationMatrix[6] = axisY[2];
-                rotationMatrix[7] = 0;
-                rotationMatrix[8] = forward[0];
-                rotationMatrix[9] = forward[1];
-                rotationMatrix[10] = forward[2];
-                rotationMatrix[11] = 0;
-                rotationMatrix[12] = 0;
-                rotationMatrix[13] = 0;
-                rotationMatrix[14] = 0;
-                rotationMatrix[15] = 1;
-                hasRotation = true;
+                const lightModelViewMatrix = mat4.create();
+                mat4.multiply(lightModelViewMatrix, viewMatrix, modelMatrix);
+                const lightNormalMatrix = mat4.create();
+                mat4.invert(lightNormalMatrix, lightModelViewMatrix);
+                mat4.transpose(lightNormalMatrix, lightNormalMatrix);
+                gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, lightModelViewMatrix);
+                gl.uniformMatrix4fv(programInfo.uniformLocations.normalMatrix, false, lightNormalMatrix);
+                const lightColor = lightSources[i].color;
+                gl.uniform4fv(programInfo.uniformLocations.color, [lightColor[0], lightColor[1], lightColor[2], 1.0]);
+                gl.uniform1i(programInfo.uniformLocations.useLighting, 0);
+                bindAndDrawMesh(satelliteConeBuffer);
             }
-            mat4.translate(modelMatrix, modelMatrix, [satelliteX, satelliteY, satelliteZ]);
-            if (hasRotation) {
-                mat4.multiply(modelMatrix, modelMatrix, rotationMatrix);
-            }
-            const satelliteModelViewMatrix = mat4.create();
-            mat4.multiply(satelliteModelViewMatrix, viewMatrix, modelMatrix);
-            const satelliteNormalMatrix = mat4.create();
-            mat4.invert(satelliteNormalMatrix, satelliteModelViewMatrix);
-            mat4.transpose(satelliteNormalMatrix, satelliteNormalMatrix);
-            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, satelliteModelViewMatrix); 
-            gl.uniformMatrix4fv(programInfo.uniformLocations.normalMatrix, false, satelliteNormalMatrix); 
-            gl.uniform4fv(programInfo.uniformLocations.color, [1.0, 1.0, 0.8, 1.0]);
-            gl.uniform1i(programInfo.uniformLocations.useLighting, 0);
-            bindAndDrawMesh(satelliteConeBuffer);
         }
         function bindAndDrawMesh(meshBuffers) {
             gl.bindBuffer(gl.ARRAY_BUFFER, meshBuffers.position);
