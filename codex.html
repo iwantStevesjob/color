@@ -357,34 +357,67 @@ const fsSource = `
             let hasRotation = false;
             const directionLength = Math.hypot(satelliteX, satelliteY, satelliteZ);
             if (directionLength > 1e-5) {
-                const axisY = [-satelliteX / directionLength, -satelliteY / directionLength, -satelliteZ / directionLength];
+                let axisY = [-satelliteX / directionLength, -satelliteY / directionLength, -satelliteZ / directionLength];
+                const axisYLength = Math.hypot(axisY[0], axisY[1], axisY[2]);
+                if (axisYLength > 1e-5) {
+                    axisY = [axisY[0] / axisYLength, axisY[1] / axisYLength, axisY[2] / axisYLength];
+                }
+
                 let referenceForward = [0, 0, 1];
                 const axisDotRef = axisY[0] * referenceForward[0] + axisY[1] * referenceForward[1] + axisY[2] * referenceForward[2];
                 if (Math.abs(axisDotRef) > 0.999) {
                     referenceForward = [1, 0, 0];
                 }
+
                 let right = [
-                    referenceForward[1] * axisY[2] - referenceForward[2] * axisY[1],
-                    referenceForward[2] * axisY[0] - referenceForward[0] * axisY[2],
-                    referenceForward[0] * axisY[1] - referenceForward[1] * axisY[0]
+                    axisY[1] * referenceForward[2] - axisY[2] * referenceForward[1],
+                    axisY[2] * referenceForward[0] - axisY[0] * referenceForward[2],
+                    axisY[0] * referenceForward[1] - axisY[1] * referenceForward[0]
                 ];
                 let rightLength = Math.hypot(right[0], right[1], right[2]);
                 if (rightLength < 1e-5) {
                     right = [1, 0, 0];
-                } else {
-                    right = [right[0] / rightLength, right[1] / rightLength, right[2] / rightLength];
+                    rightLength = 1;
                 }
+                right = [right[0] / rightLength, right[1] / rightLength, right[2] / rightLength];
+
                 let forward = [
-                    axisY[1] * right[2] - axisY[2] * right[1],
-                    axisY[2] * right[0] - axisY[0] * right[2],
-                    axisY[0] * right[1] - axisY[1] * right[0]
+                    right[1] * axisY[2] - right[2] * axisY[1],
+                    right[2] * axisY[0] - right[0] * axisY[2],
+                    right[0] * axisY[1] - right[1] * axisY[0]
                 ];
-                const forwardLength = Math.hypot(forward[0], forward[1], forward[2]);
+                let forwardLength = Math.hypot(forward[0], forward[1], forward[2]);
                 if (forwardLength < 1e-5) {
                     forward = [0, 0, 1];
-                } else {
-                    forward = [forward[0] / forwardLength, forward[1] / forwardLength, forward[2] / forwardLength];
+                    forwardLength = 1;
                 }
+                forward = [forward[0] / forwardLength, forward[1] / forwardLength, forward[2] / forwardLength];
+
+                // Re-orthogonalize to maintain an orthonormal basis
+                right = [
+                    axisY[1] * forward[2] - axisY[2] * forward[1],
+                    axisY[2] * forward[0] - axisY[0] * forward[2],
+                    axisY[0] * forward[1] - axisY[1] * forward[0]
+                ];
+                rightLength = Math.hypot(right[0], right[1], right[2]);
+                if (rightLength < 1e-5) {
+                    right = [1, 0, 0];
+                    rightLength = 1;
+                }
+                right = [right[0] / rightLength, right[1] / rightLength, right[2] / rightLength];
+
+                forward = [
+                    right[1] * axisY[2] - right[2] * axisY[1],
+                    right[2] * axisY[0] - right[0] * axisY[2],
+                    right[0] * axisY[1] - right[1] * axisY[0]
+                ];
+                forwardLength = Math.hypot(forward[0], forward[1], forward[2]);
+                if (forwardLength < 1e-5) {
+                    forward = [0, 0, 1];
+                    forwardLength = 1;
+                }
+                forward = [forward[0] / forwardLength, forward[1] / forwardLength, forward[2] / forwardLength];
+
                 rotationMatrix[0] = right[0];
                 rotationMatrix[1] = right[1];
                 rotationMatrix[2] = right[2];
