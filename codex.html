@@ -88,11 +88,13 @@ const fsSource = `
         let programInfo;
         
         let centralSphereBuffer;
-        let satelliteSphereBuffer;
+        let satelliteConeBuffer;
 
         const centralSphereRadius = 2.0;
-        const satelliteSphereRadius = 0.5;
-        const satelliteGuidanceRadius = 4.0; 
+        const satelliteConeRadius = 0.5;
+        const satelliteConeHeight = satelliteConeRadius * 2.0;
+        const satelliteConeSegments = 24;
+        const satelliteGuidanceRadius = 4.0;
 
         let satelliteAzimuth = Math.PI / 4;    
         let satelliteInclination = Math.PI / 3; 
@@ -150,7 +152,7 @@ const fsSource = `
                 },
             };
             centralSphereBuffer = createSphereBuffers(gl, centralSphereRadius, 32, 32);
-            satelliteSphereBuffer = createSphereBuffers(gl, satelliteSphereRadius, 16, 16);
+            satelliteConeBuffer = createConeBuffers(gl, satelliteConeRadius, satelliteConeHeight, satelliteConeSegments);
             canvas.addEventListener('mousedown', handleMouseDown);
             document.addEventListener('mouseup', handleMouseUp); 
             canvas.addEventListener('mousemove', handleMouseMove);
@@ -164,6 +166,73 @@ const fsSource = `
 
         // --- Geometry Util (Sphere) (collapsed) ---
         function createSphereBuffers(gl,radius,latBands,lonBands){const v=[],n=[],idx=[];for(let a=0;a<=latBands;a++){const t=a*Math.PI/latBands,st=Math.sin(t),ct=Math.cos(t);for(let o=0;o<=lonBands;o++){const p=o*2*Math.PI/lonBands,sp=Math.sin(p),cp=Math.cos(p),x=cp*st,y=ct,z=sp*st;n.push(x,y,z);v.push(radius*x,radius*y,radius*z)}}for(let a=0;a<latBands;a++)for(let o=0;o<lonBands;o++){const f=a*(lonBands+1)+o,s=f+lonBands+1;idx.push(f,s,f+1);idx.push(s,s+1,f+1)}const pbuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,pbuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(v),gl.STATIC_DRAW);const nbuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,nbuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(n),gl.STATIC_DRAW);const ibuf=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ibuf);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(idx),gl.STATIC_DRAW);return{position:pbuf,normal:nbuf,indices:ibuf,vertexCount:idx.length}}
+
+        function createConeBuffers(gl, radius, height, radialSubdivisions) {
+            const positions = [];
+            const normals = [];
+            const indices = [];
+            const halfHeight = height / 2;
+
+            for (let i = 0; i < radialSubdivisions; i++) {
+                const angle = (i / radialSubdivisions) * Math.PI * 2;
+                const cosAngle = Math.cos(angle);
+                const sinAngle = Math.sin(angle);
+
+                const nxRaw = height * cosAngle;
+                const nyRaw = radius;
+                const nzRaw = height * sinAngle;
+                const length = Math.sqrt(nxRaw * nxRaw + nyRaw * nyRaw + nzRaw * nzRaw) || 1;
+                const nx = nxRaw / length;
+                const ny = nyRaw / length;
+                const nz = nzRaw / length;
+
+                positions.push(0, halfHeight, 0);
+                normals.push(nx, ny, nz);
+
+                positions.push(radius * cosAngle, -halfHeight, radius * sinAngle);
+                normals.push(nx, ny, nz);
+            }
+
+            for (let i = 0; i < radialSubdivisions; i++) {
+                const apexIndex = i * 2;
+                const baseIndex = apexIndex + 1;
+                const nextBaseIndex = ((i + 1) % radialSubdivisions) * 2 + 1;
+                indices.push(apexIndex, baseIndex, nextBaseIndex);
+            }
+
+            const baseCenterIndex = positions.length / 3;
+            positions.push(0, -halfHeight, 0);
+            normals.push(0, -1, 0);
+
+            const baseStartIndex = positions.length / 3;
+            for (let i = 0; i < radialSubdivisions; i++) {
+                const angle = (i / radialSubdivisions) * Math.PI * 2;
+                const cosAngle = Math.cos(angle);
+                const sinAngle = Math.sin(angle);
+                positions.push(radius * cosAngle, -halfHeight, radius * sinAngle);
+                normals.push(0, -1, 0);
+            }
+
+            for (let i = 0; i < radialSubdivisions; i++) {
+                const current = baseStartIndex + i;
+                const next = baseStartIndex + ((i + 1) % radialSubdivisions);
+                indices.push(baseCenterIndex, current, next);
+            }
+
+            const positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            const normalBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
+
+            const indexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+            return { position: positionBuffer, normal: normalBuffer, indices: indexBuffer, vertexCount: indices.length };
+        }
 
         // --- Mouse Event Handlers ---
         function handleMouseDown(event) {
@@ -280,11 +349,64 @@ const fsSource = `
             gl.uniform1f(programInfo.uniformLocations.haloIntensity, haloIntensity);
             gl.uniform1f(programInfo.uniformLocations.haloSharpness, haloSharpness);
             gl.uniform1f(programInfo.uniformLocations.behindFactorPower, behindFactorPower);
-            bindAndDrawSphere(centralSphereBuffer);
+            bindAndDrawMesh(centralSphereBuffer);
 
-            // --- Draw Satellite Sphere ---
+            // --- Draw Satellite Cone ---
             mat4.identity(modelMatrix);
+            const rotationMatrix = mat4.create();
+            let hasRotation = false;
+            const directionLength = Math.hypot(satelliteX, satelliteY, satelliteZ);
+            if (directionLength > 1e-5) {
+                const axisY = [-satelliteX / directionLength, -satelliteY / directionLength, -satelliteZ / directionLength];
+                let referenceForward = [0, 0, 1];
+                const axisDotRef = axisY[0] * referenceForward[0] + axisY[1] * referenceForward[1] + axisY[2] * referenceForward[2];
+                if (Math.abs(axisDotRef) > 0.999) {
+                    referenceForward = [1, 0, 0];
+                }
+                let right = [
+                    referenceForward[1] * axisY[2] - referenceForward[2] * axisY[1],
+                    referenceForward[2] * axisY[0] - referenceForward[0] * axisY[2],
+                    referenceForward[0] * axisY[1] - referenceForward[1] * axisY[0]
+                ];
+                let rightLength = Math.hypot(right[0], right[1], right[2]);
+                if (rightLength < 1e-5) {
+                    right = [1, 0, 0];
+                } else {
+                    right = [right[0] / rightLength, right[1] / rightLength, right[2] / rightLength];
+                }
+                let forward = [
+                    axisY[1] * right[2] - axisY[2] * right[1],
+                    axisY[2] * right[0] - axisY[0] * right[2],
+                    axisY[0] * right[1] - axisY[1] * right[0]
+                ];
+                const forwardLength = Math.hypot(forward[0], forward[1], forward[2]);
+                if (forwardLength < 1e-5) {
+                    forward = [0, 0, 1];
+                } else {
+                    forward = [forward[0] / forwardLength, forward[1] / forwardLength, forward[2] / forwardLength];
+                }
+                rotationMatrix[0] = right[0];
+                rotationMatrix[1] = right[1];
+                rotationMatrix[2] = right[2];
+                rotationMatrix[3] = 0;
+                rotationMatrix[4] = axisY[0];
+                rotationMatrix[5] = axisY[1];
+                rotationMatrix[6] = axisY[2];
+                rotationMatrix[7] = 0;
+                rotationMatrix[8] = forward[0];
+                rotationMatrix[9] = forward[1];
+                rotationMatrix[10] = forward[2];
+                rotationMatrix[11] = 0;
+                rotationMatrix[12] = 0;
+                rotationMatrix[13] = 0;
+                rotationMatrix[14] = 0;
+                rotationMatrix[15] = 1;
+                hasRotation = true;
+            }
             mat4.translate(modelMatrix, modelMatrix, [satelliteX, satelliteY, satelliteZ]);
+            if (hasRotation) {
+                mat4.multiply(modelMatrix, modelMatrix, rotationMatrix);
+            }
             const satelliteModelViewMatrix = mat4.create();
             mat4.multiply(satelliteModelViewMatrix, viewMatrix, modelMatrix);
             const satelliteNormalMatrix = mat4.create();
@@ -292,19 +414,19 @@ const fsSource = `
             mat4.transpose(satelliteNormalMatrix, satelliteNormalMatrix);
             gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, satelliteModelViewMatrix); 
             gl.uniformMatrix4fv(programInfo.uniformLocations.normalMatrix, false, satelliteNormalMatrix); 
-            gl.uniform4fv(programInfo.uniformLocations.color, [1.0, 1.0, 0.8, 1.0]); 
-            gl.uniform1i(programInfo.uniformLocations.useLighting, 0); 
-            bindAndDrawSphere(satelliteSphereBuffer);
+            gl.uniform4fv(programInfo.uniformLocations.color, [1.0, 1.0, 0.8, 1.0]);
+            gl.uniform1i(programInfo.uniformLocations.useLighting, 0);
+            bindAndDrawMesh(satelliteConeBuffer);
         }
-        function bindAndDrawSphere(sphereBuffers) { 
-            gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.position);
+        function bindAndDrawMesh(meshBuffers) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, meshBuffers.position);
             gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
             gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
-            gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffers.normal);
+            gl.bindBuffer(gl.ARRAY_BUFFER, meshBuffers.normal);
             gl.vertexAttribPointer(programInfo.attribLocations.vertexNormal, 3, gl.FLOAT, false, 0, 0);
             gl.enableVertexAttribArray(programInfo.attribLocations.vertexNormal);
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereBuffers.indices);
-            gl.drawElements(gl.TRIANGLES, sphereBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshBuffers.indices);
+            gl.drawElements(gl.TRIANGLES, meshBuffers.vertexCount, gl.UNSIGNED_SHORT, 0);
         }
 
         // --- Canvas Resize ---
