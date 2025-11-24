@@ -3,31 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dictionary Minifier Proof</title>
+  <title>ASCII Safe QR Chat</title>
   
   <!-- QR Libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
   <style>
-    :root { --bg: #000000; --panel: #111; --green: #0f0; --text: #ccc; --highlight: #ff0; }
-    body { font-family: 'Courier New', monospace; background: var(--bg); color: var(--text); padding: 10px; margin: 0; font-size: 11px; }
+    :root { --bg: #111; --panel: #222; --green: #0f0; --text: #ddd; }
+    body { font-family: 'Consolas', monospace; background: var(--bg); color: var(--text); padding: 10px; margin: 0; font-size: 12px; }
     
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
     .card { background: var(--panel); padding: 10px; border: 1px solid #333; height: 180px; overflow-y: auto; border-radius: 4px; }
     .full { grid-column: 1 / -1; height: auto; text-align: center; }
     
     h2 { margin: 0 0 5px 0; font-size: 12px; color: var(--green); border-bottom: 1px solid #333; }
+    .stat { font-weight: bold; color: #fff; margin-bottom: 5px; }
     
-    .stat { font-weight: bold; color: #fff; margin-bottom: 5px; font-size: 13px; }
-    .diff { color: var(--highlight); }
-    
-    /* Visualizing the replacement */
-    .rep-row { display: flex; justify-content: space-between; border-bottom: 1px solid #222; padding: 2px 0; }
-    .key { color: #888; }
-    .val { color: var(--green); font-weight: bold; }
-
-    #qr-area { background: #fff; padding: 15px; display: inline-block; margin-top: 10px; }
+    #qr-area { background: #fff; padding: 10px; display: inline-block; margin-top: 10px; min-width: 250px; min-height: 250px; }
+    #qr-error { color: #ff5555; font-weight: bold; display: none; margin-top: 10px; font-size: 14px; }
     
     /* Scanner */
     #reader { width: 100%; max-width: 350px; border: 2px solid var(--green); margin: 10px auto; display: none; }
@@ -40,21 +34,21 @@
     <div class="card">
       <h2>1. RAW INPUT</h2>
       <div id="stat-raw" class="stat">0 chars</div>
-      <div id="log-raw" style="color: #666; word-break: break-all;">Generating...</div>
+      <div id="log-raw" style="color:#666; word-break:break-all;">Generating...</div>
     </div>
     <div class="card">
       <h2>2. DICTIONARY MAPPING</h2>
-      <div class="stat">Replacements Applied:</div>
-      <div id="log-map"></div>
+      <div id="stat-final" class="stat">0 chars</div>
+      <div id="log-debug" style="font-size:10px;"></div>
     </div>
   </div>
 
   <div class="card full">
-    <h2>3. FINAL PAYLOAD</h2>
-    <div id="stat-final" class="stat">0 chars</div>
+    <h2>3. SCAN THIS QR</h2>
     
-    <!-- QR Display -->
     <div id="qr-area"></div>
+    <div id="qr-error">ERROR: Data too big for QR!</div>
+    
     <br>
     <button onclick="startScanner()">I am the Laptop (Scan Phone)</button>
   </div>
@@ -71,25 +65,25 @@
   const pc = new RTCPeerConnection(config);
   let isInitiator = true;
 
-  // --- THE DICTIONARY (The Magic) ---
-  // We replace long WebRTC boilerplate with single safe characters
+  // --- THE SAFE DICTIONARY (ASCII ONLY) ---
+  // Replaced all special UTF8 chars with standard keyboard symbols (1 byte each)
   const DICTIONARY = [
-    { k: 'a=candidate:', v: '£' },
-    { k: 'a=fingerprint:sha-256 ', v: '¥' },
-    { k: 'a=ice-ufrag:', v: '§' },
-    { k: 'a=ice-pwd:', v: '©' },
-    { k: 'a=group:BUNDLE 0', v: '®' },
-    { k: 'a=msid-semantic: WMS', v: 'µ' },
-    { k: 'm=application ', v: '¶' },
-    { k: 'UDP/DTLS/SCTP webrtc-datachannel', v: 'Ð' },
-    { k: ' generation 0', v: '' }, // Delete completely
-    { k: ' network-cost 999', v: '' }, // Delete completely
+    { k: 'a=candidate:', v: '_' },
+    { k: 'a=fingerprint:sha-256 ', v: '$' },
+    { k: 'a=ice-ufrag:', v: '!' },
+    { k: 'a=ice-pwd:', v: '@' },
+    { k: 'a=group:BUNDLE 0', v: '*' },
+    { k: 'a=msid-semantic: WMS', v: '^' },
+    { k: 'm=application ', v: '|' },
+    { k: 'UDP/DTLS/SCTP webrtc-datachannel', v: '%' },
+    { k: ' generation 0', v: '' }, 
+    { k: ' network-cost 999', v: '' }, 
     { k: ' typ host', v: 'H' },
     { k: ' typ srflx', v: 'S' },
     { k: 'tcptype', v: 'T' },
     { k: 'udp', v: 'U' },
-    { k: '192.168.', v: 'L' }, // Common local IP prefix
-    { k: '\r\n', v: '»' } // Newline replacement
+    { k: '192.168.', v: 'L' }, 
+    { k: '\r\n', v: '~' } // Tilde is safe
   ];
 
   // --- 1. START ---
@@ -107,76 +101,70 @@
     await pc.setLocalDescription(offer);
   }
 
-  // --- 2. MINIFICATION LOGIC ---
+  // --- 2. OPTIMIZATION LOGIC ---
   pc.onicecandidate = e => {
     if (e.candidate === null) {
-      // 1. Get Raw
       const raw = pc.localDescription.sdp;
-      document.getElementById('log-raw').innerText = raw;
+      document.getElementById('log-raw').innerText = raw.substring(0, 200) + "...";
       document.getElementById('stat-raw').innerText = raw.length + " chars";
 
-      // 2. Strip TCP & Bloat first (The Butcher)
+      // A. The Butcher (Delete useless lines)
       let clean = raw.split('\r\n').filter(l => 
-        !l.includes(' tcp ') && !l.includes('a=rtcp') && !l.includes('IP6')
+        !l.includes(' tcp ') &&     // No TCP
+        !l.includes('a=rtcp') &&    // No Video Timing
+        !l.includes('IP6') &&       // No IPv6
+        !l.includes('a=extmap') &&  // No Extension Maps
+        !l.includes('a=ice-options')// No Trickle options
       ).join('\r\n');
 
-      // 3. Apply Dictionary (The Shrinker)
+      // B. The Shrinker (Dictionary)
       let minified = clean;
-      const logMap = document.getElementById('log-map');
-      
       DICTIONARY.forEach(pair => {
-        // Count occurances for the log
-        const count = minified.split(pair.k).length - 1;
-        if(count > 0) {
-          minified = minified.split(pair.k).join(pair.v);
-          
-          // Log it visually
-          const div = document.createElement('div');
-          div.className = 'rep-row';
-          div.innerHTML = `<span class="key">"${pair.k.substring(0,15)}..."</span> <span class="val">➜ ${pair.v || '(del)'}</span> <span style="font-size:9px">x${count}</span>`;
-          logMap.appendChild(div);
-        }
+        minified = minified.split(pair.k).join(pair.v);
       });
 
-      // 4. Update Stats
+      // Stats
       const savings = Math.round((1 - (minified.length / raw.length)) * 100);
       document.getElementById('stat-final').innerHTML = `
-        <span style="color:#666">Raw: ${raw.length}</span> ➜ 
-        <span style="color:#fff">Final: ${minified.length}</span> 
-        <span class="diff">(-${savings}%)</span>
+        Final: ${minified.length} chars <span style="color:#0f0">(-${savings}%)</span>
       `;
+      document.getElementById('log-debug').innerText = "Sample: " + minified.substring(0, 50) + "...";
 
-      // 5. Generate QR
+      // C. Generate QR
       generateQR(minified);
     }
   };
 
   function generateQR(data) {
-    const qrArea = document.getElementById('qr-area');
-    qrArea.innerHTML = "";
-    
-    // Determine payload (URL for Host, Raw for Joiner)
-    let payload = data;
-    // NOTE: To keep Host QR small, we use Raw Data for proof.
-    // Ideally Host QR = URL + Hash, but that adds length.
-    
-    new QRCode(qrArea, {
-      text: payload,
-      width: 250,
-      height: 250,
-      correctLevel: QRCode.CorrectLevel.L // Low redundancy = Less dots
-    });
+    const qrEl = document.getElementById('qr-area');
+    const errEl = document.getElementById('qr-error');
+    qrEl.innerHTML = "";
+    errEl.style.display = "none";
+
+    try {
+      new QRCode(qrEl, {
+        text: data,
+        width: 250,
+        height: 250,
+        // We use 'L' (Low) to reduce dots. 
+        // If the library fails, it throws an error which we catch below.
+        correctLevel: QRCode.CorrectLevel.L 
+      });
+    } catch (e) {
+      console.error(e);
+      qrEl.style.display = "none";
+      errEl.style.display = "block";
+      errEl.innerHTML = `ERROR: Data size (${data.length}) is still too big for this QR library.<br>Try refreshing to get a shorter key.`;
+    }
   }
 
-  // --- 3. RESTORATION (Un-Minify) ---
+  // --- 3. RESTORATION ---
   function unminify(str) {
     let result = str;
     // Reverse loop
     for(let i = DICTIONARY.length - 1; i >= 0; i--) {
       const pair = DICTIONARY[i];
-      if(pair.v !== '') { // Don't restore deletions
-        result = result.split(pair.v).join(pair.k);
-      }
+      if(pair.v !== '') result = result.split(pair.v).join(pair.k);
     }
     return result;
   }
@@ -184,7 +172,6 @@
   // --- 4. JOINER / SCANNER ---
   async function handleJoin() {
     const hash = window.location.hash.substring(1);
-    // User scans QR -> Gets minified string -> We restore it
     const sdp = unminify(decodeURIComponent(hash));
     
     await pc.setRemoteDescription({ type: "offer", sdp });
@@ -213,20 +200,26 @@
     let clean = data;
     if(data.includes('#')) clean = data.split('#')[1];
     
-    const sdp = unminify(clean);
+    // Safety check for common scanning errors
+    if(!clean) return alert("Scan Error: Empty data");
     
     try {
+      const sdp = unminify(clean);
       const type = isInitiator ? "answer" : "offer";
       await pc.setRemoteDescription({ type, sdp });
       document.getElementById('status').innerText = "CONNECTED!";
       document.getElementById('status').style.color = "#0f0";
     } catch(e) {
       document.getElementById('status').innerText = "Error: " + e.message;
+      alert("Connection failed. The QR data might be corrupted.");
     }
   }
 
   function setupChannel(dc) {
-    dc.onopen = () => alert("Chat Connected!");
+    dc.onopen = () => {
+        alert("CHAT CONNECTED!");
+        document.body.style.background = "#002200"; // Visual cue
+    };
     dc.onmessage = e => alert("Msg: " + e.data);
   }
 
