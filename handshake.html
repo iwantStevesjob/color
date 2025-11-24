@@ -3,309 +3,253 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gzip QR Handshake</title>
+  <title>Native Share Chat</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
   
-  <!-- QR Libs -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-
   <style>
-    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --primary: #2f81f7; --text: #c9d1d9; }
-    body { font-family: monospace; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --primary: #2f81f7; --text: #c9d1d9; --btn-text: #ffffff; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+    .container { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 20px; }
     
-    .container { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 15px; }
-    .card { background: var(--surface); border: 1px solid var(--border); padding: 15px; border-radius: 6px; }
+    /* Cards */
+    .card { background: var(--surface); border: 1px solid var(--border); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    h2 { color: var(--primary); margin: 0 0 10px 0; font-size: 1.2rem; }
+    p { color: #8b949e; font-size: 0.9rem; line-height: 1.5; margin-bottom: 15px; }
     
-    h2 { color: var(--primary); margin: 0 0 10px 0; font-size: 1rem; text-transform: uppercase; letter-spacing: 1px; }
-    
-    /* STEPS VISUALIZATION */
-    .step-box { background: #000; padding: 8px; border-left: 3px solid #333; margin-bottom: 8px; font-size: 0.75rem; word-break: break-all; max-height: 60px; overflow-y: auto; color: #8b949e; }
-    .step-label { display: block; font-weight: bold; color: #fff; margin-bottom: 2px; }
-    .highlight { color: var(--primary); font-weight: bold; }
+    /* Inputs */
+    textarea { width: 100%; height: 80px; background: #000; color: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-family: monospace; font-size: 0.8rem; resize: none; box-sizing: border-box; }
+    textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
 
-    /* QR STYLES */
-    #qr-area { background: #fff; padding: 10px; display: inline-block; margin: 10px auto; border-radius: 4px; }
+    /* Buttons */
+    .btn-group { display: flex; gap: 10px; margin-top: 10px; }
+    button { flex: 1; padding: 12px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 0.9rem; }
     
-    /* CHAT & SCANNER */
-    #reader { width: 100%; border: 2px solid var(--primary); border-radius: 6px; overflow: hidden; display: none; }
-    .btn { background: var(--primary); color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px; }
+    .btn-primary { background: var(--primary); color: var(--btn-text); }
+    .btn-primary:hover { opacity: 0.9; }
+    
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-secondary:hover { background: #444; }
+
+    /* Chat */
     .hidden { display: none !important; }
+    #chat-log { height: 300px; overflow-y: auto; background: #000; border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+    .msg { padding: 8px 12px; border-radius: 18px; margin-bottom: 8px; max-width: 80%; word-wrap: break-word; font-size: 0.95rem; }
+    .msg.me { background: #1f6feb; color: white; align-self: flex-end; margin-left: auto; }
+    .msg.peer { background: #21262d; color: #c9d1d9; align-self: flex-start; }
     
-    #chat-log { height: 300px; overflow-y: auto; border: 1px solid var(--border); background: #000; padding: 10px; margin-bottom: 10px; }
-    input { width: 70%; padding: 10px; background: #000; border: 1px solid var(--border); color: #fff; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; background: #ff7b72; border-radius: 50%; margin-right: 5px; }
+    .status-dot.connected { background: #3fb950; box-shadow: 0 0 8px #3fb950; }
   </style>
 </head>
 <body>
 
 <div class="container">
 
-  <!-- SETUP / DEBUG PANEL -->
-  <div id="setup-panel" class="card">
-    <h2 id="status-title">Initializing...</h2>
-    
-    <!-- Step 1: Raw Data -->
-    <div class="step-box">
-      <span class="step-label">1. RAW SDP (WebRTC Data)</span>
-      <span id="debug-raw">Waiting for ICE candidates...</span>
-    </div>
-
-    <!-- Step 2: Optimization -->
-    <div class="step-box">
-      <span class="step-label">2. CLEANED (Removed TCP/Fluff)</span>
-      <span id="debug-clean">...</span>
-    </div>
-
-    <!-- Step 3: Compression -->
-    <div class="step-box">
-      <span class="step-label">3. GZIP + BASE64 (Final Payload)</span>
-      <span id="debug-compressed">...</span>
-    </div>
-
-    <div style="text-align: center; margin: 10px 0;">
-      <span id="size-stats" style="font-size: 0.8rem; color: #ff7b72;"></span>
-    </div>
-
-    <!-- Step 4: QR Code -->
-    <div id="qr-container" class="hidden" style="text-align: center;">
-      <div id="qr-area"></div>
-      <p id="instruction" style="font-size: 0.8rem; margin-top:5px;">Scan with other device</p>
-    </div>
-
-    <!-- Step 5: Scanner -->
-    <div id="scanner-container">
-      <div id="reader"></div>
-      <button id="btn-scan" class="btn hidden" onclick="startScanner()">Scan Response</button>
+  <!-- HEADER -->
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <h2 style="margin:0; color:#fff;">P2P Handshake</h2>
+    <div style="font-size:0.8rem; color:#8b949e;">
+      <span id="status-dot" class="status-dot"></span> <span id="status-text">Disconnected</span>
     </div>
   </div>
 
-  <!-- CHAT PANEL -->
-  <div id="chat-panel" class="card hidden">
-    <h2>Secure Chat Connected</h2>
+  <!-- STEP 1: OFFER -->
+  <div id="step-1" class="card">
+    <h2>1. The Host (Laptop)</h2>
+    <p>Click Create Offer. Then use "Share" to send the text to your Phone (via Email, Telegram, or Notes).</p>
+    <div class="btn-group">
+      <button class="btn-primary" onclick="createOffer()">Create Offer</button>
+      <button class="btn-secondary" id="btn-share-offer" onclick="shareData('local-sdp')" disabled>Share Offer 📤</button>
+      <button class="btn-secondary" onclick="copyData('local-sdp')">Copy 📋</button>
+    </div>
+    <textarea id="local-sdp" readonly placeholder="Offer will appear here..." style="margin-top:10px;"></textarea>
+  </div>
+
+  <!-- STEP 2: ANSWER -->
+  <div id="step-2" class="card">
+    <h2>2. The Guest (Phone)</h2>
+    <p>Paste the Offer above. Then click "Create Answer". Use <b>Nearby Share / AirDrop</b> to send the result back to the laptop.</p>
+    <textarea id="remote-sdp" placeholder="Paste Remote SDP here..."></textarea>
+    <div class="btn-group">
+      <button class="btn-primary" onclick="acceptOffer()">Create Answer</button>
+      <button class="btn-secondary" id="btn-share-answer" onclick="shareData('local-sdp')" disabled>Share Answer 📤</button>
+      <button class="btn-secondary" onclick="copyData('local-sdp')">Copy 📋</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: FINALIZE -->
+  <div id="step-3" class="card">
+    <h2>3. Finalize</h2>
+    <p>Paste the Answer received from the Phone here to start the chat.</p>
+    <textarea id="final-sdp" placeholder="Paste Answer here..."></textarea>
+    <div class="btn-group">
+      <button class="btn-primary" onclick="finalize()">Connect 🚀</button>
+    </div>
+  </div>
+
+  <!-- CHAT INTERFACE -->
+  <div id="chat-interface" class="card hidden">
+    <h2>Secure Chat</h2>
     <div id="chat-log"></div>
     <div style="display: flex; gap: 10px;">
-      <input type="text" id="chat-input" placeholder="Type message..." onkeypress="handleKey(event)">
-      <button class="btn" style="width: auto; margin: 0;" onclick="sendMessage()">Send</button>
+      <input type="text" id="chat-msg" placeholder="Type a message..." style="flex:1; border-radius:6px; border:none; padding:12px;" onkeypress="handleKey(event)">
+      <button class="btn-primary" style="flex:0 0 80px;" onclick="sendMsg()">Send</button>
     </div>
   </div>
 
 </div>
 
 <script>
-  // --- 1. GZIP COMPRESSION UTILS (Native CompressionStream) ---
-  
-  async function gzipCompress(str) {
-    // 1. Convert string to byte stream
-    const stream = new Blob([str]).stream();
-    // 2. Pipe through Gzip
-    const compressedStream = stream.pipeThrough(new CompressionStream("gzip"));
-    // 3. Read stream back to buffer
-    const response = await new Response(compressedStream);
-    const blob = await response.blob();
-    const buffer = await blob.arrayBuffer();
-    // 4. Convert to Base64 (Url Safe)
-    return arrayBufferToBase64(buffer);
-  }
-
-  async function gzipDecompress(base64) {
-    // 1. Convert Base64 to Buffer
-    const buffer = base64ToArrayBuffer(base64);
-    // 2. Pipe through Decompression
-    const stream = new Blob([buffer]).stream();
-    const decompressedStream = stream.pipeThrough(new DecompressionStream("gzip"));
-    // 3. Read back to Text
-    const response = await new Response(decompressedStream);
-    return await response.text();
-  }
-
-  // Helper: Binary to Base64 URL Safe
-  function arrayBufferToBase64(buffer) {
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    // Replace + with -, / with _ to make it URL safe, remove padding =
-    return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  }
-
-  // Helper: Base64 URL Safe to Binary
-  function base64ToArrayBuffer(base64) {
-    // Restore padding and standard chars
-    let binary_string = window.atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
-    const len = binary_string.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binary_string.charCodeAt(i);
-    }
-    return bytes.buffer;
-  }
-
-  // --- 2. WEBRTC & UI LOGIC ---
-
+  // --- CONFIG ---
   const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
   const pc = new RTCPeerConnection(config);
   let dataChannel;
-  let isInitiator = false;
-  let html5QrCode;
 
-  // UI Refs
-  const ui = {
-    raw: document.getElementById('debug-raw'),
-    clean: document.getElementById('debug-clean'),
-    comp: document.getElementById('debug-compressed'),
-    stats: document.getElementById('size-stats'),
-    qrBox: document.getElementById('qr-container'),
-    qr: document.getElementById('qr-area'),
-    btnScan: document.getElementById('btn-scan'),
-    setup: document.getElementById('setup-panel'),
-    chat: document.getElementById('chat-panel'),
-    log: document.getElementById('chat-log'),
-    title: document.getElementById('status-title')
+  // --- UI REFS ---
+  const els = {
+    local: document.getElementById('local-sdp'),
+    remote: document.getElementById('remote-sdp'),
+    final: document.getElementById('final-sdp'),
+    btnShareOffer: document.getElementById('btn-share-offer'),
+    btnShareAnswer: document.getElementById('btn-share-answer'),
+    statusDot: document.getElementById('status-dot'),
+    statusText: document.getElementById('status-text'),
+    chat: document.getElementById('chat-interface'),
+    steps: [document.getElementById('step-1'), document.getElementById('step-2'), document.getElementById('step-3')]
   };
 
-  window.onload = async () => {
-    const hash = window.location.hash.substring(1);
+  // --- WEBRTC LOGIC ---
+
+  // 1. HOST: Create Offer
+  async function createOffer() {
+    dataChannel = pc.createDataChannel("chat");
+    setupChannel(dataChannel);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    // Wait for ICE...
+  }
+
+  // 2. GUEST: Accept Offer, Create Answer
+  async function acceptOffer() {
+    const offerStr = els.remote.value.trim();
+    if (!offerStr) return alert("Paste the Offer first!");
     
-    if (hash) {
-      // === GUEST (PHONE) ===
-      isInitiator = false;
-      ui.title.innerText = "GUEST: Processing Host Data...";
-      ui.comp.innerText = hash.substring(0, 50) + "...";
-      
-      try {
-        const sdp = await gzipDecompress(hash);
-        ui.raw.innerText = "Decompressed Offer received.";
-        
-        await pc.setRemoteDescription({ type: "offer", sdp });
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-      } catch(e) { 
-        alert("Decompression failed. Code might be corrupted.");
-        console.error(e);
-      }
-    } else {
-      // === HOST (LAPTOP) ===
-      isInitiator = true;
-      ui.title.innerText = "HOST: Creating Room...";
-      
-      const dc = pc.createDataChannel("chat");
-      setupChannel(dc);
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-    }
-  };
-
-  // --- 3. THE PIPELINE: SDP -> CLEAN -> GZIP -> QR ---
-  pc.onicecandidate = async e => {
-    if (e.candidate === null) {
-      // 1. RAW DATA
-      const rawSdp = pc.localDescription.sdp;
-      ui.raw.innerText = rawSdp.substring(0, 60) + "...";
-
-      // 2. CLEANING (Aggressive)
-      // Remove TCP, ufrag, pwd lines if redundant (keep it simple for now: remove TCP)
-      // Note: We MUST NOT remove ice-ufrag or ice-pwd or fingerprint, connection will fail.
-      let cleanSdp = rawSdp.split('\r\n').filter(line => {
-        return !line.includes(' tcp ') && !line.includes('a=rtcp-fb'); 
-      }).join('\r\n');
-      ui.clean.innerText = cleanSdp.substring(0, 60) + "...";
-
-      // 3. GZIP COMPRESSION
-      const compressed = await gzipCompress(cleanSdp);
-      ui.comp.innerText = compressed.substring(0, 60) + "...";
-
-      // Stats
-      const savings = Math.round((1 - (compressed.length / rawSdp.length)) * 100);
-      ui.stats.innerHTML = `Original: ${rawSdp.length} chars | <span class="highlight">Final: ${compressed.length} chars</span> (-${savings}%)`;
-
-      // 4. GENERATE QR
-      if (isInitiator) {
-        const url = `${window.location.href.split('#')[0]}#${compressed}`;
-        generateQR(url);
-        ui.title.innerText = "1. Scan this with Phone";
-        ui.btnScan.classList.remove('hidden');
-      } else {
-        generateQR(compressed); // Just the raw base64 for Guest
-        ui.title.innerText = "2. Scan this with Laptop";
-      }
-    }
-  };
-
-  function generateQR(text) {
-    ui.qr.innerHTML = "";
-    // We can use 'L' (Low) error correction because the data is safer now
-    new QRCode(ui.qr, {
-      text: text,
-      width: 260,
-      height: 260,
-      colorDark : "#000000",
-      colorLight : "#ffffff",
-      correctLevel : QRCode.CorrectLevel.L
-    });
-    ui.qrBox.classList.remove('hidden');
-  }
-
-  // --- 4. SCANNER ---
-  function startScanner() {
-    document.getElementById('reader').style.display = "block";
-    ui.btnScan.classList.add('hidden');
-    ui.qrBox.classList.add('hidden'); // Hide own QR
-    ui.title.innerText = "Scanning Response...";
-
-    html5QrCode = new Html5Qrcode("reader");
-    html5QrCode.start(
-      { facingMode: "environment" }, 
-      { fps: 10, qrbox: 250 },
-      async (decodedText) => {
-        html5QrCode.stop();
-        finishConnection(decodedText);
-      },
-      (err) => {}
-    );
-  }
-
-  async function finishConnection(data) {
-    ui.title.innerText = "Connecting...";
     try {
-      // Strip URL if present
-      let payload = data;
-      if (data.includes('#')) payload = data.split('#')[1];
-
-      const sdp = await gzipDecompress(payload);
-      const type = isInitiator ? "answer" : "offer";
-      await pc.setRemoteDescription({ type, sdp });
+      const offer = JSON.parse(decompress(offerStr));
+      await pc.setRemoteDescription(offer);
       
+      pc.ondatachannel = e => setupChannel(e.channel); // Guest listens for channel
+      
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      // Wait for ICE...
     } catch (e) {
-      alert("Connection failed. Check console.");
+      alert("Invalid Code. Make sure you copied the whole string.");
       console.error(e);
     }
   }
 
-  // --- 5. CHAT ---
-  pc.ondatachannel = e => setupChannel(e.channel);
+  // 3. HOST: Finalize Connection
+  async function finalize() {
+    const answerStr = els.final.value.trim();
+    if (!answerStr) return alert("Paste the Answer first!");
+
+    try {
+      const answer = JSON.parse(decompress(answerStr));
+      await pc.setRemoteDescription(answer);
+    } catch (e) {
+      alert("Connection failed. Check console.");
+    }
+  }
+
+  // ICE Candidates -> Update Text Box
+  pc.onicecandidate = e => {
+    if (e.candidate === null) {
+      // Finished gathering.
+      const raw = JSON.stringify(pc.localDescription);
+      const compressed = compress(raw);
+      
+      els.local.value = compressed;
+      
+      // Enable Share Buttons based on role
+      if (pc.localDescription.type === 'offer') {
+        els.btnShareOffer.disabled = false;
+        els.btnShareOffer.innerText = "Share Offer (Ready)";
+      } else {
+        els.btnShareAnswer.disabled = false;
+        els.btnShareAnswer.innerText = "Share Answer (Ready)";
+      }
+    }
+  };
+
   function setupChannel(dc) {
     dataChannel = dc;
     dc.onopen = () => {
-      ui.setup.classList.add('hidden');
-      ui.chat.classList.remove('hidden');
+      els.statusDot.classList.add('connected');
+      els.statusText.innerText = "Connected";
+      els.statusText.style.color = "#3fb950";
+      
+      // Hide setup, show chat
+      els.steps.forEach(s => s.classList.add('hidden'));
+      els.chat.classList.remove('hidden');
     };
-    dc.onmessage = e => addMsg(e.data, 'Peer');
+    dc.onmessage = e => addMsg(e.data, 'peer');
   }
-  function sendMessage() {
-    const val = document.getElementById('chat-input').value;
-    if(dataChannel && val) {
-      dataChannel.send(val);
-      addMsg(val, 'You');
-      document.getElementById('chat-input').value = "";
+
+  // --- SHARING TOOLS ---
+
+  async function shareData(elementId) {
+    const text = document.getElementById(elementId).value;
+    if (!navigator.share) {
+      alert("Your browser doesn't support Native Sharing. Please use the Copy button.");
+      return;
+    }
+    try {
+      await navigator.share({
+        title: 'WebRTC Code',
+        text: text
+      });
+    } catch (err) {
+      console.log('Share canceled or failed', err);
     }
   }
-  function addMsg(txt, who) {
-    const d = document.createElement('div');
-    d.innerHTML = `<strong>${who}:</strong> ${txt}`;
-    ui.log.appendChild(d);
+
+  function copyData(elementId) {
+    const text = document.getElementById(elementId).value;
+    navigator.clipboard.writeText(text);
+    alert("Copied to clipboard!");
   }
-  function handleKey(e) { if(e.key==='Enter') sendMessage(); }
+
+  // --- COMPRESSION (Safe for URL/Text) ---
+  function compress(str) {
+    // We remove TCP candidates to save space before compressing
+    return LZString.compressToEncodedURIComponent(str);
+  }
+  
+  function decompress(str) {
+    return LZString.decompressFromEncodedURIComponent(str);
+  }
+
+  // --- CHAT UI ---
+  function sendMsg() {
+    const input = document.getElementById('chat-msg');
+    const txt = input.value.trim();
+    if (dataChannel && txt) {
+      dataChannel.send(txt);
+      addMsg(txt, 'me');
+      input.value = "";
+    }
+  }
+
+  function addMsg(txt, who) {
+    const div = document.createElement('div');
+    div.className = `msg ${who}`;
+    div.innerText = txt;
+    document.getElementById('chat-log').appendChild(div);
+    document.getElementById('chat-log').scrollTop = 9999;
+  }
+
+  function handleKey(e) { if(e.key==='Enter') sendMsg(); }
 
 </script>
 </body>
