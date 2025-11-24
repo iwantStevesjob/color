@@ -3,128 +3,191 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Animated QR Chat</title>
+  <title>Gzip QR Handshake</title>
   
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+  <!-- QR Libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
   <style>
-    :root { --bg: #121212; --surface: #1e1e1e; --primary: #00e676; --text: #e0e0e0; }
-    body { font-family: monospace; background: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-    .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 15px; }
-    .card { background: var(--surface); padding: 15px; border-radius: 8px; border: 1px solid #333; text-align: center; }
+    :root { --bg: #0d1117; --surface: #161b22; --border: #30363d; --primary: #2f81f7; --text: #c9d1d9; }
+    body { font-family: monospace; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
     
-    h1 { color: var(--primary); margin: 0 0 5px 0; font-size: 1.2rem; }
-    p { margin: 5px 0; font-size: 0.85rem; color: #aaa; }
+    .container { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 15px; }
+    .card { background: var(--surface); border: 1px solid var(--border); padding: 15px; border-radius: 6px; }
+    
+    h2 { color: var(--primary); margin: 0 0 10px 0; font-size: 1rem; text-transform: uppercase; letter-spacing: 1px; }
+    
+    /* STEPS VISUALIZATION */
+    .step-box { background: #000; padding: 8px; border-left: 3px solid #333; margin-bottom: 8px; font-size: 0.75rem; word-break: break-all; max-height: 60px; overflow-y: auto; color: #8b949e; }
+    .step-label { display: block; font-weight: bold; color: #fff; margin-bottom: 2px; }
+    .highlight { color: var(--primary); font-weight: bold; }
 
-    /* QR Area */
-    #qr-wrapper { min-height: 280px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-    #qr-area { background: #fff; padding: 15px; display: inline-block; border-radius: 4px; }
-    #qr-progress { font-size: 1.2rem; font-weight: bold; color: var(--primary); margin-top: 10px; }
+    /* QR STYLES */
+    #qr-area { background: #fff; padding: 10px; display: inline-block; margin: 10px auto; border-radius: 4px; }
     
-    /* Scanner */
-    #reader { width: 100%; border-radius: 8px; overflow: hidden; display: none; background: #000; border: 2px solid var(--primary); }
-    
-    /* Chat */
-    .chat-box { height: 50vh; overflow-y: auto; background: #000; padding: 10px; border: 1px solid #333; text-align: left; margin-bottom: 10px; font-size: 0.9rem; }
-    .msg { margin-bottom: 5px; padding: 6px 10px; border-radius: 4px; word-break: break-word; max-width: 80%; display: inline-block; }
-    .msg-row { display: flex; width: 100%; margin-bottom: 5px; }
-    .msg-row.me { justify-content: flex-end; }
-    .msg-row.me .msg { background: #004d40; color: #fff; }
-    .msg-row.peer .msg { background: #263238; color: #eceff1; }
-    
-    input { width: 60%; padding: 10px; border-radius: 4px; border: none; background: #333; color: white; }
-    button { padding: 10px 15px; background: var(--primary); color: #000; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+    /* CHAT & SCANNER */
+    #reader { width: 100%; border: 2px solid var(--primary); border-radius: 6px; overflow: hidden; display: none; }
+    .btn { background: var(--primary); color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 10px; }
     .hidden { display: none !important; }
+    
+    #chat-log { height: 300px; overflow-y: auto; border: 1px solid var(--border); background: #000; padding: 10px; margin-bottom: 10px; }
+    input { width: 70%; padding: 10px; background: #000; border: 1px solid var(--border); color: #fff; }
   </style>
 </head>
 <body>
 
 <div class="container">
-  
+
+  <!-- SETUP / DEBUG PANEL -->
   <div id="setup-panel" class="card">
-    <h1 id="status-title">Loading...</h1>
-    <p id="instruction">Initializing...</p>
+    <h2 id="status-title">Initializing...</h2>
     
-    <!-- QR Display -->
-    <div id="qr-container" class="hidden">
-      <div id="qr-wrapper">
-        <div id="qr-area"></div>
-        <div id="qr-progress"></div>
-      </div>
-      <p id="qr-caption">Scan with other device</p>
+    <!-- Step 1: Raw Data -->
+    <div class="step-box">
+      <span class="step-label">1. RAW SDP (WebRTC Data)</span>
+      <span id="debug-raw">Waiting for ICE candidates...</span>
     </div>
 
-    <!-- Scanner -->
-    <div id="scanner-container" style="margin-top: 15px;">
+    <!-- Step 2: Optimization -->
+    <div class="step-box">
+      <span class="step-label">2. CLEANED (Removed TCP/Fluff)</span>
+      <span id="debug-clean">...</span>
+    </div>
+
+    <!-- Step 3: Compression -->
+    <div class="step-box">
+      <span class="step-label">3. GZIP + BASE64 (Final Payload)</span>
+      <span id="debug-compressed">...</span>
+    </div>
+
+    <div style="text-align: center; margin: 10px 0;">
+      <span id="size-stats" style="font-size: 0.8rem; color: #ff7b72;"></span>
+    </div>
+
+    <!-- Step 4: QR Code -->
+    <div id="qr-container" class="hidden" style="text-align: center;">
+      <div id="qr-area"></div>
+      <p id="instruction" style="font-size: 0.8rem; margin-top:5px;">Scan with other device</p>
+    </div>
+
+    <!-- Step 5: Scanner -->
+    <div id="scanner-container">
       <div id="reader"></div>
-      <div id="scan-progress" style="color:var(--primary); font-weight:bold; margin-bottom:5px;"></div>
-      <button id="btn-scan" class="hidden" onclick="startScanner()">Scan Partner's QR</button>
+      <button id="btn-scan" class="btn hidden" onclick="startScanner()">Scan Response</button>
     </div>
   </div>
 
+  <!-- CHAT PANEL -->
   <div id="chat-panel" class="card hidden">
-    <h1>SECURE CHAT</h1>
-    <div id="chat-log" class="chat-box"></div>
-    <div style="display: flex; gap: 5px;">
-      <input type="text" id="chat-input" placeholder="Message..." autocomplete="off" onkeypress="handleKey(event)">
-      <button onclick="sendMessage()">Send</button>
+    <h2>Secure Chat Connected</h2>
+    <div id="chat-log"></div>
+    <div style="display: flex; gap: 10px;">
+      <input type="text" id="chat-input" placeholder="Type message..." onkeypress="handleKey(event)">
+      <button class="btn" style="width: auto; margin: 0;" onclick="sendMessage()">Send</button>
     </div>
   </div>
 
 </div>
 
 <script>
-  // --- 1. CONFIG & GLOBALS ---
+  // --- 1. GZIP COMPRESSION UTILS (Native CompressionStream) ---
+  
+  async function gzipCompress(str) {
+    // 1. Convert string to byte stream
+    const stream = new Blob([str]).stream();
+    // 2. Pipe through Gzip
+    const compressedStream = stream.pipeThrough(new CompressionStream("gzip"));
+    // 3. Read stream back to buffer
+    const response = await new Response(compressedStream);
+    const blob = await response.blob();
+    const buffer = await blob.arrayBuffer();
+    // 4. Convert to Base64 (Url Safe)
+    return arrayBufferToBase64(buffer);
+  }
+
+  async function gzipDecompress(base64) {
+    // 1. Convert Base64 to Buffer
+    const buffer = base64ToArrayBuffer(base64);
+    // 2. Pipe through Decompression
+    const stream = new Blob([buffer]).stream();
+    const decompressedStream = stream.pipeThrough(new DecompressionStream("gzip"));
+    // 3. Read back to Text
+    const response = await new Response(decompressedStream);
+    return await response.text();
+  }
+
+  // Helper: Binary to Base64 URL Safe
+  function arrayBufferToBase64(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    // Replace + with -, / with _ to make it URL safe, remove padding =
+    return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  // Helper: Base64 URL Safe to Binary
+  function base64ToArrayBuffer(base64) {
+    // Restore padding and standard chars
+    let binary_string = window.atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
+    const len = binary_string.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary_string.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  // --- 2. WEBRTC & UI LOGIC ---
+
   const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
   const pc = new RTCPeerConnection(config);
   let dataChannel;
   let isInitiator = false;
   let html5QrCode;
-  let qrInterval; // To control the animation loop
-  
-  // CHUNK SCANNING STATE
-  let receivedChunks = {}; 
-  let totalChunksExpected = 0;
 
-  // UI References
+  // UI Refs
   const ui = {
-    status: document.getElementById('status-title'),
-    instruction: document.getElementById('instruction'),
-    qrContainer: document.getElementById('qr-container'),
-    qrArea: document.getElementById('qr-area'),
-    qrProgress: document.getElementById('qr-progress'),
-    qrCaption: document.getElementById('qr-caption'),
+    raw: document.getElementById('debug-raw'),
+    clean: document.getElementById('debug-clean'),
+    comp: document.getElementById('debug-compressed'),
+    stats: document.getElementById('size-stats'),
+    qrBox: document.getElementById('qr-container'),
+    qr: document.getElementById('qr-area'),
     btnScan: document.getElementById('btn-scan'),
     setup: document.getElementById('setup-panel'),
     chat: document.getElementById('chat-panel'),
     log: document.getElementById('chat-log'),
-    input: document.getElementById('chat-input'),
-    scanProg: document.getElementById('scan-progress')
+    title: document.getElementById('status-title')
   };
 
-  // --- 2. INITIALIZATION ---
   window.onload = async () => {
     const hash = window.location.hash.substring(1);
     
     if (hash) {
       // === GUEST (PHONE) ===
       isInitiator = false;
-      ui.status.innerText = "Joining...";
-      ui.instruction.innerText = "Processing URL...";
+      ui.title.innerText = "GUEST: Processing Host Data...";
+      ui.comp.innerText = hash.substring(0, 50) + "...";
       
       try {
-        const sdp = LZString.decompressFromEncodedURIComponent(hash);
+        const sdp = await gzipDecompress(hash);
+        ui.raw.innerText = "Decompressed Offer received.";
+        
         await pc.setRemoteDescription({ type: "offer", sdp });
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        // Wait for ICE candidates...
-      } catch(e) { alert("Invalid Link"); }
+      } catch(e) { 
+        alert("Decompression failed. Code might be corrupted.");
+        console.error(e);
+      }
     } else {
       // === HOST (LAPTOP) ===
       isInitiator = true;
-      ui.status.innerText = "Generating Room...";
+      ui.title.innerText = "HOST: Creating Room...";
       
       const dc = pc.createDataChannel("chat");
       setupChannel(dc);
@@ -133,137 +196,93 @@
     }
   };
 
-  // --- 3. ICE HANDLING & QR GENERATION ---
-  pc.onicecandidate = e => {
+  // --- 3. THE PIPELINE: SDP -> CLEAN -> GZIP -> QR ---
+  pc.onicecandidate = async e => {
     if (e.candidate === null) {
-      // DONE GATHERING. PREPARE DATA.
+      // 1. RAW DATA
       const rawSdp = pc.localDescription.sdp;
-      // Strip TCP for size
-      const cleanSdp = rawSdp.split('\r\n').filter(l => !l.includes(' tcp ')).join('\r\n');
-      const compressed = LZString.compressToEncodedURIComponent(cleanSdp);
+      ui.raw.innerText = rawSdp.substring(0, 60) + "...";
 
+      // 2. CLEANING (Aggressive)
+      // Remove TCP, ufrag, pwd lines if redundant (keep it simple for now: remove TCP)
+      // Note: We MUST NOT remove ice-ufrag or ice-pwd or fingerprint, connection will fail.
+      let cleanSdp = rawSdp.split('\r\n').filter(line => {
+        return !line.includes(' tcp ') && !line.includes('a=rtcp-fb'); 
+      }).join('\r\n');
+      ui.clean.innerText = cleanSdp.substring(0, 60) + "...";
+
+      // 3. GZIP COMPRESSION
+      const compressed = await gzipCompress(cleanSdp);
+      ui.comp.innerText = compressed.substring(0, 60) + "...";
+
+      // Stats
+      const savings = Math.round((1 - (compressed.length / rawSdp.length)) * 100);
+      ui.stats.innerHTML = `Original: ${rawSdp.length} chars | <span class="highlight">Final: ${compressed.length} chars</span> (-${savings}%)`;
+
+      // 4. GENERATE QR
       if (isInitiator) {
-        // HOST: Single QR (URL) - Phones have good cameras, they can handle it.
         const url = `${window.location.href.split('#')[0]}#${compressed}`;
-        showSingleQR(url);
-        ui.status.innerText = "Step 1: Scan with Phone";
-        ui.btnScan.classList.remove('hidden'); 
+        generateQR(url);
+        ui.title.innerText = "1. Scan this with Phone";
+        ui.btnScan.classList.remove('hidden');
       } else {
-        // GUEST: ANIMATED QR - Laptop cameras suck, so we chunk it.
-        startAnimatedQR(compressed);
-        ui.status.innerText = "Step 2: Show to Laptop";
-        ui.instruction.innerText = "Hold steady. Phone will flash codes.";
+        generateQR(compressed); // Just the raw base64 for Guest
+        ui.title.innerText = "2. Scan this with Laptop";
       }
     }
   };
 
-  // --- 4. QR DISPLAY LOGIC ---
-
-  // A. Static QR (For Host)
-  function showSingleQR(text) {
-    ui.qrArea.innerHTML = "";
-    new QRCode(ui.qrArea, { text: text, width: 250, height: 250 });
-    ui.qrContainer.classList.remove('hidden');
+  function generateQR(text) {
+    ui.qr.innerHTML = "";
+    // We can use 'L' (Low) error correction because the data is safer now
+    new QRCode(ui.qr, {
+      text: text,
+      width: 260,
+      height: 260,
+      colorDark : "#000000",
+      colorLight : "#ffffff",
+      correctLevel : QRCode.CorrectLevel.L
+    });
+    ui.qrBox.classList.remove('hidden');
   }
 
-  // B. Animated QR (For Guest/Phone)
-  function startAnimatedQR(data) {
-    ui.qrContainer.classList.remove('hidden');
-    
-    // Split data into chunks of 100 chars (Very small = Big blocks)
-    const CHUNK_SIZE = 120; 
-    const chunks = [];
-    const total = Math.ceil(data.length / CHUNK_SIZE);
-
-    for (let i = 0; i < total; i++) {
-      // Protocol: "C:Index:Total:Data"
-      const part = data.substr(i * CHUNK_SIZE, CHUNK_SIZE);
-      chunks.push(`C:${i+1}:${total}:${part}`);
-    }
-
-    let frame = 0;
-    // Loop every 800ms
-    qrInterval = setInterval(() => {
-      ui.qrArea.innerHTML = ""; // Clear
-      new QRCode(ui.qrArea, { 
-        text: chunks[frame], 
-        width: 260, 
-        height: 260,
-        correctLevel : QRCode.CorrectLevel.L
-      });
-      ui.qrProgress.innerText = `Part ${frame + 1}/${total}`;
-      ui.qrCaption.innerText = "Keep pointing at laptop... looping";
-      
-      frame = (frame + 1) % total;
-    }, 700);
-  }
-
-  // --- 5. SCANNER LOGIC (Must handle Chunks) ---
+  // --- 4. SCANNER ---
   function startScanner() {
     document.getElementById('reader').style.display = "block";
     ui.btnScan.classList.add('hidden');
-    ui.qrContainer.classList.add('hidden'); // Hide own QR
-    if(qrInterval) clearInterval(qrInterval); // Stop own animation if any
+    ui.qrBox.classList.add('hidden'); // Hide own QR
+    ui.title.innerText = "Scanning Response...";
 
     html5QrCode = new Html5Qrcode("reader");
     html5QrCode.start(
       { facingMode: "environment" }, 
-      { fps: 15, qrbox: 250 },
-      (decodedText) => {
-        handleScanData(decodedText);
+      { fps: 10, qrbox: 250 },
+      async (decodedText) => {
+        html5QrCode.stop();
+        finishConnection(decodedText);
       },
       (err) => {}
     );
   }
 
-  async function handleScanData(text) {
-    // 1. Is it a Chunk? (Format: C:1:3:sad8f7...)
-    if (text.startsWith('C:')) {
-      const parts = text.split(':');
-      if (parts.length < 4) return;
-      
-      const idx = parseInt(parts[1]);
-      const total = parseInt(parts[2]);
-      const content = parts.slice(3).join(':'); // Rejoin rest in case data had colons
-
-      receivedChunks[idx] = content;
-      totalChunksExpected = total;
-      
-      const currentCount = Object.keys(receivedChunks).length;
-      ui.scanProg.innerText = `Scanning: ${currentCount}/${total} parts received...`;
-
-      if (currentCount === total) {
-        html5QrCode.stop();
-        ui.scanProg.innerText = "Reassembling...";
-        // Reassemble
-        let fullData = "";
-        for(let i=1; i<=total; i++) fullData += receivedChunks[i];
-        finishConnection(fullData);
-      }
-    } 
-    // 2. Is it a standard URL/Data? (For Phone scanning Laptop)
-    else {
-      let clean = text;
-      if(text.includes('#')) clean = text.split('#')[1];
-      html5QrCode.stop();
-      finishConnection(clean);
-    }
-  }
-
-  async function finishConnection(compressedData) {
-    ui.status.innerText = "Connecting...";
+  async function finishConnection(data) {
+    ui.title.innerText = "Connecting...";
     try {
-      const sdpStr = LZString.decompressFromEncodedURIComponent(compressedData);
-      const desc = { type: isInitiator ? "answer" : "offer", sdp: sdpStr };
-      await pc.setRemoteDescription(desc);
-      console.log("Remote set");
+      // Strip URL if present
+      let payload = data;
+      if (data.includes('#')) payload = data.split('#')[1];
+
+      const sdp = await gzipDecompress(payload);
+      const type = isInitiator ? "answer" : "offer";
+      await pc.setRemoteDescription({ type, sdp });
+      
     } catch (e) {
-      alert("Error connecting. Try refreshing.");
+      alert("Connection failed. Check console.");
       console.error(e);
     }
   }
 
-  // --- 6. CHAT ---
+  // --- 5. CHAT ---
   pc.ondatachannel = e => setupChannel(e.channel);
   function setupChannel(dc) {
     dataChannel = dc;
@@ -271,24 +290,22 @@
       ui.setup.classList.add('hidden');
       ui.chat.classList.remove('hidden');
     };
-    dc.onmessage = e => addMsg(e.data, 'peer');
+    dc.onmessage = e => addMsg(e.data, 'Peer');
   }
   function sendMessage() {
-    const val = ui.input.value;
+    const val = document.getElementById('chat-input').value;
     if(dataChannel && val) {
       dataChannel.send(val);
-      addMsg(val, 'me');
-      ui.input.value = "";
+      addMsg(val, 'You');
+      document.getElementById('chat-input').value = "";
     }
   }
   function addMsg(txt, who) {
     const d = document.createElement('div');
-    d.className = `msg-row ${who}`;
-    d.innerHTML = `<div class="msg">${txt}</div>`;
+    d.innerHTML = `<strong>${who}:</strong> ${txt}`;
     ui.log.appendChild(d);
-    ui.log.scrollTop = ui.log.scrollHeight;
   }
-  function handleKey(e) { if(e.key === 'Enter') sendMessage(); }
+  function handleKey(e) { if(e.key==='Enter') sendMessage(); }
 
 </script>
 </body>
