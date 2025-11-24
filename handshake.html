@@ -3,15 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lite QR WebRTC</title>
+  <title>Fixed QR Chat</title>
   
-  <!-- QR Libraries -->
+  <!-- 1. Include LZ-String for SAFE compression -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+  <!-- 2. QR Generation -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- 3. QR Scanning -->
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
   <style>
-    :root { --bg: #121212; --surface: #1e1e1e; --primary: #03dac6; --text: #e0e0e0; }
-    body { font-family: monospace; background: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+    :root { --bg: #121212; --surface: #1e1e1e; --primary: #76ff03; --text: #e0e0e0; }
+    body { font-family: 'Segoe UI', monospace; background: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
     .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 15px; }
     .card { background: var(--surface); padding: 15px; border-radius: 8px; border: 1px solid #333; text-align: center; }
     
@@ -20,7 +23,7 @@
 
     /* QR Area - Click to zoom */
     #qr-area { background: #fff; padding: 10px; display: inline-block; border-radius: 4px; margin: 10px 0; cursor: zoom-in; transition: transform 0.2s; }
-    #qr-area.zoomed { transform: scale(1.4); margin: 30px 0; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+    #qr-area.zoomed { transform: scale(1.5); margin: 40px 0; box-shadow: 0 0 50px rgba(0,0,0,0.8); z-index: 100; position: relative; }
     #qr-area img { display: block; } 
     
     /* Scanner */
@@ -47,13 +50,13 @@
   <!-- SETUP PANEL -->
   <div id="setup-panel" class="card">
     <h1 id="status-title">Loading...</h1>
-    <p id="instruction">Initializing WebRTC...</p>
+    <p id="instruction">Initializing...</p>
     
     <!-- QR Display -->
     <div id="qr-container" class="hidden">
       <div id="qr-area" onclick="this.classList.toggle('zoomed')" title="Tap to Zoom"></div>
-      <p>Scan with other device <br>(Tap QR to Zoom)</p>
-      <button class="btn-secondary" onclick="copyString()">Copy Text Instead</button>
+      <p id="qr-instructions">Scan with other device <br>(Tap QR to Zoom)</p>
+      <button class="btn-secondary" onclick="copyString()">Copy Text Code</button>
     </div>
 
     <!-- Camera Scanner -->
@@ -76,37 +79,19 @@
 </div>
 
 <script>
-  // --- 1. MINIFICATION LOGIC (Reduces QR Density) ---
-  const replacers = [
-    { k: 'a=candidate:', v: '^' },
-    { k: 'a=fingerprint:sha-256 ', v: '*' },
-    { k: 'a=ice-ufrag:', v: '$' },
-    { k: 'a=ice-pwd:', v: '%' },
-    { k: 'a=ice-options:trickle', v: '!' },
-    { k: 'webrtc-datachannel', v: '@' },
-    { k: 'typ host', v: 'H' },
-    { k: 'typ srflx', v: 'S' },
-    { k: 'tcptype', v: 'T' },
-    { k: 'generation 0', v: '' }, 
-    { k: 'network-cost 999', v: '' }, 
-    { k: 'udp', v: 'u' },
-    { k: '\r\n', v: '~' } // ~ is URL safe
-  ];
-
-  function minify(sdp) {
-    let result = sdp;
-    // Remove TCP candidates (they are large and usually unnecessary for this)
-    result = result.split('\r\n').filter(l => !l.includes(' tcp ')).join('\r\n');
-    replacers.forEach(r => { result = result.split(r.k).join(r.v); });
-    return result;
+  // --- 1. SAFE DATA HANDLING ---
+  // We use LZString because it handles special characters safely.
+  // We manually strip "TCP" candidates to make the QR smaller (safe to do).
+  
+  function optimizeAndCompress(sdp) {
+    // 1. Remove TCP candidates (reduces size by ~40%)
+    const cleanSdp = sdp.split('\r\n').filter(line => !line.includes(' tcp ')).join('\r\n');
+    // 2. Compress safe for URL
+    return LZString.compressToEncodedURIComponent(cleanSdp);
   }
 
-  function unminify(str) {
-    let result = str;
-    [...replacers].reverse().forEach(r => { 
-      if(r.v !== '') result = result.split(r.v).join(r.k); 
-    });
-    return result;
+  function decompress(data) {
+    return LZString.decompressFromEncodedURIComponent(data);
   }
 
   // --- 2. WEBRTC CONFIG ---
@@ -115,9 +100,9 @@
   let dataChannel;
   let isInitiator = false;
   let html5QrCode;
-  let rawMinified = ""; // For clipboard fallback
+  let rawCompressed = ""; // For clipboard fallback
 
-  // UI References
+  // UI Elements
   const ui = {
     status: document.getElementById('status-title'),
     instruction: document.getElementById('instruction'),
@@ -130,25 +115,30 @@
     input: document.getElementById('chat-input')
   };
 
-  // --- 3. INITIALIZATION ---
+  // --- 3. INIT LOGIC ---
   window.onload = async () => {
-    // Check URL Hash for data
     const hash = window.location.hash.substring(1);
     
     if (hash) {
       // === GUEST (PHONE) ===
       isInitiator = false;
-      ui.status.innerText = "Joining...";
+      ui.status.innerText = "Joining Chat...";
       ui.instruction.innerText = "Processing Host Data...";
       
       try {
-        const sdp = unminify(decodeURIComponent(hash));
+        const sdp = decompress(hash);
+        if(!sdp) throw new Error("Decompression failed");
+
+        // Guest sets REMOTE Offer
         await pc.setRemoteDescription({ type: "offer", sdp: sdp });
+        
+        // Guest creates LOCAL Answer
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        // Wait for ICE candidates (onicecandidate triggers next step)
+        // We wait for ICE candidates to finish before showing QR
       } catch(e) { 
-        alert("Invalid Link Data. Ensure the full URL was copied."); 
+        alert("Invalid Link. Please scan again."); 
+        console.error(e);
       }
     } else {
       // === HOST (LAPTOP) ===
@@ -160,29 +150,28 @@
       setupChannel(dc);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      // Wait for ICE candidates...
     }
   };
 
-  // --- 4. ICE CANDIDATE HANDLING ---
+  // --- 4. ICE CANDIDATE COMPLETE ---
   pc.onicecandidate = e => {
     if (e.candidate === null) {
-      // ICE Gathering Complete -> Generate QR
-      const minified = minify(pc.localDescription.sdp);
-      rawMinified = minified;
+      // 1. Get SDP and Compress
+      const compressed = optimizeAndCompress(pc.localDescription.sdp);
+      rawCompressed = compressed;
 
       if (isInitiator) {
-        // Host: Create URL for the Guest
-        const url = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(minified)}`;
+        // HOST: Show URL QR
+        const url = `${window.location.href.split('#')[0]}#${compressed}`;
         generateQR(url);
         ui.status.innerText = "Step 1: Scan with Phone";
-        ui.instruction.innerText = "Scan this, then open the link.";
-        ui.btnScan.classList.remove('hidden'); // Host needs to scan answer later
+        ui.instruction.innerText = "Scan this code to open the chat on your phone.";
+        ui.btnScan.classList.remove('hidden'); // Host needs to scan answer next
       } else {
-        // Guest: Create RAW DATA (Smaller QR)
-        generateQR(minified);
+        // GUEST: Show RAW DATA QR (Smaller)
+        generateQR(compressed);
         ui.status.innerText = "Step 2: Scan with Laptop";
-        ui.instruction.innerText = "Point your laptop camera here.";
+        ui.instruction.innerText = "Show this code to your laptop camera.";
       }
     }
   };
@@ -196,7 +185,7 @@
       height: 260,
       colorDark : "#000000",
       colorLight : "#ffffff",
-      correctLevel : QRCode.CorrectLevel.L // Low error correction = Less dense QR
+      correctLevel : QRCode.CorrectLevel.L // Low error correction = Less dense
     });
     ui.qrBox.classList.remove('hidden');
   }
@@ -204,47 +193,46 @@
   function startScanner() {
     document.getElementById('reader').style.display = "block";
     ui.btnScan.classList.add('hidden');
-    ui.qrBox.classList.add('hidden'); // Hide own QR to make space
-    ui.instruction.innerText = "Hold the QR code steady in front of camera.";
+    ui.qrBox.classList.add('hidden');
+    ui.instruction.innerText = "Hold phone steady. Move closer/further slowly.";
     
     html5QrCode = new Html5Qrcode("reader");
     html5QrCode.start(
-      { facingMode: "environment" }, // "user" or "environment"
+      { facingMode: "environment" }, 
       { fps: 10, qrbox: 250 },
       (decodedText) => {
-        // Success
         html5QrCode.stop();
         finishConnection(decodedText);
       },
       (errorMessage) => { /* scanning */ }
     ).catch(err => {
-      alert("Camera failed. Make sure you are using HTTPS or Localhost.");
+      alert("Camera failed. Use HTTPS or Localhost.");
     });
   }
 
   async function finishConnection(data) {
     ui.status.innerText = "Connecting...";
     try {
-      // If we scanned a URL (by mistake?), strip it. 
-      // But typically Host scans Guest's raw data.
+      // Handle if scanner picked up a URL or just raw data
       let cleanData = data;
       if(data.includes('#')) cleanData = data.split('#')[1];
       
-      const sdp = unminify(decodeURIComponent(cleanData));
-      
-      // If we are Host, we are receiving an Answer. 
-      // If we are Guest (rare case using scanner), we receive Offer.
+      const sdp = decompress(cleanData);
+      if(!sdp) throw new Error("Empty data");
+
+      // Host receives "answer", Guest receives "offer" (rare manual case)
       const type = isInitiator ? "answer" : "offer";
       
       await pc.setRemoteDescription({ type: type, sdp: sdp });
-      // Connection state should change to 'connected' automatically
+      console.log("Remote description set");
     } catch (e) {
-      alert("Failed to connect. Data might be corrupted.");
+      alert("Connection Failed. Data corrupted.");
       console.error(e);
+      ui.status.innerText = "Error";
     }
   }
 
-  // --- 6. CHAT LOGIC ---
+  // --- 6. CHAT ---
   pc.ondatachannel = e => setupChannel(e.channel);
   
   function setupChannel(dc) {
@@ -280,8 +268,8 @@
   function handleKey(e) { if(e.key === 'Enter') sendMessage(); }
 
   function copyString() {
-    navigator.clipboard.writeText(rawMinified);
-    alert("Code copied to clipboard!");
+    navigator.clipboard.writeText(rawCompressed);
+    alert("Copied! Send this text to the other device.");
   }
 </script>
 </body>
