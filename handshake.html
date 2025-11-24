@@ -1,104 +1,304 @@
 <!DOCTYPE html>
-<html>
-<head>
-  <title>WebRTC Data Channel</title>
-  <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
-</head>
-<body>
-  v6:<br/>
-  <button id="button" onclick="createOffer()">Create Offer</button>
-  <textarea id="offer" placeholder="Paste offer here"></textarea><br>
-  
-  Answer: <textarea id="answer"></textarea><br>
-  <div id="log"></div>
-  
-  Chat: <input id="chat" placeholder="Type message here"></input><br>
-  
-  <script>
-    var server = { urls: "stun:stun.l.google.com:19302" };
-    var pc = new RTCPeerConnection({ iceServers: [server] });
-    var dc, isOfferer = false;
+<html lang="en">
 
-    // ICE candidate handler
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Serverless WebRTC Chat</title>
+  <style>
+    :root {
+      --bg-color: #121212;
+      --surface-color: #1e1e1e;
+      --primary-color: #bb86fc;
+      --text-color: #e0e0e0;
+      --border-radius: 8px;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+      box-sizing: border-box;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .card {
+      background-color: var(--surface-color);
+      padding: 20px;
+      border-radius: var(--border-radius);
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    }
+
+    h1,
+    h2 {
+      margin-top: 0;
+      color: var(--primary-color);
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      background-color: #2d2d2d;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 10px;
+      box-sizing: border-box;
+      font-family: monospace;
+      resize: vertical;
+    }
+
+    button {
+      background-color: var(--primary-color);
+      color: #000;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: opacity 0.2s;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #chat-log {
+      height: 200px;
+      overflow-y: auto;
+      background-color: #000;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      border: 1px solid #333;
+    }
+
+    .message {
+      margin: 5px 0;
+    }
+
+    .message.local {
+      color: #81c784;
+    }
+
+    .message.remote {
+      color: #64b5f6;
+    }
+
+    .message.system {
+      color: #aaa;
+      font-style: italic;
+    }
+
+    input[type="text"] {
+      flex-grow: 1;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background-color: #2d2d2d;
+      color: #fff;
+    }
+
+    .status {
+      margin-left: auto;
+      font-size: 0.9em;
+      color: #888;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+    <div class="card">
+      <div class="row">
+        <h1>WebRTC Handshake</h1>
+        <span id="connection-status" class="status">Disconnected</span>
+      </div>
+      <p>1. <strong>Create Offer</strong> (if initiator) OR <strong>Paste Remote SDP</strong> (if joiner).</p>
+
+      <div class="row">
+        <button id="btn-create-offer" onclick="createOffer()">Create Offer</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>1. Local SDP <button onclick="copyLocal()" style="font-size: 0.8em; padding: 4px 8px;">Copy</button></h2>
+      <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Send this to your peer.</p>
+      <textarea id="local-sdp" readonly placeholder="Generated SDP will appear here..."></textarea>
+    </div>
+
+    <div class="card">
+      <h2>2. Remote SDP</h2>
+      <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Paste the peer's SDP here.</p>
+      <textarea id="remote-sdp" placeholder="Paste peer's SDP here..."></textarea>
+      <br>
+      <button id="btn-connect" onclick="connect()">Connect / Accept Answer</button>
+    </div>
+
+    <div class="card">
+      <h2>Chat</h2>
+      <div id="chat-log"></div>
+      <div class="row">
+        <input type="text" id="chat-input" placeholder="Type a message..." onkeypress="handleChatKey(event)">
+        <button onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const config = {
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    };
+
+    const pc = new RTCPeerConnection(config);
+    let dataChannel;
+
+    // UI Elements
+    const localSdpEl = document.getElementById('local-sdp');
+    const remoteSdpEl = document.getElementById('remote-sdp');
+    const chatLog = document.getElementById('chat-log');
+    const statusEl = document.getElementById('connection-status');
+    const btnCreateOffer = document.getElementById('btn-create-offer');
+    const btnConnect = document.getElementById('btn-connect');
+
+    // Logging
+    function log(msg, type = 'system') {
+      const div = document.createElement('div');
+      div.className = 'message ' + type;
+      div.textContent = msg;
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      console.log(`[${type}] ${msg}`);
+    }
+
+    // ICE Candidate handling
     pc.onicecandidate = e => {
       if (e.candidate) {
-        log("ICE Candidate: " + JSON.stringify(e.candidate));
+        // console.log("New ICE candidate");
       } else {
-        log("All ICE candidates have been sent.");
-        if (isOfferer) {
-          offer.value = pc.localDescription.sdp;
-          offer.select();
-          answer.placeholder = "Paste answer here";
-        } else {
-          answer.value = pc.localDescription.sdp;
-          answer.select();
-        }
+        // All candidates gathered
+        log("ICE gathering complete. Copy Local SDP to peer.");
+        localSdpEl.value = JSON.stringify(pc.localDescription);
+        localSdpEl.select();
       }
     };
 
-    // Data channel handler
-    pc.ondatachannel = event => {
-      dc = event.channel;
-      dcInit();
+    pc.onconnectionstatechange = () => {
+      statusEl.textContent = pc.connectionState;
+      log(`Connection state: ${pc.connectionState}`);
     };
 
-    // Create data channel and offer
-    function createOffer() {
-      button.disabled = true;
-      isOfferer = true;
-      dc = pc.createDataChannel("chat");
-      dcInit();
-      
-      pc.createOffer().then(offer => {
-        return pc.setLocalDescription(offer);
-      }).catch(log);
+    // Data Channel Setup
+    function setupDataChannel(dc) {
+      dataChannel = dc;
+      dc.onopen = () => {
+        log("Chat channel open!", 'system');
+        statusEl.textContent = 'Connected';
+        statusEl.style.color = '#81c784';
+        document.getElementById('chat-input').disabled = false;
+        document.getElementById('chat-input').focus();
+      };
+      dc.onmessage = e => log(`Peer: ${e.data}`, 'remote');
     }
 
-    // Handle offer input and create answer
-    offer.onkeypress = e => {
-      if (e.keyCode !== 13 || pc.signalingState !== "stable") return;
-      button.disabled = offer.disabled = true;
-      
-      var offerDesc = new RTCSessionDescription({ type: "offer", sdp: offer.value });
-      pc.setRemoteDescription(offerDesc).then(() => {
-        log("Remote offer description set, creating answer...");
-        return pc.createAnswer();
-      }).then(answer => {
-        return pc.setLocalDescription(answer);
-      }).then(() => {
-        log("Answer created: " + pc.localDescription.sdp);
-      }).catch(log);
+    // Initiator: Create Data Channel
+    pc.ondatachannel = e => {
+      log("Received data channel from remote.");
+      setupDataChannel(e.channel);
     };
 
-    // Handle answer input
-    answer.onkeypress = e => {
-      if (e.keyCode !== 13 || pc.signalingState !== "have-local-offer") return;
-      answer.disabled = true;
-      
-      var answerDesc = new RTCSessionDescription({ type: "answer", sdp: answer.value });
-      pc.setRemoteDescription(answerDesc).then(() => {
-        log("Remote answer description set.");
-      }).catch(log);
-    };
+    async function createOffer() {
+      btnCreateOffer.disabled = true;
+      log("Creating offer...");
 
-    // Chat input handling
-    chat.onkeypress = e => {
-      if (e.keyCode !== 13) return;
-      dc.send(chat.value);
-      log("Sent: " + chat.value);
-      chat.value = "";
-    };
+      // Create data channel as initiator
+      const dc = pc.createDataChannel("chat");
+      setupDataChannel(dc);
 
-    // Data channel initialization
-    function dcInit() {
-      dc.onopen = () => log("Chat is open!");
-      dc.onmessage = e => log("Received: " + e.data);
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        log("Offer created. Waiting for ICE candidates...");
+      } catch (err) {
+        log("Error creating offer: " + err);
+      }
     }
 
-    // Logging function
-    var log = msg => {
-      document.getElementById('log').innerHTML += "<p>" + msg + "</p>";
-    };
+    async function connect() {
+      const remoteText = remoteSdpEl.value.trim();
+      if (!remoteText) {
+        alert("Please paste the remote SDP first.");
+        return;
+      }
+
+      try {
+        const remoteDesc = JSON.parse(remoteText);
+        await pc.setRemoteDescription(remoteDesc);
+        log("Remote description set.");
+
+        // If we received an offer, create an answer
+        if (remoteDesc.type === 'offer') {
+          log("Creating answer...");
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          log("Answer created. Waiting for ICE candidates...");
+        }
+      } catch (err) {
+        log("Error connecting: " + err);
+        console.error(err);
+      }
+    }
+
+    // Chat Functions
+    function sendMessage() {
+      const input = document.getElementById('chat-input');
+      const msg = input.value.trim();
+      if (!msg || !dataChannel || dataChannel.readyState !== 'open') return;
+
+      dataChannel.send(msg);
+      log(`You: ${msg}`, 'local');
+      input.value = '';
+    }
+
+    function handleChatKey(e) {
+      if (e.key === 'Enter') sendMessage();
+    }
+
+    function copyLocal() {
+      localSdpEl.select();
+      document.execCommand('copy');
+      log("Local SDP copied to clipboard.");
+    }
+
+    // Initial State
+    document.getElementById('chat-input').disabled = true;
   </script>
+
 </body>
+
 </html>
