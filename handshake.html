@@ -3,253 +3,250 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tiny QR Chat (WiFi)</title>
+  <title>2-Way QR Chat</title>
   
-  <!-- Libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
   <style>
-    :root { --bg: #121212; --surface: #1e1e1e; --primary: #76ff03; --text: #e0e0e0; }
-    body { font-family: monospace; background: var(--bg); color: var(--text); margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+    :root { --bg: #121212; --surface: #1e1e1e; --primary: #00e676; --text: #e0e0e0; }
+    body { font-family: monospace; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
     .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 15px; }
-    .card { background: var(--surface); padding: 15px; border-radius: 8px; border: 1px solid #333; text-align: center; }
+    .card { background: var(--surface); padding: 20px; border-radius: 8px; border: 1px solid #333; text-align: center; }
     
-    h1 { color: var(--primary); margin: 0 0 5px 0; font-size: 1.2rem; }
-    p { margin: 5px 0; font-size: 0.8rem; color: #aaa; }
+    h1 { color: var(--primary); margin: 0 0 10px 0; font-size: 1.2rem; }
+    p { margin: 5px 0; font-size: 0.85rem; color: #aaa; }
 
-    /* QR STYLING - High Contrast, Large Blocks */
-    #qr-container { background: #fff; padding: 10px; display: inline-block; margin: 10px 0; border-radius: 4px; }
-    
-    /* Scanner */
-    #reader { width: 100%; border: 2px solid var(--primary); border-radius: 6px; overflow: hidden; display: none; background: #000; }
-    
     /* Buttons */
-    .btn { background: var(--primary); color: #000; border: none; padding: 12px; border-radius: 4px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 10px; }
-    .btn-secondary { background: #333; color: #fff; font-size: 0.8rem; padding: 8px; width: auto; margin-top: 10px; }
+    .btn-group { display: flex; gap: 10px; justify-content: center; }
+    .btn { background: var(--primary); color: #000; border: none; padding: 15px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; flex: 1; font-size: 1rem; }
+    .btn:hover { opacity: 0.9; }
+    .btn-secondary { background: #333; color: #fff; font-size: 0.8rem; padding: 5px 10px; margin-top: 10px; border: none; border-radius: 4px; cursor: pointer; }
+
+    /* QR & Scanner */
+    #qr-container { background: #fff; padding: 10px; display: inline-block; margin: 15px 0; border-radius: 4px; }
+    #reader { width: 100%; border: 4px solid var(--primary); border-radius: 8px; overflow: hidden; display: none; background: #000; margin-top: 15px; }
     
     .hidden { display: none !important; }
-
-    /* Chat Log */
-    #chat-log { height: 300px; overflow-y: auto; background: #000; border: 1px solid #333; padding: 10px; text-align: left; }
-    .msg { padding: 5px 10px; margin-bottom: 5px; border-radius: 4px; display: inline-block; max-width: 80%; }
+    
+    /* Chat */
+    #chat-log { height: 300px; overflow-y: auto; background: #000; border: 1px solid #333; padding: 10px; text-align: left; border-radius: 4px; }
+    .msg { padding: 8px 12px; margin-bottom: 8px; border-radius: 4px; display: inline-block; max-width: 80%; }
     .msg.me { background: #004d40; color: #fff; float: right; clear: both; }
     .msg.peer { background: #263238; color: #fff; float: left; clear: both; }
+    input { width: calc(100% - 90px); padding: 12px; border: none; border-radius: 4px; background: #333; color: white; margin-top: 10px; }
+    .send-btn { width: 80px; padding: 12px; background: var(--primary); border: none; border-radius: 4px; font-weight: bold; cursor: pointer; float: right; margin-top: 10px; }
+
   </style>
 </head>
 <body>
 
 <div class="container">
 
-  <!-- SETUP PANEL -->
-  <div id="setup-panel" class="card">
-    <h1 id="status-title">WiFi Chat</h1>
-    <p>Ensures QR codes are small enough for laptop cameras.</p>
-    
-    <!-- Mode Toggle -->
-    <div style="margin-bottom: 15px; font-size: 0.75rem; color: #888;">
-      <label>
-        <input type="checkbox" id="chk-lan" checked> 
-        WiFi Mode (Tiny QR)
-      </label>
-      <br>
-      <span style="font-size: 0.7em;">(Uncheck if using Mobile Data/Different Networks)</span>
-    </div>
-
-    <!-- QR Area -->
-    <div id="qr-display" class="hidden">
-      <div id="qr-container">
-        <div id="qr-code"></div>
-      </div>
-      <p id="qr-instruction">Scan with Laptop</p>
-    </div>
-
-    <!-- Scanner -->
-    <div id="scanner-ui">
-      <div id="reader"></div>
-      <button id="btn-start" class="btn" onclick="initHost()">Start (I am the Phone)</button>
-      <button id="btn-scan" class="btn hidden" onclick="startScanner()">Scan Partner</button>
+  <!-- MAIN MENU -->
+  <div id="menu-panel" class="card">
+    <h1>P2P WiFi Chat</h1>
+    <p>Both devices must be on the same WiFi (or use Mobile Data).</p>
+    <div class="btn-group">
+      <button class="btn" onclick="startAsHost()">Create Room<br><span style="font-size:0.7em">(I am the Phone)</span></button>
+      <button class="btn" onclick="startAsJoiner()">Scan to Join<br><span style="font-size:0.7em">(I am the Laptop)</span></button>
     </div>
   </div>
 
-  <!-- CHAT PANEL -->
+  <!-- SETUP AREA (QR / Scanner) -->
+  <div id="setup-panel" class="card hidden">
+    <h1 id="status-title">Generating...</h1>
+    <p id="instruction">...</p>
+
+    <!-- QR CODE DISPLAY -->
+    <div id="qr-display" class="hidden">
+      <div id="qr-container"><div id="qr-code"></div></div>
+    </div>
+
+    <!-- SCANNER DISPLAY -->
+    <div id="reader"></div>
+    
+    <!-- Action Button (Hidden initially) -->
+    <button id="btn-action" class="btn hidden" onclick="activateScanner()">Scan Response</button>
+    
+    <button class="btn-secondary" onclick="location.reload()">Reset / Cancel</button>
+  </div>
+
+  <!-- CHAT INTERFACE -->
   <div id="chat-panel" class="card hidden">
     <h1>Connected</h1>
     <div id="chat-log"></div>
-    <div style="display:flex; gap:10px; margin-top:10px;">
-      <input id="chat-input" type="text" style="flex:1; padding:10px; border:none; border-radius:4px;" placeholder="Message...">
-      <button onclick="sendMsg()" style="padding:10px; background:var(--primary); border:none; border-radius:4px; font-weight:bold;">Send</button>
+    <div>
+      <input id="chat-input" type="text" placeholder="Type a message..." autocomplete="off">
+      <button class="send-btn" onclick="sendMsg()">Send</button>
     </div>
   </div>
 
 </div>
 
 <script>
-  // --- UTILS ---
-  const $ = id => document.getElementById(id);
+  // --- CONFIG ---
   const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
   const pc = new RTCPeerConnection(config);
   let dataChannel, html5QrCode;
-  let isInitiator = false;
-
-  // --- 1. WORKFLOW START ---
   
-  // Logic: PHONE starts everything. 
-  // Phone -> Creates Offer -> Shows QR -> Laptop Scans -> Laptop Answers -> Shows QR -> Phone Scans.
-  
-  window.onload = () => {
-    // If URL has hash, this is the Laptop scanning the Phone's first code
-    if(window.location.hash.length > 1) {
-      handleLaptopJoin();
-    }
-  };
+  // State
+  let isHost = false; 
 
-  async function initHost() {
-    // Phone initiates
-    isInitiator = true;
-    $('btn-start').classList.add('hidden');
-    $('status-title').innerText = "Generating...";
+  // --- 1. START MODES ---
+
+  async function startAsHost() {
+    isHost = true;
+    showSetup("Generating Invitation...", "Wait for QR Code...");
     
+    // Create Channel & Offer
     dataChannel = pc.createDataChannel("chat");
     setupChannel(dataChannel);
     
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    // Wait for ICE to finish...
+    // Wait for ICE -> onicecandidate will trigger QR
   }
 
-  // --- 2. ICE HANDLING & COMPRESSION ---
-  
+  function startAsJoiner() {
+    isHost = false;
+    showSetup("Scan Invitation", "Point camera at the Host's QR Code.");
+    activateScanner(); // Open camera immediately
+  }
+
+  // --- 2. WEBRTC SIGNALING ---
+
   pc.onicecandidate = e => {
     if (e.candidate === null) {
-      // Finished Gathering
+      // ICE Gathering Complete -> Generate QR
       const raw = pc.localDescription.sdp;
-      const isLanMode = $('chk-lan').checked;
-      
-      // AGGRESSIVE STRIPPING
-      // 1. Remove TCP (Always)
-      let clean = raw.split('\r\n').filter(l => !l.includes(' tcp ')).join('\r\n');
-      
-      // 2. Remove IPv6 & Non-Local (If WiFi Mode)
-      if (isLanMode) {
-        clean = clean.split('\r\n').filter(l => {
-          if(l.startsWith('a=candidate')) {
-            // Keep only 'host' (local LAN) or 'srflx' (if needed)
-            // To make it TINY, we prioritize 192.168... type addresses
-            return l.includes('192.168') || l.includes('10.0') || l.includes('172.');
-          }
-          return true;
-        }).join('\r\n');
-      }
-
-      // 3. Compress
+      const clean = optimizeSDP(raw);
       const compressed = LZString.compressToEncodedURIComponent(clean);
       
-      // 4. Show QR
-      generateQR(compressed);
+      showQR(compressed);
+
+      if(isHost) {
+        document.getElementById('status-title').innerText = "1. Scan with Laptop";
+        document.getElementById('instruction').innerText = "Show this to the other device.";
+        // Host needs to scan the ANSWER later
+        const btn = document.getElementById('btn-action');
+        btn.innerText = "Scan Response";
+        btn.classList.remove('hidden');
+      } else {
+        document.getElementById('status-title').innerText = "2. Scan with Phone";
+        document.getElementById('instruction').innerText = "Show this Answer back to the Host.";
+      }
     }
   };
 
-  function generateQR(data) {
-    const isPhone = isInitiator; 
-    $('qr-code').innerHTML = "";
-    
-    // Laptop needs a URL to open. Phone needs just data to scan back.
-    // If I am Phone (Initiator), I show a URL for Laptop to scan.
-    let payload = data;
-    if(isInitiator) {
-      payload = window.location.href.split('#')[0] + '#' + data;
-      $('status-title').innerText = "1. Scan with Laptop";
-    } else {
-      $('status-title').innerText = "2. Scan with Phone";
-    }
-
-    new QRCode($('qr-code'), {
-      text: payload,
-      width: 250, 
-      height: 250,
-      correctLevel: QRCode.CorrectLevel.L // Low error correction = Bigger Blocks
-    });
-    
-    $('qr-display').classList.remove('hidden');
-    
-    if(isInitiator) {
-       // Phone waits for Laptop to answer
-       $('btn-scan').classList.remove('hidden');
-       $('btn-scan').innerText = "Scan Laptop's Answer";
-    }
+  // Helper: Strip TCP/IPv6 to make QR blocks huge/readable
+  function optimizeSDP(sdp) {
+    return sdp.split('\r\n').filter(l => {
+      // Remove TCP (bloat)
+      if(l.includes(' tcp ')) return false;
+      // Remove IPv6 (bloat, usually we are on IPv4 WiFi)
+      if(l.includes(' IP6 ')) return false;
+      return true;
+    }).join('\r\n');
   }
 
-  // --- 3. LAPTOP JOINING LOGIC ---
-  async function handleLaptopJoin() {
-    $('btn-start').classList.add('hidden');
-    $('status-title').innerText = "Joining...";
-    isInitiator = false;
-    
-    const hash = window.location.hash.substring(1);
-    try {
-      const sdp = LZString.decompressFromEncodedURIComponent(hash);
-      
-      await pc.setRemoteDescription({ type: "offer", sdp });
-      
-      pc.ondatachannel = e => setupChannel(e.channel);
-      
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      // Wait for ICE -> generates QR automatically
-    } catch(e) {
-      alert("Error parsing link.");
-    }
-  }
+  // --- 3. SCANNER LOGIC ---
 
-  // --- 4. SCANNER (For Phone to scan Laptop back) ---
-  function startScanner() {
-    $('reader').style.display = "block";
-    $('qr-display').classList.add('hidden');
-    $('btn-scan').classList.add('hidden');
-    
+  function activateScanner() {
+    document.getElementById('qr-display').classList.add('hidden'); // Hide own QR if any
+    document.getElementById('reader').style.display = "block";
+    document.getElementById('btn-action').classList.add('hidden');
+
     html5QrCode = new Html5Qrcode("reader");
     html5QrCode.start(
       { facingMode: "environment" }, 
       { fps: 10, qrbox: 250 },
       decoded => {
         html5QrCode.stop();
-        finalizeConnection(decoded);
+        document.getElementById('reader').style.display = "none";
+        handleScanResult(decoded);
       },
       err => {}
-    );
+    ).catch(e => alert("Camera blocked or HTTP. Use HTTPS/Localhost."));
   }
 
-  async function finalizeConnection(data) {
-    $('status-title').innerText = "Connecting...";
+  async function handleScanResult(data) {
+    document.getElementById('status-title').innerText = "Processing...";
+    
     try {
-      // If laptop generated a URL QR (unlikely but possible), strip it
-      let clean = data.includes('#') ? data.split('#')[1] : data;
-      const sdp = LZString.decompressFromEncodedURIComponent(clean);
+      // Check if data is a URL (Host QR) or Raw Data (Joiner QR)
+      let cleanData = data;
+      if(data.includes('#')) cleanData = data.split('#')[1];
+
+      const sdp = LZString.decompressFromEncodedURIComponent(cleanData);
       
-      await pc.setRemoteDescription({ type: "answer", sdp });
+      if(isHost) {
+        // HOST scanned ANSWER
+        await pc.setRemoteDescription({ type: "answer", sdp });
+        // Connection should establish now
+      } else {
+        // JOINER scanned OFFER
+        await pc.setRemoteDescription({ type: "offer", sdp });
+        
+        pc.ondatachannel = e => setupChannel(e.channel);
+        
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        // Wait for ICE -> Will trigger QR display
+      }
     } catch(e) {
-      alert("Connection failed. Ensure both are on WiFi.");
+      alert("Scan failed. Data corrupted or wrong format.");
+      console.error(e);
+      location.reload();
     }
   }
 
+  // --- 4. UI HELPERS ---
+
+  function showSetup(title, instr) {
+    document.getElementById('menu-panel').classList.add('hidden');
+    document.getElementById('setup-panel').classList.remove('hidden');
+    document.getElementById('status-title').innerText = title;
+    document.getElementById('instruction').innerText = instr;
+  }
+
+  function showQR(data) {
+    document.getElementById('qr-display').classList.remove('hidden');
+    document.getElementById('qr-code').innerHTML = "";
+    
+    // If Host, make it a URL (convenience). If Joiner, raw data.
+    let text = data;
+    // Note: We avoid full URL for Host to keep QR simple for Laptop camera
+    // But if you want Phone->Phone, URL is better. 
+    // Let's stick to RAW DATA for max readability on Laptop Webcam.
+    
+    new QRCode(document.getElementById('qr-code'), {
+      text: text,
+      width: 250,
+      height: 250,
+      correctLevel: QRCode.CorrectLevel.L
+    });
+  }
+
   // --- 5. CHAT ---
+
   function setupChannel(dc) {
     dataChannel = dc;
     dc.onopen = () => {
-      $('setup-panel').classList.add('hidden');
-      $('chat-panel').classList.remove('hidden');
+      document.getElementById('setup-panel').classList.add('hidden');
+      document.getElementById('chat-panel').classList.remove('hidden');
     };
     dc.onmessage = e => addMsg(e.data, 'peer');
   }
 
   function sendMsg() {
-    const txt = $('chat-input').value;
+    const input = document.getElementById('chat-input');
+    const txt = input.value;
     if(dataChannel && txt) {
       dataChannel.send(txt);
       addMsg(txt, 'me');
-      $('chat-input').value = "";
+      input.value = "";
     }
   }
 
@@ -257,11 +254,15 @@
     const div = document.createElement('div');
     div.className = `msg ${who}`;
     div.innerText = txt;
-    $('chat-log').appendChild(div);
-    const br = document.createElement('div'); 
-    br.style.clear = 'both';
-    $('chat-log').appendChild(br);
+    document.getElementById('chat-log').appendChild(div);
+    const br = document.createElement('div'); br.style.clear='both';
+    document.getElementById('chat-log').appendChild(br);
   }
+
+  // Handle Enter key
+  document.getElementById('chat-input').addEventListener("keypress", function(event) {
+    if (event.key === "Enter") sendMsg();
+  });
 
 </script>
 </body>
