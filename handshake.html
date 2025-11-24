@@ -3,274 +3,319 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Deep Debug WebRTC</title>
+  <title>Strict Debug WebRTC</title>
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
   <style>
-    body { font-family: monospace; background: #000; color: #0f0; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
-    h2 { border-bottom: 1px solid #0f0; padding-bottom: 5px; margin: 0; }
+    body { font-family: monospace; background: #000; color: #fff; padding: 10px; display: flex; flex-direction: column; gap: 15px; }
     
-    .box { border: 1px solid #333; padding: 10px; border-radius: 5px; background: #111; }
+    .panel { border: 1px solid #444; padding: 15px; border-radius: 8px; background: #111; }
+    h2 { margin: 0 0 10px 0; color: #0f0; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 5px; }
     
-    /* The Debug Data Area */
+    label { display: block; color: #aaa; margin-bottom: 5px; font-size: 0.8rem; }
     textarea { 
-      width: 100%; height: 150px; 
-      background: #220000; color: #ffcccc; 
-      border: 1px solid #f00; font-size: 10px; 
-      font-family: monospace;
-      box-sizing: border-box;
+      width: 100%; height: 120px; 
+      background: #222; color: #0f0; 
+      border: 1px solid #555; font-size: 10px; 
+      font-family: monospace; resize: vertical;
     }
     
-    label { color: #f00; font-weight: bold; display: block; margin-bottom: 5px; }
+    .row { display: flex; flex-direction: column; gap: 10px; }
+    
+    /* QR Area */
+    #qr-display { background: #fff; padding: 10px; display: inline-block; margin-top: 10px; }
+    
+    /* Buttons */
+    button { padding: 15px; border: none; font-weight: bold; cursor: pointer; font-size: 1rem; width: 100%; margin-top: 10px; }
+    .btn-action { background: #0066cc; color: white; }
+    .btn-connect { background: #00cc00; color: black; }
+    .btn-scan { background: #cc00cc; color: white; }
 
-    button { 
-      width: 100%; padding: 15px; 
-      background: #004400; color: #fff; 
-      border: 1px solid #0f0; font-weight: bold; 
-      margin-top: 10px; cursor: pointer; font-size: 1.1rem;
-    }
-    button.scan { background: #000088; border-color: #55f; }
-
-    #qr-area { background: #fff; padding: 10px; display: inline-block; margin: 10px auto; }
-    #reader { width: 100%; display: none; border: 2px solid red; }
+    #reader { width: 100%; background: #000; border: 2px solid #fff; display: none; }
+    
     .hidden { display: none !important; }
-    
-    #chat-ui { display: flex; gap: 5px; }
-    input { flex: 1; padding: 10px; }
+    .status { font-weight: bold; color: #ff0; }
   </style>
 </head>
 <body>
 
-  <!-- STEP 1: DEBUGGER UI -->
-  <div id="debug-panel" class="box">
-    <h2 id="step-title">Initializing...</h2>
-    <p id="status">Waiting...</p>
+<!-- STATUS BAR -->
+<div style="background: #222; padding: 10px; text-align: center;">
+  STATUS: <span id="conn-state" class="status">Idle</span>
+</div>
 
-    <!-- Raw Data Viewer -->
-    <div id="data-viewer" class="hidden">
-      <label>RAW DATA (Verify this matches peer!)</label>
-      <textarea id="raw-output" readonly></textarea>
-      <div id="data-info" style="font-size: 0.8rem; color: #aaa;"></div>
-      <button id="btn-confirm" onclick="nextStep()">LOOKS GOOD, CONTINUE</button>
+<!-- STEP 1: GENERATION PANEL (Shows My Data) -->
+<div id="panel-local" class="panel hidden">
+  <h2>1. My Local Data</h2>
+  <div class="row">
+    <div>
+      <label>Raw JSON (Verify this on other screen):</label>
+      <textarea id="local-json" readonly></textarea>
     </div>
-
-    <!-- QR Zone -->
-    <div id="qr-container" class="hidden" style="text-align: center;">
-      <div id="qr-area"></div>
-      <p>Scan this with other device</p>
-    </div>
-
-    <!-- Scanner Zone -->
-    <div id="scanner-container" class="hidden">
-      <div id="reader"></div>
-      <button class="scan" onclick="openScanner()">OPEN SCANNER</button>
+    <div style="text-align: center;">
+      <div id="qr-display"></div>
+      <p style="color: #ccc; font-size: 0.8rem;">Scan this with the other device</p>
     </div>
   </div>
+  <button id="btn-open-scanner" class="btn-scan" onclick="startScanner()">Next: Scan Partner's Response</button>
+</div>
 
-  <!-- STEP 2: CHAT UI -->
-  <div id="chat-panel" class="box hidden">
-    <h2>Connected</h2>
-    <div id="chat-log" style="height: 200px; overflow-y: scroll; border: 1px solid #333; margin-bottom: 10px;"></div>
-    <div id="chat-ui">
-      <input type="text" id="msg-in" placeholder="Type...">
-      <button onclick="send()" style="width: auto; margin: 0;">Send</button>
-    </div>
-  </div>
+<!-- STEP 2: VERIFICATION PANEL (Shows Scanned Data) -->
+<div id="panel-remote" class="panel hidden">
+  <h2>2. Scanned Remote Data</h2>
+  <label>Data received from QR (Review before connecting):</label>
+  <textarea id="remote-json" readonly></textarea>
+  <br>
+  <button id="btn-connect" class="btn-connect" onclick="executeConnection()">LOOKS GOOD: CONNECT</button>
+  <button class="btn-scan" onclick="location.reload()" style="background: #444; margin-top: 5px;">Cancel / Reset</button>
+</div>
+
+<!-- SCANNER OVERLAY -->
+<div id="panel-scanner" class="panel hidden">
+  <h2>Scanner</h2>
+  <div id="reader"></div>
+  <button onclick="stopScanner()">Close Scanner</button>
+</div>
+
+<!-- CHAT PANEL -->
+<div id="panel-chat" class="panel hidden">
+  <h2>Secure Connection Established</h2>
+  <div id="logs" style="height: 200px; overflow-y: auto; background: #000; border: 1px solid #333; margin-bottom: 10px;"></div>
+  <input type="text" id="chat-input" placeholder="Type..." style="width: 70%; padding: 10px;">
+  <button onclick="send()" style="width: 20%; padding: 10px;">Send</button>
+</div>
 
 <script>
-  // --- STATE MANAGEMENT ---
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-  });
-  let dc;
-  let nextAction = null; // Stores the function to run after user confirms data
+  // --- CONFIGURATION ---
+  const config = { 
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    iceCandidatePoolSize: 10 
+  };
+  
+  // Legacy iOS DataChannel Config (Important for iPhone)
+  const dcConfig = { ordered: false, maxRetransmits: 0 };
+
+  const pc = new RTCPeerConnection(config);
+  let dataChannel;
   let html5QrCode;
+  
+  // State tracking
+  let isInitiator = false;
+  let pendingRemoteDescription = null; // Stores JSON until user clicks Connect
+
+  // --- UI REFERENCES ---
+  const els = {
+    localPanel: document.getElementById('panel-local'),
+    remotePanel: document.getElementById('panel-remote'),
+    scanPanel: document.getElementById('panel-scanner'),
+    chatPanel: document.getElementById('panel-chat'),
+    localJson: document.getElementById('local-json'),
+    remoteJson: document.getElementById('remote-json'),
+    qrArea: document.getElementById('qr-display'),
+    connState: document.getElementById('conn-state')
+  };
 
   // --- 1. BOOTSTRAP ---
   window.onload = async () => {
-    const hash = window.location.hash.substring(1);
-    
-    // Log Connection State
+    // Monitor WebRTC State
     pc.onconnectionstatechange = () => {
-      document.getElementById('status').innerText = "WebRTC State: " + pc.connectionState;
+      els.connState.innerText = pc.connectionState.toUpperCase();
       if(pc.connectionState === 'connected') {
-        document.getElementById('debug-panel').classList.add('hidden');
-        document.getElementById('chat-panel').classList.remove('hidden');
+        els.localPanel.classList.add('hidden');
+        els.remotePanel.classList.add('hidden');
+        els.chatPanel.classList.remove('hidden');
+      } else if (pc.connectionState === 'failed') {
+        els.connState.style.color = 'red';
+        alert("WebRTC Connection FAILED. \n1. Are you on the same Wi-Fi? \n2. Did the JSON match exactly?");
       }
     };
 
-    if(hash) {
-      // JOINER FLOW
-      document.getElementById('step-title').innerText = "STEP 1: Verify Host Data";
-      document.getElementById('status').innerText = "Decoding URL hash...";
+    const hash = window.location.hash.substring(1);
+    
+    if (hash) {
+      // --- ROLE: JOINER (iPhone) ---
+      isInitiator = false;
+      document.getElementById('btn-open-scanner').classList.add('hidden'); // Joiner doesn't scan again after connection
       
-      // DECODE & SHOW RAW DATA
       try {
         const jsonStr = LZString.decompressFromEncodedURIComponent(hash);
-        if(!jsonStr) throw new Error("Decompression failed");
+        if(!jsonStr) throw new Error("Decompress Failed");
         
-        // Show data to user for verification
-        showDebugData(jsonStr, async () => {
-          // USER CONFIRMED: Set Remote Description
-          document.getElementById('status').innerText = "Processing Offer...";
-          await pc.setRemoteDescription(JSON.parse(jsonStr));
-          prepareAnswer();
-        });
-      } catch(e) { alert(e.message); }
+        // Show the User what was scanned from the URL
+        showVerificationPanel(jsonStr);
+      } catch(e) {
+        alert("Link corrupted: " + e.message);
+      }
 
     } else {
-      // HOST FLOW
-      document.getElementById('step-title').innerText = "STEP 1: Create Offer";
-      prepareOffer();
+      // --- ROLE: HOST (Android) ---
+      isInitiator = true;
+      initHost();
     }
   };
 
-  // --- 2. HOST LOGIC ---
-  async function prepareOffer() {
-    dc = pc.createDataChannel("chat");
-    setupDc(dc);
+  // --- 2. HOST FLOW ---
+  async function initHost() {
+    els.connState.innerText = "Creating Offer...";
     
+    // Create Data Channel
+    dataChannel = pc.createDataChannel("chat", dcConfig);
+    setupDc(dataChannel);
+
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    
-    document.getElementById('status').innerText = "Gathering ICE (Network)...";
-    
-    // Wait for ICE gathering
-    pc.onicecandidate = e => {
-      if(!e.candidate) {
-        // Gathering done. Show RAW JSON.
-        const rawJson = JSON.stringify(pc.localDescription, null, 2);
-        showDebugData(rawJson, () => {
-          // USER CONFIRMED: Generate QR
-          const compressed = LZString.compressToEncodedURIComponent(rawJson);
-          const link = window.location.origin + window.location.pathname + "#" + compressed;
-          generateQR(link);
-          
-          document.getElementById('step-title').innerText = "STEP 2: Wait for Answer";
-          document.getElementById('scanner-container').classList.remove('hidden');
-        });
-      }
-    };
+
+    // Wait for ICE
+    waitForIce(() => {
+      const json = JSON.stringify(pc.localDescription, null, 2);
+      // Host generates a LINK for the Joiner to scan
+      const compressed = LZString.compressToEncodedURIComponent(json);
+      const link = window.location.origin + window.location.pathname + "#" + compressed;
+      
+      showGenerationPanel(json, link);
+    });
   }
 
-  // --- 3. JOINER LOGIC ---
-  async function prepareAnswer() {
-    pc.ondatachannel = e => setupDc(e.channel);
-    
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+  // --- 3. COMMON LOGIC ---
 
-    document.getElementById('status').innerText = "Gathering ICE...";
-    
-    pc.onicecandidate = e => {
-      if(!e.candidate) {
-        // Gathering done. Show RAW JSON.
-        const rawJson = JSON.stringify(pc.localDescription, null, 2);
-        document.getElementById('step-title').innerText = "STEP 2: Verify Answer Data";
-        
-        showDebugData(rawJson, () => {
-          // USER CONFIRMED: Generate QR (Data only)
-          const compressed = LZString.compressToEncodedURIComponent(rawJson);
-          generateQR(compressed);
-          document.getElementById('status').innerText = "Show this QR to Host";
-        });
-      }
-    };
-  }
+  // Called when User clicks "CONNECT" in Verification Panel
+  async function executeConnection() {
+    if(!pendingRemoteDescription) return;
 
-  // --- 4. SCANNER & FINALIZATION ---
-  async function handleScannedData(scannedText) {
-    document.getElementById('status').innerText = "Decompressing...";
     try {
-      // Try to decompress
-      let rawJson = LZString.decompressFromEncodedURIComponent(scannedText);
-      
-      // Fallback: maybe it wasn't compressed? (Scanning errors)
-      if(!rawJson && scannedText.startsWith('{')) rawJson = scannedText; 
-      
-      if(!rawJson) throw new Error("Could not decompress data");
+      els.connState.innerText = "Applying Remote Desc...";
+      await pc.setRemoteDescription(pendingRemoteDescription);
 
-      document.getElementById('step-title').innerText = "STEP 3: Verify Incoming Answer";
-      
-      // SHOW DATA BEFORE CONNECTING
-      showDebugData(rawJson, async () => {
-        document.getElementById('status').innerText = "Connecting...";
-        await pc.setRemoteDescription(JSON.parse(rawJson));
-      });
+      if (!isInitiator) {
+        // If Joiner: We just accepted the Offer. Now create Answer.
+        els.remotePanel.classList.add('hidden');
+        
+        // Setup DC listener for when Host connects
+        pc.ondatachannel = e => setupDc(e.channel);
 
-    } catch(e) {
-      alert("Scan Error: " + e.message);
-      document.getElementById('scanner-container').classList.remove('hidden');
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        
+        waitForIce(() => {
+          const json = JSON.stringify(pc.localDescription, null, 2);
+          // Joiner generates RAW DATA (not link) for Host to scan
+          const compressed = LZString.compressToEncodedURIComponent(json);
+          
+          showGenerationPanel(json, compressed);
+          els.connState.innerText = "Answer Created. Show QR to Host.";
+        });
+      } else {
+        // If Host: We just accepted the Answer. Connection should start.
+        els.connState.innerText = "Finalizing Handshake...";
+        els.remotePanel.classList.add('hidden');
+      }
+
+    } catch (e) {
+      alert("Connection Error: " + e.message);
     }
   }
 
   // --- HELPERS ---
 
-  function showDebugData(data, onConfirmCallback) {
-    // Hide everything else
-    document.getElementById('qr-container').classList.add('hidden');
-    document.getElementById('scanner-container').classList.add('hidden');
-    
-    // Show Data
-    const ui = document.getElementById('data-viewer');
-    const textarea = document.getElementById('raw-output');
-    const info = document.getElementById('data-info');
-    
-    ui.classList.remove('hidden');
-    textarea.value = data;
-    info.innerText = `Length: ${data.length} chars | Type: ${JSON.parse(data).type}`;
-    
-    // Store the callback
-    nextAction = onConfirmCallback;
+  function waitForIce(cb) {
+    els.connState.innerText = "Gathering Candidates...";
+    const timeout = setTimeout(() => {
+      if(pc.iceGatheringState !== 'complete') cb(); // Fallback
+    }, 2000); // 2s max wait
+
+    pc.onicecandidate = e => {
+      if(!e.candidate) {
+        clearTimeout(timeout);
+        cb();
+      }
+    };
   }
 
-  function nextStep() {
-    document.getElementById('data-viewer').classList.add('hidden');
-    if(nextAction) nextAction();
-  }
-
-  function generateQR(text) {
-    document.getElementById('qr-area').innerHTML = "";
-    document.getElementById('qr-container').classList.remove('hidden');
-    new QRCode(document.getElementById('qr-area'), {
-      text: text, width: 250, height: 250, correctLevel: QRCode.CorrectLevel.L
+  function showGenerationPanel(json, qrText) {
+    els.localPanel.classList.remove('hidden');
+    els.localJson.value = json; // Show Raw JSON
+    
+    els.qrArea.innerHTML = "";
+    new QRCode(els.qrArea, {
+      text: qrText,
+      width: 250, 
+      height: 250,
+      correctLevel: QRCode.CorrectLevel.L
     });
   }
 
-  function openScanner() {
-    document.getElementById('reader').style.display = "block";
+  function showVerificationPanel(jsonStr) {
+    els.localPanel.classList.add('hidden');
+    els.scanPanel.classList.add('hidden');
+    els.remotePanel.classList.remove('hidden');
+    
+    // Pretty print for readability
+    try {
+      pendingRemoteDescription = JSON.parse(jsonStr);
+      els.remoteJson.value = JSON.stringify(pendingRemoteDescription, null, 2);
+    } catch(e) {
+      els.remoteJson.value = "INVALID JSON: " + jsonStr;
+      alert("Scanned data is not valid JSON.");
+    }
+  }
+
+  // --- SCANNER LOGIC ---
+  function startScanner() {
+    els.localPanel.classList.add('hidden');
+    els.scanPanel.classList.remove('hidden');
+    els.connState.innerText = "Scanning...";
+
     html5QrCode = new Html5Qrcode("reader");
-    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 },
+    els.qrArea.innerHTML = ""; // Clear QR to save memory
+    document.getElementById('reader').style.display = 'block';
+
+    html5QrCode.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 250 },
       (decodedText) => {
-        html5QrCode.stop();
-        document.getElementById('reader').style.display = "none";
-        handleScannedData(decodedText);
+        // SUCCESS
+        stopScanner();
+        
+        // Try decompressing, or use raw if uncompressed
+        let json = LZString.decompressFromEncodedURIComponent(decodedText);
+        if(!json) json = decodedText; // Fallback
+        
+        showVerificationPanel(json);
       },
       () => {}
     );
   }
 
-  function setupDc(channel) {
-    dc = channel;
-    dc.onopen = () => console.log("CHANNEL OPEN");
-    dc.onmessage = e => {
-      const d = document.createElement('div');
-      d.innerText = "Peer: " + e.data;
-      document.getElementById('chat-log').appendChild(d);
+  function stopScanner() {
+    if(html5QrCode) {
+      html5QrCode.stop().then(() => {
+        document.getElementById('reader').style.display = 'none';
+        html5QrCode.clear();
+      });
     }
   }
 
+  // --- CHAT LOGIC ---
+  function setupDc(dc) {
+    dc.onopen = () => els.connState.innerText = "CONNECTED (P2P)";
+    dc.onmessage = e => {
+      const d = document.createElement('div');
+      d.innerText = "Peer: " + e.data;
+      d.style.color = "#0f0";
+      document.getElementById('logs').appendChild(d);
+    };
+  }
+
   function send() {
-    const el = document.getElementById('msg-in');
-    if(dc) dc.send(el.value);
+    const input = document.getElementById('chat-input');
+    if(dataChannel) dataChannel.send(input.value);
     const d = document.createElement('div');
-    d.innerText = "Me: " + el.value;
-    d.style.color = "#fff";
-    document.getElementById('chat-log').appendChild(d);
-    el.value = "";
+    d.innerText = "Me: " + input.value;
+    document.getElementById('logs').appendChild(d);
+    input.value = "";
   }
 
 </script>
