@@ -3,70 +3,52 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ASCII Safe QR Chat</title>
+  <title>Ultra-Minified Chat</title>
   
-  <!-- QR Libs -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
   <style>
-    :root { --bg: #111; --panel: #222; --green: #0f0; --text: #ddd; }
-    body { font-family: 'Consolas', monospace; background: var(--bg); color: var(--text); padding: 10px; margin: 0; font-size: 12px; }
+    :root { --bg: #000; --green: #0f0; --text: #eee; }
+    body { font-family: monospace; background: var(--bg); color: var(--text); padding: 10px; display:flex; flex-direction:column; align-items:center; }
     
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
-    .card { background: var(--panel); padding: 10px; border: 1px solid #333; height: 180px; overflow-y: auto; border-radius: 4px; }
-    .full { grid-column: 1 / -1; height: auto; text-align: center; }
+    .card { border: 1px solid #333; padding: 10px; margin-bottom: 10px; width: 100%; max-width: 600px; box-sizing: border-box; }
+    textarea { width: 100%; height: 60px; background: #111; color: var(--green); border: none; font-size: 10px; resize: vertical; }
     
-    h2 { margin: 0 0 5px 0; font-size: 12px; color: var(--green); border-bottom: 1px solid #333; }
-    .stat { font-weight: bold; color: #fff; margin-bottom: 5px; }
+    .stat { font-size: 12px; margin-bottom: 5px; color: #aaa; }
+    .diff { color: #fff; font-weight: bold; }
+
+    #qr-area { background: #fff; padding: 10px; display: inline-block; margin: 10px 0; }
+    #reader { width: 100%; max-width: 300px; border: 2px solid var(--green); display:none; }
     
-    #qr-area { background: #fff; padding: 10px; display: inline-block; margin-top: 10px; min-width: 250px; min-height: 250px; }
-    #qr-error { color: #ff5555; font-weight: bold; display: none; margin-top: 10px; font-size: 14px; }
-    
-    /* Scanner */
-    #reader { width: 100%; max-width: 350px; border: 2px solid var(--green); margin: 10px auto; display: none; }
-    button { background: var(--green); color: #000; border: none; padding: 10px; cursor: pointer; font-weight: bold; margin-top: 5px; }
+    button { background: var(--green); border: none; padding: 10px; font-weight: bold; cursor: pointer; width: 100%; margin-top:5px; }
   </style>
 </head>
 <body>
 
-  <div class="grid">
-    <div class="card">
-      <h2>1. RAW INPUT</h2>
-      <div id="stat-raw" class="stat">0 chars</div>
-      <div id="log-raw" style="color:#666; word-break:break-all;">Generating...</div>
-    </div>
-    <div class="card">
-      <h2>2. DICTIONARY MAPPING</h2>
-      <div id="stat-final" class="stat">0 chars</div>
-      <div id="log-debug" style="font-size:10px;"></div>
-    </div>
+  <div class="card">
+    <div class="stat">RAW (Original)</div>
+    <textarea id="box-raw" readonly></textarea>
   </div>
 
-  <div class="card full">
-    <h2>3. SCAN THIS QR</h2>
-    
-    <div id="qr-area"></div>
-    <div id="qr-error">ERROR: Data too big for QR!</div>
-    
-    <br>
-    <button onclick="startScanner()">I am the Laptop (Scan Phone)</button>
+  <div class="card">
+    <div id="stat-final" class="stat">ULTRA MINIFIED</div>
+    <textarea id="box-final" readonly></textarea>
   </div>
 
-  <div id="scanner-area" class="card full" style="display:none; height:auto;">
-    <h2>SCANNER</h2>
+  <div id="qr-area"></div>
+  
+  <div class="card">
+    <button onclick="startScanner()">SCAN PARTNER</button>
     <div id="reader"></div>
-    <div id="status">Scanning...</div>
   </div>
 
 <script>
-  // --- CONFIG ---
   const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
   const pc = new RTCPeerConnection(config);
   let isInitiator = true;
 
-  // --- THE SAFE DICTIONARY (ASCII ONLY) ---
-  // Replaced all special UTF8 chars with standard keyboard symbols (1 byte each)
+  // 1. REPLACEMENTS (Safe ASCII)
   const DICTIONARY = [
     { k: 'a=candidate:', v: '_' },
     { k: 'a=fingerprint:sha-256 ', v: '$' },
@@ -82,11 +64,18 @@
     { k: ' typ srflx', v: 'S' },
     { k: 'tcptype', v: 'T' },
     { k: 'udp', v: 'U' },
-    { k: '192.168.', v: 'L' }, 
-    { k: '\r\n', v: '~' } // Tilde is safe
+    { k: '192.168.', v: 'L' },
+    { k: ' raddr 0.0.0.0 rport 0', v: '' }, // Useless boilerplate
+    { k: '\r\n', v: '~' },
+    // BOILERPLATE MAPS (The new reductions)
+    { k: 'a=setup:actpass', v: '1' },
+    { k: 'a=setup:active', v: '2' },
+    { k: 'a=mid:0', v: '3' },
+    { k: 'a=sctp-port:5000', v: '4' },
+    { k: 'a=max-message-size:262144', v: '5' }
   ];
 
-  // --- 1. START ---
+  // --- START ---
   if(window.location.hash.length > 1) {
     isInitiator = false;
     handleJoin();
@@ -101,78 +90,94 @@
     await pc.setLocalDescription(offer);
   }
 
-  // --- 2. OPTIMIZATION LOGIC ---
   pc.onicecandidate = e => {
     if (e.candidate === null) {
       const raw = pc.localDescription.sdp;
-      document.getElementById('log-raw').innerText = raw.substring(0, 200) + "...";
-      document.getElementById('stat-raw').innerText = raw.length + " chars";
+      document.getElementById('box-raw').value = raw;
+      
+      const minified = minify(raw);
+      
+      document.getElementById('box-final').value = minified;
+      const red = Math.round((1 - (minified.length / raw.length)) * 100);
+      document.getElementById('stat-final').innerHTML = `ULTRA MINIFIED (${minified.length} chars) <span class="diff">-${red}%</span>`;
 
-      // A. The Butcher (Delete useless lines)
-      let clean = raw.split('\r\n').filter(l => 
-        !l.includes(' tcp ') &&     // No TCP
-        !l.includes('a=rtcp') &&    // No Video Timing
-        !l.includes('IP6') &&       // No IPv6
-        !l.includes('a=extmap') &&  // No Extension Maps
-        !l.includes('a=ice-options')// No Trickle options
-      ).join('\r\n');
-
-      // B. The Shrinker (Dictionary)
-      let minified = clean;
-      DICTIONARY.forEach(pair => {
-        minified = minified.split(pair.k).join(pair.v);
-      });
-
-      // Stats
-      const savings = Math.round((1 - (minified.length / raw.length)) * 100);
-      document.getElementById('stat-final').innerHTML = `
-        Final: ${minified.length} chars <span style="color:#0f0">(-${savings}%)</span>
-      `;
-      document.getElementById('log-debug').innerText = "Sample: " + minified.substring(0, 50) + "...";
-
-      // C. Generate QR
       generateQR(minified);
     }
   };
 
-  function generateQR(data) {
-    const qrEl = document.getElementById('qr-area');
-    const errEl = document.getElementById('qr-error');
-    qrEl.innerHTML = "";
-    errEl.style.display = "none";
+  // --- THE ULTRA MINIFIER ---
+  function minify(sdp) {
+    let lines = sdp.split('\r\n');
+    let keep = [];
+    
+    // 1. FILTER LINES
+    lines.forEach(l => {
+      // Remove standard headers (we reconstruct them)
+      if(l.startsWith('v=') || l.startsWith('s=') || l.startsWith('t=')) return;
+      
+      // Remove Origin line (we reconstruct a fake one)
+      if(l.startsWith('o=')) return;
 
-    try {
-      new QRCode(qrEl, {
-        text: data,
-        width: 250,
-        height: 250,
-        // We use 'L' (Low) to reduce dots. 
-        // If the library fails, it throws an error which we catch below.
-        correctLevel: QRCode.CorrectLevel.L 
-      });
-    } catch (e) {
-      console.error(e);
-      qrEl.style.display = "none";
-      errEl.style.display = "block";
-      errEl.innerHTML = `ERROR: Data size (${data.length}) is still too big for this QR library.<br>Try refreshing to get a shorter key.`;
-    }
+      // Remove unwanted bloat
+      if(l.includes(' tcp ') || l.includes('a=rtcp') || l.includes('IP6') || l.includes('extmap')) return;
+
+      // Remove mDNS (.local) if we have other candidates. 
+      // (UUIDs take up 40+ chars).
+      if(l.includes('.local')) return; 
+
+      keep.push(l);
+    });
+
+    let s = keep.join('\r\n');
+
+    // 2. DICTIONARY SWAP
+    DICTIONARY.forEach(p => { s = s.split(p.k).join(p.v); });
+
+    // 3. HEX PACKING (Remove colons from Fingerprint)
+    // Turns "$AA:BB:CC" into "$AABBCC"
+    s = s.replace(/\$([0-9A-Fa-f:]+)/, (match, hex) => {
+      return '$' + hex.replace(/:/g, '');
+    });
+
+    return s;
   }
 
-  // --- 3. RESTORATION ---
+  // --- THE RESTORER ---
   function unminify(str) {
-    let result = str;
-    // Reverse loop
+    let s = str;
+
+    // 1. UNPACK HEX (Add colons back to Fingerprint)
+    // Matches the long hex string after '$'
+    s = s.replace(/\$([0-9A-Fa-f]{60,})/, (match, hex) => {
+      // Insert colon every 2 chars
+      return '$' + hex.match(/.{1,2}/g).join(':');
+    });
+
+    // 2. DICTIONARY RESTORE
     for(let i = DICTIONARY.length - 1; i >= 0; i--) {
-      const pair = DICTIONARY[i];
-      if(pair.v !== '') result = result.split(pair.v).join(pair.k);
+      if(DICTIONARY[i].v !== '') s = s.split(DICTIONARY[i].v).join(DICTIONARY[i].k);
     }
-    return result;
+
+    // 3. RECONSTRUCT HEADERS
+    // We add a fake Origin ID. Browsers accept this for new connections.
+    const header = "v=0\r\no=- 123456 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
+    return header + s;
   }
 
-  // --- 4. JOINER / SCANNER ---
+  function generateQR(data) {
+    document.getElementById('qr-area').innerHTML = "";
+    new QRCode(document.getElementById('qr-area'), {
+      text: data, width: 250, height: 250,
+      correctLevel: QRCode.CorrectLevel.L
+    });
+  }
+
+  // --- LOGIC ---
   async function handleJoin() {
     const hash = window.location.hash.substring(1);
     const sdp = unminify(decodeURIComponent(hash));
+    document.getElementById('box-raw').value = "Received URL Hash";
+    document.getElementById('box-final').value = "Restored SDP:\n" + sdp;
     
     await pc.setRemoteDescription({ type: "offer", sdp });
     pc.ondatachannel = e => setupChannel(e.channel);
@@ -181,48 +186,23 @@
   }
 
   function startScanner() {
-    document.getElementById('scanner-area').style.display = 'block';
     document.getElementById('reader').style.display = 'block';
-    
     const html5QrCode = new Html5Qrcode("reader");
-    html5QrCode.start(
-      { facingMode: "environment" }, 
-      { fps: 10, qrbox: 250 },
+    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, 
       decoded => {
         html5QrCode.stop();
-        finalize(decoded);
-      },
-      err => {}
+        let clean = decoded.includes('#') ? decoded.split('#')[1] : decoded;
+        const sdp = unminify(clean);
+        const type = isInitiator ? "answer" : "offer";
+        pc.setRemoteDescription({ type, sdp }).then(() => alert("CONNECTED!"));
+      }, err => {}
     );
   }
 
-  async function finalize(data) {
-    let clean = data;
-    if(data.includes('#')) clean = data.split('#')[1];
-    
-    // Safety check for common scanning errors
-    if(!clean) return alert("Scan Error: Empty data");
-    
-    try {
-      const sdp = unminify(clean);
-      const type = isInitiator ? "answer" : "offer";
-      await pc.setRemoteDescription({ type, sdp });
-      document.getElementById('status').innerText = "CONNECTED!";
-      document.getElementById('status').style.color = "#0f0";
-    } catch(e) {
-      document.getElementById('status').innerText = "Error: " + e.message;
-      alert("Connection failed. The QR data might be corrupted.");
-    }
-  }
-
   function setupChannel(dc) {
-    dc.onopen = () => {
-        alert("CHAT CONNECTED!");
-        document.body.style.background = "#002200"; // Visual cue
-    };
-    dc.onmessage = e => alert("Msg: " + e.data);
+    dc.onopen = () => { document.body.style.background = "#050"; alert("CHAT CONNECTED!"); };
+    dc.onmessage = e => alert(e.data);
   }
-
 </script>
 </body>
 </html>
