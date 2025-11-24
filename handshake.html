@@ -3,68 +3,72 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Optimized QR Chat</title>
+  <title>Lite QR WebRTC</title>
   
-  <!-- Libraries -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+  <!-- QR Libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
   <style>
-    :root { --bg: #121212; --surface: #1e1e1e; --primary: #bb86fc; --text: #e0e0e0; }
-    body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-    .container { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 20px; }
-    .card { background: var(--surface); padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); text-align: center; }
-    h1, h2 { color: var(--primary); margin-top: 0; }
+    :root { --bg: #121212; --surface: #1e1e1e; --primary: #03dac6; --text: #e0e0e0; }
+    body { font-family: monospace; background: var(--bg); color: var(--text); margin: 0; padding: 10px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+    .container { width: 100%; max-width: 500px; display: flex; flex-direction: column; gap: 15px; }
+    .card { background: var(--surface); padding: 15px; border-radius: 8px; border: 1px solid #333; text-align: center; }
     
-    /* QR Area Styles */
-    #qr-area { background: #fff; padding: 15px; display: inline-block; border-radius: 4px; margin: 10px 0; cursor: zoom-in; transition: transform 0.2s; }
-    #qr-area:active { transform: scale(1.5); } /* Click and hold to zoom */
+    h1 { color: var(--primary); margin: 0 0 5px 0; font-size: 1.2rem; }
+    p { margin: 5px 0; font-size: 0.85rem; color: #aaa; }
+
+    /* QR Area - Click to zoom */
+    #qr-area { background: #fff; padding: 10px; display: inline-block; border-radius: 4px; margin: 10px 0; cursor: zoom-in; transition: transform 0.2s; }
+    #qr-area.zoomed { transform: scale(1.4); margin: 30px 0; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+    #qr-area img { display: block; } 
     
-    #reader { width: 100%; border-radius: 8px; overflow: hidden; display: none; background: #000; }
-    .chat-box { height: 200px; overflow-y: auto; background: #000; padding: 10px; border: 1px solid #333; text-align: left; margin-bottom: 10px; font-family: monospace; }
-    input { width: 65%; padding: 10px; border-radius: 4px; border: none; }
-    button { padding: 10px 20px; background: var(--primary); border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
-    .hidden { display: none; }
-    .text-link { color: #bb86fc; text-decoration: underline; cursor: pointer; font-size: 0.8em; }
+    /* Scanner */
+    #reader { width: 100%; border-radius: 8px; overflow: hidden; display: none; background: #000; border: 2px solid var(--primary); }
+    
+    /* Chat */
+    .chat-box { height: 50vh; overflow-y: auto; background: #000; padding: 10px; border: 1px solid #333; text-align: left; margin-bottom: 10px; font-size: 0.9rem; }
+    .msg { margin-bottom: 5px; padding: 6px 10px; border-radius: 4px; word-break: break-word; max-width: 80%; display: inline-block; }
+    .msg-row { display: flex; width: 100%; margin-bottom: 5px; }
+    .msg-row.me { justify-content: flex-end; }
+    .msg-row.me .msg { background: #004d40; color: #fff; }
+    .msg-row.peer .msg { background: #263238; color: #eceff1; }
+    
+    input { width: 60%; padding: 10px; border-radius: 4px; border: none; background: #333; color: white; }
+    button { padding: 10px 15px; background: var(--primary); color: #000; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+    .hidden { display: none !important; }
+    .btn-secondary { background: #333; color: #fff; font-size: 0.75rem; padding: 5px 10px; margin-top: 5px; }
   </style>
 </head>
 <body>
 
 <div class="container">
   
-  <!-- Setup Panel -->
+  <!-- SETUP PANEL -->
   <div id="setup-panel" class="card">
-    <h1 id="status-title">Initializing...</h1>
-    <p id="instruction" style="color:#aaa;">Please wait...</p>
-
+    <h1 id="status-title">Loading...</h1>
+    <p id="instruction">Initializing WebRTC...</p>
+    
     <!-- QR Display -->
     <div id="qr-container" class="hidden">
-      <div id="qr-area" title="Click to Zoom"></div>
-      <p style="font-size: 0.8em; margin-top:5px;">
-        <span id="qr-helper-text">Scan with other device.</span><br>
-        <span style="color: #ffb74d; font-size: 0.9em;">(Tap QR to Zoom if camera struggles)</span>
-      </p>
-      
-      <!-- Fallback Copy Button -->
-      <button onclick="copyToClipboard()" style="font-size: 0.7em; background: #333; color: #fff; margin-top: 10px;">
-        Scan failed? Copy Text Code
-      </button>
+      <div id="qr-area" onclick="this.classList.toggle('zoomed')" title="Tap to Zoom"></div>
+      <p>Scan with other device <br>(Tap QR to Zoom)</p>
+      <button class="btn-secondary" onclick="copyString()">Copy Text Instead</button>
     </div>
 
-    <!-- Scanner -->
-    <div id="scanner-container">
+    <!-- Camera Scanner -->
+    <div id="scanner-container" style="margin-top: 15px;">
       <div id="reader"></div>
-      <button id="btn-scan" class="hidden" onclick="startScanner()">Scan Partner's QR Code</button>
+      <button id="btn-scan" class="hidden" onclick="startScanner()">Scan Partner's QR</button>
     </div>
   </div>
 
-  <!-- Chat Panel -->
+  <!-- CHAT PANEL -->
   <div id="chat-panel" class="card hidden">
-    <h2>Connected</h2>
+    <h1>SECURE CHAT</h1>
     <div id="chat-log" class="chat-box"></div>
-    <div style="display: flex; gap: 10px;">
-      <input type="text" id="chat-input" placeholder="Type a message..." onkeypress="if(event.key==='Enter') sendMessage()">
+    <div style="display: flex; gap: 5px;">
+      <input type="text" id="chat-input" placeholder="Message..." autocomplete="off" onkeypress="handleKey(event)">
       <button onclick="sendMessage()">Send</button>
     </div>
   </div>
@@ -72,193 +76,212 @@
 </div>
 
 <script>
-  // --- CONFIG ---
+  // --- 1. MINIFICATION LOGIC (Reduces QR Density) ---
+  const replacers = [
+    { k: 'a=candidate:', v: '^' },
+    { k: 'a=fingerprint:sha-256 ', v: '*' },
+    { k: 'a=ice-ufrag:', v: '$' },
+    { k: 'a=ice-pwd:', v: '%' },
+    { k: 'a=ice-options:trickle', v: '!' },
+    { k: 'webrtc-datachannel', v: '@' },
+    { k: 'typ host', v: 'H' },
+    { k: 'typ srflx', v: 'S' },
+    { k: 'tcptype', v: 'T' },
+    { k: 'generation 0', v: '' }, 
+    { k: 'network-cost 999', v: '' }, 
+    { k: 'udp', v: 'u' },
+    { k: '\r\n', v: '~' } // ~ is URL safe
+  ];
+
+  function minify(sdp) {
+    let result = sdp;
+    // Remove TCP candidates (they are large and usually unnecessary for this)
+    result = result.split('\r\n').filter(l => !l.includes(' tcp ')).join('\r\n');
+    replacers.forEach(r => { result = result.split(r.k).join(r.v); });
+    return result;
+  }
+
+  function unminify(str) {
+    let result = str;
+    [...replacers].reverse().forEach(r => { 
+      if(r.v !== '') result = result.split(r.v).join(r.k); 
+    });
+    return result;
+  }
+
+  // --- 2. WEBRTC CONFIG ---
   const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
   const pc = new RTCPeerConnection(config);
   let dataChannel;
-  const loc = window.location;
-  const baseUrl = loc.origin + loc.pathname;
   let isInitiator = false;
   let html5QrCode;
-  let rawCompressedData = ""; // For clipboard fallback
+  let rawMinified = ""; // For clipboard fallback
 
-  // --- UI HELPERS ---
-  const statusTitle = document.getElementById('status-title');
-  const instruction = document.getElementById('instruction');
-  const qrContainer = document.getElementById('qr-container');
-  const qrArea = document.getElementById('qr-area');
-  const btnScan = document.getElementById('btn-scan');
-  const chatPanel = document.getElementById('chat-panel');
-  const setupPanel = document.getElementById('setup-panel');
-  const chatLog = document.getElementById('chat-log');
+  // UI References
+  const ui = {
+    status: document.getElementById('status-title'),
+    instruction: document.getElementById('instruction'),
+    qrBox: document.getElementById('qr-container'),
+    qr: document.getElementById('qr-area'),
+    btnScan: document.getElementById('btn-scan'),
+    setup: document.getElementById('setup-panel'),
+    chat: document.getElementById('chat-panel'),
+    log: document.getElementById('chat-log'),
+    input: document.getElementById('chat-input')
+  };
 
-  // --- 1. STARTUP ---
+  // --- 3. INITIALIZATION ---
   window.onload = async () => {
-    const hashData = loc.hash.substring(1);
-
-    if (hashData) {
-      // PHONE (Joiner)
+    // Check URL Hash for data
+    const hash = window.location.hash.substring(1);
+    
+    if (hash) {
+      // === GUEST (PHONE) ===
       isInitiator = false;
-      statusTitle.innerText = "Joining...";
-      instruction.innerText = "Reading link data...";
-      await handleJoiner(hashData);
+      ui.status.innerText = "Joining...";
+      ui.instruction.innerText = "Processing Host Data...";
+      
+      try {
+        const sdp = unminify(decodeURIComponent(hash));
+        await pc.setRemoteDescription({ type: "offer", sdp: sdp });
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        // Wait for ICE candidates (onicecandidate triggers next step)
+      } catch(e) { 
+        alert("Invalid Link Data. Ensure the full URL was copied."); 
+      }
     } else {
-      // LAPTOP (Host)
+      // === HOST (LAPTOP) ===
       isInitiator = true;
-      statusTitle.innerText = "Start Chat";
-      instruction.innerText = "Generating Host QR...";
-      createOffer();
+      ui.status.innerText = "Creating Room...";
+      ui.instruction.innerText = "Generating Host Data...";
+      
+      const dc = pc.createDataChannel("chat");
+      setupChannel(dc);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      // Wait for ICE candidates...
     }
   };
 
-  // --- 2. WEBRTC LOGIC ---
-  pc.ondatachannel = e => setupChannel(e.channel);
-
-  function setupChannel(dc) {
-    dataChannel = dc;
-    dc.onopen = () => {
-      setupPanel.classList.add('hidden');
-      chatPanel.classList.remove('hidden');
-      if(html5QrCode) html5QrCode.stop(); 
-    };
-    dc.onmessage = e => log("Peer: " + e.data);
-  }
-
-  async function createOffer() {
-    const dc = pc.createDataChannel("chat");
-    setupChannel(dc);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-  }
-
-  async function handleJoiner(compressedSdp) {
-    try {
-      const sdpStr = LZString.decompressFromEncodedURIComponent(compressedSdp);
-      const offer = JSON.parse(sdpStr);
-      await pc.setRemoteDescription(offer);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-    } catch (e) {
-      alert("Link data corrupted. Try creating a new room.");
-    }
-  }
-
-  // --- 3. SDP SLIMMING (The Magic Fix) ---
-  // Removes TCP candidates and extra fluff to make QR code less dense
-  function optimizeSDP(sdpObj) {
-    let sdpLines = sdpObj.sdp.split('\r\n');
-    
-    // Filter out TCP candidates (usually bloated and hard to scan)
-    // Filter out video/audio specific lines if present by default
-    const filteredLines = sdpLines.filter(line => {
-      if (line.includes("candidate") && line.includes(" tcp ")) return false; 
-      return true;
-    });
-
-    return {
-      type: sdpObj.type,
-      sdp: filteredLines.join('\r\n')
-    };
-  }
-
+  // --- 4. ICE CANDIDATE HANDLING ---
   pc.onicecandidate = e => {
     if (e.candidate === null) {
-      // ICE Gathering Complete.
-      // 1. Get local description
-      const originalSdp = pc.localDescription;
-      
-      // 2. STRIP unused data to make QR smaller
-      const slimSdp = optimizeSDP(originalSdp);
-
-      // 3. Compress
-      const data = JSON.stringify(slimSdp);
-      const compressed = LZString.compressToEncodedURIComponent(data);
-      rawCompressedData = compressed; // Store for copy button
+      // ICE Gathering Complete -> Generate QR
+      const minified = minify(pc.localDescription.sdp);
+      rawMinified = minified;
 
       if (isInitiator) {
-        // Host: Needs to make a URL
-        const fullUrl = `${baseUrl}#${compressed}`;
-        generateQR(fullUrl);
-        instruction.innerText = "1. Scan this with your Phone.";
-        btnScan.classList.remove('hidden');
+        // Host: Create URL for the Guest
+        const url = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(minified)}`;
+        generateQR(url);
+        ui.status.innerText = "Step 1: Scan with Phone";
+        ui.instruction.innerText = "Scan this, then open the link.";
+        ui.btnScan.classList.remove('hidden'); // Host needs to scan answer later
       } else {
-        // Joiner: Just shows raw data
-        generateQR(compressed);
-        statusTitle.innerText = "Scan with Laptop";
-        instruction.innerText = "2. Point laptop camera here.";
+        // Guest: Create RAW DATA (Smaller QR)
+        generateQR(minified);
+        ui.status.innerText = "Step 2: Scan with Laptop";
+        ui.instruction.innerText = "Point your laptop camera here.";
       }
     }
   };
 
-  // --- 4. QR & SCANNER ---
+  // --- 5. QR & SCANNER ---
   function generateQR(text) {
-    qrArea.innerHTML = "";
-    // Use lower error correction (L) because we want fewer dots
-    new QRCode(qrArea, {
+    ui.qr.innerHTML = "";
+    new QRCode(ui.qr, {
       text: text,
-      width: 280,
-      height: 280,
+      width: 260,
+      height: 260,
       colorDark : "#000000",
       colorLight : "#ffffff",
-      correctLevel : QRCode.CorrectLevel.L 
+      correctLevel : QRCode.CorrectLevel.L // Low error correction = Less dense QR
     });
-    qrContainer.classList.remove('hidden');
+    ui.qrBox.classList.remove('hidden');
   }
 
   function startScanner() {
     document.getElementById('reader').style.display = "block";
-    btnScan.classList.add('hidden');
-    qrContainer.classList.add('hidden');
-    instruction.innerText = "Hold phone steady in front of webcam.";
-
+    ui.btnScan.classList.add('hidden');
+    ui.qrBox.classList.add('hidden'); // Hide own QR to make space
+    ui.instruction.innerText = "Hold the QR code steady in front of camera.";
+    
     html5QrCode = new Html5Qrcode("reader");
     html5QrCode.start(
-      { facingMode: "user" }, // "user" for webcam, "environment" for phone
+      { facingMode: "environment" }, // "user" or "environment"
       { fps: 10, qrbox: 250 },
       (decodedText) => {
-        finishConnection(decodedText);
+        // Success
         html5QrCode.stop();
+        finishConnection(decodedText);
       },
-      (errorMessage) => { /* scanning... */ }
+      (errorMessage) => { /* scanning */ }
     ).catch(err => {
-      alert("Camera start failed. Ensure HTTPS is used.");
+      alert("Camera failed. Make sure you are using HTTPS or Localhost.");
     });
   }
 
-  async function finishConnection(compressedData) {
+  async function finishConnection(data) {
+    ui.status.innerText = "Connecting...";
     try {
-      const sdpStr = LZString.decompressFromEncodedURIComponent(compressedData);
-      const answer = JSON.parse(sdpStr);
-      await pc.setRemoteDescription(answer);
-      instruction.innerText = "Connecting P2P...";
+      // If we scanned a URL (by mistake?), strip it. 
+      // But typically Host scans Guest's raw data.
+      let cleanData = data;
+      if(data.includes('#')) cleanData = data.split('#')[1];
+      
+      const sdp = unminify(decodeURIComponent(cleanData));
+      
+      // If we are Host, we are receiving an Answer. 
+      // If we are Guest (rare case using scanner), we receive Offer.
+      const type = isInitiator ? "answer" : "offer";
+      
+      await pc.setRemoteDescription({ type: type, sdp: sdp });
+      // Connection state should change to 'connected' automatically
     } catch (e) {
-      alert("Failed to read data. Try Copy/Paste fallback.");
+      alert("Failed to connect. Data might be corrupted.");
+      console.error(e);
     }
   }
 
-  // --- 5. FALLBACKS ---
-  function copyToClipboard() {
-    if(!rawCompressedData) return;
-    navigator.clipboard.writeText(rawCompressedData).then(() => {
-      alert("Code copied! Email or text this code to your other device, then paste it manually.");
-      // In a real app, we'd show a paste box, but for this simple file, 
-      // we assume the QR fix will work. 
-    });
+  // --- 6. CHAT LOGIC ---
+  pc.ondatachannel = e => setupChannel(e.channel);
+  
+  function setupChannel(dc) {
+    dataChannel = dc;
+    dc.onopen = () => {
+      ui.setup.classList.add('hidden');
+      ui.chat.classList.remove('hidden');
+      if(html5QrCode) html5QrCode.stop().catch(()=>{});
+    };
+    dc.onmessage = e => addMsg(e.data, 'peer');
   }
 
   function sendMessage() {
-    const input = document.getElementById('chat-input');
-    if(dataChannel && input.value) {
-      dataChannel.send(input.value);
-      log("You: " + input.value);
-      input.value = "";
+    const txt = ui.input.value.trim();
+    if(dataChannel && txt) {
+      dataChannel.send(txt);
+      addMsg(txt, 'me');
+      ui.input.value = "";
     }
   }
-  
-  function log(msg) {
-    const div = document.createElement('div');
-    div.textContent = msg;
-    chatLog.appendChild(div);
+
+  function addMsg(txt, who) {
+    const row = document.createElement('div');
+    row.className = `msg-row ${who}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'msg';
+    bubble.textContent = txt;
+    row.appendChild(bubble);
+    ui.log.appendChild(row);
+    ui.log.scrollTop = ui.log.scrollHeight;
+  }
+
+  function handleKey(e) { if(e.key === 'Enter') sendMessage(); }
+
+  function copyString() {
+    navigator.clipboard.writeText(rawMinified);
+    alert("Code copied to clipboard!");
   }
 </script>
 </body>
