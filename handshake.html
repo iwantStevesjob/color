@@ -3,206 +3,234 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ultra-Minified Chat</title>
+  <title>QR WebRTC Chat</title>
   
+  <!-- Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
   <style>
-    :root { --bg: #000; --green: #0f0; --text: #eee; }
-    body { font-family: monospace; background: var(--bg); color: var(--text); padding: 10px; display:flex; flex-direction:column; align-items:center; }
-    
-    .card { border: 1px solid #333; padding: 10px; margin-bottom: 10px; width: 100%; max-width: 600px; box-sizing: border-box; }
-    textarea { width: 100%; height: 60px; background: #111; color: var(--green); border: none; font-size: 10px; resize: vertical; }
-    
-    .stat { font-size: 12px; margin-bottom: 5px; color: #aaa; }
-    .diff { color: #fff; font-weight: bold; }
-
-    #qr-area { background: #fff; padding: 10px; display: inline-block; margin: 10px 0; }
-    #reader { width: 100%; max-width: 300px; border: 2px solid var(--green); display:none; }
-    
-    button { background: var(--green); border: none; padding: 10px; font-weight: bold; cursor: pointer; width: 100%; margin-top:5px; }
+    :root { --bg: #121212; --surface: #1e1e1e; --primary: #bb86fc; --text: #e0e0e0; }
+    body { font-family: sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+    .container { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 20px; }
+    .card { background: var(--surface); padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); text-align: center; }
+    h1, h2 { color: var(--primary); margin-top: 0; }
+    #qr-area { background: #fff; padding: 10px; display: inline-block; border-radius: 4px; margin: 10px 0; }
+    #reader { width: 100%; border-radius: 8px; overflow: hidden; display: none; }
+    .chat-box { height: 200px; overflow-y: auto; background: #000; padding: 10px; border: 1px solid #333; text-align: left; margin-bottom: 10px; }
+    input { width: 70%; padding: 10px; border-radius: 4px; border: none; }
+    button { padding: 10px 20px; background: var(--primary); border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+    .hidden { display: none; }
+    .step-instruction { font-size: 0.9rem; color: #aaa; margin-bottom: 10px; }
   </style>
 </head>
 <body>
 
-  <div class="card">
-    <div class="stat">RAW (Original)</div>
-    <textarea id="box-raw" readonly></textarea>
-  </div>
-
-  <div class="card">
-    <div id="stat-final" class="stat">ULTRA MINIFIED</div>
-    <textarea id="box-final" readonly></textarea>
-  </div>
-
-  <div id="qr-area"></div>
+<div class="container">
   
-  <div class="card">
-    <button onclick="startScanner()">SCAN PARTNER</button>
-    <div id="reader"></div>
+  <!-- Connection Panel -->
+  <div id="setup-panel" class="card">
+    <h1 id="status-title">Initializing...</h1>
+    <p id="instruction" class="step-instruction">Please wait...</p>
+
+    <!-- QR Display Area -->
+    <div id="qr-container" class="hidden">
+      <div id="qr-area"></div>
+      <p style="color: #333; font-size: 0.8em;">Scan this with the other device</p>
+    </div>
+
+    <!-- Scanner Area -->
+    <div id="scanner-container">
+      <div id="reader"></div>
+      <button id="btn-scan" class="hidden" onclick="startScanner()">Scan Partner's QR Code</button>
+    </div>
   </div>
+
+  <!-- Chat Panel (Hidden until connected) -->
+  <div id="chat-panel" class="card hidden">
+    <h2>Secure Chat</h2>
+    <div id="chat-log" class="chat-box"></div>
+    <div style="display: flex; gap: 10px;">
+      <input type="text" id="chat-input" placeholder="Type message..." onkeypress="if(event.key==='Enter') sendMessage()">
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+</div>
 
 <script>
-  const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-  const pc = new RTCPeerConnection(config);
-  let isInitiator = true;
+  // --- CONFIGURATION ---
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  let dataChannel;
+  const loc = window.location;
+  const baseUrl = loc.origin + loc.pathname;
+  let isInitiator = false;
+  let html5QrCode;
 
-  // 1. REPLACEMENTS (Safe ASCII)
-  const DICTIONARY = [
-    { k: 'a=candidate:', v: '_' },
-    { k: 'a=fingerprint:sha-256 ', v: '$' },
-    { k: 'a=ice-ufrag:', v: '!' },
-    { k: 'a=ice-pwd:', v: '@' },
-    { k: 'a=group:BUNDLE 0', v: '*' },
-    { k: 'a=msid-semantic: WMS', v: '^' },
-    { k: 'm=application ', v: '|' },
-    { k: 'UDP/DTLS/SCTP webrtc-datachannel', v: '%' },
-    { k: ' generation 0', v: '' }, 
-    { k: ' network-cost 999', v: '' }, 
-    { k: ' typ host', v: 'H' },
-    { k: ' typ srflx', v: 'S' },
-    { k: 'tcptype', v: 'T' },
-    { k: 'udp', v: 'U' },
-    { k: '192.168.', v: 'L' },
-    { k: ' raddr 0.0.0.0 rport 0', v: '' }, // Useless boilerplate
-    { k: '\r\n', v: '~' },
-    // BOILERPLATE MAPS (The new reductions)
-    { k: 'a=setup:actpass', v: '1' },
-    { k: 'a=setup:active', v: '2' },
-    { k: 'a=mid:0', v: '3' },
-    { k: 'a=sctp-port:5000', v: '4' },
-    { k: 'a=max-message-size:262144', v: '5' }
-  ];
+  // --- DOM ELEMENTS ---
+  const statusTitle = document.getElementById('status-title');
+  const instruction = document.getElementById('instruction');
+  const qrContainer = document.getElementById('qr-container');
+  const qrArea = document.getElementById('qr-area');
+  const btnScan = document.getElementById('btn-scan');
+  const chatPanel = document.getElementById('chat-panel');
+  const setupPanel = document.getElementById('setup-panel');
+  const chatLog = document.getElementById('chat-log');
 
-  // --- START ---
-  if(window.location.hash.length > 1) {
-    isInitiator = false;
-    handleJoin();
-  } else {
-    initHost();
-  }
+  // --- 1. INITIALIZATION LOGIC ---
+  window.onload = async () => {
+    // Check if there is data in the URL Hash
+    const hashData = loc.hash.substring(1); // Remove '#'
 
-  async function initHost() {
-    const dc = pc.createDataChannel("chat");
-    setupChannel(dc);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-  }
-
-  pc.onicecandidate = e => {
-    if (e.candidate === null) {
-      const raw = pc.localDescription.sdp;
-      document.getElementById('box-raw').value = raw;
-      
-      const minified = minify(raw);
-      
-      document.getElementById('box-final').value = minified;
-      const red = Math.round((1 - (minified.length / raw.length)) * 100);
-      document.getElementById('stat-final').innerHTML = `ULTRA MINIFIED (${minified.length} chars) <span class="diff">-${red}%</span>`;
-
-      generateQR(minified);
+    if (hashData) {
+      // CASE B: JOINER (Scanning the QR)
+      isInitiator = false;
+      statusTitle.innerText = "Joining Chat";
+      instruction.innerText = "Processing connection data...";
+      await handleJoiner(hashData);
+    } else {
+      // CASE A: INITIATOR (Opened page normally)
+      isInitiator = true;
+      statusTitle.innerText = "Start Chat";
+      instruction.innerText = "Generating secure link...";
+      createOffer();
     }
   };
 
-  // --- THE ULTRA MINIFIER ---
-  function minify(sdp) {
-    let lines = sdp.split('\r\n');
-    let keep = [];
+  // --- 2. CORE WEBRTC FUNCTIONS ---
+
+  // Setup Data Channel (Chat)
+  pc.ondatachannel = e => setupChannel(e.channel);
+
+  function setupChannel(dc) {
+    dataChannel = dc;
+    dc.onopen = () => {
+      setupPanel.classList.add('hidden');
+      chatPanel.classList.remove('hidden');
+      log("Chat Connected!");
+      if(html5QrCode) html5QrCode.stop(); // Stop camera if running
+    };
+    dc.onmessage = e => log("Peer: " + e.data);
+  }
+
+  // Create Offer (Host)
+  async function createOffer() {
+    const dc = pc.createDataChannel("chat");
+    setupChannel(dc);
     
-    // 1. FILTER LINES
-    lines.forEach(l => {
-      // Remove standard headers (we reconstruct them)
-      if(l.startsWith('v=') || l.startsWith('s=') || l.startsWith('t=')) return;
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    // Wait for ICE gathering to complete inside onicecandidate
+  }
+
+  // Handle Joiner Logic (Phone)
+  async function handleJoiner(compressedSdp) {
+    try {
+      const sdpStr = LZString.decompressFromEncodedURIComponent(compressedSdp);
+      const offer = JSON.parse(sdpStr);
       
-      // Remove Origin line (we reconstruct a fake one)
-      if(l.startsWith('o=')) return;
-
-      // Remove unwanted bloat
-      if(l.includes(' tcp ') || l.includes('a=rtcp') || l.includes('IP6') || l.includes('extmap')) return;
-
-      // Remove mDNS (.local) if we have other candidates. 
-      // (UUIDs take up 40+ chars).
-      if(l.includes('.local')) return; 
-
-      keep.push(l);
-    });
-
-    let s = keep.join('\r\n');
-
-    // 2. DICTIONARY SWAP
-    DICTIONARY.forEach(p => { s = s.split(p.k).join(p.v); });
-
-    // 3. HEX PACKING (Remove colons from Fingerprint)
-    // Turns "$AA:BB:CC" into "$AABBCC"
-    s = s.replace(/\$([0-9A-Fa-f:]+)/, (match, hex) => {
-      return '$' + hex.replace(/:/g, '');
-    });
-
-    return s;
-  }
-
-  // --- THE RESTORER ---
-  function unminify(str) {
-    let s = str;
-
-    // 1. UNPACK HEX (Add colons back to Fingerprint)
-    // Matches the long hex string after '$'
-    s = s.replace(/\$([0-9A-Fa-f]{60,})/, (match, hex) => {
-      // Insert colon every 2 chars
-      return '$' + hex.match(/.{1,2}/g).join(':');
-    });
-
-    // 2. DICTIONARY RESTORE
-    for(let i = DICTIONARY.length - 1; i >= 0; i--) {
-      if(DICTIONARY[i].v !== '') s = s.split(DICTIONARY[i].v).join(DICTIONARY[i].k);
+      await pc.setRemoteDescription(offer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      // Wait for ICE gathering to complete
+    } catch (e) {
+      alert("Invalid QR Code or Link");
+      console.error(e);
     }
-
-    // 3. RECONSTRUCT HEADERS
-    // We add a fake Origin ID. Browsers accept this for new connections.
-    const header = "v=0\r\no=- 123456 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n";
-    return header + s;
   }
 
-  function generateQR(data) {
-    document.getElementById('qr-area').innerHTML = "";
-    new QRCode(document.getElementById('qr-area'), {
-      text: data, width: 250, height: 250,
-      correctLevel: QRCode.CorrectLevel.L
+  // Handle ICE Candidates (Gathering network info)
+  pc.onicecandidate = e => {
+    if (e.candidate === null) {
+      // Gathering complete. Now we generate the QR code.
+      const data = JSON.stringify(pc.localDescription);
+      const compressed = LZString.compressToEncodedURIComponent(data);
+      
+      if (isInitiator) {
+        // Host: Show QR containing the URL + Hash
+        const fullUrl = `${baseUrl}#${compressed}`;
+        generateQR(fullUrl);
+        instruction.innerText = "1. Scan this with your phone camera.";
+        btnScan.classList.remove('hidden'); // Host needs to scan the answer later
+      } else {
+        // Joiner: Show QR containing just the Answer Data
+        generateQR(compressed); // Just data, not URL, to keep it smaller
+        instruction.innerText = "2. Show this QR code to the Host device.";
+      }
+    }
+  };
+
+  // --- 3. QR & SCANNER FUNCTIONS ---
+
+  function generateQR(text) {
+    qrArea.innerHTML = "";
+    // Attempt to handle size limits. If URL is huge, QR might be dense.
+    new QRCode(qrArea, {
+      text: text,
+      width: 256,
+      height: 256,
+      colorDark : "#000000",
+      colorLight : "#ffffff",
+      correctLevel : QRCode.CorrectLevel.L // Low error correction for less density
     });
-  }
-
-  // --- LOGIC ---
-  async function handleJoin() {
-    const hash = window.location.hash.substring(1);
-    const sdp = unminify(decodeURIComponent(hash));
-    document.getElementById('box-raw').value = "Received URL Hash";
-    document.getElementById('box-final').value = "Restored SDP:\n" + sdp;
-    
-    await pc.setRemoteDescription({ type: "offer", sdp });
-    pc.ondatachannel = e => setupChannel(e.channel);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    qrContainer.classList.remove('hidden');
   }
 
   function startScanner() {
-    document.getElementById('reader').style.display = 'block';
-    const html5QrCode = new Html5Qrcode("reader");
-    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, 
-      decoded => {
+    document.getElementById('reader').style.display = "block";
+    btnScan.classList.add('hidden');
+    qrContainer.classList.add('hidden'); // Hide own QR to clear screen space
+    instruction.innerText = "Scan the QR code from the other device.";
+
+    html5QrCode = new Html5Qrcode("reader");
+    html5QrCode.start(
+      { facingMode: "environment" }, 
+      { fps: 10, qrbox: 250 },
+      (decodedText, decodedResult) => {
+        // Success
+        finishConnection(decodedText);
         html5QrCode.stop();
-        let clean = decoded.includes('#') ? decoded.split('#')[1] : decoded;
-        const sdp = unminify(clean);
-        const type = isInitiator ? "answer" : "offer";
-        pc.setRemoteDescription({ type, sdp }).then(() => alert("CONNECTED!"));
-      }, err => {}
-    );
+      },
+      (errorMessage) => {
+        // Parse error, ignore
+      }
+    ).catch(err => {
+      alert("Camera permission failed.");
+    });
   }
 
-  function setupChannel(dc) {
-    dc.onopen = () => { document.body.style.background = "#050"; alert("CHAT CONNECTED!"); };
-    dc.onmessage = e => alert(e.data);
+  async function finishConnection(compressedData) {
+    try {
+      // Host scans the Answer (raw compressed string, not URL)
+      const sdpStr = LZString.decompressFromEncodedURIComponent(compressedData);
+      const answer = JSON.parse(sdpStr);
+      await pc.setRemoteDescription(answer);
+      // Connection should open momentarily
+      instruction.innerText = "Connecting...";
+    } catch (e) {
+      console.error(e);
+      alert("Failed to read connection data.");
+    }
   }
+
+  // --- 4. CHAT UI ---
+  function sendMessage() {
+    const input = document.getElementById('chat-input');
+    if(dataChannel && dataChannel.readyState === 'open' && input.value) {
+      dataChannel.send(input.value);
+      log("You: " + input.value);
+      input.value = "";
+    }
+  }
+  
+  function log(msg) {
+    const div = document.createElement('div');
+    div.textContent = msg;
+    chatLog.appendChild(div);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
 </script>
 </body>
 </html>
