@@ -1,323 +1,304 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Strict Debug WebRTC</title>
-  
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Serverless WebRTC Chat</title>
   <style>
-    body { font-family: monospace; background: #000; color: #fff; padding: 10px; display: flex; flex-direction: column; gap: 15px; }
-    
-    .panel { border: 1px solid #444; padding: 15px; border-radius: 8px; background: #111; }
-    h2 { margin: 0 0 10px 0; color: #0f0; font-size: 1.2rem; border-bottom: 1px solid #333; padding-bottom: 5px; }
-    
-    label { display: block; color: #aaa; margin-bottom: 5px; font-size: 0.8rem; }
-    textarea { 
-      width: 100%; height: 120px; 
-      background: #222; color: #0f0; 
-      border: 1px solid #555; font-size: 10px; 
-      font-family: monospace; resize: vertical;
+    :root {
+      --bg-color: #121212;
+      --surface-color: #1e1e1e;
+      --primary-color: #bb86fc;
+      --text-color: #e0e0e0;
+      --border-radius: 8px;
     }
-    
-    .row { display: flex; flex-direction: column; gap: 10px; }
-    
-    /* QR Area */
-    #qr-display { background: #fff; padding: 10px; display: inline-block; margin-top: 10px; }
-    
-    /* Buttons */
-    button { padding: 15px; border: none; font-weight: bold; cursor: pointer; font-size: 1rem; width: 100%; margin-top: 10px; }
-    .btn-action { background: #0066cc; color: white; }
-    .btn-connect { background: #00cc00; color: black; }
-    .btn-scan { background: #cc00cc; color: white; }
 
-    #reader { width: 100%; background: #000; border: 2px solid #fff; display: none; }
-    
-    .hidden { display: none !important; }
-    .status { font-weight: bold; color: #ff0; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+      box-sizing: border-box;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .card {
+      background-color: var(--surface-color);
+      padding: 20px;
+      border-radius: var(--border-radius);
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    }
+
+    h1,
+    h2 {
+      margin-top: 0;
+      color: var(--primary-color);
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      background-color: #2d2d2d;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 10px;
+      box-sizing: border-box;
+      font-family: monospace;
+      resize: vertical;
+    }
+
+    button {
+      background-color: var(--primary-color);
+      color: #000;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: opacity 0.2s;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #chat-log {
+      height: 200px;
+      overflow-y: auto;
+      background-color: #000;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      border: 1px solid #333;
+    }
+
+    .message {
+      margin: 5px 0;
+    }
+
+    .message.local {
+      color: #81c784;
+    }
+
+    .message.remote {
+      color: #64b5f6;
+    }
+
+    .message.system {
+      color: #aaa;
+      font-style: italic;
+    }
+
+    input[type="text"] {
+      flex-grow: 1;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background-color: #2d2d2d;
+      color: #fff;
+    }
+
+    .status {
+      margin-left: auto;
+      font-size: 0.9em;
+      color: #888;
+    }
   </style>
 </head>
+
 <body>
 
-<!-- STATUS BAR -->
-<div style="background: #222; padding: 10px; text-align: center;">
-  STATUS: <span id="conn-state" class="status">Idle</span>
-</div>
+  <div class="container">
+    <div class="card">
+      <div class="row">
+        <h1>WebRTC Handshake</h1>
+        <span id="connection-status" class="status">Disconnected</span>
+      </div>
+      <p>1. <strong>Create Offer</strong> (if initiator) OR <strong>Paste Remote SDP</strong> (if joiner).</p>
 
-<!-- STEP 1: GENERATION PANEL (Shows My Data) -->
-<div id="panel-local" class="panel hidden">
-  <h2>1. My Local Data</h2>
-  <div class="row">
-    <div>
-      <label>Raw JSON (Verify this on other screen):</label>
-      <textarea id="local-json" readonly></textarea>
+      <div class="row">
+        <button id="btn-create-offer" onclick="createOffer()">Create Offer</button>
+      </div>
     </div>
-    <div style="text-align: center;">
-      <div id="qr-display"></div>
-      <p style="color: #ccc; font-size: 0.8rem;">Scan this with the other device</p>
+
+    <div class="card">
+      <h2>1. Local SDP <button onclick="copyLocal()" style="font-size: 0.8em; padding: 4px 8px;">Copy</button></h2>
+      <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Send this to your peer.</p>
+      <textarea id="local-sdp" readonly placeholder="Generated SDP will appear here..."></textarea>
+    </div>
+
+    <div class="card">
+      <h2>2. Remote SDP</h2>
+      <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Paste the peer's SDP here.</p>
+      <textarea id="remote-sdp" placeholder="Paste peer's SDP here..."></textarea>
+      <br>
+      <button id="btn-connect" onclick="connect()">Connect / Accept Answer</button>
+    </div>
+
+    <div class="card">
+      <h2>Chat</h2>
+      <div id="chat-log"></div>
+      <div class="row">
+        <input type="text" id="chat-input" placeholder="Type a message..." onkeypress="handleChatKey(event)">
+        <button onclick="sendMessage()">Send</button>
+      </div>
     </div>
   </div>
-  <button id="btn-open-scanner" class="btn-scan" onclick="startScanner()">Next: Scan Partner's Response</button>
-</div>
 
-<!-- STEP 2: VERIFICATION PANEL (Shows Scanned Data) -->
-<div id="panel-remote" class="panel hidden">
-  <h2>2. Scanned Remote Data</h2>
-  <label>Data received from QR (Review before connecting):</label>
-  <textarea id="remote-json" readonly></textarea>
-  <br>
-  <button id="btn-connect" class="btn-connect" onclick="executeConnection()">LOOKS GOOD: CONNECT</button>
-  <button class="btn-scan" onclick="location.reload()" style="background: #444; margin-top: 5px;">Cancel / Reset</button>
-</div>
-
-<!-- SCANNER OVERLAY -->
-<div id="panel-scanner" class="panel hidden">
-  <h2>Scanner</h2>
-  <div id="reader"></div>
-  <button onclick="stopScanner()">Close Scanner</button>
-</div>
-
-<!-- CHAT PANEL -->
-<div id="panel-chat" class="panel hidden">
-  <h2>Secure Connection Established</h2>
-  <div id="logs" style="height: 200px; overflow-y: auto; background: #000; border: 1px solid #333; margin-bottom: 10px;"></div>
-  <input type="text" id="chat-input" placeholder="Type..." style="width: 70%; padding: 10px;">
-  <button onclick="send()" style="width: 20%; padding: 10px;">Send</button>
-</div>
-
-<script>
-  // --- CONFIGURATION ---
-  const config = { 
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    iceCandidatePoolSize: 10 
-  };
-  
-  // Legacy iOS DataChannel Config (Important for iPhone)
-  const dcConfig = { ordered: false, maxRetransmits: 0 };
-
-  const pc = new RTCPeerConnection(config);
-  let dataChannel;
-  let html5QrCode;
-  
-  // State tracking
-  let isInitiator = false;
-  let pendingRemoteDescription = null; // Stores JSON until user clicks Connect
-
-  // --- UI REFERENCES ---
-  const els = {
-    localPanel: document.getElementById('panel-local'),
-    remotePanel: document.getElementById('panel-remote'),
-    scanPanel: document.getElementById('panel-scanner'),
-    chatPanel: document.getElementById('panel-chat'),
-    localJson: document.getElementById('local-json'),
-    remoteJson: document.getElementById('remote-json'),
-    qrArea: document.getElementById('qr-display'),
-    connState: document.getElementById('conn-state')
-  };
-
-  // --- 1. BOOTSTRAP ---
-  window.onload = async () => {
-    // Monitor WebRTC State
-    pc.onconnectionstatechange = () => {
-      els.connState.innerText = pc.connectionState.toUpperCase();
-      if(pc.connectionState === 'connected') {
-        els.localPanel.classList.add('hidden');
-        els.remotePanel.classList.add('hidden');
-        els.chatPanel.classList.remove('hidden');
-      } else if (pc.connectionState === 'failed') {
-        els.connState.style.color = 'red';
-        alert("WebRTC Connection FAILED. \n1. Are you on the same Wi-Fi? \n2. Did the JSON match exactly?");
-      }
+  <script>
+    const config = {
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     };
 
-    const hash = window.location.hash.substring(1);
-    
-    if (hash) {
-      // --- ROLE: JOINER (iPhone) ---
-      isInitiator = false;
-      document.getElementById('btn-open-scanner').classList.add('hidden'); // Joiner doesn't scan again after connection
-      
-      try {
-        const jsonStr = LZString.decompressFromEncodedURIComponent(hash);
-        if(!jsonStr) throw new Error("Decompress Failed");
-        
-        // Show the User what was scanned from the URL
-        showVerificationPanel(jsonStr);
-      } catch(e) {
-        alert("Link corrupted: " + e.message);
-      }
+    const pc = new RTCPeerConnection(config);
+    let dataChannel;
 
-    } else {
-      // --- ROLE: HOST (Android) ---
-      isInitiator = true;
-      initHost();
+    // UI Elements
+    const localSdpEl = document.getElementById('local-sdp');
+    const remoteSdpEl = document.getElementById('remote-sdp');
+    const chatLog = document.getElementById('chat-log');
+    const statusEl = document.getElementById('connection-status');
+    const btnCreateOffer = document.getElementById('btn-create-offer');
+    const btnConnect = document.getElementById('btn-connect');
+
+    // Logging
+    function log(msg, type = 'system') {
+      const div = document.createElement('div');
+      div.className = 'message ' + type;
+      div.textContent = msg;
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      console.log(`[${type}] ${msg}`);
     }
-  };
 
-  // --- 2. HOST FLOW ---
-  async function initHost() {
-    els.connState.innerText = "Creating Offer...";
-    
-    // Create Data Channel
-    dataChannel = pc.createDataChannel("chat", dcConfig);
-    setupDc(dataChannel);
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    // Wait for ICE
-    waitForIce(() => {
-      const json = JSON.stringify(pc.localDescription, null, 2);
-      // Host generates a LINK for the Joiner to scan
-      const compressed = LZString.compressToEncodedURIComponent(json);
-      const link = window.location.origin + window.location.pathname + "#" + compressed;
-      
-      showGenerationPanel(json, link);
-    });
-  }
-
-  // --- 3. COMMON LOGIC ---
-
-  // Called when User clicks "CONNECT" in Verification Panel
-  async function executeConnection() {
-    if(!pendingRemoteDescription) return;
-
-    try {
-      els.connState.innerText = "Applying Remote Desc...";
-      await pc.setRemoteDescription(pendingRemoteDescription);
-
-      if (!isInitiator) {
-        // If Joiner: We just accepted the Offer. Now create Answer.
-        els.remotePanel.classList.add('hidden');
-        
-        // Setup DC listener for when Host connects
-        pc.ondatachannel = e => setupDc(e.channel);
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        
-        waitForIce(() => {
-          const json = JSON.stringify(pc.localDescription, null, 2);
-          // Joiner generates RAW DATA (not link) for Host to scan
-          const compressed = LZString.compressToEncodedURIComponent(json);
-          
-          showGenerationPanel(json, compressed);
-          els.connState.innerText = "Answer Created. Show QR to Host.";
-        });
-      } else {
-        // If Host: We just accepted the Answer. Connection should start.
-        els.connState.innerText = "Finalizing Handshake...";
-        els.remotePanel.classList.add('hidden');
-      }
-
-    } catch (e) {
-      alert("Connection Error: " + e.message);
-    }
-  }
-
-  // --- HELPERS ---
-
-  function waitForIce(cb) {
-    els.connState.innerText = "Gathering Candidates...";
-    const timeout = setTimeout(() => {
-      if(pc.iceGatheringState !== 'complete') cb(); // Fallback
-    }, 2000); // 2s max wait
-
+    // ICE Candidate handling
     pc.onicecandidate = e => {
-      if(!e.candidate) {
-        clearTimeout(timeout);
-        cb();
+      if (e.candidate) {
+        // console.log("New ICE candidate");
+      } else {
+        // All candidates gathered
+        log("ICE gathering complete. Copy Local SDP to peer.");
+        localSdpEl.value = JSON.stringify(pc.localDescription);
+        localSdpEl.select();
       }
     };
-  }
 
-  function showGenerationPanel(json, qrText) {
-    els.localPanel.classList.remove('hidden');
-    els.localJson.value = json; // Show Raw JSON
-    
-    els.qrArea.innerHTML = "";
-    new QRCode(els.qrArea, {
-      text: qrText,
-      width: 250, 
-      height: 250,
-      correctLevel: QRCode.CorrectLevel.L
-    });
-  }
-
-  function showVerificationPanel(jsonStr) {
-    els.localPanel.classList.add('hidden');
-    els.scanPanel.classList.add('hidden');
-    els.remotePanel.classList.remove('hidden');
-    
-    // Pretty print for readability
-    try {
-      pendingRemoteDescription = JSON.parse(jsonStr);
-      els.remoteJson.value = JSON.stringify(pendingRemoteDescription, null, 2);
-    } catch(e) {
-      els.remoteJson.value = "INVALID JSON: " + jsonStr;
-      alert("Scanned data is not valid JSON.");
-    }
-  }
-
-  // --- SCANNER LOGIC ---
-  function startScanner() {
-    els.localPanel.classList.add('hidden');
-    els.scanPanel.classList.remove('hidden');
-    els.connState.innerText = "Scanning...";
-
-    html5QrCode = new Html5Qrcode("reader");
-    els.qrArea.innerHTML = ""; // Clear QR to save memory
-    document.getElementById('reader').style.display = 'block';
-
-    html5QrCode.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: 250 },
-      (decodedText) => {
-        // SUCCESS
-        stopScanner();
-        
-        // Try decompressing, or use raw if uncompressed
-        let json = LZString.decompressFromEncodedURIComponent(decodedText);
-        if(!json) json = decodedText; // Fallback
-        
-        showVerificationPanel(json);
-      },
-      () => {}
-    );
-  }
-
-  function stopScanner() {
-    if(html5QrCode) {
-      html5QrCode.stop().then(() => {
-        document.getElementById('reader').style.display = 'none';
-        html5QrCode.clear();
-      });
-    }
-  }
-
-  // --- CHAT LOGIC ---
-  function setupDc(dc) {
-    dc.onopen = () => els.connState.innerText = "CONNECTED (P2P)";
-    dc.onmessage = e => {
-      const d = document.createElement('div');
-      d.innerText = "Peer: " + e.data;
-      d.style.color = "#0f0";
-      document.getElementById('logs').appendChild(d);
+    pc.onconnectionstatechange = () => {
+      statusEl.textContent = pc.connectionState;
+      log(`Connection state: ${pc.connectionState}`);
     };
-  }
 
-  function send() {
-    const input = document.getElementById('chat-input');
-    if(dataChannel) dataChannel.send(input.value);
-    const d = document.createElement('div');
-    d.innerText = "Me: " + input.value;
-    document.getElementById('logs').appendChild(d);
-    input.value = "";
-  }
+    // Data Channel Setup
+    function setupDataChannel(dc) {
+      dataChannel = dc;
+      dc.onopen = () => {
+        log("Chat channel open!", 'system');
+        statusEl.textContent = 'Connected';
+        statusEl.style.color = '#81c784';
+        document.getElementById('chat-input').disabled = false;
+        document.getElementById('chat-input').focus();
+      };
+      dc.onmessage = e => log(`Peer: ${e.data}`, 'remote');
+    }
 
-</script>
+    // Initiator: Create Data Channel
+    pc.ondatachannel = e => {
+      log("Received data channel from remote.");
+      setupDataChannel(e.channel);
+    };
+
+    async function createOffer() {
+      btnCreateOffer.disabled = true;
+      log("Creating offer...");
+
+      // Create data channel as initiator
+      const dc = pc.createDataChannel("chat");
+      setupDataChannel(dc);
+
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        log("Offer created. Waiting for ICE candidates...");
+      } catch (err) {
+        log("Error creating offer: " + err);
+      }
+    }
+
+    async function connect() {
+      const remoteText = remoteSdpEl.value.trim();
+      if (!remoteText) {
+        alert("Please paste the remote SDP first.");
+        return;
+      }
+
+      try {
+        const remoteDesc = JSON.parse(remoteText);
+        await pc.setRemoteDescription(remoteDesc);
+        log("Remote description set.");
+
+        // If we received an offer, create an answer
+        if (remoteDesc.type === 'offer') {
+          log("Creating answer...");
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          log("Answer created. Waiting for ICE candidates...");
+        }
+      } catch (err) {
+        log("Error connecting: " + err);
+        console.error(err);
+      }
+    }
+
+    // Chat Functions
+    function sendMessage() {
+      const input = document.getElementById('chat-input');
+      const msg = input.value.trim();
+      if (!msg || !dataChannel || dataChannel.readyState !== 'open') return;
+
+      dataChannel.send(msg);
+      log(`You: ${msg}`, 'local');
+      input.value = '';
+    }
+
+    function handleChatKey(e) {
+      if (e.key === 'Enter') sendMessage();
+    }
+
+    function copyLocal() {
+      localSdpEl.select();
+      document.execCommand('copy');
+      log("Local SDP copied to clipboard.");
+    }
+
+    // Initial State
+    document.getElementById('chat-input').disabled = true;
+  </script>
+
 </body>
+
 </html>
