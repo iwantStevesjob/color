@@ -148,7 +148,6 @@
     </header>
 
     <div id="chat-history">
-        <!-- Messages appear here -->
         <div class="system-msg">Waiting for peers to join...</div>
     </div>
 
@@ -158,17 +157,23 @@
     </form>
 </div>
 
-<!-- 
-    The logic below follows the pattern from your sample:
-    1. Import from esm.run
-    2. Config & Join Room
-    3. makeAction() for specific data types
--->
 <script type="module">
+    // IMPORTANT: Ensure you are importing the version you intend. 
+    // If you want default (usually BitTorrent), use 'trystero'. 
+    // If you are seeing Nostr errors, this bundle is using Nostr.
     import { joinRoom, selfId } from 'https://esm.run/trystero';
 
     // -- 1. Configuration --
-    const config = { appId: 'my-github-chat-app-v1' }; 
+    const config = { 
+        appId: 'my-github-chat-app-v1',
+        // Define free relays to prevent payment errors
+        relayUrls: [
+            'wss://relay.damus.io',
+            'wss://nos.lol',
+            'wss://relay.primal.net',
+            'wss://relay.snort.social'
+        ]
+    }; 
     const roomName = 'lobby'; 
     
     // UI References
@@ -185,32 +190,25 @@
     let sendMessage;
     let getMessage;
 
-    // Join the room immediately
     initChat();
 
     function initChat() {
         room = joinRoom(config, roomName);
 
-        // Define our "Action". 
-        // In your sample, you had 'mouseMove'. Here we use 'chatMessage'.
-        // returns: [functionToSend, functionToReceive]
+        // Define our "Action" for chat messages
         [sendMessage, getMessage] = room.makeAction('chatMessage');
 
         // -- Event Listeners --
-        
-        // When someone joins
         room.onPeerJoin(peerId => {
             updatePeerCount();
             addSystemMessage(`${peerId.slice(0, 4)} joined the chat`);
         });
 
-        // When someone leaves
         room.onPeerLeave(peerId => {
             updatePeerCount();
             addSystemMessage(`${peerId.slice(0, 4)} left the chat`);
         });
 
-        // When we receive a message
         getMessage((data, peerId) => {
             addMessage(data, peerId, false);
         });
@@ -219,26 +217,18 @@
     }
 
     // -- 3. Interaction Logic --
-
-    // Handle Form Submit
     formEl.addEventListener('submit', (e) => {
         e.preventDefault();
         const text = inputEl.value.trim();
         
         if (text) {
-            // Send to peers
             sendMessage(text);
-            
-            // Show on my screen
             addMessage(text, selfId, true);
-            
-            // Clear input
             inputEl.value = '';
         }
     });
 
     // -- 4. UI Helper Functions --
-
     function updatePeerCount() {
         const count = Object.keys(room.getPeers()).length;
         statusEl.innerText = count > 0 
@@ -252,7 +242,6 @@
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${isMe ? 'me' : 'peer'}`;
         
-        // Add ID label for peers
         const meta = document.createElement('span');
         meta.className = 'meta';
         meta.innerText = isMe ? 'You' : id.slice(0, 4);
