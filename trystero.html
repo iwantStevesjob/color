@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Serverless P2P Chat</title>
+</head>
+<body>
+    <h1>My GitHub P2P App</h1>
+    <div id="status">🔎 Looking for peers...</div>
+    <div id="chat-box" style="border:1px solid #ccc; height:200px; overflow-y:scroll;"></div>
+    <input type="text" id="msgInput" placeholder="Type a message">
+    <button onclick="sendMsg()">Send</button>
+
+    <script type="module">
+        // 1. Import Trystero from a CDN (No installation needed)
+        import { joinRoom } from 'https://cdn.jsdelivr.net/npm/trystero/dist/trystero.min.js';
+
+        // 2. Configuration
+        const config = { appId: 'my-github-single-file-app' };
+        const roomName = 'global-lobby'; // Everyone on the site joins this room
+        
+        // 3. Initialize
+        const room = joinRoom(config, roomName);
+        const [send, get] = room.makeAction('message');
+
+        // 4. Handle Events
+        room.onPeerJoin(id => {
+            document.getElementById('status').innerText = `✅ Connected to ${id}`;
+            console.log(id, 'joined');
+        });
+
+        room.onPeerLeave(id => {
+            document.getElementById('status').innerText = `❌ ${id} left`;
+        });
+
+        // 5. Receive Data
+        get((data, id) => {
+            const box = document.getElementById('chat-box');
+            box.innerHTML += `<p><b>Peer:</b> ${data}</p>`;
+        });
+
+        // 6. Send Data (Exposed to window for the button)
+        window.sendMsg = () => {
+            const input = document.getElementById('msgInput');
+            const box = document.getElementById('chat-box');
+            
+            send(input.value); // Send to P2P network
+            
+            box.innerHTML += `<p><b>Me:</b> ${input.value}</p>`;
+            input.value = '';
+        };
+    </script>
+</body>
+</html>
