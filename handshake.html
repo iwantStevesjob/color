@@ -5,6 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Serverless WebRTC Chat</title>
+  <!-- Load robust QR Code library -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
   <style>
     :root {
       --bg-color: #121212;
@@ -128,6 +130,13 @@
       font-size: 0.9em;
       color: #888;
     }
+    
+    #qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 10px;
+    }
   </style>
 </head>
 
@@ -145,6 +154,11 @@
       <h2>1. Local SDP <button onclick="copyLocal()" style="font-size: 0.8em; padding: 4px 8px;">Copy</button></h2>
       <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Send this to your peer.</p>
       <textarea id="local-sdp" readonly placeholder="Generated SDP will appear here..."></textarea>
+      
+      <div id="qr-container">
+        <canvas id="qr-canvas"></canvas>
+        <p id="qr-status" style="font-size: 0.8em; color: #aaa; display:none;">Generating QR...</p>
+      </div>
     </div>
 
     <div class="card">
@@ -179,6 +193,7 @@
     const chatLog = document.getElementById('chat-log');
     const statusEl = document.getElementById('connection-status');
     const btnConnect = document.getElementById('btn-connect');
+    const qrStatusEl = document.getElementById('qr-status');
 
     // Logging
     function log(msg, type = 'system') {
@@ -190,15 +205,73 @@
       console.log(`[${type}] ${msg}`);
     }
 
+    // --- QR & COMPRESSION ---
+
+    // 1. Gzip and Base64 encode the string
+    async function gzipBase64(str) {
+      try {
+        const stream = new Blob([str]).stream();
+        const compressedStream = stream.pipeThrough(new CompressionStream('gzip'));
+        const response = await new Response(compressedStream);
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              // reader.result is "data:application/octet-stream;base64,xxxx..."
+              const base64data = reader.result.split(',')[1]; 
+              resolve(base64data);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch (e) {
+        log("Compression not supported or failed: " + e, "system");
+        throw e;
+      }
+    }
+
+    // 2. Generate QR using library
+    function generateQRCode(text) {
+      const canvas = document.getElementById('qr-canvas');
+      qrStatusEl.style.display = 'block';
+      
+      // Use the global QRCode object from the CDN library
+      QRCode.toCanvas(canvas, text, { 
+        width: 200, 
+        margin: 1,
+        errorCorrectionLevel: 'L' // Low error correction to maximize capacity for long URLs
+      }, function (error) {
+        if (error) {
+          console.error(error);
+          log("QR Generation failed: Data too long?", "system");
+          qrStatusEl.textContent = "Error generating QR";
+        } else {
+          console.log('QR code generated successfully');
+          qrStatusEl.style.display = 'none';
+        }
+      });
+    }
+
     // ICE Candidate handling
     pc.onicecandidate = e => {
       if (e.candidate) {
-        // console.log("New ICE candidate");
+        // Gathering...
       } else {
-        // All candidates gathered
+        // Complete
         log("ICE gathering complete. Copy Local SDP to peer.");
-        localSdpEl.value = JSON.stringify(pc.localDescription);
+        const rawSdp = JSON.stringify(pc.localDescription);
+        localSdpEl.value = rawSdp;
         localSdpEl.select();
+        
+        // Compress and generate URL
+        log("Generating QR code...");
+        gzipBase64(rawSdp).then(base64 => {
+          // Create URL: current page + ?sdp=...
+          const url = window.location.origin + window.location.pathname + '?sdp=' + encodeURIComponent(base64);
+          generateQRCode(url);
+        }).catch(err => {
+          console.error(err);
+        });
       }
     };
 
@@ -228,8 +301,6 @@
 
     async function createOffer() {
       log("Creating offer...");
-
-      // Create data channel as initiator
       const dc = pc.createDataChannel("chat");
       setupDataChannel(dc);
 
@@ -254,7 +325,6 @@
         await pc.setRemoteDescription(remoteDesc);
         log("Remote description set.");
 
-        // If we received an offer, create an answer
         if (remoteDesc.type === 'offer') {
           log("Creating answer...");
           const answer = await pc.createAnswer();
@@ -291,6 +361,7 @@
     // Initial State
     document.getElementById('chat-input').disabled = true;
 
+    // Start
     createOffer(); 
 
   </script>
