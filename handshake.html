@@ -205,7 +205,7 @@
       console.log(`[${type}] ${msg}`);
     }
 
-    // --- QR & COMPRESSION ---
+    // --- HELPER FUNCTIONS (Compression / Decompression) ---
 
     // 1. Gzip and Base64 encode the string
     async function gzipBase64(str) {
@@ -225,21 +225,41 @@
           reader.readAsDataURL(blob);
         });
       } catch (e) {
-        log("Compression not supported or failed: " + e, "system");
+        log("Compression error: " + e, "system");
         throw e;
       }
     }
 
-    // 2. Generate QR using library
+    // 2. Base64 decode and Gunzip (The Reverse)
+    async function gunzipBase64(base64) {
+      try {
+        // Decode Base64 string to binary string
+        const binaryString = atob(base64);
+        // Convert binary string to Uint8Array
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        // Decompress
+        const stream = new Blob([bytes]).stream();
+        const decompressedStream = stream.pipeThrough(new DecompressionStream('gzip'));
+        const response = await new Response(decompressedStream);
+        return await response.text();
+      } catch (e) {
+        log("Decompression error: " + e, "system");
+        throw e;
+      }
+    }
+
+    // 3. Generate QR using library
     function generateQRCode(text) {
       const canvas = document.getElementById('qr-canvas');
       qrStatusEl.style.display = 'block';
       
-      // Use the global QRCode object from the CDN library
       QRCode.toCanvas(canvas, text, { 
         width: 200, 
         margin: 1,
-        errorCorrectionLevel: 'L' // Low error correction to maximize capacity for long URLs
+        errorCorrectionLevel: 'L'
       }, function (error) {
         if (error) {
           console.error(error);
@@ -257,17 +277,19 @@
       if (e.candidate) {
         // Gathering...
       } else {
-        // Complete
-        log("ICE gathering complete. Copy Local SDP to peer.");
+        // Complete (Works for both Offer and Answer generation)
+        const type = pc.localDescription.type; 
+        log(`ICE gathering complete for ${type}. Updating QR.`);
+        
         const rawSdp = JSON.stringify(pc.localDescription);
         localSdpEl.value = rawSdp;
-        localSdpEl.select();
+        // Don't auto-select/focus if we are just responding, to avoid jumping around
+        if(type === 'offer') localSdpEl.select();
         
-        // Compress and generate URL
-        log("Generating QR code...");
+        // Compress and generate URL with Hash
         gzipBase64(rawSdp).then(base64 => {
-          // Create URL: current page + ?sdp=...
-          const url = window.location.origin + window.location.pathname + '?sdp=' + encodeURIComponent(base64);
+          // Use # instead of ?sdp=
+          const url = window.location.origin + window.location.pathname + '#' + encodeURIComponent(base64);
           generateQRCode(url);
         }).catch(err => {
           console.error(err);
@@ -300,7 +322,7 @@
     };
 
     async function createOffer() {
-      log("Creating offer...");
+      log("Creating offer (Initiator)...");
       const dc = pc.createDataChannel("chat");
       setupDataChannel(dc);
 
@@ -325,10 +347,13 @@
         await pc.setRemoteDescription(remoteDesc);
         log("Remote description set.");
 
+        // If the remote description is an 'offer', we must create an 'answer'
         if (remoteDesc.type === 'offer') {
           log("Creating answer...");
           const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
+          await pc.setLocalDescription(answer); 
+          // Note: setLocalDescription triggers onicecandidate above, 
+          // which will populate the local-sdp box and QR code with the Answer.
           log("Answer created. Waiting for ICE candidates...");
         }
       } catch (err) {
@@ -358,11 +383,31 @@
       log("Local SDP copied to clipboard.");
     }
 
-    // Initial State
+    // --- INITIALIZATION LOGIC ---
+    
     document.getElementById('chat-input').disabled = true;
 
-    // Start
-    createOffer(); 
+    // Check if there is a hash in the URL
+    if (window.location.hash && window.location.hash.length > 1) {
+      log("Hash detected in URL. Processing remote SDP...", "system");
+      
+      // Remove the '#' and decode URI component
+      const rawHash = window.location.hash.substring(1);
+      const base64 = decodeURIComponent(rawHash);
+
+      gunzipBase64(base64).then(sdpJson => {
+        remoteSdpEl.value = sdpJson;
+        log("Remote SDP successfully decoded from URL.", "system");
+        log("Please click 'Connect' to accept the offer.", "system");
+        // We do NOT call createOffer() here. We wait for user to click Connect.
+      }).catch(err => {
+        log("Failed to decode SDP from URL: " + err, "system");
+      });
+
+    } else {
+      // No hash: We are the initiator.
+      createOffer(); 
+    }
 
   </script>
 
