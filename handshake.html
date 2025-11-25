@@ -4,24 +4,150 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRTC Chat + Diagnostics</title>
+  <title>Serverless WebRTC Chat</title>
+  <!-- QR Code Generation Library -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <!-- QR Code Reading Library -->
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
   <style>
-    :root { --bg: #121212; --surface: #1e1e1e; --primary: #03dac6; --text: #e0e0e0; }
-    body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 10px; display: flex; flex-direction: column; align-items: center; }
-    .container { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 15px; }
-    .card { background: var(--surface); padding: 15px; border-radius: 8px; border: 1px solid #333; }
-    h3 { margin: 0 0 10px 0; color: var(--primary); display:flex; justify-content:space-between; font-size: 1rem;}
-    textarea { width: 100%; height: 60px; background: #000; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 5px; font-family: monospace; font-size: 0.8rem; }
-    button { background: var(--primary); color: #000; border: none; padding: 10px; border-radius: 4px; font-weight: bold; width: 100%; cursor: pointer; margin-top:5px;}
-    .row { display: flex; gap: 10px; }
-    #chat-log { height: 200px; overflow-y: auto; background: #000; padding: 10px; border: 1px solid #333; font-size: 0.8rem; font-family: monospace; }
-    .msg { margin-bottom: 4px; border-bottom: 1px solid #222; padding-bottom: 2px; }
-    .sys { color: #888; } .err { color: #ff5252; } .local { color: #81c784; } .remote { color: #64b5f6; }
-    #qr-container { text-align: center; margin-top: 10px; }
-    #reader { width: 100%; height: 300px; background: #000; margin-bottom: 10px; display: none; }
-    .hidden { display: none !important; }
+    :root {
+      --bg-color: #121212;
+      --surface-color: #1e1e1e;
+      --primary-color: #bb86fc;
+      --text-color: #e0e0e0;
+      --border-radius: 8px;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100vh;
+      box-sizing: border-box;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .card {
+      background-color: var(--surface-color);
+      padding: 20px;
+      border-radius: var(--border-radius);
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    }
+
+    h1,
+    h2 {
+      margin-top: 0;
+      color: var(--primary-color);
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      background-color: #2d2d2d;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 10px;
+      box-sizing: border-box;
+      font-family: monospace;
+      resize: vertical;
+    }
+
+    button {
+      background-color: var(--primary-color);
+      color: #000;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: opacity 0.2s;
+    }
+
+    button:hover {
+      opacity: 0.9;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    #chat-log {
+      height: 200px;
+      overflow-y: auto;
+      background-color: #000;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      border: 1px solid #333;
+    }
+
+    .message {
+      margin: 5px 0;
+    }
+
+    .message.local {
+      color: #81c784;
+    }
+
+    .message.remote {
+      color: #64b5f6;
+    }
+
+    .message.system {
+      color: #aaa;
+      font-style: italic;
+    }
+
+    input[type="text"] {
+      flex-grow: 1;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      background-color: #2d2d2d;
+      color: #fff;
+    }
+
+    .status {
+      margin-left: auto;
+      font-size: 0.9em;
+      color: #888;
+    }
+    
+    #qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    /* Scanner Styles */
+    #reader {
+        width: 100%;
+        max-width: 400px;
+        margin: 10px auto; 
+        display: none; /* Hidden by default */
+        border: 1px solid #444;
+    }
   </style>
 </head>
 
@@ -29,228 +155,344 @@
 
   <div class="container">
     <div class="card">
-      <h3>Status: <span id="status">Disconnected</span></h3>
-    </div>
-
-    <!-- LOCAL -->
-    <div class="card">
-      <h3>1. Your Info <button style="width:auto; padding:2px 8px; font-size:0.7rem" onclick="copyLocal()">Copy</button></h3>
-      <textarea id="local-sdp" readonly onclick="this.select()"></textarea>
-      
-      <div id="qr-section">
-        <div id="qr-container">
-          <canvas id="qr-canvas"></canvas>
-          <div id="qr-msg" class="sys">Initializing...</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- REMOTE -->
-    <div class="card">
-      <h3>2. Peer Info</h3>
-      <div id="reader"></div>
-      <textarea id="remote-sdp" placeholder="Scan or Paste Peer SDP..." oninput="uiState()"></textarea>
-      
       <div class="row">
-        <button id="btn-scan" onclick="startScanner()">📷 Scan QR</button>
-        <button id="btn-conn" onclick="connect()" class="hidden">🔗 Connect</button>
-        <button id="btn-stop" onclick="stopScanner()" class="hidden" style="background:#cf6679">Cancel</button>
+        <h1>Handshaka bom</h1>
+        <span id="connection-status" class="status">Disconnected</span>
       </div>
     </div>
 
-    <!-- CHAT -->
     <div class="card">
-      <h3>Debug Log / Chat</h3>
+      <h2>1. Local SDP <button onclick="copyLocal()" style="font-size: 0.8em; padding: 4px 8px;">Copy</button></h2>
+      <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Send this to your peer.</p>
+      <textarea id="local-sdp" readonly placeholder="Generated SDP will appear here..."></textarea>
+      
+      <div id="qr-container">
+        <canvas id="qr-canvas"></canvas>
+        <p id="qr-status" style="font-size: 0.8em; color: #aaa; display:none;">Generating QR...</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. Remote SDP</h2>
+      <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Paste peer's SDP or Scan QR.</p>
+      <textarea id="remote-sdp" placeholder="Paste peer's SDP here..." oninput="toggleRemoteButtons()"></textarea>
+      
+      <!-- Camera Viewport -->
+      <div id="reader"></div>
+      
+      <br>
+      <div class="row">
+          <button id="btn-scan" onclick="startScanner()">Scan QR</button>
+          <button id="btn-connect" onclick="connect()" style="display:none;">Connect / Accept Answer</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Chat</h2>
       <div id="chat-log"></div>
-      <div class="row" style="margin-top:5px;">
-        <input id="chat-in" type="text" placeholder="Type..." style="flex-grow:1; padding:8px;" onkeypress="if(event.key==='Enter') sendMsg()">
-        <button style="width:auto;" onclick="sendMsg()">Send</button>
+      <div class="row">
+        <input type="text" id="chat-input" placeholder="Type a message..." onkeypress="handleChatKey(event)">
+        <button onclick="sendMessage()">Send</button>
       </div>
     </div>
   </div>
 
   <script>
-    // --- UTILS ---
-    const log = (m, t='sys') => {
-      const el = document.getElementById('chat-log');
-      el.innerHTML += `<div class="msg ${t}">[${new Date().toLocaleTimeString().split(' ')[0]}] ${m}</div>`;
-      el.scrollTop = el.scrollHeight;
-      console.log(m);
+    const config = {
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     };
 
-    async function compress(str) {
-      const s = new Blob([str]).stream().pipeThrough(new CompressionStream('gzip'));
-      const b = await new Response(s).blob();
-      return new Promise(r => { const fr=new FileReader(); fr.onload=()=>r(fr.result.split(',')[1]); fr.readAsDataURL(b); });
+    const pc = new RTCPeerConnection(config);
+    let dataChannel;
+    let html5QrcodeScanner = null;
+
+    // UI Elements
+    const localSdpEl = document.getElementById('local-sdp');
+    const remoteSdpEl = document.getElementById('remote-sdp');
+    const chatLog = document.getElementById('chat-log');
+    const statusEl = document.getElementById('connection-status');
+    const btnConnect = document.getElementById('btn-connect');
+    const btnScan = document.getElementById('btn-scan');
+    const qrStatusEl = document.getElementById('qr-status');
+
+    // Logging
+    function log(msg, type = 'system') {
+      const div = document.createElement('div');
+      div.className = 'message ' + type;
+      div.textContent = msg;
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      console.log(`[${type}] ${msg}`);
     }
 
-    async function decompress(b64) {
+    // --- HELPER FUNCTIONS (Compression / Decompression) ---
+
+    async function gzipBase64(str) {
       try {
-        const bin = atob(decodeURIComponent(b64).trim());
-        const arr = new Uint8Array(bin.length);
-        for(let i=0; i<bin.length; i++) arr[i] = bin.charCodeAt(i);
-        const s = new Blob([arr]).stream().pipeThrough(new DecompressionStream('gzip'));
-        return await new Response(s).text();
-      } catch(e) { throw new Error("Decompress Failed"); }
-    }
-
-    // --- APP ---
-    const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-    let pc, dc, scanner;
-    
-    // Elements
-    const el = {
-      local: document.getElementById('local-sdp'),
-      remote: document.getElementById('remote-sdp'),
-      btnScan: document.getElementById('btn-scan'),
-      btnConn: document.getElementById('btn-conn'),
-      btnStop: document.getElementById('btn-stop'),
-      status: document.getElementById('status'),
-      qrMsg: document.getElementById('qr-msg'),
-      qrSec: document.getElementById('qr-section')
-    };
-
-    function initPC() {
-      if(pc) pc.close();
-      pc = new RTCPeerConnection(config);
-      
-      // DIAGNOSTICS: Log candidates to see if they are mDNS or Private
-      pc.onicecandidate = e => {
-        if(e.candidate) {
-            let type = e.candidate.type; // host, srflx, or relay
-            let addr = e.candidate.address || e.candidate.candidate;
-            // Check for mDNS (often ends in .local)
-            if(addr.includes('.local')) type += " (mDNS - Local Only)";
-            log(`Gathered: ${type}`, 'local');
-        } else {
-            log("ICE Gathering Complete. Generating QR...", 'sys');
-            const sdp = JSON.stringify(pc.localDescription);
-            el.local.value = sdp;
-            compress(sdp).then(b64 => {
-              const url = window.location.origin + window.location.pathname + '#' + encodeURIComponent(b64);
-              QRCode.toCanvas(document.getElementById('qr-canvas'), url, { width: 180, margin:1 }, (e)=>{
-                if(!e) el.qrMsg.innerText = "Scan Me";
-              });
-            });
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        el.status.innerText = pc.connectionState;
-        log(`State Change: ${pc.connectionState}`, 'sys');
-        if(pc.connectionState === 'failed') {
-            log("❌ Connection Failed. This is usually due to NAT/Firewall.", 'err');
-            log("Tip: Are you on the same Wi-Fi? mDNS might be blocking you.", 'err');
-        }
-      };
-
-      pc.ondatachannel = e => setupDC(e.channel);
-    }
-
-    function setupDC(channel) {
-      dc = channel;
-      dc.onopen = () => { log("✅ DATA CHANNEL OPEN!", 'local'); el.status.style.color='#00ff00'; };
-      dc.onmessage = e => log(`Peer: ${e.data}`, 'remote');
-    }
-
-    // --- LOGIC ---
-    function uiState() {
-      if(el.remote.value.length > 0) {
-        el.btnScan.classList.add('hidden');
-        el.btnConn.classList.remove('hidden');
-      } else {
-        el.btnScan.classList.remove('hidden');
-        el.btnConn.classList.add('hidden');
+        const stream = new Blob([str]).stream();
+        const compressedStream = stream.pipeThrough(new CompressionStream('gzip'));
+        const response = await new Response(compressedStream);
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              const base64data = reader.result.split(',')[1]; 
+              resolve(base64data);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch (e) {
+        log("Compression error: " + e, "system");
+        throw e;
       }
+    }
+
+    async function gunzipBase64(base64) {
+      try {
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const stream = new Blob([bytes]).stream();
+        const decompressedStream = stream.pipeThrough(new DecompressionStream('gzip'));
+        const response = await new Response(decompressedStream);
+        return await response.text();
+      } catch (e) {
+        log("Decompression error: " + e, "system");
+        throw e;
+      }
+    }
+
+    // --- QR GENERATION ---
+    function generateQRCode(text) {
+      const canvas = document.getElementById('qr-canvas');
+      qrStatusEl.style.display = 'block';
+      
+      QRCode.toCanvas(canvas, text, { 
+        width: 200, 
+        margin: 1,
+        errorCorrectionLevel: 'L'
+      }, function (error) {
+        if (error) {
+          console.error(error);
+          log("QR Generation failed: Data too long?", "system");
+          qrStatusEl.textContent = "Error generating QR";
+        } else {
+          console.log('QR code generated successfully');
+          qrStatusEl.style.display = 'none';
+        }
+      });
+    }
+
+    // --- QR SCANNING LOGIC ---
+
+    function toggleRemoteButtons() {
+        const content = remoteSdpEl.value.trim();
+        if (content.length > 0) {
+            btnScan.style.display = 'none';
+            btnConnect.style.display = 'block';
+            // Also ensure scanner is stopped if user manually types something
+            if(html5QrcodeScanner) {
+                stopScanner();
+            }
+        } else {
+            btnScan.style.display = 'block';
+            btnConnect.style.display = 'none';
+        }
     }
 
     function startScanner() {
-      el.qrSec.classList.add('hidden'); // Hide Local QR
-      document.getElementById('reader').style.display = 'block';
-      el.btnScan.classList.add('hidden');
-      el.btnStop.classList.remove('hidden');
-      
-      scanner = new Html5Qrcode("reader");
-      scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, 
-        (txt) => {
-           let b64 = txt.includes('#') ? txt.split('#').pop() : txt;
-           decompress(b64).then(json => {
-             // Self-scan Guard
-             if(json === el.local.value) return log("⚠️ You scanned yourself!", 'err');
-             
-             el.remote.value = json;
-             stopScanner();
-             log("QR Scanned. Click Connect.", 'sys');
-           }).catch(e => log("Bad QR Code", 'err'));
-        }, 
-        (err) => {}
-      );
+        document.getElementById('reader').style.display = 'block';
+        btnScan.style.display = 'none';
+
+        html5QrcodeScanner = new Html5Qrcode("reader");
+        
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+        
+        html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
+        .catch(err => {
+            log("Error starting scanner: " + err);
+            document.getElementById('reader').style.display = 'none';
+            toggleRemoteButtons();
+        });
     }
 
     function stopScanner() {
-      if(scanner) scanner.stop().then(() => {
-        document.getElementById('reader').style.display = 'none';
-        el.qrSec.classList.remove('hidden');
-        el.btnStop.classList.add('hidden');
-        scanner.clear();
-        uiState();
-      });
+        if (html5QrcodeScanner) {
+            html5QrcodeScanner.stop().then(() => {
+                html5QrcodeScanner.clear();
+                document.getElementById('reader').style.display = 'none';
+            }).catch(err => {
+                console.error("Failed to stop scanner", err);
+            });
+        }
     }
+function onScanSuccess(decodedText, decodedResult) {
+        log("QR Scanned successfully!", "system");
+        
+        // Stop scanning immediately
+        stopScanner();
+
+        let base64 = decodedText;
+        if (decodedText.includes('#')) {
+            // Robustly get the content after the last #
+            base64 = decodedText.split('#').pop();
+        }
+
+        // FIX 1: Restore '+' characters that decodeURIComponent might have turned into spaces
+        base64 = decodeURIComponent(base64).replace(/ /g, '+');
+
+        gunzipBase64(base64).then(sdpJson => {
+            // FIX 2: Remove invisible Byte Order Mark (\uFEFF) and trim whitespace
+            // This is the invisible character making the "identical" code fail
+            const cleanJson = sdpJson.replace(/^\uFEFF/, '').trim();
+            
+            remoteSdpEl.value = cleanJson;
+            log("Remote SDP populated from QR.", "system");
+            toggleRemoteButtons(); 
+        }).catch(err => {
+            log("Invalid QR Data: " + err, "system");
+            toggleRemoteButtons(); 
+        });
+    }
+
+    // --- WEBRTC LOGIC ---
+
+    pc.onicecandidate = e => {
+      if (e.candidate) {
+        // Gathering...
+      } else {
+        const type = pc.localDescription.type; 
+        log(`ICE gathering complete for ${type}. Updating QR.`);
+        
+        const rawSdp = JSON.stringify(pc.localDescription);
+        localSdpEl.value = rawSdp;
+        if(type === 'offer') localSdpEl.select();
+        
+        gzipBase64(rawSdp).then(base64 => {
+          const url = window.location.origin + window.location.pathname + '#' + encodeURIComponent(base64);
+          generateQRCode(url);
+        }).catch(err => {
+          console.error(err);
+        });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      statusEl.textContent = pc.connectionState;
+      log(`Connection state: ${pc.connectionState}`);
+    };
+
+    function setupDataChannel(dc) {
+      dataChannel = dc;
+      dc.onopen = () => {
+        log("Chat channel open!", 'system');
+        statusEl.textContent = 'Connected';
+        statusEl.style.color = '#81c784';
+        document.getElementById('chat-input').disabled = false;
+        document.getElementById('chat-input').focus();
+      };
+      dc.onmessage = e => log(`Peer: ${e.data}`, 'remote');
+    }
+
+    pc.ondatachannel = e => {
+      log("Received data channel from remote.");
+      setupDataChannel(e.channel);
+    };
 
     async function createOffer() {
-      log("Creating Offer...", 'sys');
-      initPC();
-      dc = pc.createDataChannel("chat");
-      setupDC(dc);
-      await pc.setLocalDescription(await pc.createOffer());
-    }
-
-    async function connect() {
-      const txt = el.remote.value.trim();
-      if(!txt) return;
+      log("Creating offer (Initiator)...");
+      const dc = pc.createDataChannel("chat");
+      setupDataChannel(dc);
 
       try {
-        const desc = JSON.parse(txt);
-        
-        // GLARE FIX: If we have a local offer but scan an offer, reset.
-        if(desc.type === 'offer' && pc.signalingState === 'have-local-offer') {
-            log("⚠️ Glare detected (Both are Callers). Resetting...", 'sys');
-            initPC();
-        }
-
-        log(`Setting Remote ${desc.type}...`, 'sys');
-        await pc.setRemoteDescription(desc);
-
-        if(desc.type === 'offer') {
-          log("Creating Answer...", 'sys');
-          await pc.setLocalDescription(await pc.createAnswer());
-        }
-      } catch(e) {
-        log("Connect Error: " + e.message, 'err');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        log("Offer created. Waiting for ICE candidates...");
+      } catch (err) {
+        log("Error creating offer: " + err);
       }
     }
 
-    function sendMsg() {
-      const i = document.getElementById('chat-in');
-      if(dc && dc.readyState==='open') { dc.send(i.value); log(`Me: ${i.value}`, 'local'); i.value=''; }
+async function connect() {
+      // FIX 3: Sanitize the value again before parsing to ensure no invisible characters remain
+      const remoteText = remoteSdpEl.value.replace(/^\uFEFF/, '').trim();
+      
+      if (!remoteText) {
+        alert("Please paste the remote SDP first.");
+        return;
+      }
+
+      try {
+        const remoteDesc = JSON.parse(remoteText);
+        await pc.setRemoteDescription(remoteDesc);
+        log("Remote description set.");
+
+        if (remoteDesc.type === 'offer') {
+          log("Creating answer...");
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer); 
+          log("Answer created. Waiting for ICE candidates...");
+        }
+      } catch (err) {
+        log("Error connecting: " + err);
+        console.error(err);
+      }
+    }
+
+    function sendMessage() {
+      const input = document.getElementById('chat-input');
+      const msg = input.value.trim();
+      if (!msg || !dataChannel || dataChannel.readyState !== 'open') return;
+
+      dataChannel.send(msg);
+      log(`You: ${msg}`, 'local');
+      input.value = '';
+    }
+
+    function handleChatKey(e) {
+      if (e.key === 'Enter') sendMessage();
     }
 
     function copyLocal() {
-        el.local.select(); document.execCommand('copy');
+      localSdpEl.select();
+      document.execCommand('copy');
+      log("Local SDP copied to clipboard.");
     }
 
-    // --- BOOT ---
-    if(window.location.hash.length > 1) {
-      log("📥 Loaded from URL Hash", 'sys');
-      initPC();
-      decompress(window.location.hash.substring(1)).then(json => {
-        el.remote.value = json;
-        uiState();
-        log("Ready to Connect.", 'sys');
+    // --- INITIALIZATION ---
+    
+    document.getElementById('chat-input').disabled = true;
+
+    // Check URL Hash on Load
+    if (window.location.hash && window.location.hash.length > 1) {
+      log("Hash detected. Processing remote SDP...", "system");
+      
+      const rawHash = window.location.hash.substring(1);
+      const base64 = decodeURIComponent(rawHash);
+
+      gunzipBase64(base64).then(sdpJson => {
+        remoteSdpEl.value = sdpJson;
+        log("Remote SDP successfully decoded from URL.", "system");
+        log("Please click 'Connect' to accept the offer.", "system");
+        // Update Buttons based on filled textarea
+        toggleRemoteButtons();
+      }).catch(err => {
+        log("Failed to decode SDP from URL: " + err, "system");
+        // Update Buttons (will likely show Scan since it failed)
+        toggleRemoteButtons();
       });
+
     } else {
-      createOffer();
+      // No hash: We are the initiator.
+      createOffer(); 
+      toggleRemoteButtons(); // Initialize button state (Scan visible)
     }
+
   </script>
+
 </body>
+
 </html>
