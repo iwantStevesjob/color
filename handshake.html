@@ -5,8 +5,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Serverless WebRTC Chat</title>
-  <!-- Load robust QR Code library -->
+  <!-- QR Code Generation Library -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <!-- QR Code Reading Library -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
   <style>
     :root {
       --bg-color: #121212;
@@ -137,6 +139,15 @@
       align-items: center;
       margin-top: 10px;
     }
+
+    /* Scanner Styles */
+    #reader {
+        width: 100%;
+        max-width: 400px;
+        margin: 10px auto; 
+        display: none; /* Hidden by default */
+        border: 1px solid #444;
+    }
   </style>
 </head>
 
@@ -145,7 +156,7 @@
   <div class="container">
     <div class="card">
       <div class="row">
-        <h1>WebRTC Handshake</h1>
+        <h1>Handshake</h1>
         <span id="connection-status" class="status">Disconnected</span>
       </div>
     </div>
@@ -163,10 +174,17 @@
 
     <div class="card">
       <h2>2. Remote SDP</h2>
-      <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Paste the peer's SDP here.</p>
-      <textarea id="remote-sdp" placeholder="Paste peer's SDP here..."></textarea>
+      <p style="font-size: 0.8em; color: #aaa; margin-bottom: 5px;">Paste peer's SDP or Scan QR.</p>
+      <textarea id="remote-sdp" placeholder="Paste peer's SDP here..." oninput="toggleRemoteButtons()"></textarea>
+      
+      <!-- Camera Viewport -->
+      <div id="reader"></div>
+      
       <br>
-      <button id="btn-connect" onclick="connect()">Connect / Accept Answer</button>
+      <div class="row">
+          <button id="btn-scan" onclick="startScanner()">Scan QR</button>
+          <button id="btn-connect" onclick="connect()" style="display:none;">Connect / Accept Answer</button>
+      </div>
     </div>
 
     <div class="card">
@@ -186,6 +204,7 @@
 
     const pc = new RTCPeerConnection(config);
     let dataChannel;
+    let html5QrcodeScanner = null;
 
     // UI Elements
     const localSdpEl = document.getElementById('local-sdp');
@@ -193,6 +212,7 @@
     const chatLog = document.getElementById('chat-log');
     const statusEl = document.getElementById('connection-status');
     const btnConnect = document.getElementById('btn-connect');
+    const btnScan = document.getElementById('btn-scan');
     const qrStatusEl = document.getElementById('qr-status');
 
     // Logging
@@ -207,7 +227,6 @@
 
     // --- HELPER FUNCTIONS (Compression / Decompression) ---
 
-    // 1. Gzip and Base64 encode the string
     async function gzipBase64(str) {
       try {
         const stream = new Blob([str]).stream();
@@ -217,7 +236,6 @@
         return new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => {
-              // reader.result is "data:application/octet-stream;base64,xxxx..."
               const base64data = reader.result.split(',')[1]; 
               resolve(base64data);
           };
@@ -230,17 +248,13 @@
       }
     }
 
-    // 2. Base64 decode and Gunzip (The Reverse)
     async function gunzipBase64(base64) {
       try {
-        // Decode Base64 string to binary string
         const binaryString = atob(base64);
-        // Convert binary string to Uint8Array
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
-        // Decompress
         const stream = new Blob([bytes]).stream();
         const decompressedStream = stream.pipeThrough(new DecompressionStream('gzip'));
         const response = await new Response(decompressedStream);
@@ -251,7 +265,7 @@
       }
     }
 
-    // 3. Generate QR using library
+    // --- QR GENERATION ---
     function generateQRCode(text) {
       const canvas = document.getElementById('qr-canvas');
       qrStatusEl.style.display = 'block';
@@ -272,23 +286,94 @@
       });
     }
 
-    // ICE Candidate handling
+    // --- QR SCANNING LOGIC ---
+
+    function toggleRemoteButtons() {
+        const content = remoteSdpEl.value.trim();
+        if (content.length > 0) {
+            btnScan.style.display = 'none';
+            btnConnect.style.display = 'block';
+            // Also ensure scanner is stopped if user manually types something
+            if(html5QrcodeScanner) {
+                stopScanner();
+            }
+        } else {
+            btnScan.style.display = 'block';
+            btnConnect.style.display = 'none';
+        }
+    }
+
+    function startScanner() {
+        document.getElementById('reader').style.display = 'block';
+        btnScan.style.display = 'none';
+
+        html5QrcodeScanner = new Html5Qrcode("reader");
+        
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+        
+        html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess)
+        .catch(err => {
+            log("Error starting scanner: " + err);
+            document.getElementById('reader').style.display = 'none';
+            toggleRemoteButtons();
+        });
+    }
+
+    function stopScanner() {
+        if (html5QrcodeScanner) {
+            html5QrcodeScanner.stop().then(() => {
+                html5QrcodeScanner.clear();
+                document.getElementById('reader').style.display = 'none';
+            }).catch(err => {
+                console.error("Failed to stop scanner", err);
+            });
+        }
+    }
+
+    function onScanSuccess(decodedText, decodedResult) {
+        log("QR Scanned successfully!", "system");
+        
+        // 1. Stop scanning immediately
+        stopScanner();
+
+        // 2. Extract hash from URL if present
+        let base64 = decodedText;
+        if (decodedText.includes('#')) {
+            const parts = decodedText.split('#');
+            if (parts.length > 1) {
+                base64 = parts[parts.length - 1]; // Get the last part
+            }
+        }
+
+        // 3. Decode component (in case of URL encoding)
+        base64 = decodeURIComponent(base64);
+
+        // 4. Decompress and Populate
+        gunzipBase64(base64).then(sdpJson => {
+            remoteSdpEl.value = sdpJson;
+            log("Remote SDP populated from QR.", "system");
+            // 5. Update UI (Show Connect Button)
+            toggleRemoteButtons(); 
+        }).catch(err => {
+            log("Invalid QR Data: " + err, "system");
+            toggleRemoteButtons(); // Reset UI
+        });
+    }
+
+    // --- WEBRTC LOGIC ---
+
     pc.onicecandidate = e => {
       if (e.candidate) {
         // Gathering...
       } else {
-        // Complete (Works for both Offer and Answer generation)
         const type = pc.localDescription.type; 
         log(`ICE gathering complete for ${type}. Updating QR.`);
         
         const rawSdp = JSON.stringify(pc.localDescription);
         localSdpEl.value = rawSdp;
-        // Don't auto-select/focus if we are just responding, to avoid jumping around
         if(type === 'offer') localSdpEl.select();
         
-        // Compress and generate URL with Hash
         gzipBase64(rawSdp).then(base64 => {
-          // Use # instead of ?sdp=
           const url = window.location.origin + window.location.pathname + '#' + encodeURIComponent(base64);
           generateQRCode(url);
         }).catch(err => {
@@ -302,7 +387,6 @@
       log(`Connection state: ${pc.connectionState}`);
     };
 
-    // Data Channel Setup
     function setupDataChannel(dc) {
       dataChannel = dc;
       dc.onopen = () => {
@@ -315,7 +399,6 @@
       dc.onmessage = e => log(`Peer: ${e.data}`, 'remote');
     }
 
-    // Initiator: Create Data Channel
     pc.ondatachannel = e => {
       log("Received data channel from remote.");
       setupDataChannel(e.channel);
@@ -347,13 +430,10 @@
         await pc.setRemoteDescription(remoteDesc);
         log("Remote description set.");
 
-        // If the remote description is an 'offer', we must create an 'answer'
         if (remoteDesc.type === 'offer') {
           log("Creating answer...");
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer); 
-          // Note: setLocalDescription triggers onicecandidate above, 
-          // which will populate the local-sdp box and QR code with the Answer.
           log("Answer created. Waiting for ICE candidates...");
         }
       } catch (err) {
@@ -362,7 +442,6 @@
       }
     }
 
-    // Chat Functions
     function sendMessage() {
       const input = document.getElementById('chat-input');
       const msg = input.value.trim();
@@ -383,15 +462,14 @@
       log("Local SDP copied to clipboard.");
     }
 
-    // --- INITIALIZATION LOGIC ---
+    // --- INITIALIZATION ---
     
     document.getElementById('chat-input').disabled = true;
 
-    // Check if there is a hash in the URL
+    // Check URL Hash on Load
     if (window.location.hash && window.location.hash.length > 1) {
-      log("Hash detected in URL. Processing remote SDP...", "system");
+      log("Hash detected. Processing remote SDP...", "system");
       
-      // Remove the '#' and decode URI component
       const rawHash = window.location.hash.substring(1);
       const base64 = decodeURIComponent(rawHash);
 
@@ -399,14 +477,18 @@
         remoteSdpEl.value = sdpJson;
         log("Remote SDP successfully decoded from URL.", "system");
         log("Please click 'Connect' to accept the offer.", "system");
-        // We do NOT call createOffer() here. We wait for user to click Connect.
+        // Update Buttons based on filled textarea
+        toggleRemoteButtons();
       }).catch(err => {
         log("Failed to decode SDP from URL: " + err, "system");
+        // Update Buttons (will likely show Scan since it failed)
+        toggleRemoteButtons();
       });
 
     } else {
       // No hash: We are the initiator.
       createOffer(); 
+      toggleRemoteButtons(); // Initialize button state (Scan visible)
     }
 
   </script>
