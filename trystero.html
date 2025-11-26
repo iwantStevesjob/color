@@ -9,8 +9,8 @@
             --bg-color: #121212;
             --container-bg: #1e1e1e;
             --text-color: #e0e0e0;
-            --accent-color: #4CAF50;
-            --my-msg-bg: #2e7d32;
+            --accent-color: #2196F3; /* Blue for BitTorrent version */
+            --my-msg-bg: #1565C0;
             --peer-msg-bg: #424242;
         }
 
@@ -140,15 +140,15 @@
 <div id="app">
     <header>
         <div>
-            <strong>Trystero Chat</strong>
+            <strong>P2P Chat (BitTorrent)</strong>
             <br>
             <span style="font-size: 0.7rem; color: #666">Room: <span id="room-id">lobby</span></span>
         </div>
-        <div id="status">Connecting...</div>
+        <div id="status">Connecting to DHT...</div>
     </header>
 
     <div id="chat-history">
-        <div class="system-msg">Waiting for peers to join...</div>
+        <div class="system-msg">Initializing BitTorrent Swarm...</div>
     </div>
 
     <form id="input-area">
@@ -158,25 +158,17 @@
 </div>
 
 <script type="module">
-    // IMPORTANT: Ensure you are importing the version you intend. 
-    // If you want default (usually BitTorrent), use 'trystero'. 
-    // If you are seeing Nostr errors, this bundle is using Nostr.
-    import { joinRoom, selfId } from 'https://esm.run/trystero';
+    // FIX 1: Explicitly import the Torrent strategy. 
+    // This uses DHT/Trackers instead of finicky Nostr Relays.
+    import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
-    // -- 1. Configuration --
+    // FIX 2: Simplified Config (No 'relayUrls' needed)
     const config = { 
-        appId: 'my-github-chat-app-v1',
-        // Define free relays to prevent payment errors
-        relayUrls: [
-            'wss://relay.damus.io',
-            'wss://nos.lol',
-            'wss://relay.primal.net',
-            'wss://relay.snort.social'
-        ]
+        appId: 'my-github-chat-app-v1'
     }; 
+    
     const roomName = 'lobby'; 
     
-    // UI References
     const statusEl = document.getElementById('status');
     const historyEl = document.getElementById('chat-history');
     const formEl = document.getElementById('input-area');
@@ -185,7 +177,6 @@
 
     roomDisplay.innerText = roomName;
 
-    // -- 2. Initialize Trystero --
     let room;
     let sendMessage;
     let getMessage;
@@ -195,18 +186,16 @@
     function initChat() {
         room = joinRoom(config, roomName);
 
-        // Define our "Action" for chat messages
         [sendMessage, getMessage] = room.makeAction('chatMessage');
 
-        // -- Event Listeners --
         room.onPeerJoin(peerId => {
             updatePeerCount();
-            addSystemMessage(`${peerId.slice(0, 4)} joined the chat`);
+            addSystemMessage(`${peerId.slice(0, 4)} joined`);
         });
 
         room.onPeerLeave(peerId => {
             updatePeerCount();
-            addSystemMessage(`${peerId.slice(0, 4)} left the chat`);
+            addSystemMessage(`${peerId.slice(0, 4)} left`);
         });
 
         getMessage((data, peerId) => {
@@ -216,7 +205,6 @@
         updatePeerCount();
     }
 
-    // -- 3. Interaction Logic --
     formEl.addEventListener('submit', (e) => {
         e.preventDefault();
         const text = inputEl.value.trim();
@@ -228,12 +216,11 @@
         }
     });
 
-    // -- 4. UI Helper Functions --
     function updatePeerCount() {
         const count = Object.keys(room.getPeers()).length;
         statusEl.innerText = count > 0 
             ? `🟢 ${count} peer${count !== 1 ? 's' : ''} online` 
-            : '🟡 Waiting for peers...';
+            : '🟡 Searching...';
         
         if(count > 0) statusEl.classList.add('connected');
     }
