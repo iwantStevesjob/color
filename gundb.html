@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trystero + GunDB</title>
+    <!-- 1. Import GunDB (Database) -->
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <style>
+        :root { --bg: #121212; --panel: #1e1e1e; --text: #e0e0e0; --accent: #FF9800; --me: #E65100; --peer: #424242; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; height: 100vh; margin: 0; }
+        #app { width: 100%; max-width: 600px; background: var(--panel); display: flex; flex-direction: column; border-x: 1px solid #333; }
+        header { padding: 15px; background: #252525; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+        #status { font-size: 0.8rem; color: #888; }
+        #status.on { color: var(--accent); }
+        #chat-box { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+        .msg { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.9rem; word-break: break-word; }
+        .msg.me { align-self: flex-end; background: var(--me); border-bottom-right-radius: 2px; }
+        .msg.peer { align-self: flex-start; background: var(--peer); border-bottom-left-radius: 2px; }
+        .meta { font-size: 0.65rem; opacity: 0.6; display: block; margin-bottom: 2px; }
+        form { display: flex; padding: 10px; background: #252525; gap: 10px; }
+        input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #444; background: #333; color: white; outline: none; }
+        button { padding: 0 20px; border-radius: 20px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <header>
+        <div><strong>P2P Database Chat</strong></div>
+        <div id="status">Starting DHT...</div>
+    </header>
+    <div id="chat-box"></div>
+    <form id="send-form">
+        <input type="text" id="msg-input" placeholder="Message..." autocomplete="off">
+        <button type="submit">Send</button>
+    </form>
+</div>
+
+<script type="module">
+    // 2. Import Trystero (Network) - Using BitTorrent Strategy
+    import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
+
+    // --- CONFIGURATION ---
+    const ROOM_ID = 'gun-trystero-hybrid-v1';
+    
+    // --- INIT GUN DB (LOCAL ONLY) ---
+    // We pass peers: [] to force it to work locally + our custom sync
+    const gun = Gun({ peers: [], localStorage: true });
+    const chatDB = gun.get(ROOM_ID);
+
+    // --- INIT TRYSTERO ---
+    const config = { appId: 'trystero-gun-demo' };
+    const room = joinRoom(config, ROOM_ID);
+    
+    // Actions: 
+    // 'liveMsg' = New realtime message
+    // 'syncReq' = "I just joined, give me history"
+    // 'syncRes' = "Here is the history"
+    const [sendLive, getLive] = room.makeAction('liveMsg');
+    const [reqHistory, getReqHistory] = room.makeAction('syncReq');
+    const [resHistory, getResHistory] = room.makeAction('syncRes');
+
+    // --- DOM ELEMENTS ---
+    const ui = {
+        box: document.getElementById('chat-box'),
+        form: document.getElementById('send-form'),
+        input: document.getElementById('msg-input'),
+        status: document.getElementById('status')
+    };
+
+    // --- 1. SENDING MESSAGES (The "Dual Write") ---
+    ui.form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const text = ui.input.value.trim();
+        if (!text) return;
+
+        const msgData = {
+            id: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
+            text: text,
+            sender: selfId,
+            ts: Date.now()
+        };
+
+        // A. Send to Network (Trystero)
+        sendLive(msgData);
+
+        // B. Save to Database (Gun)
+        chatDB.get(msgData.id).put(msgData);
+
+        ui.input.value = '';
+    });
+
+    // --- 2. RECEIVING MESSAGES ---
+    getLive((data) => {
+        // When we get a message from Trystero, save it to GunDB.
+        // GunDB's listener will then update the UI automatically.
+        chatDB.get(data.id).put(data);
+    });
+
+    // --- 3. RENDERING (Listening to GunDB) ---
+    // This is the magic. We don't render from Trystero. We render from Gun.
+    // This ensures that whether data comes from LocalStorage OR Network, it shows up.
+    let displayedIds = new Set();
+
+    chatDB.map().on((data, id) => {
+        if (!data || !data.text || displayedIds.has(id)) return;
+        
+        displayedIds.add(id);
+        renderMessage(data);
+    });
+
+    function renderMessage(data) {
+        const isMe = data.sender === selfId;
+        const div = document.createElement('div');
+        div.className = `msg ${isMe ? 'me' : 'peer'}`;
+        div.innerHTML = `
+            <span class="meta">${isMe ? 'You' : data.sender.slice(0,4)}</span>
+            ${data.text}
+        `;
+        
+        // Insert based on timestamp (simple sort)
+        ui.box.appendChild(div);
+        ui.box.scrollTop = ui.box.scrollHeight;
+    }
+
+    // --- 4. HISTORY SYNC (The Bridge) ---
+    
+    // When a new peer joins...
+    room.onPeerJoin((peerId) => {
+        updateStatus();
+        console.log(`Peer ${peerId} joined. Waiting for sync request...`);
+        // We wait for THEM to ask for data, so we don't flood the network
+    });
+
+    room.onPeerLeave(() => updateStatus());
+
+    // A. I just joined. Ask everyone for data.
+    // (Wait 1s for connection to stabilize)
+    setTimeout(() => {
+        console.log("Requesting history from peers...");
+        reqHistory('sync_please'); 
+    }, 1000);
+
+    // B. Someone asked for history.
+    getReqHistory((payload, requestorId) => {
+        console.log(`Sending history to ${requestorId}`);
+        // Read local GunDB and send last 50 messages
+        // Note: Gun isn't an array, so we do a quick grab
+        let batch = [];
+        chatDB.map().once((data) => {
+            if(data && data.text) batch.push(data);
+        });
+        
+        // Allow a moment to gather, then send
+        setTimeout(() => {
+            if(batch.length > 0) {
+                // Trystero has a size limit, so usually you chunk this. 
+                // For this demo, we assume the batch fits.
+                resHistory(batch, requestorId); 
+            }
+        }, 500);
+    });
+
+    // C. I received history.
+    getResHistory((batch) => {
+        console.log(`Received ${batch.length} old messages.`);
+        batch.forEach(msg => {
+            // Save to Gun. The UI listener will handle the rest.
+            chatDB.get(msg.id).put(msg);
+        });
+    });
+
+    function updateStatus() {
+        const count = Object.keys(room.getPeers()).length;
+        ui.status.innerText = count > 0 ? `🟢 ${count} Peers (BitTorrent)` : '🟡 Searching DHT...';
+        if(count > 0) ui.status.classList.add('on');
+    }
+
+</script>
+</body>
+</html>
