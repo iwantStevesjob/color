@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Shared Doc (Fixed Sync)</title>
+    <title>P2P Shared Doc (Robust)</title>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
@@ -130,6 +130,16 @@
         }
         .scroll-dot:hover { transform: scale(1.5); }
 
+        /* TOAST NOTIFICATION */
+        #toast {
+            position: fixed; top: 60px; right: 20px;
+            background: #333; color: #fff;
+            padding: 8px 16px; border-radius: 4px;
+            font-size: 0.8rem; opacity: 0; transition: opacity 0.3s;
+            pointer-events: none; z-index: 200;
+        }
+        #toast.show { opacity: 1; }
+
     </style>
 </head>
 <body>
@@ -148,13 +158,14 @@
     </div>
     
     <div id="minimap"></div>
+    <div id="toast">Data Synced</div>
 
 <script type="module">
     import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
     // --- CONFIG ---
     const LINE_HEIGHT = 24;
-    const APP_ID = 'gun-trystero-sync-fixed-v1';
+    const APP_ID = 'gun-trystero-final-fix-v2';
     
     // Hash Logic
     let hash = window.location.hash.replace('#', '');
@@ -170,27 +181,35 @@
     const minimap = document.getElementById('minimap');
     const statusDot = document.querySelector('.dot-status');
     const statusText = document.getElementById('peer-count');
+    const toast = document.getElementById('toast');
 
     // --- 1. SETUP GUN (Local Persistence Only) ---
     const gun = Gun({ peers: [], localStorage: true });
     const localDB = gun.get(ROOM_ID);
 
-    // --- 2. SETUP TRYSTERO (Network Transport) ---
-    const config = { appId: APP_ID };
+    // --- 2. SETUP TRYSTERO (With Robust Trackers) ---
+    const config = { 
+        appId: APP_ID,
+        trackerUrls: [
+            'wss://tracker.openwebrtc.io', 
+            'wss://tracker.btorrent.xyz', 
+            'wss://tracker.webtorrent.dev',
+            'wss://tracker.files.fm:7073/announce'
+        ]
+    };
     const room = joinRoom(config, ROOM_ID);
 
     // Actions
     const [sendContent, getContent] = room.makeAction('content');
     const [sendCursor, getCursor] = room.makeAction('cursor');
-    const [reqSync, getReqSync] = room.makeAction('reqSync'); // "I'm new, give me data"
-    const [resSync, getResSync] = room.makeAction('resSync'); // "Here is the data"
+    const [pushSync, getPushSync] = room.makeAction('pushSync'); // "Here is the data"
 
     // --- 3. INIT & INFINITE SCROLL ---
 
     function initDisplay() {
-        // Load from Local Storage first (Offline first)
+        // Attempt to load from local storage first
         localDB.get('content').once((data) => {
-            if (data) {
+            if (data && data.length > 20) {
                 display.innerHTML = data;
             } else {
                 fillWhitespace();
@@ -200,7 +219,8 @@
     }
 
     function fillWhitespace() {
-        if(display.innerHTML.length < 50) {
+        // Only fill if empty
+        if(display.innerHTML.trim().length === 0) {
             const totalLines = Math.floor(window.innerHeight / LINE_HEIGHT) * 3;
             display.innerHTML = '<div><br></div>'.repeat(totalLines);
         }
@@ -229,35 +249,27 @@
     container.addEventListener('scroll', handleScroll);
     initDisplay();
 
-    // --- 4. NETWORK SYNC LOGIC ---
+    // --- 4. SYNC LOGIC ---
 
     let isTyping = false;
     let typeTimeout;
 
-    // A. I am typing -> Send to Network & Save Local
+    // A. I am typing
     display.addEventListener('input', () => {
         isTyping = true;
         const html = display.innerHTML;
         
-        // 1. Save Local
-        localDB.get('content').put(html);
+        localDB.get('content').put(html); // Save Local
+        sendContent(html);                // Broadcast Live
         
-        // 2. Broadcast to Peers
-        sendContent(html);
-        
-        // 3. Update my cursor immediately
         updateMyCursor();
-
         clearTimeout(typeTimeout);
         typeTimeout = setTimeout(() => isTyping = false, 1000);
     });
 
-    // B. Peer typed -> Receive from Network & Save Local
+    // B. Receiving Live Updates
     getContent((html) => {
-        // Save to local DB so we have it if we refresh
         localDB.get('content').put(html);
-
-        // Only update screen if I'm not actively typing to avoid conflicts
         if (!isTyping && display.innerHTML !== html) {
             const savedSel = saveSelection();
             display.innerHTML = html;
@@ -265,28 +277,36 @@
         }
     });
 
-    // --- 5. INITIAL SYNC (HANDSHAKE) ---
-
-    // When I join, I ask: "Hey, anyone have the doc?"
-    // (Wait 1s for connections to stabilize)
-    setTimeout(() => {
-        console.log("Requesting sync...");
-        reqSync(null);
-    }, 1000);
-
-    // If someone asks, and I have data, I send it
-    getReqSync((_, peerId) => {
+    // --- 5. CONNECTION HANDLER ("Push" Strategy) ---
+    
+    // When a new peer joins, I immediately PUSH my data to them
+    // This mimics your PeerJS logic: conn.on('open', () => conn.send(data))
+    room.onPeerJoin(peerId => {
+        updateStatus();
+        console.log(`Peer ${peerId} joined. Pushing data...`);
+        
         const content = display.innerHTML;
-        if(content && content.length > 50) {
-            console.log("Sending sync to", peerId);
-            resSync(content, peerId);
+        // Don't push if I only have empty whitespace
+        if(content.length > 50) {
+            pushSync(content, peerId);
         }
+        
+        // Also send my cursor so they see me immediately
+        updateMyCursor();
     });
 
-    // Receive the full doc snapshot
-    getResSync((html) => {
-        console.log("Received sync snapshot");
-        if (!isTyping) {
+    room.onPeerLeave(id => {
+        updateStatus();
+        removePeerVisuals(id);
+    });
+
+    // Receive the Pushed Data (I am the new peer)
+    getPushSync((html) => {
+        console.log("Received Initial Sync!");
+        showToast("Synced with peer");
+        
+        // Always trust the incoming sync on join
+        if(!isTyping) {
             display.innerHTML = html;
             localDB.get('content').put(html);
         }
@@ -315,12 +335,10 @@
         sendCursor(cursorData);
     }
 
-    // Trigger cursor updates
     ['click', 'keyup', 'focus', 'mouseup'].forEach(evt => 
         display.addEventListener(evt, updateMyCursor)
     );
 
-    // Receive Cursors
     getCursor((data, peerId) => {
         renderGhostCursor(peerId, data);
         renderMinimapDot(peerId, data);
@@ -344,10 +362,9 @@
         cursor.style.backgroundColor = data.color;
         cursor.style.top = `${data.y}px`;
         cursor.style.left = `${data.x}px`;
-        
-        // Auto-remove cursor if inactive for 5s
-        clearTimeout(cursor.timer);
         cursor.style.opacity = 1;
+        
+        clearTimeout(cursor.timer);
         cursor.timer = setTimeout(() => cursor.style.opacity = 0, 5000);
     }
 
@@ -368,21 +385,7 @@
         dot.style.top = `${percentage}%`;
     }
 
-    // --- 7. PEER STATUS ---
-
-    room.onPeerJoin(id => {
-        updateStatus();
-        // Also proactively send sync if we have data
-        reqSync(null); 
-    });
-    
-    room.onPeerLeave(id => {
-        updateStatus();
-        const c = document.getElementById(`cursor-${id}`);
-        const d = document.getElementById(`dot-${id}`);
-        if(c) c.remove();
-        if(d) d.remove();
-    });
+    // --- HELPERS ---
 
     function updateStatus() {
         const count = Object.keys(room.getPeers()).length;
@@ -391,7 +394,18 @@
         else statusDot.classList.remove('on');
     }
 
-    // --- HELPERS ---
+    function removePeerVisuals(id) {
+        const c = document.getElementById(`cursor-${id}`);
+        const d = document.getElementById(`dot-${id}`);
+        if(c) c.remove();
+        if(d) d.remove();
+    }
+
+    function showToast(msg) {
+        toast.innerText = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2000);
+    }
 
     function generateColor(str) {
         let hash = 0;
