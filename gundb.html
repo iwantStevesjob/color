@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Shared Editor (Stable)</title>
+    <title>Infinite P2P Editor</title>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
@@ -33,6 +33,7 @@
             height: 50px; background: #f8f9fa; border-bottom: 1px solid #ddd;
             display: flex; justify-content: space-between; align-items: center; padding: 0 20px;
             font-family: -apple-system, system-ui, sans-serif;
+            z-index: 10;
         }
         .status { font-size: 0.8rem; color: #666; display: flex; align-items: center; gap: 8px; }
         .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; transition: background 0.3s; }
@@ -40,47 +41,54 @@
 
         #container { 
             flex: 1; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; 
-            padding-bottom: 50vh; 
+            position: relative;
         }
 
         #display {
             min-height: 100%; outline: none; 
-            padding: 40px 60px;
-            font-size: 16px; line-height: var(--line-height);
+            padding: 40px 60px; /* Margins */
+            font-size: 16px; 
+            line-height: var(--line-height);
         }
 
         /* --- LINE LOCKING --- */
         .editor-line {
             min-height: var(--line-height);
+            display: block; /* Forces line break behavior */
             padding-left: 5px;
             border-left: 4px solid transparent; 
             margin-bottom: 1px;
             position: relative;
+            white-space: pre-wrap; /* Keeps spaces/tabs */
         }
 
-        /* Remote User Lock Styling */
         .locked-line {
             background-color: rgba(0, 0, 0, 0.03);
             transition: background 0.2s, border-color 0.2s;
         }
         .locked-tag {
             position: absolute;
-            left: -60px; /* Float in the margin */
-            top: 0;
-            font-size: 0.7rem;
-            color: #fff;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: sans-serif;
-            text-align: right;
-            width: 50px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            pointer-events: none;
+            left: -60px; top: 0;
+            font-size: 0.7rem; color: #fff;
+            padding: 2px 6px; border-radius: 4px;
+            font-family: sans-serif; text-align: right;
+            width: 50px; pointer-events: none;
         }
 
-        /* My Active Line */
+        /* --- MINIMAP --- */
+        #minimap {
+            position: absolute; right: 5px; top: 50px; bottom: 0;
+            width: 12px; z-index: 100; pointer-events: none;
+        }
+        .scroll-dot {
+            position: absolute; right: 0;
+            width: 8px; height: 8px; border-radius: 50%;
+            cursor: pointer; pointer-events: auto;
+            transition: top 0.2s;
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+        .scroll-dot:hover { transform: scale(1.5); }
+
         .my-line { background-color: rgba(0, 0, 0, 0.01); }
 
         /* --- TOOLS --- */
@@ -89,6 +97,7 @@
             background: #222; padding: 10px; border-radius: 50px; 
             display: flex; gap: 10px; opacity: 0; pointer-events: none; transition: 0.2s;
             box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            z-index: 200;
         }
         #tools.visible { opacity: 1; pointer-events: auto; }
         #tools button { width: 36px; height: 36px; border-radius: 50%; border:none; cursor: pointer; background: #444; color: white; font-weight: bold; }
@@ -98,27 +107,31 @@
 </head>
 <body>
 
-    <!-- 1. LOGIN -->
+    <!-- LOGIN -->
     <div id="login">
-        <h2>P2P Collaborative Editor</h2>
-        <input type="text" id="color-input" placeholder="Enter Room Name (e.g. blue)" required>
+        <h2>Infinite P2P Notebook</h2>
+        <input type="text" id="color-input" placeholder="Enter Room Name (e.g. infinite)" required>
         <button id="btn-login">Join Room</button>
     </div>
 
-    <!-- 2. APP UI -->
+    <!-- HEADER -->
     <div id="header">
-        <strong>Shared Document</strong>
+        <strong>P2P Editor</strong>
         <div class="status">
             <span class="dot"></span>
             <span id="peer-count">Connecting...</span>
         </div>
     </div>
 
+    <!-- MAIN AREA -->
     <div id="container">
         <div id="display" contenteditable="true" spellcheck="false"></div>
     </div>
+    
+    <!-- MINIMAP -->
+    <div id="minimap"></div>
 
-    <!-- 3. TOOLS -->
+    <!-- TOOLS -->
     <div id="tools">
         <button id="btn-bold">B</button>
         <button id="btn-italic">I</button>
@@ -128,12 +141,13 @@
     <script type="module">
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
-        // --- STATE ---
+        // --- 1. CONFIG & STATE ---
         const ui = {
             login: document.getElementById('login'),
             input: document.getElementById('color-input'),
             display: document.getElementById('display'),
             container: document.getElementById('container'),
+            minimap: document.getElementById('minimap'),
             peerCount: document.getElementById('peer-count'),
             dot: document.querySelector('.dot'),
             tools: document.getElementById('tools')
@@ -142,19 +156,14 @@
         const myColor = generateColor(selfId);
         let roomId = null;
         let roomDB, room;
-        
-        // Actions container
         const act = {}; 
-        
-        // Locking State: { "peerId": { lineId: "...", ts: 123456 } }
         const activeLocks = {}; 
 
-        // --- 1. BOOTSTRAP ---
-        
+        // --- 2. BOOTSTRAP ---
         function checkHash() {
             const hash = window.location.hash.replace('#', '');
             if(hash) {
-                roomId = 'doc-stable-' + hash;
+                roomId = 'doc-infinite-v4-' + hash;
                 ui.login.classList.add('hidden');
                 startApp();
             } else {
@@ -164,75 +173,100 @@
 
         document.getElementById('btn-login').onclick = () => {
             const val = ui.input.value.trim();
-            if(val) {
-                window.location.hash = val;
-                checkHash();
-            }
+            if(val) { window.location.hash = val; checkHash(); }
         };
-
         window.addEventListener('load', checkHash);
 
-        // --- 2. INIT NETWORK ---
-
+        // --- 3. NETWORK START ---
         function startApp() {
-            // A. GunDB
             const gun = Gun({ peers: [], localStorage: true });
             roomDB = gun.get(roomId);
 
-            // B. Trystero with STABLE TRACKERS
             const config = { 
-                appId: 'doc-block-stable-v1',
+                appId: 'doc-infinite-v4',
                 trackerUrls: [
                     'wss://tracker.webtorrent.dev', 
                     'wss://tracker.openwebrtc.io',
-                    'wss://tracker.files.fm:7073/announce',
-                    'wss://tracker.au.webtorrent.dev/announce'
+                    'wss://tracker.files.fm:7073/announce'
                 ]
             };
             room = joinRoom(config, roomId);
 
-            // C. Actions
+            // Actions
             const [sendContent, getContent] = room.makeAction('content');
             const [sendLock, getLock] = room.makeAction('lock');
             const [pushSync, getPushSync] = room.makeAction('sync');
+            const [reqSync, getReqSync] = room.makeAction('req');
 
             act.sendContent = sendContent;
             act.sendLock = sendLock;
             act.pushSync = pushSync;
+            act.reqSync = reqSync;
 
-            // D. Listeners
             getContent(handleRemoteContent);
             getLock(handleRemoteLock);
             getPushSync(handleSync);
+            getReqSync((_, pid) => {
+                // If someone asks for data, send it
+                if(ui.display.innerHTML.length > 100) act.pushSync(ui.display.innerHTML, pid);
+            });
             
             room.onPeerJoin(handlePeerJoin);
             room.onPeerLeave(handlePeerLeave);
 
-            // E. Load Local Data
+            // Load Data or Init Fresh
             roomDB.get('content').once((data) => {
                 if(data && data.includes('class="editor-line"')) {
+                    // Data exists: Load it
                     ui.display.innerHTML = data;
+                    ensureStructure();
+                    // Scroll to bottom/content (simple default)
+                    ui.container.scrollTop = ui.container.scrollHeight / 2;
                 } else {
-                    // Start fresh
-                    ui.display.innerHTML = createLine() + createLine() + createLine();
+                    // No data: Create FRESH INFINITE CANVAS
+                    initFreshCanvas();
                 }
-                ensureStructure();
             });
         }
 
-        // --- 3. CORE EDITOR LOGIC ---
+        // --- 4. INFINITE CANVAS & STRUCTURE ---
 
         function createLine() {
             const id = 'line-' + Math.random().toString(36).substr(2, 9);
+            // Default empty line
             return `<div id="${id}" class="editor-line"><br></div>`;
         }
 
+        function initFreshCanvas() {
+            // Generate 100 lines
+            let html = '';
+            for(let i=0; i<100; i++) html += createLine();
+            ui.display.innerHTML = html;
+
+            // SCROLL TO CENTER
+            setTimeout(() => {
+                const middleLine = ui.display.children[50];
+                if(middleLine) {
+                    middleLine.scrollIntoView({ block: 'center' });
+                    placeCaret(middleLine);
+                }
+            }, 100);
+        }
+
+        function placeCaret(el) {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(true);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }
+
         function ensureStructure() {
+            // Ensure everything is wrapped in .editor-line
             const children = Array.from(ui.display.children);
-            if(children.length === 0) {
-                ui.display.innerHTML = createLine();
-                return;
-            }
+            if(children.length === 0) { ui.display.innerHTML = createLine(); return; }
+            
             children.forEach(child => {
                 if(child.tagName !== 'DIV' || !child.id) {
                     child.outerHTML = `<div id="line-${Math.random().toString(36).substr(2,9)}" class="editor-line">${child.innerHTML || '<br>'}</div>`;
@@ -241,15 +275,92 @@
             });
         }
 
-        // --- 4. INPUT & SYNC ---
+        // --- 5. ENTER KEY & INPUT HANDLING ---
 
+        // Custom Enter Key Handler (Crucial for the "New Line" logic)
+        ui.display.addEventListener('keydown', (e) => {
+            // A. Handle Enter
+            if (e.key === 'Enter') {
+                e.preventDefault(); // Stop browser weirdness
+
+                // 1. Get current line
+                const sel = window.getSelection();
+                const range = sel.getRangeAt(0);
+                const currentLine = range.startContainer.nodeType === 3 
+                    ? range.startContainer.parentNode.closest('.editor-line') 
+                    : range.startContainer.closest('.editor-line');
+
+                // 2. Create new line DOM element
+                const id = 'line-' + Math.random().toString(36).substr(2, 9);
+                const newLine = document.createElement('div');
+                newLine.id = id;
+                newLine.className = 'editor-line';
+                newLine.innerHTML = '<br>'; // Empty placeholder
+
+                // 3. Insert AFTER current line
+                if (currentLine && currentLine.nextSibling) {
+                    ui.display.insertBefore(newLine, currentLine.nextSibling);
+                } else {
+                    ui.display.appendChild(newLine);
+                }
+
+                // 4. Move Cursor
+                placeCaret(newLine);
+
+                // 5. Trigger Save
+                triggerSave();
+                return;
+            }
+
+            // B. Enforce Locks
+            const sel = window.getSelection();
+            if(!sel.rangeCount) return;
+            const node = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentNode : sel.anchorNode;
+            const line = node.closest('.editor-line');
+            if(line && line.classList.contains('locked-line')) {
+                e.preventDefault();
+            }
+        });
+
+        // Simple Input Handler
         ui.display.addEventListener('input', () => {
-            ensureStructure(); 
+            triggerSave();
+        });
+
+        function triggerSave() {
             const html = ui.display.innerHTML;
-            
             roomDB.get('content').put(html);
             if(act.sendContent) act.sendContent(html);
+        }
+
+        // --- 6. INFINITE SCROLL LOGIC ---
+
+        ui.container.addEventListener('scroll', () => {
+            const scrollTop = ui.container.scrollTop;
+            const scrollHeight = ui.container.scrollHeight;
+            const clientHeight = ui.container.clientHeight;
+
+            // A. Scroll Up (Prepend)
+            if (scrollTop < 100) {
+                const oldHeight = scrollHeight;
+                let html = '';
+                for(let i=0; i<10; i++) html += createLine();
+                ui.display.insertAdjacentHTML('afterbegin', html);
+                
+                // Adjust scroll so we don't jump
+                const newHeight = ui.container.scrollHeight;
+                ui.container.scrollTop = scrollTop + (newHeight - oldHeight);
+            }
+
+            // B. Scroll Down (Append)
+            if (scrollHeight - scrollTop - clientHeight < 100) {
+                let html = '';
+                for(let i=0; i<10; i++) html += createLine();
+                ui.display.insertAdjacentHTML('beforeend', html);
+            }
         });
+
+        // --- 7. SYNC & LOCKS ---
 
         function handleRemoteContent(html) {
             roomDB.get('content').put(html);
@@ -264,114 +375,110 @@
         }
 
         function handleSync(html) {
-            // New peer sends us their state
+            // Joining user receives this
+            console.log("Received Sync");
             ui.display.innerHTML = html;
             roomDB.get('content').put(html);
+            
+            // Auto-scroll to active action (simple heuristic: look for last locked line)
+            setTimeout(() => {
+                const locks = Object.values(activeLocks);
+                if(locks.length > 0) {
+                    const lastLock = locks[locks.length-1];
+                    const el = document.getElementById(lastLock.lineId);
+                    if(el) el.scrollIntoView({ block: 'center' });
+                } else {
+                    // Or just middle
+                    ui.container.scrollTop = ui.container.scrollHeight / 2;
+                }
+            }, 500);
         }
 
-        // --- 5. LINE LOCKING LOGIC ---
-
-        // A. Broadcast my location
+        // Broadcast Lock
         document.addEventListener('selectionchange', () => {
             const sel = window.getSelection();
             if(!sel.rangeCount) return;
-
-            let node = sel.anchorNode;
-            if(node.nodeType === 3) node = node.parentNode;
+            const node = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentNode : sel.anchorNode;
             const line = node.closest('.editor-line');
 
             if(line && line.id) {
+                // UI Highlight
                 document.querySelectorAll('.my-line').forEach(e => e.classList.remove('my-line'));
                 line.classList.add('my-line');
                 ui.tools.classList.toggle('visible', sel.toString().length > 0);
+                
+                // Network
                 if(act.sendLock) act.sendLock({ lineId: line.id, peerId: selfId });
             }
         });
 
-        // B. Handle Incoming Locks
         function handleRemoteLock(data, peerId) {
-            activeLocks[peerId] = { 
-                lineId: data.lineId, 
-                ts: Date.now(), 
-                color: stringToColor(peerId) 
-            };
+            activeLocks[peerId] = { lineId: data.lineId, ts: Date.now(), color: stringToColor(peerId) };
             reapplyVisualLocks();
         }
 
         function reapplyVisualLocks() {
+            // Clean UI
             document.querySelectorAll('.locked-line').forEach(el => {
                 el.classList.remove('locked-line');
                 el.style.borderLeftColor = 'transparent';
                 const tag = el.querySelector('.locked-tag');
                 if(tag) tag.remove();
             });
+            ui.minimap.innerHTML = ''; // Clean minimap
 
             const now = Date.now();
+            const totalHeight = ui.container.scrollHeight;
+
             for(const [pid, lock] of Object.entries(activeLocks)) {
-                if(now - lock.ts > 30000) continue; 
+                if(now - lock.ts > 60000) continue; // 1 min expiry
                 if(pid === selfId) continue;
 
                 const el = document.getElementById(lock.lineId);
                 if(el) {
+                    // 1. Line Style
                     el.classList.add('locked-line');
                     el.style.borderLeftColor = lock.color;
-
+                    
                     const tag = document.createElement('div');
                     tag.className = 'locked-tag';
                     tag.innerText = pid.slice(0,4);
                     tag.style.backgroundColor = lock.color;
-                    
                     el.appendChild(tag);
+
+                    // 2. Minimap Dot
+                    if(totalHeight > 0) {
+                        const dot = document.createElement('div');
+                        dot.className = 'scroll-dot';
+                        dot.style.backgroundColor = lock.color;
+                        dot.style.top = (el.offsetTop / totalHeight * 100) + '%';
+                        dot.onclick = () => el.scrollIntoView({behavior:'smooth', block:'center'});
+                        ui.minimap.appendChild(dot);
+                    }
                 }
             }
         }
 
-        // C. ENFORCE LOCKS
-        ui.display.addEventListener('keydown', (e) => {
-            const sel = window.getSelection();
-            if(!sel.rangeCount) return;
-            let node = sel.anchorNode;
-            if(node.nodeType === 3) node = node.parentNode;
-            const line = node.closest('.editor-line');
-
-            if(line && line.classList.contains('locked-line')) {
-                e.preventDefault();
-                return; // Silently block or alert
-            }
-
-            if(e.key === 'Enter') {
-                e.preventDefault();
-                document.execCommand('insertHTML', false, createLine());
-            }
-        });
-
-        // --- 6. PEER MANAGEMENT ---
-
+        // --- 8. PEER MGMT ---
         function handlePeerJoin(id) {
             updateStatus();
-            if(ui.display.innerHTML.length > 50 && act.pushSync) {
+            // Ask for sync immediately if I'm new, or send if I'm old
+            if(ui.display.innerHTML.length < 500) {
+                act.reqSync(null, id);
+            } else {
                 act.pushSync(ui.display.innerHTML, id);
             }
         }
-
         function handlePeerLeave(id) {
             updateStatus();
             delete activeLocks[id];
             reapplyVisualLocks();
         }
-
         function updateStatus() {
             const count = Object.keys(room.getPeers()).length;
-            ui.peerCount.innerText = count > 0 ? `${count} Peer(s)` : 'Waiting for peers...';
+            ui.peerCount.innerText = count > 0 ? `${count} Peer(s)` : 'Waiting...';
             ui.dot.classList.toggle('on', count > 0);
         }
-
-        // --- 7. INFINITE SCROLL ---
-        ui.container.addEventListener('scroll', () => {
-            if(ui.container.scrollHeight - ui.container.scrollTop - ui.container.clientHeight < 100) {
-                ui.display.insertAdjacentHTML('beforeend', createLine() + createLine());
-            }
-        });
 
         // --- HELPERS ---
         function stringToColor(str) {
@@ -398,13 +505,15 @@
             if(line) {
                 const range = document.createRange();
                 range.selectNodeContents(line);
-                range.collapse(false);
+                range.collapse(true); // default to start
+                // Try to respect offset if possible (simplified)
                 const sel = window.getSelection();
                 sel.removeAllRanges();
                 sel.addRange(range);
             }
         }
-        
+
+        // Tools
         document.getElementById('btn-bold').onclick = () => document.execCommand('bold');
         document.getElementById('btn-italic').onclick = () => document.execCommand('italic');
         document.getElementById('btn-link').onclick = () => {
