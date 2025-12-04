@@ -3,41 +3,85 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Chat + History + Notifications</title>
+    <title>P2P Color Chat</title>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
-        :root { --bg: #121212; --panel: #1e1e1e; --text: #e0e0e0; --accent: #00bcd4; --me: #008394; --peer: #424242; --sys: #666; }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; height: 100vh; margin: 0; }
-        #app { width: 100%; max-width: 600px; background: var(--panel); display: flex; flex-direction: column; border-left: 1px solid #333; border-right: 1px solid #333; }
-        header { padding: 15px; background: #252525; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
-        #status { font-size: 0.8rem; color: #888; transition: color 0.3s; }
-        #status.on { color: var(--accent); font-weight: bold; }
-        #chat-box { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+        :root {
+            --bg: #121212;
+            --panel: #1e1e1e;
+            --input-bg: #2c2c2c;
+            --text: #e0e0e0;
+            --accent: #00bcd4; /* Default, will be overridden by hash */
+            --me-bg: #263238; 
+            --peer-bg: #37474f;
+            --sys: #757575;
+        }
+
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; height: 100vh; overflow: hidden; }
+
+        #app { width: 100%; max-width: 600px; background: var(--panel); display: flex; flex-direction: column; border-left: 1px solid #333; border-right: 1px solid #333; position: relative; }
+
+        /* HEADER */
+        header { padding: 15px; background: #252525; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 10; }
+        .room-info { display: flex; flex-direction: column; }
+        .app-title { font-weight: bold; font-size: 0.9rem; }
+        .room-id { font-family: monospace; color: var(--accent); cursor: pointer; font-size: 0.85rem; opacity: 0.9; transition: opacity 0.2s; display: flex; align-items: center; gap: 5px; }
+        .room-id:hover { opacity: 1; text-decoration: underline; }
         
-        /* Message Styles */
-        .msg { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 0.95rem; word-break: break-word; line-height: 1.4; }
-        .msg.me { align-self: flex-end; background: var(--me); border-bottom-right-radius: 2px; }
-        .msg.peer { align-self: flex-start; background: var(--peer); border-bottom-left-radius: 2px; }
-        
-        /* System Notification Style (Joined/Left) */
-        .system-msg { align-self: center; font-size: 0.75rem; color: var(--sys); margin: 5px 0; font-style: italic; opacity: 0.8; }
-        
-        .meta { font-size: 0.65rem; opacity: 0.6; display: block; margin-bottom: 2px; }
-        form { display: flex; padding: 10px; background: #252525; gap: 10px; border-top: 1px solid #333; }
-        input { flex: 1; padding: 12px; border-radius: 25px; border: 1px solid #444; background: #333; color: white; outline: none; }
+        #status { font-size: 0.75rem; color: #888; display: flex; align-items: center; gap: 6px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; transition: all 0.3s; }
+        .dot.on { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+        /* CHAT AREA */
+        #chat-box { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; scroll-behavior: smooth; }
+        #chat-box::-webkit-scrollbar { width: 6px; }
+        #chat-box::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+        /* MESSAGES */
+        .msg-row { display: flex; gap: 8px; max-width: 85%; animation: slideIn 0.2s ease; margin-bottom: 4px; }
+        .msg-row.me { align-self: flex-end; flex-direction: row-reverse; }
+        .msg-row.peer { align-self: flex-start; }
+
+        .avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: bold; color: rgba(255,255,255,0.9); flex-shrink: 0; background: #555; }
+
+        .bubble { padding: 8px 12px; border-radius: 12px; position: relative; min-width: 50px; }
+        .msg-row.me .bubble { background: var(--accent); color: #000; border-bottom-right-radius: 2px; }
+        .msg-row.me .msg-meta { color: rgba(0,0,0,0.5); }
+        .msg-row.peer .bubble { background: var(--peer-bg); border-bottom-left-radius: 2px; }
+
+        .msg-text { font-size: 0.95rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+        .msg-meta { font-size: 0.65rem; text-align: right; margin-top: 2px; color: rgba(255,255,255,0.4); }
+
+        /* SYSTEM & TYPING */
+        .system-msg { align-self: center; font-size: 0.7rem; color: var(--sys); margin: 8px 0; background: rgba(255,255,255,0.05); padding: 4px 12px; border-radius: 20px; }
+        #typing-indicator { font-size: 0.75rem; color: var(--accent); padding: 5px 20px; height: 25px; font-style: italic; opacity: 0; transition: opacity 0.3s; }
+        #typing-indicator.active { opacity: 1; }
+
+        /* INPUT */
+        form { display: flex; padding: 15px; background: #252525; gap: 10px; border-top: 1px solid #333; }
+        input { flex: 1; padding: 12px 15px; border-radius: 25px; border: 1px solid #444; background: var(--input-bg); color: white; outline: none; transition: border 0.2s; }
         input:focus { border-color: var(--accent); }
-        button { padding: 0 20px; border-radius: 25px; border: none; background: var(--accent); color: white; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
+        button { padding: 0 20px; border-radius: 25px; border: none; background: var(--accent); color: #000; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
         button:hover { opacity: 0.9; }
+
+        @keyframes slideIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
 
 <div id="app">
     <header>
-        <div><strong>P2P Chat</strong></div>
-        <div id="status">Waiting for peers...</div>
+        <div class="room-info">
+            <span class="app-title">P2P Chat</span>
+            <div id="room-display" class="room-id" title="Click to copy link">#...</div>
+        </div>
+        <div id="status"><div class="dot"></div> <span id="status-text">Connecting...</span></div>
     </header>
+    
     <div id="chat-box"></div>
+    <div id="typing-indicator"></div>
+    
     <form id="send-form">
         <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off">
         <button type="submit">Send</button>
@@ -47,115 +91,247 @@
 <script type="module">
     import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
-    const ROOM_ID = 'gun-trystero-final-v3';
-    
-    // 1. Setup GunDB (Local Mode Only)
-    const gun = Gun({ peers: [], localStorage: true });
-    const chatDB = gun.get(ROOM_ID);
+    // --- 1. ROOM & THEME SETUP ---
+    function initRoom() {
+        let hash = window.location.hash;
+        
+        // Default to #ffffff if empty or just '#'
+        if (!hash || hash === '#') {
+            hash = '#ffffff';
+            history.replaceState(null, null, hash);
+        }
 
-    // 2. Setup Trystero
-    const config = { appId: 'trystero-gun-final-v3' };
-    const room = joinRoom(config, ROOM_ID);
+        // Apply Theme if hash is a valid hex color
+        const isColor = /^#[0-9A-F]{6}$/i.test(hash);
+        if (isColor) {
+            document.documentElement.style.setProperty('--accent', hash);
+        }
+
+        return hash;
+    }
+
+    const HASH_ID = initRoom();
+    const APP_NAMESPACE = 'gun-trystero-color-v1';
+    // Create a unique room ID string
+    const ROOM_ID = `${APP_NAMESPACE}-${HASH_ID.replace('#', '')}`;
+
+    // UI: Display Room ID
+    const roomDisplay = document.getElementById('room-display');
+    roomDisplay.innerText = HASH_ID;
     
-    const [sendLive, getLive] = room.makeAction('liveMsg');
-    const [reqHistory, getReqHistory] = room.makeAction('reqHistory');
-    const [resHistory, getResHistory] = room.makeAction('resHistory');
+    // UI: Copy Link Handler
+    roomDisplay.onclick = () => {
+        navigator.clipboard.writeText(window.location.href);
+        const original = roomDisplay.innerText;
+        roomDisplay.innerText = "Link Copied!";
+        setTimeout(() => roomDisplay.innerText = original, 1500);
+    };
+
+    // UI: Handle Manual URL Change
+    window.addEventListener('hashchange', () => window.location.reload());
+
+    // --- 2. INITIALIZE LIBS ---
+    const gun = Gun({ peers: [], localStorage: true });
+    const chatDB = gun.get(ROOM_ID); // Scope DB to this room
+
+    const config = { appId: APP_NAMESPACE };
+    const room = joinRoom(config, ROOM_ID);
+
+    // Trystero Actions
+    const [sendLive, getLive] = room.makeAction('msg');
+    const [sendTyping, getTyping] = room.makeAction('typing');
+    const [reqHistory, getReqHistory] = room.makeAction('reqHist');
+    const [resHistory, getResHistory] = room.makeAction('resHist');
 
     // UI Refs
     const ui = {
         box: document.getElementById('chat-box'),
         form: document.getElementById('send-form'),
         input: document.getElementById('msg-input'),
-        status: document.getElementById('status')
+        typing: document.getElementById('typing-indicator'),
+        dot: document.querySelector('.dot'),
+        statusText: document.getElementById('status-text')
     };
 
-    // --- LOGIC 1: SENDING ---
+    // --- 3. SENDING MESSAGES ---
     ui.form.addEventListener('submit', (e) => {
         e.preventDefault();
         const text = ui.input.value.trim();
         if (!text) return;
 
         const msg = {
-            id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+            id: Date.now().toString(36) + Math.random().toString(36).substr(2),
             text: text,
             sender: selfId,
             ts: Date.now()
         };
 
-        chatDB.get(msg.id).put(msg); // Save Local
-        sendLive(msg);               // Send Network
-        ui.input.value = '';
-    });
-
-    // --- LOGIC 2: RECEIVING LIVE ---
-    getLive((msg) => {
+        // 1. Save Local (Gun)
         chatDB.get(msg.id).put(msg);
+        // 2. Broadcast (Trystero)
+        sendLive(msg);
+
+        ui.input.value = '';
+        sendTyping(false);
     });
 
-    // --- LOGIC 3: RENDERING (Single Source of Truth) ---
+    // Typing Debounce
+    let typeTimer;
+    ui.input.addEventListener('input', () => {
+        sendTyping(true);
+        clearTimeout(typeTimer);
+        typeTimer = setTimeout(() => sendTyping(false), 1000);
+    });
+
+    // --- 4. RECEIVING MESSAGES ---
+    
+    // Live Message
+    getLive((msg) => {
+        chatDB.get(msg.id).put(msg); // Triggers map().on listener
+    });
+
+    // Sync from GunDB (Single Source of Truth)
     const seenIds = new Set();
     
     chatDB.map().on((msg, id) => {
         if (!msg || !msg.text || seenIds.has(id)) return;
         seenIds.add(id);
-        
-        const isMe = msg.sender === selfId;
-        const div = document.createElement('div');
-        div.className = `msg ${isMe ? 'me' : 'peer'}`;
-        div.innerHTML = `<span class="meta">${isMe ? 'You' : msg.sender.slice(0,4)}</span>${msg.text}`;
-        
-        ui.box.appendChild(div);
-        ui.box.scrollTop = ui.box.scrollHeight;
+        renderMessage(msg);
     });
 
-    // --- LOGIC 4: SYNC & NOTIFICATIONS ---
+    // Typing Status
+    const typingUsers = new Set();
+    getTyping((isTyping, peerId) => {
+        isTyping ? typingUsers.add(peerId) : typingUsers.delete(peerId);
+        updateTyping();
+    });
 
+    // --- 5. RENDERING LOGIC ---
+    function renderMessage(msg) {
+        const isMe = msg.sender === selfId;
+        const time = new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
+        
+        const row = document.createElement('div');
+        row.className = `msg-row ${isMe ? 'me' : 'peer'}`;
+        row.dataset.ts = msg.ts; // For sorting
+
+        // Avatar
+        if (!isMe) {
+            const av = document.createElement('div');
+            av.className = 'avatar';
+            av.innerText = msg.sender.slice(0, 2).toUpperCase();
+            av.style.backgroundColor = strToColor(msg.sender);
+            row.appendChild(av);
+        }
+
+        // Bubble
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        
+        const txt = document.createElement('div');
+        txt.className = 'msg-text';
+        txt.textContent = msg.text; // Safe text insertion
+
+        const meta = document.createElement('div');
+        meta.className = 'msg-meta';
+        meta.innerText = time;
+
+        bubble.appendChild(txt);
+        bubble.appendChild(meta);
+        row.appendChild(bubble);
+
+        // Smart Insert (Chronological)
+        const children = Array.from(ui.box.children);
+        let inserted = false;
+        
+        // Check scroll position before modifying DOM
+        const atBottom = ui.box.scrollHeight - ui.box.scrollTop <= ui.box.clientHeight + 100;
+
+        for (let i = children.length - 1; i >= 0; i--) {
+            const child = children[i];
+            const ts = parseInt(child.dataset.ts || 0);
+            if (!child.classList.contains('system-msg') && ts < msg.ts) {
+                if (i === children.length - 1) ui.box.appendChild(row);
+                else ui.box.insertBefore(row, children[i+1]);
+                inserted = true;
+                break;
+            }
+        }
+        if (!inserted) {
+            if (children.length > 0) ui.box.insertBefore(row, children[0]);
+            else ui.box.appendChild(row);
+        }
+
+        if (atBottom || isMe) {
+            requestAnimationFrame(() => ui.box.scrollTop = ui.box.scrollHeight);
+        }
+    }
+
+    // --- 6. PEER SYNC LOGIC ---
     room.onPeerJoin((peerId) => {
         updateStatus();
-        // 1. Show Notification
-        addSystemMessage(`${peerId.slice(0,4)} joined the chat`);
-        
-        // 2. Sync History
-        console.log(`Connected to ${peerId}. Asking for history...`);
-        reqHistory('please_sync', peerId);
+        addSysMsg(`${peerId.slice(0,4)} joined`);
+        reqHistory('sync', peerId);
     });
 
     room.onPeerLeave((peerId) => {
         updateStatus();
-        // Show Notification
-        addSystemMessage(`${peerId.slice(0,4)} left the chat`);
+        typingUsers.delete(peerId);
+        updateTyping();
+        addSysMsg(`${peerId.slice(0,4)} left`);
     });
 
-    // Handle History Requests
-    getReqHistory((data, requestorId) => {
-        const historyBatch = [];
+    // History Request Handler
+    getReqHistory((_, peerId) => {
+        const batch = [];
+        let count = 0;
+        // Grab recent messages from Gun
         chatDB.map().once((msg) => {
-            if (msg && msg.text) historyBatch.push(msg);
+            if (msg && msg.text && count < 50) {
+                batch.push(msg);
+                count++;
+            }
         });
         setTimeout(() => {
-            if (historyBatch.length > 0) resHistory(historyBatch, requestorId);
+            if (batch.length) resHistory(batch, peerId);
         }, 500);
     });
 
-    // Handle History Response
+    // History Response Handler
     getResHistory((batch) => {
-        batch.forEach(msg => chatDB.get(msg.id).put(msg));
+        batch.forEach(msg => {
+            if(!seenIds.has(msg.id)) chatDB.get(msg.id).put(msg);
+        });
     });
 
     // --- HELPERS ---
     function updateStatus() {
         const count = Object.keys(room.getPeers()).length;
-        ui.status.innerText = count > 0 ? `🟢 ${count} Peer(s) Online` : '🟡 Waiting for peers...';
-        if (count > 0) ui.status.classList.add('on');
-        else ui.status.classList.remove('on');
+        ui.dot.classList.toggle('on', count > 0);
+        ui.statusText.innerText = count > 0 ? `${count} Peer(s)` : 'Waiting...';
     }
 
-    function addSystemMessage(text) {
+    function updateTyping() {
+        if (typingUsers.size > 0) {
+            ui.typing.innerText = `${typingUsers.size} typing...`;
+            ui.typing.classList.add('active');
+        } else {
+            ui.typing.classList.remove('active');
+        }
+    }
+
+    function addSysMsg(txt) {
         const div = document.createElement('div');
         div.className = 'system-msg';
-        div.innerText = text;
+        div.innerText = txt;
         ui.box.appendChild(div);
-        ui.box.scrollTop = ui.box.scrollHeight;
+    }
+
+    function strToColor(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+        return '#' + '00000'.substring(0, 6 - c.length) + c;
     }
 
 </script>
