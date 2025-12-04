@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Whiteboard (Light)</title>
+    <title>P2P Shared Doc (Fixed Sync)</title>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
@@ -28,7 +28,7 @@
             flex-direction: column; 
         }
 
-        /* LIGHT HEADER */
+        /* HEADER */
         header { 
             padding: 0 20px; 
             background: var(--header-bg); 
@@ -46,37 +46,31 @@
         .dot-status { width: 8px; height: 8px; background: #ccc; border-radius: 50%; transition: background 0.3s; }
         .dot-status.on { background: #00c853; box-shadow: 0 0 4px #00c853; }
 
-        /* MAIN CONTAINER & FLOATING SCROLLBAR */
+        /* EDITOR CONTAINER */
         #editor-container { 
             position: relative; 
             flex: 1; 
-            overflow-y: overlay; /* Webkit-only: Places scrollbar on top of content */
+            overflow-y: overlay; 
             overflow-x: hidden; 
             scroll-behavior: smooth; 
             scrollbar-width: thin;
             scrollbar-color: var(--scroll-thumb) transparent;
         }
 
-        /* Custom Scrollbar Styling */
-        #editor-container::-webkit-scrollbar {
-            width: 12px;
-            background: transparent; /* Track is invisible */
-        }
+        #editor-container::-webkit-scrollbar { width: 12px; background: transparent; }
         #editor-container::-webkit-scrollbar-thumb {
             background-color: var(--scroll-thumb);
             border-radius: 20px;
-            border: 3px solid transparent; /* Creates padding around the thumb */
+            border: 3px solid transparent;
             background-clip: content-box;
         }
-        #editor-container::-webkit-scrollbar-thumb:hover {
-            background-color: var(--scroll-thumb-hover);
-        }
+        #editor-container::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
         
         /* EDITOR SURFACE */
         #display {
             min-height: 100%;
             outline: none;
-            padding: 40px 60px; /* Generous padding for paper feel */
+            padding: 40px 60px;
             line-height: var(--line-height);
             font-size: 16px;
             white-space: pre-wrap;
@@ -84,7 +78,7 @@
             z-index: 1; 
         }
 
-        /* REMOTE CURSORS LAYER */
+        /* REMOTE CURSORS */
         #cursor-layer {
             position: absolute;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -102,31 +96,27 @@
         
         .cursor-flag {
             position: absolute;
-            top: -20px;
-            left: 0;
+            top: -20px; left: 0;
             padding: 2px 6px;
             border-radius: 4px;
             font-size: 0.65rem;
-            color: #fff; /* White text on colored flag */
+            color: #fff; 
             font-weight: bold;
             white-space: nowrap;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             opacity: 0.8;
         }
-        
-        /* Hover over cursor to see name clearly */
         .remote-cursor:hover .cursor-flag { opacity: 1; z-index: 20; }
-
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-        /* SCROLL MINIMAP (Right Side) */
+        /* MINIMAP */
         #minimap {
             position: absolute;
             right: 0; top: 50px; bottom: 0;
             width: 16px;
-            background: transparent; /* Transparent background */
+            background: transparent;
             z-index: 50;
-            pointer-events: none; /* Let clicks pass through unless hitting a dot */
+            pointer-events: none; 
         }
         .scroll-dot {
             position: absolute;
@@ -135,7 +125,7 @@
             border-radius: 50%;
             cursor: pointer;
             transition: transform 0.1s;
-            pointer-events: auto; /* Re-enable clicks for dots */
+            pointer-events: auto;
             box-shadow: 0 0 2px rgba(0,0,0,0.3);
         }
         .scroll-dot:hover { transform: scale(1.5); }
@@ -145,7 +135,7 @@
 <body>
 
     <header>
-        <div class="title">P2P Paper</div>
+        <div class="title">P2P Shared Doc</div>
         <div class="status">
             <div class="dot-status"></div>
             <span id="peer-count">Offline</span>
@@ -157,7 +147,6 @@
         <div id="cursor-layer"></div>
     </div>
     
-    <!-- Scroll Indicators live here -->
     <div id="minimap"></div>
 
 <script type="module">
@@ -165,11 +154,11 @@
 
     // --- CONFIG ---
     const LINE_HEIGHT = 24;
-    const APP_ID = 'gun-whiteboard-light-v1';
+    const APP_ID = 'gun-trystero-sync-fixed-v1';
     
-    // Hash-based Room
+    // Hash Logic
     let hash = window.location.hash.replace('#', '');
-    if(!hash) { hash = 'whiteboard-light'; window.location.hash = hash; }
+    if(!hash) { hash = 'ffffff'; window.location.hash = hash; }
     
     const ROOM_ID = `${APP_ID}-${hash}`;
     const MY_COLOR = generateColor(selfId);
@@ -182,24 +171,39 @@
     const statusDot = document.querySelector('.dot-status');
     const statusText = document.getElementById('peer-count');
 
-    // --- GUN SETUP ---
+    // --- 1. SETUP GUN (Local Persistence Only) ---
     const gun = Gun({ peers: [], localStorage: true });
-    const roomDB = gun.get(ROOM_ID);
-    
-    // Use Trystero for Peer Awareness
+    const localDB = gun.get(ROOM_ID);
+
+    // --- 2. SETUP TRYSTERO (Network Transport) ---
     const config = { appId: APP_ID };
     const room = joinRoom(config, ROOM_ID);
 
-    // --- 1. INFINITE SCROLL & INIT LOGIC ---
+    // Actions
+    const [sendContent, getContent] = room.makeAction('content');
+    const [sendCursor, getCursor] = room.makeAction('cursor');
+    const [reqSync, getReqSync] = room.makeAction('reqSync'); // "I'm new, give me data"
+    const [resSync, getResSync] = room.makeAction('resSync'); // "Here is the data"
+
+    // --- 3. INIT & INFINITE SCROLL ---
 
     function initDisplay() {
-        roomDB.get('content').once((data) => {
-            if (!data) {
-                const totalLines = Math.floor(window.innerHeight / LINE_HEIGHT) * 3;
-                display.innerHTML = '<div><br></div>'.repeat(totalLines); 
+        // Load from Local Storage first (Offline first)
+        localDB.get('content').once((data) => {
+            if (data) {
+                display.innerHTML = data;
+            } else {
+                fillWhitespace();
             }
         });
         display.focus();
+    }
+
+    function fillWhitespace() {
+        if(display.innerHTML.length < 50) {
+            const totalLines = Math.floor(window.innerHeight / LINE_HEIGHT) * 3;
+            display.innerHTML = '<div><br></div>'.repeat(totalLines);
+        }
     }
 
     function handleScroll() {
@@ -225,30 +229,70 @@
     container.addEventListener('scroll', handleScroll);
     initDisplay();
 
-    // --- 2. CONTENT SYNC (GunDB) ---
+    // --- 4. NETWORK SYNC LOGIC ---
 
     let isTyping = false;
+    let typeTimeout;
 
-    // Send
+    // A. I am typing -> Send to Network & Save Local
     display.addEventListener('input', () => {
         isTyping = true;
-        const content = display.innerHTML;
-        roomDB.get('content').put(content);
+        const html = display.innerHTML;
+        
+        // 1. Save Local
+        localDB.get('content').put(html);
+        
+        // 2. Broadcast to Peers
+        sendContent(html);
+        
+        // 3. Update my cursor immediately
         updateMyCursor();
-        setTimeout(() => isTyping = false, 500); 
+
+        clearTimeout(typeTimeout);
+        typeTimeout = setTimeout(() => isTyping = false, 1000);
     });
 
-    // Receive
-    roomDB.get('content').on((data) => {
-        if (!data || isTyping) return; 
-        if (display.innerHTML === data) return; 
+    // B. Peer typed -> Receive from Network & Save Local
+    getContent((html) => {
+        // Save to local DB so we have it if we refresh
+        localDB.get('content').put(html);
 
-        const savedSel = saveSelection();
-        display.innerHTML = data;
-        restoreSelection(savedSel);
+        // Only update screen if I'm not actively typing to avoid conflicts
+        if (!isTyping && display.innerHTML !== html) {
+            const savedSel = saveSelection();
+            display.innerHTML = html;
+            restoreSelection(savedSel);
+        }
     });
 
-    // --- 3. CURSOR TRACKING ---
+    // --- 5. INITIAL SYNC (HANDSHAKE) ---
+
+    // When I join, I ask: "Hey, anyone have the doc?"
+    // (Wait 1s for connections to stabilize)
+    setTimeout(() => {
+        console.log("Requesting sync...");
+        reqSync(null);
+    }, 1000);
+
+    // If someone asks, and I have data, I send it
+    getReqSync((_, peerId) => {
+        const content = display.innerHTML;
+        if(content && content.length > 50) {
+            console.log("Sending sync to", peerId);
+            resSync(content, peerId);
+        }
+    });
+
+    // Receive the full doc snapshot
+    getResSync((html) => {
+        console.log("Received sync snapshot");
+        if (!isTyping) {
+            display.innerHTML = html;
+            localDB.get('content').put(html);
+        }
+    });
+
+    // --- 6. CURSOR TRACKING ---
 
     function updateMyCursor() {
         const sel = window.getSelection();
@@ -256,10 +300,8 @@
 
         const range = sel.getRangeAt(0);
         const rect = range.getBoundingClientRect();
-        
         const containerRect = container.getBoundingClientRect();
         
-        // Calculate offsets
         const relativeY = rect.top - containerRect.top + container.scrollTop;
         const relativeX = rect.left - containerRect.left + container.scrollLeft;
 
@@ -267,33 +309,25 @@
             id: selfId,
             x: relativeX,
             y: relativeY,
-            color: MY_COLOR,
-            ts: Date.now()
+            color: MY_COLOR
         };
 
-        roomDB.get('cursors').get(selfId).put(cursorData);
+        sendCursor(cursorData);
     }
 
+    // Trigger cursor updates
     ['click', 'keyup', 'focus', 'mouseup'].forEach(evt => 
         display.addEventListener(evt, updateMyCursor)
     );
 
-    // --- 4. RENDER REMOTE CURSORS & MINIMAP ---
-
-    const peers = {}; 
-
-    roomDB.get('cursors').map().on((data, peerId) => {
-        if (peerId === selfId || !data) return;
-        if (Date.now() - data.ts > 300000) return; // Ignore old cursors
-
-        peers[peerId] = data;
+    // Receive Cursors
+    getCursor((data, peerId) => {
         renderGhostCursor(peerId, data);
         renderMinimapDot(peerId, data);
     });
 
     function renderGhostCursor(peerId, data) {
         let cursor = document.getElementById(`cursor-${peerId}`);
-        
         if (!cursor) {
             cursor = document.createElement('div');
             cursor.id = `cursor-${peerId}`;
@@ -307,39 +341,41 @@
             cursor.appendChild(flag);
             cursorLayer.appendChild(cursor);
         }
-
         cursor.style.backgroundColor = data.color;
         cursor.style.top = `${data.y}px`;
         cursor.style.left = `${data.x}px`;
+        
+        // Auto-remove cursor if inactive for 5s
+        clearTimeout(cursor.timer);
+        cursor.style.opacity = 1;
+        cursor.timer = setTimeout(() => cursor.style.opacity = 0, 5000);
     }
 
     function renderMinimapDot(peerId, data) {
         let dot = document.getElementById(`dot-${peerId}`);
-        
         if (!dot) {
             dot = document.createElement('div');
             dot.id = `dot-${peerId}`;
             dot.className = 'scroll-dot';
             dot.style.backgroundColor = data.color;
             dot.title = `Jump to ${peerId.slice(0,4)}`;
-            
-            dot.onclick = () => {
-                container.scrollTo({ top: data.y - (container.clientHeight/2), behavior: 'smooth' });
-            };
-            
+            dot.onclick = () => container.scrollTo({ top: data.y - (container.clientHeight/2), behavior: 'smooth' });
             minimap.appendChild(dot);
         }
-
         const totalHeight = container.scrollHeight;
         if(totalHeight === 0) return;
-
         const percentage = (data.y / totalHeight) * 100;
         dot.style.top = `${percentage}%`;
     }
 
-    // --- 5. PEER STATUS ---
+    // --- 7. PEER STATUS ---
 
-    room.onPeerJoin(id => updateStatus());
+    room.onPeerJoin(id => {
+        updateStatus();
+        // Also proactively send sync if we have data
+        reqSync(null); 
+    });
+    
     room.onPeerLeave(id => {
         updateStatus();
         const c = document.getElementById(`cursor-${id}`);
@@ -350,7 +386,7 @@
 
     function updateStatus() {
         const count = Object.keys(room.getPeers()).length;
-        statusText.innerText = count > 0 ? `${count} Peer(s)` : "Waiting...";
+        statusText.innerText = count > 0 ? `${count} Peer(s)` : "Offline";
         if(count > 0) statusDot.classList.add('on');
         else statusDot.classList.remove('on');
     }
@@ -360,7 +396,6 @@
     function generateColor(str) {
         let hash = 0;
         for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-        // Generates bold/darker colors for visibility on white bg
         const c = (hash & 0x00AAAA).toString(16).toUpperCase(); 
         return '#' + '00000'.substring(0, 6 - c.length) + c;
     }
@@ -368,20 +403,16 @@
     function saveSelection() {
         if (window.getSelection) {
             const sel = window.getSelection();
-            if (sel.getRangeAt && sel.rangeCount) {
-                return sel.getRangeAt(0);
-            }
+            if (sel.getRangeAt && sel.rangeCount) return sel.getRangeAt(0);
         }
         return null;
     }
 
     function restoreSelection(range) {
-        if (range) {
-            if (window.getSelection) {
-                const sel = window.getSelection();
-                sel.removeAllRanges();
-                sel.addRange(range);
-            }
+        if (range && window.getSelection) {
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
         }
     }
 
