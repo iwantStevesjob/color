@@ -3,441 +3,430 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Shared Doc (Robust)</title>
+    <title>P2P Color Notebook</title>
+    <!-- 1. Load GunDB -->
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
             --bg: #ffffff;
             --text: #1a1a1a;
-            --header-bg: #f8f9fa;
-            --header-border: #e9ecef;
-            --caret-width: 2px;
+            --accent: #000;
             --line-height: 24px;
-            --scroll-thumb: rgba(0, 0, 0, 0.2);
-            --scroll-thumb-hover: rgba(0, 0, 0, 0.4);
         }
-
+        
         body { 
-            margin: 0; 
-            background: var(--bg); 
-            color: var(--text); 
-            font-family: 'Courier New', Courier, monospace; 
-            overflow: hidden; 
-            height: 100vh; 
-            display: flex; 
-            flex-direction: column; 
+            margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            background: var(--bg); color: var(--text); 
+            overflow: hidden; height: 100vh; display: flex; flex-direction: column; 
         }
 
-        /* HEADER */
-        header { 
-            padding: 0 20px; 
-            background: var(--header-bg); 
-            border-bottom: 1px solid var(--header-border); 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-            z-index: 100; 
-            height: 50px; 
-            box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+        /* --- LOGIN FORM --- */
+        #login {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--bg); z-index: 1000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
         }
-        
-        .title { font-weight: 700; color: #333; letter-spacing: -0.5px; }
-        .status { font-size: 0.75rem; color: #666; display: flex; gap: 8px; align-items: center; background: #fff; padding: 4px 10px; border-radius: 20px; border: 1px solid #ddd; }
-        .dot-status { width: 8px; height: 8px; background: #ccc; border-radius: 50%; transition: background 0.3s; }
-        .dot-status.on { background: #00c853; box-shadow: 0 0 4px #00c853; }
+        #login input { padding: 15px; font-size: 1.2rem; border: 2px solid #333; border-radius: 8px; text-align: center; outline: none; }
+        #login button { padding: 15px 30px; font-size: 1rem; background: #333; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        #login.hidden { display: none; }
 
-        /* EDITOR CONTAINER */
-        #editor-container { 
-            position: relative; 
-            flex: 1; 
-            overflow-y: overlay; 
-            overflow-x: hidden; 
+        /* --- MAIN CONTAINER --- */
+        #container { 
+            position: relative; flex: 1; 
+            overflow-y: auto; overflow-x: hidden; 
             scroll-behavior: smooth; 
-            scrollbar-width: thin;
-            scrollbar-color: var(--scroll-thumb) transparent;
         }
 
-        #editor-container::-webkit-scrollbar { width: 12px; background: transparent; }
-        #editor-container::-webkit-scrollbar-thumb {
-            background-color: var(--scroll-thumb);
-            border-radius: 20px;
-            border: 3px solid transparent;
-            background-clip: content-box;
-        }
-        #editor-container::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
-        
-        /* EDITOR SURFACE */
+        /* --- EDITOR SURFACE --- */
         #display {
-            min-height: 100%;
-            outline: none;
-            padding: 40px 60px;
-            line-height: var(--line-height);
-            font-size: 16px;
-            white-space: pre-wrap;
-            position: relative;
-            z-index: 1; 
+            min-height: 100%; outline: none; 
+            padding: 40px 60px; /* Margins like a paper */
+            line-height: var(--line-height); font-size: 16px; white-space: pre-wrap;
+            position: relative; z-index: 1;
         }
 
-        /* REMOTE CURSORS */
-        #cursor-layer {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            pointer-events: none; 
-            z-index: 10;
-        }
+        /* --- CURSORS LAYER --- */
+        #cursor-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .remote-cursor { position: absolute; width: 2px; height: var(--line-height); transition: top 0.1s, left 0.1s; pointer-events: none; }
+        .cursor-flag { position: absolute; top: -18px; left: 0; padding: 2px 4px; border-radius: 3px; font-size: 10px; color: #fff; font-weight: bold; white-space: nowrap; }
 
-        .remote-cursor {
-            position: absolute;
-            width: var(--caret-width);
-            height: var(--line-height);
-            transition: top 0.1s, left 0.1s;
-            animation: blink 1s infinite;
-        }
-        
-        .cursor-flag {
-            position: absolute;
-            top: -20px; left: 0;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 0.65rem;
-            color: #fff; 
-            font-weight: bold;
-            white-space: nowrap;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            opacity: 0.8;
-        }
-        .remote-cursor:hover .cursor-flag { opacity: 1; z-index: 20; }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-
-        /* MINIMAP */
-        #minimap {
-            position: absolute;
-            right: 0; top: 50px; bottom: 0;
-            width: 16px;
-            background: transparent;
-            z-index: 50;
-            pointer-events: none; 
-        }
-        .scroll-dot {
-            position: absolute;
-            width: 8px; height: 8px;
-            left: 4px;
-            border-radius: 50%;
-            cursor: pointer;
-            transition: transform 0.1s;
-            pointer-events: auto;
-            box-shadow: 0 0 2px rgba(0,0,0,0.3);
-        }
+        /* --- MINIMAP (Scroll Indicator) --- */
+        #minimap { position: absolute; right: 5px; top: 0; bottom: 50px; width: 10px; z-index: 50; pointer-events: none; }
+        .scroll-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; cursor: pointer; pointer-events: auto; transition: transform 0.1s; right: 0; }
         .scroll-dot:hover { transform: scale(1.5); }
 
-        /* TOAST NOTIFICATION */
-        #toast {
-            position: fixed; top: 60px; right: 20px;
-            background: #333; color: #fff;
-            padding: 8px 16px; border-radius: 4px;
-            font-size: 0.8rem; opacity: 0; transition: opacity 0.3s;
-            pointer-events: none; z-index: 200;
+        /* --- STATUS BAR --- */
+        #status-bar {
+            height: 40px; background: #f0f0f0; border-top: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center; padding: 0 20px;
+            font-size: 0.8rem; color: #555; z-index: 100;
         }
-        #toast.show { opacity: 1; }
+        #connection-status { display: flex; align-items: center; gap: 8px; }
+        .status-indicator { width: 10px; height: 10px; border-radius: 50%; background: #ff5252; transition: background 0.3s; }
+        .status-indicator.connected { background: #00e676; box-shadow: 0 0 5px #00e676; }
+
+        /* --- TOOLS --- */
+        #tools {
+            position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+            background: #222; padding: 10px 15px; border-radius: 50px; 
+            display: flex; gap: 8px; opacity: 0; transition: opacity 0.2s, transform 0.2s;
+            pointer-events: none; z-index: 200; box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        #tools.visible { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+        #tools button { background: #444; color: #fff; border: none; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-weight: bold; font-size: 0.9rem; transition: background 0.2s; }
+        #tools button:hover { background: #666; }
 
     </style>
 </head>
 <body>
 
-    <header>
-        <div class="title">P2P Shared Doc</div>
-        <div class="status">
-            <div class="dot-status"></div>
-            <span id="peer-count">Offline</span>
-        </div>
-    </header>
+    <!-- LOGIN / ROOM SELECTION -->
+    <form id="login">
+        <h2 style="font-weight: 300;">Enter a Color Code (Room)</h2>
+        <input type="text" id="color" placeholder="e.g. #336699 or blue" required>
+        <button type="submit">ENTER</button>
+    </form>
 
-    <div id="editor-container">
+    <div id="container">
+        <!-- Text Editor -->
         <div id="display" contenteditable="true" spellcheck="false"></div>
+        <!-- Remote Cursors Overlay -->
         <div id="cursor-layer"></div>
     </div>
     
+    <!-- Right side scroll indicators -->
     <div id="minimap"></div>
-    <div id="toast">Data Synced</div>
 
-<script type="module">
-    import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
+    <!-- Bottom Status -->
+    <div id="status-bar">
+        <div id="connection-status">
+            <span class="status-indicator"></span>
+            <span id="status-text">Disconnected</span>
+        </div>
+        <div id="peer-count">Connected Peers: 0</div>
+    </div>
 
-    // --- CONFIG ---
-    const LINE_HEIGHT = 24;
-    const APP_ID = 'gun-trystero-final-fix-v2';
-    
-    // Hash Logic
-    let hash = window.location.hash.replace('#', '');
-    if(!hash) { hash = 'ffffff'; window.location.hash = hash; }
-    
-    const ROOM_ID = `${APP_ID}-${hash}`;
-    const MY_COLOR = generateColor(selfId);
+    <!-- Floating Formatting Tools -->
+    <div id="tools">
+        <button id="bold-button"><b>B</b></button>
+        <button id="italic-button"><i>I</i></button>
+        <button id="underline-button"><u>U</u></button>
+        <button id="link-button">🔗</button>
+        <button id="image-button">📷</button>
+    </div>
 
-    // --- UI REFS ---
-    const container = document.getElementById('editor-container');
-    const display = document.getElementById('display');
-    const cursorLayer = document.getElementById('cursor-layer');
-    const minimap = document.getElementById('minimap');
-    const statusDot = document.querySelector('.dot-status');
-    const statusText = document.getElementById('peer-count');
-    const toast = document.getElementById('toast');
+    <!-- LOGIC -->
+    <script type="module">
+        import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
-    // --- 1. SETUP GUN (Local Persistence Only) ---
-    const gun = Gun({ peers: [], localStorage: true });
-    const localDB = gun.get(ROOM_ID);
-
-    // --- 2. SETUP TRYSTERO (With Robust Trackers) ---
-    const config = { 
-        appId: APP_ID,
-        trackerUrls: [
-            'wss://tracker.openwebrtc.io', 
-            'wss://tracker.btorrent.xyz', 
-            'wss://tracker.webtorrent.dev',
-            'wss://tracker.files.fm:7073/announce'
-        ]
-    };
-    const room = joinRoom(config, ROOM_ID);
-
-    // Actions
-    const [sendContent, getContent] = room.makeAction('content');
-    const [sendCursor, getCursor] = room.makeAction('cursor');
-    const [pushSync, getPushSync] = room.makeAction('pushSync'); // "Here is the data"
-
-    // --- 3. INIT & INFINITE SCROLL ---
-
-    function initDisplay() {
-        // Attempt to load from local storage first
-        localDB.get('content').once((data) => {
-            if (data && data.length > 20) {
-                display.innerHTML = data;
-            } else {
-                fillWhitespace();
-            }
-        });
-        display.focus();
-    }
-
-    function fillWhitespace() {
-        // Only fill if empty
-        if(display.innerHTML.trim().length === 0) {
-            const totalLines = Math.floor(window.innerHeight / LINE_HEIGHT) * 3;
-            display.innerHTML = '<div><br></div>'.repeat(totalLines);
-        }
-    }
-
-    function handleScroll() {
-        const scrollTop = container.scrollTop;
-        const scrollHeight = container.scrollHeight;
-        const clientHeight = container.clientHeight;
-        const buffer = 200; 
-
-        if (scrollTop < buffer) {
-            const linesToAdd = 5;
-            const html = '<div><br></div>'.repeat(linesToAdd);
-            display.insertAdjacentHTML('afterbegin', html);
-            container.scrollTop += (linesToAdd * LINE_HEIGHT);
-        }
-
-        if (scrollHeight - scrollTop - clientHeight < buffer) {
-            const linesToAdd = 5;
-            const html = '<div><br></div>'.repeat(linesToAdd);
-            display.insertAdjacentHTML('beforeend', html);
-        }
-    }
-
-    container.addEventListener('scroll', handleScroll);
-    initDisplay();
-
-    // --- 4. SYNC LOGIC ---
-
-    let isTyping = false;
-    let typeTimeout;
-
-    // A. I am typing
-    display.addEventListener('input', () => {
-        isTyping = true;
-        const html = display.innerHTML;
-        
-        localDB.get('content').put(html); // Save Local
-        sendContent(html);                // Broadcast Live
-        
-        updateMyCursor();
-        clearTimeout(typeTimeout);
-        typeTimeout = setTimeout(() => isTyping = false, 1000);
-    });
-
-    // B. Receiving Live Updates
-    getContent((html) => {
-        localDB.get('content').put(html);
-        if (!isTyping && display.innerHTML !== html) {
-            const savedSel = saveSelection();
-            display.innerHTML = html;
-            restoreSelection(savedSel);
-        }
-    });
-
-    // --- 5. CONNECTION HANDLER ("Push" Strategy) ---
-    
-    // When a new peer joins, I immediately PUSH my data to them
-    // This mimics your PeerJS logic: conn.on('open', () => conn.send(data))
-    room.onPeerJoin(peerId => {
-        updateStatus();
-        console.log(`Peer ${peerId} joined. Pushing data...`);
-        
-        const content = display.innerHTML;
-        // Don't push if I only have empty whitespace
-        if(content.length > 50) {
-            pushSync(content, peerId);
-        }
-        
-        // Also send my cursor so they see me immediately
-        updateMyCursor();
-    });
-
-    room.onPeerLeave(id => {
-        updateStatus();
-        removePeerVisuals(id);
-    });
-
-    // Receive the Pushed Data (I am the new peer)
-    getPushSync((html) => {
-        console.log("Received Initial Sync!");
-        showToast("Synced with peer");
-        
-        // Always trust the incoming sync on join
-        if(!isTyping) {
-            display.innerHTML = html;
-            localDB.get('content').put(html);
-        }
-    });
-
-    // --- 6. CURSOR TRACKING ---
-
-    function updateMyCursor() {
-        const sel = window.getSelection();
-        if (sel.rangeCount === 0) return;
-
-        const range = sel.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        const containerRect = container.getBoundingClientRect();
-        
-        const relativeY = rect.top - containerRect.top + container.scrollTop;
-        const relativeX = rect.left - containerRect.left + container.scrollLeft;
-
-        const cursorData = {
-            id: selfId,
-            x: relativeX,
-            y: relativeY,
-            color: MY_COLOR
+        // --- 1. CONFIG & STATE ---
+        const ui = {
+            login: document.getElementById('login'),
+            colorInput: document.getElementById('color'),
+            display: document.getElementById('display'),
+            container: document.getElementById('container'),
+            cursorLayer: document.getElementById('cursor-layer'),
+            minimap: document.getElementById('minimap'),
+            statusInd: document.querySelector('.status-indicator'),
+            statusText: document.getElementById('status-text'),
+            peerCount: document.getElementById('peer-count'),
+            tools: document.getElementById('tools')
         };
 
-        sendCursor(cursorData);
-    }
+        const lineHeight = 24;
+        const myColor = generateColor(selfId); // My Cursor Color
+        let appConfig = { roomId: null };
 
-    ['click', 'keyup', 'focus', 'mouseup'].forEach(evt => 
-        display.addEventListener(evt, updateMyCursor)
-    );
-
-    getCursor((data, peerId) => {
-        renderGhostCursor(peerId, data);
-        renderMinimapDot(peerId, data);
-    });
-
-    function renderGhostCursor(peerId, data) {
-        let cursor = document.getElementById(`cursor-${peerId}`);
-        if (!cursor) {
-            cursor = document.createElement('div');
-            cursor.id = `cursor-${peerId}`;
-            cursor.className = 'remote-cursor';
-            
-            const flag = document.createElement('div');
-            flag.className = 'cursor-flag';
-            flag.innerText = peerId.slice(0,4);
-            flag.style.backgroundColor = data.color;
-            
-            cursor.appendChild(flag);
-            cursorLayer.appendChild(cursor);
+        // --- 2. LOGIN LOGIC ---
+        function checkLogin() {
+            let hash = window.location.hash.replace('#', '');
+            if (hash) {
+                // Logged in
+                appConfig.roomId = 'color-doc-' + hash;
+                ui.login.classList.add('hidden');
+                initApp(); // Start Gun & Trystero
+            } else {
+                // Show Login
+                ui.login.classList.remove('hidden');
+                ui.colorInput.focus();
+            }
         }
-        cursor.style.backgroundColor = data.color;
-        cursor.style.top = `${data.y}px`;
-        cursor.style.left = `${data.x}px`;
-        cursor.style.opacity = 1;
-        
-        clearTimeout(cursor.timer);
-        cursor.timer = setTimeout(() => cursor.style.opacity = 0, 5000);
-    }
 
-    function renderMinimapDot(peerId, data) {
-        let dot = document.getElementById(`dot-${peerId}`);
-        if (!dot) {
-            dot = document.createElement('div');
-            dot.id = `dot-${peerId}`;
-            dot.className = 'scroll-dot';
-            dot.style.backgroundColor = data.color;
-            dot.title = `Jump to ${peerId.slice(0,4)}`;
-            dot.onclick = () => container.scrollTo({ top: data.y - (container.clientHeight/2), behavior: 'smooth' });
-            minimap.appendChild(dot);
-        }
-        const totalHeight = container.scrollHeight;
-        if(totalHeight === 0) return;
-        const percentage = (data.y / totalHeight) * 100;
-        dot.style.top = `${percentage}%`;
-    }
-
-    // --- HELPERS ---
-
-    function updateStatus() {
-        const count = Object.keys(room.getPeers()).length;
-        statusText.innerText = count > 0 ? `${count} Peer(s)` : "Offline";
-        if(count > 0) statusDot.classList.add('on');
-        else statusDot.classList.remove('on');
-    }
-
-    function removePeerVisuals(id) {
-        const c = document.getElementById(`cursor-${id}`);
-        const d = document.getElementById(`dot-${id}`);
-        if(c) c.remove();
-        if(d) d.remove();
-    }
-
-    function showToast(msg) {
-        toast.innerText = msg;
-        toast.classList.add('show');
-        setTimeout(() => toast.classList.remove('show'), 2000);
-    }
-
-    function generateColor(str) {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-        const c = (hash & 0x00AAAA).toString(16).toUpperCase(); 
-        return '#' + '00000'.substring(0, 6 - c.length) + c;
-    }
-
-    function saveSelection() {
-        if (window.getSelection) {
-            const sel = window.getSelection();
-            if (sel.getRangeAt && sel.rangeCount) return sel.getRangeAt(0);
-        }
-        return null;
-    }
-
-    function restoreSelection(range) {
-        if (range && window.getSelection) {
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-        }
-    }
-
-    display.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            document.execCommand('insertHTML', false, '<div><br></div>');
+        ui.login.addEventListener('submit', (e) => {
             e.preventDefault();
-            updateMyCursor();
-        }
-    });
+            const val = ui.colorInput.value.trim();
+            if (val) {
+                window.location.hash = val;
+                checkLogin();
+            }
+        });
 
-</script>
+        // --- 3. GUN DB & TRYSTERO SETUP ---
+        let room, roomDB;
+        let sendContent, getContent, sendCursor, getCursor, pushSync, getPushSync;
+
+        function initApp() {
+            // A. GunDB (Storage)
+            const gun = Gun({ peers: [], localStorage: true });
+            roomDB = gun.get(appConfig.roomId);
+
+            // B. Trystero (Network)
+            const config = { 
+                appId: 'color-doc-v2',
+                trackerUrls: [
+                    'wss://tracker.openwebrtc.io', 
+                    'wss://tracker.btorrent.xyz', 
+                    'wss://tracker.webtorrent.dev'
+                ] 
+            };
+            room = joinRoom(config, appConfig.roomId);
+
+            // Actions
+            [sendContent, getContent] = room.makeAction('content');
+            [sendCursor, getCursor] = room.makeAction('cursor');
+            [pushSync, getPushSync] = room.makeAction('sync');
+
+            // Event Listeners
+            setupNetworkEvents();
+            initData(); // Load local content
+        }
+
+        // --- 4. DISPLAY & CONTENT MANAGEMENT ---
+
+        function initData() {
+            roomDB.get('content').once((data) => {
+                if (data && data.length > 20) {
+                    ui.display.innerHTML = data;
+                } else {
+                    // Fill whitespace for infinite feel
+                    const totalLines = Math.floor(window.innerHeight / lineHeight) * 3;
+                    ui.display.innerHTML = '<div><br></div>'.repeat(totalLines);
+                }
+                
+                // Initial Scroll
+                setTimeout(() => {
+                    ui.container.scrollTop = ui.container.scrollHeight / 3;
+                    ui.display.focus();
+                }, 100);
+            });
+        }
+
+        // Handle Typing (Save + Broadcast)
+        ui.display.addEventListener('input', () => {
+            const content = ui.display.innerHTML;
+            
+            // 1. Save Local
+            roomDB.get('content').put(content);
+            
+            // 2. Send Network
+            sendContent(content);
+            
+            // 3. Maintain formatting
+            maintainEmptyLines();
+        });
+
+        function maintainEmptyLines() {
+            // Infinite scroll logic (Bottom)
+            if (!ui.display.innerHTML.trim()) {
+                const totalLines = Math.floor(window.innerHeight / lineHeight) * 3;
+                ui.display.innerHTML = '<div><br></div>'.repeat(totalLines);
+            }
+        }
+
+        // Infinite Scroll Logic
+        ui.container.addEventListener('scroll', () => {
+            const scrollTop = ui.container.scrollTop;
+            const scrollHeight = ui.container.scrollHeight;
+            const clientHeight = ui.container.clientHeight;
+
+            // Add Top
+            if (scrollTop < clientHeight) {
+                const lines = 5;
+                ui.display.insertAdjacentHTML('afterbegin', '<div><br></div>'.repeat(lines));
+                ui.container.scrollTop += lines * lineHeight;
+            }
+            // Add Bottom
+            if (scrollHeight - scrollTop - clientHeight < clientHeight) {
+                ui.display.insertAdjacentHTML('beforeend', '<div><br></div>'.repeat(5));
+            }
+        });
+
+        // Handle Enter Key (Clean Divs)
+        ui.display.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.execCommand('insertHTML', false, '<div><br></div>');
+            }
+        });
+
+        // --- 5. NETWORK SYNC LOGIC ---
+
+        function setupNetworkEvents() {
+            // Peer Joined
+            room.onPeerJoin(peerId => {
+                updateStatus();
+                // Push my current board state to the new peer (Sync)
+                if (ui.display.innerHTML.length > 50) {
+                    pushSync(ui.display.innerHTML, peerId);
+                }
+            });
+
+            room.onPeerLeave(peerId => {
+                updateStatus();
+                removePeerVisuals(peerId);
+            });
+
+            // Receive Content Updates
+            getContent((html) => {
+                // Save to local
+                roomDB.get('content').put(html);
+                
+                // Update DOM if different
+                if (html !== ui.display.innerHTML) {
+                    const savedSel = saveSelection();
+                    ui.display.innerHTML = html;
+                    restoreSelection(savedSel);
+                }
+            });
+
+            // Receive Initial Sync
+            getPushSync((html) => {
+                roomDB.get('content').put(html);
+                const savedSel = saveSelection();
+                ui.display.innerHTML = html;
+                restoreSelection(savedSel);
+            });
+
+            // Receive Cursors
+            getCursor((data, peerId) => {
+                renderCursor(peerId, data);
+                renderMinimap(peerId, data);
+            });
+        }
+
+        function updateStatus() {
+            const count = Object.keys(room.getPeers()).length;
+            ui.peerCount.innerText = `Connected Peers: ${count}`;
+            if (count > 0) {
+                ui.statusInd.classList.add('connected');
+                ui.statusText.innerText = "Connected";
+            } else {
+                ui.statusInd.classList.remove('connected');
+                ui.statusText.innerText = "Waiting...";
+            }
+        }
+
+        // --- 6. CURSOR LOGIC ---
+
+        function broadcastCursor() {
+            const sel = window.getSelection();
+            if (sel.rangeCount === 0) return;
+            const range = sel.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+            const containerRect = ui.container.getBoundingClientRect();
+
+            const x = rect.left - containerRect.left + ui.container.scrollLeft;
+            const y = rect.top - containerRect.top + ui.container.scrollTop;
+
+            sendCursor({ x, y, color: myColor });
+        }
+
+        ['click', 'keyup', 'input', 'mouseup'].forEach(ev => 
+            ui.display.addEventListener(ev, broadcastCursor)
+        );
+
+        function renderCursor(id, data) {
+            let cursor = document.getElementById(`cursor-${id}`);
+            if (!cursor) {
+                cursor = document.createElement('div');
+                cursor.id = `cursor-${id}`;
+                cursor.className = 'remote-cursor';
+                
+                const flag = document.createElement('div');
+                flag.className = 'cursor-flag';
+                flag.innerText = id.slice(0,4);
+                flag.style.backgroundColor = data.color;
+                
+                cursor.appendChild(flag);
+                ui.cursorLayer.appendChild(cursor);
+            }
+            cursor.style.backgroundColor = data.color;
+            cursor.style.left = data.x + 'px';
+            cursor.style.top = data.y + 'px';
+        }
+
+        function renderMinimap(id, data) {
+            let dot = document.getElementById(`dot-${id}`);
+            if (!dot) {
+                dot = document.createElement('div');
+                dot.id = `dot-${id}`;
+                dot.className = 'scroll-dot';
+                dot.style.backgroundColor = data.color;
+                dot.onclick = () => ui.container.scrollTo({ top: data.y - (ui.container.clientHeight/2), behavior: 'smooth' });
+                ui.minimap.appendChild(dot);
+            }
+            const pct = (data.y / ui.container.scrollHeight) * 100;
+            dot.style.top = pct + '%';
+        }
+
+        function removePeerVisuals(id) {
+            const c = document.getElementById(`cursor-${id}`);
+            if(c) c.remove();
+            const d = document.getElementById(`dot-${id}`);
+            if(d) d.remove();
+        }
+
+        // --- 7. TOOLS LOGIC ---
+        function handleSelection() {
+            if (window.getSelection().toString().trim()) {
+                ui.tools.classList.add('visible');
+            } else {
+                ui.tools.classList.remove('visible');
+            }
+        }
+        ui.display.addEventListener('mouseup', handleSelection);
+        ui.display.addEventListener('keyup', handleSelection);
+
+        ui.tools.addEventListener('click', (e) => {
+            if(e.target.tagName === 'BUTTON') {
+                const cmd = e.target.id.replace('-button', '');
+                if(['bold','italic','underline'].includes(cmd)) {
+                    document.execCommand(cmd, false, null);
+                } else if(cmd === 'link') {
+                    const url = prompt('URL:');
+                    if(url) document.execCommand('createLink', false, url);
+                } else if(cmd === 'image') {
+                    const url = prompt('Image URL:');
+                    if(url) document.execCommand('insertImage', false, url);
+                }
+            }
+        });
+
+        // --- HELPERS ---
+        function generateColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            const c = (hash & 0x00AAAA).toString(16).toUpperCase(); 
+            return '#' + '00000'.substring(0, 6 - c.length) + c;
+        }
+
+        function saveSelection() {
+            const sel = window.getSelection();
+            return sel.rangeCount ? sel.getRangeAt(0) : null;
+        }
+
+        function restoreSelection(range) {
+            if (range) {
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            }
+        }
+
+        // --- START ---
+        window.addEventListener('load', checkLogin);
+        window.addEventListener('hashchange', () => window.location.reload());
+
+    </script>
 </body>
 </html>
