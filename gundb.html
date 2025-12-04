@@ -3,15 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Color Notebook</title>
-    <!-- 1. Load GunDB -->
+    <title>P2P Block Editor</title>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
             --bg: #ffffff;
             --text: #1a1a1a;
-            --accent: #000;
-            --line-height: 24px;
+            --line-height: 1.5;
         }
         
         body { 
@@ -20,412 +18,423 @@
             overflow: hidden; height: 100vh; display: flex; flex-direction: column; 
         }
 
-        /* --- LOGIN FORM --- */
+        /* LOGIN */
         #login {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: var(--bg); z-index: 1000;
-            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+            background: #fff; z-index: 1000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
-        #login input { padding: 15px; font-size: 1.2rem; border: 2px solid #333; border-radius: 8px; text-align: center; outline: none; }
-        #login button { padding: 15px 30px; font-size: 1rem; background: #333; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
         #login.hidden { display: none; }
+        #login input { padding: 15px; font-size: 1.2rem; border: 2px solid #333; margin-bottom: 10px; text-align: center; }
+        #login button { padding: 15px 30px; background: #333; color: white; border: none; cursor: pointer; font-size: 1rem; }
 
-        /* --- MAIN CONTAINER --- */
+        /* HEADER */
+        #header {
+            padding: 10px 20px; background: #f4f4f4; border-bottom: 1px solid #ddd;
+            display: flex; justify-content: space-between; align-items: center; height: 40px; z-index: 10;
+        }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; display: inline-block; }
+        .status-dot.on { background: #00e676; box-shadow: 0 0 5px #00e676; }
+
+        /* EDITOR CONTAINER */
         #container { 
-            position: relative; flex: 1; 
-            overflow-y: auto; overflow-x: hidden; 
-            scroll-behavior: smooth; 
+            flex: 1; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; 
+            padding-bottom: 50vh; /* Allow scrolling past bottom */
+            cursor: text;
         }
 
-        /* --- EDITOR SURFACE --- */
+        /* THE EDITOR SURFACE */
         #display {
             min-height: 100%; outline: none; 
-            padding: 40px 60px; /* Margins like a paper */
-            line-height: var(--line-height); font-size: 16px; white-space: pre-wrap;
-            position: relative; z-index: 1;
+            padding: 40px 60px;
+            font-size: 16px; line-height: var(--line-height);
         }
 
-        /* --- CURSORS LAYER --- */
-        #cursor-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-        .remote-cursor { position: absolute; width: 2px; height: var(--line-height); transition: top 0.1s, left 0.1s; pointer-events: none; }
-        .cursor-flag { position: absolute; top: -18px; left: 0; padding: 2px 4px; border-radius: 3px; font-size: 10px; color: #fff; font-weight: bold; white-space: nowrap; }
-
-        /* --- MINIMAP (Scroll Indicator) --- */
-        #minimap { position: absolute; right: 5px; top: 0; bottom: 50px; width: 10px; z-index: 50; pointer-events: none; }
-        .scroll-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; cursor: pointer; pointer-events: auto; transition: transform 0.1s; right: 0; }
-        .scroll-dot:hover { transform: scale(1.5); }
-
-        /* --- STATUS BAR --- */
-        #status-bar {
-            height: 40px; background: #f0f0f0; border-top: 1px solid #ddd;
-            display: flex; justify-content: space-between; align-items: center; padding: 0 20px;
-            font-size: 0.8rem; color: #555; z-index: 100;
+        /* --- THE LINE LOCKING MAGIC --- */
+        
+        /* A standard line */
+        .editor-line {
+            min-height: 24px; /* Ensure empty lines are clickable */
+            padding: 2px 5px;
+            border-left: 3px solid transparent; /* Reserve space for lock indicator */
+            margin-bottom: 2px;
+            border-radius: 2px;
         }
-        #connection-status { display: flex; align-items: center; gap: 8px; }
-        .status-indicator { width: 10px; height: 10px; border-radius: 50%; background: #ff5252; transition: background 0.3s; }
-        .status-indicator.connected { background: #00e676; box-shadow: 0 0 5px #00e676; }
 
-        /* --- TOOLS --- */
+        /* A line locked by someone else */
+        .locked-line {
+            background-color: rgba(0,0,0, 0.03);
+            position: relative;
+        }
+        
+        /* The user's name tag floating on the locked line */
+        .locked-tag {
+            position: absolute;
+            right: 100%;
+            top: 0;
+            font-size: 0.7rem;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            margin-right: 5px;
+            pointer-events: none;
+            font-weight: bold;
+            display: flex; align-items: center;
+        }
+
+        /* When I am editing a line, highlight it slightly for me too */
+        .my-active-line {
+            background-color: rgba(0, 0, 0, 0.015);
+        }
+
+        /* TOOLS */
         #tools {
-            position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
-            background: #222; padding: 10px 15px; border-radius: 50px; 
-            display: flex; gap: 8px; opacity: 0; transition: opacity 0.2s, transform 0.2s;
-            pointer-events: none; z-index: 200; box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: #222; padding: 10px; border-radius: 50px; 
+            display: flex; gap: 10px; opacity: 0; pointer-events: none; transition: 0.2s;
         }
-        #tools.visible { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
-        #tools button { background: #444; color: #fff; border: none; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-weight: bold; font-size: 0.9rem; transition: background 0.2s; }
-        #tools button:hover { background: #666; }
+        #tools.visible { opacity: 1; pointer-events: auto; }
+        #tools button { width: 30px; height: 30px; border-radius: 50%; border:none; cursor: pointer; background: #555; color: white; }
 
     </style>
 </head>
 <body>
 
-    <!-- LOGIN / ROOM SELECTION -->
-    <form id="login">
-        <h2 style="font-weight: 300;">Enter a Color Code (Room)</h2>
-        <input type="text" id="color" placeholder="e.g. #336699 or blue" required>
-        <button type="submit">ENTER</button>
-    </form>
+    <!-- Login -->
+    <div id="login">
+        <h2>Enter Room Name</h2>
+        <input type="text" id="room-input" placeholder="e.g. blue-room">
+        <button id="btn-join">Join Document</button>
+    </div>
+
+    <!-- UI -->
+    <div id="header">
+        <strong>P2P Block Editor</strong>
+        <div>
+            <span class="status-dot"></span>
+            <span id="peer-count" style="font-size: 0.8rem; margin-left: 5px;">Offline</span>
+        </div>
+    </div>
 
     <div id="container">
-        <!-- Text Editor -->
         <div id="display" contenteditable="true" spellcheck="false"></div>
-        <!-- Remote Cursors Overlay -->
-        <div id="cursor-layer"></div>
-    </div>
-    
-    <!-- Right side scroll indicators -->
-    <div id="minimap"></div>
-
-    <!-- Bottom Status -->
-    <div id="status-bar">
-        <div id="connection-status">
-            <span class="status-indicator"></span>
-            <span id="status-text">Disconnected</span>
-        </div>
-        <div id="peer-count">Connected Peers: 0</div>
     </div>
 
-    <!-- Floating Formatting Tools -->
     <div id="tools">
-        <button id="bold-button"><b>B</b></button>
-        <button id="italic-button"><i>I</i></button>
-        <button id="underline-button"><u>U</u></button>
-        <button id="link-button">🔗</button>
-        <button id="image-button">📷</button>
+        <button id="btn-bold">B</button>
+        <button id="btn-italic">I</button>
+        <button id="btn-link">🔗</button>
     </div>
 
-    <!-- LOGIC -->
     <script type="module">
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
-        // --- 1. CONFIG & STATE ---
+        // --- STATE & CONFIG ---
         const ui = {
             login: document.getElementById('login'),
-            colorInput: document.getElementById('color'),
+            roomInput: document.getElementById('room-input'),
             display: document.getElementById('display'),
             container: document.getElementById('container'),
-            cursorLayer: document.getElementById('cursor-layer'),
-            minimap: document.getElementById('minimap'),
-            statusInd: document.querySelector('.status-indicator'),
-            statusText: document.getElementById('status-text'),
             peerCount: document.getElementById('peer-count'),
+            statusDot: document.querySelector('.status-dot'),
             tools: document.getElementById('tools')
         };
 
-        const lineHeight = 24;
-        const myColor = generateColor(selfId); // My Cursor Color
-        let appConfig = { roomId: null };
-
-        // --- 2. LOGIN LOGIC ---
-        function checkLogin() {
-            let hash = window.location.hash.replace('#', '');
-            if (hash) {
-                // Logged in
-                appConfig.roomId = 'color-doc-' + hash;
-                ui.login.classList.add('hidden');
-                initApp(); // Start Gun & Trystero
-            } else {
-                // Show Login
-                ui.login.classList.remove('hidden');
-                ui.colorInput.focus();
-            }
-        }
-
-        ui.login.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const val = ui.colorInput.value.trim();
-            if (val) {
-                window.location.hash = val;
-                checkLogin();
-            }
-        });
-
-        // --- 3. GUN DB & TRYSTERO SETUP ---
+        const myColor = generateColor(selfId);
+        let roomId = null;
         let room, roomDB;
-        let sendContent, getContent, sendCursor, getCursor, pushSync, getPushSync;
+        let actions = {};
+        
+        // Track who is editing what: { peerId: "line-id" }
+        const activeLocks = {}; 
 
-        function initApp() {
-            // A. GunDB (Storage)
+        // --- 1. INITIALIZATION ---
+
+        document.getElementById('btn-join').onclick = () => {
+            const val = ui.roomInput.value.trim();
+            if(val) {
+                roomId = 'block-doc-' + val;
+                ui.login.classList.add('hidden');
+                initNetwork();
+            }
+        };
+
+        function initNetwork() {
+            // GunDB
             const gun = Gun({ peers: [], localStorage: true });
-            roomDB = gun.get(appConfig.roomId);
+            roomDB = gun.get(roomId);
 
-            // B. Trystero (Network)
-            const config = { 
-                appId: 'color-doc-v2',
-                trackerUrls: [
-                    'wss://tracker.openwebrtc.io', 
-                    'wss://tracker.btorrent.xyz', 
-                    'wss://tracker.webtorrent.dev'
-                ] 
-            };
-            room = joinRoom(config, appConfig.roomId);
+            // Trystero
+            const config = { appId: 'block-doc-v1' };
+            room = joinRoom(config, roomId);
+            
+            actions.sendContent = room.makeAction('content')[0];
+            actions.getContent = room.makeAction('content')[1];
+            
+            actions.sendLock = room.makeAction('lock')[0];
+            actions.getLock = room.makeAction('lock')[1];
 
-            // Actions
-            [sendContent, getContent] = room.makeAction('content');
-            [sendCursor, getCursor] = room.makeAction('cursor');
-            [pushSync, getPushSync] = room.makeAction('sync');
+            actions.pushSync = room.makeAction('sync')[0];
+            actions.getPushSync = room.makeAction('sync')[1];
 
-            // Event Listeners
-            setupNetworkEvents();
-            initData(); // Load local content
+            setupEvents();
+            loadLocalContent();
         }
 
-        // --- 4. DISPLAY & CONTENT MANAGEMENT ---
+        // --- 2. CONTENT LOADING & FORMATTING ---
 
-        function initData() {
+        function loadLocalContent() {
             roomDB.get('content').once((data) => {
-                if (data && data.length > 20) {
+                if (data && data.includes('class="editor-line"')) {
                     ui.display.innerHTML = data;
                 } else {
-                    // Fill whitespace for infinite feel
-                    const totalLines = Math.floor(window.innerHeight / lineHeight) * 3;
-                    ui.display.innerHTML = '<div><br></div>'.repeat(totalLines);
+                    // Initialize with 10 empty lines
+                    let html = '';
+                    for(let i=0; i<10; i++) html += createEmptyLine();
+                    ui.display.innerHTML = html;
                 }
-                
-                // Initial Scroll
-                setTimeout(() => {
-                    ui.container.scrollTop = ui.container.scrollHeight / 3;
-                    ui.display.focus();
-                }, 100);
+                ensureLineIDs(); // Safety check
             });
         }
 
-        // Handle Typing (Save + Broadcast)
+        // Helper: Create a line with a UUID
+        function createEmptyLine() {
+            const id = 'line-' + Math.random().toString(36).substr(2, 9);
+            return `<div id="${id}" class="editor-line"><br></div>`;
+        }
+
+        // Safety: Ensure every single child has an ID and class
+        function ensureLineIDs() {
+            const children = Array.from(ui.display.children);
+            let changed = false;
+            children.forEach(child => {
+                if (!child.id || !child.id.startsWith('line-')) {
+                    child.id = 'line-' + Math.random().toString(36).substr(2, 9);
+                    changed = true;
+                }
+                if (!child.classList.contains('editor-line')) {
+                    child.classList.add('editor-line');
+                    changed = true;
+                }
+            });
+            return changed;
+        }
+
+        // --- 3. INPUT & SYNC LOGIC ---
+
+        // Broadcast Content
         ui.display.addEventListener('input', () => {
-            const content = ui.display.innerHTML;
-            
-            // 1. Save Local
-            roomDB.get('content').put(content);
-            
-            // 2. Send Network
-            sendContent(content);
-            
-            // 3. Maintain formatting
-            maintainEmptyLines();
+            // If the browser messed up tags, fix them
+            if(ensureLineIDs()) {
+                // If we had to fix IDs, cursor might jump, save it?
+                // For simplicity in this demo, we assume browser plays nice mostly
+            }
+
+            const html = ui.display.innerHTML;
+            roomDB.get('content').put(html);
+            actions.sendContent(html);
         });
 
-        function maintainEmptyLines() {
-            // Infinite scroll logic (Bottom)
-            if (!ui.display.innerHTML.trim()) {
-                const totalLines = Math.floor(window.innerHeight / lineHeight) * 3;
-                ui.display.innerHTML = '<div><br></div>'.repeat(totalLines);
+        // Receive Content
+        actions.getContent((html) => {
+            roomDB.get('content').put(html);
+            
+            // Only update if I am NOT typing to avoid conflict
+            // In a block editor, we could update *other* blocks, but let's keep it simple
+            if (!document.hasFocus()) {
+                ui.display.innerHTML = html;
+            } else {
+                // Harder problem: Merge remote changes without destroying my focus
+                // For this demo: We only update if the HTML is drastically different
+                // or rely on "Line Locking" to prevent conflicts in the first place.
+                
+                // For now, let's update but try to keep selection
+                const saved = saveSelection();
+                ui.display.innerHTML = html;
+                restoreSelection(saved);
+            }
+            applyVisualLocks(); // Re-apply locks after DOM refresh
+        });
+
+        // --- 4. LINE LOCKING LOGIC (The Core Request) ---
+
+        // A. Detect where I am
+        document.addEventListener('selectionchange', () => {
+            const sel = window.getSelection();
+            if (!sel.rangeCount) return;
+            
+            // Find the closest parent line <div>
+            let node = sel.anchorNode;
+            if (node.nodeType === 3) node = node.parentNode; // Text node -> Element
+            
+            const lineElement = node.closest('.editor-line');
+            
+            if (lineElement && lineElement.id) {
+                // Highlight my own line
+                document.querySelectorAll('.my-active-line').forEach(el => el.classList.remove('my-active-line'));
+                lineElement.classList.add('my-active-line');
+
+                // Broadcast lock
+                actions.sendLock({ lineId: lineElement.id, peerId: selfId });
+            }
+        });
+
+        // B. Receive Locks
+        actions.getLock((data, peerId) => {
+            activeLocks[peerId] = { lineId: data.lineId, ts: Date.now(), color: stringToColor(peerId) };
+            applyVisualLocks();
+        });
+
+        // C. Apply Visuals & Enforce Locks
+        function applyVisualLocks() {
+            // Clear old locks
+            document.querySelectorAll('.locked-line').forEach(el => {
+                el.classList.remove('locked-line');
+                el.style.borderLeftColor = 'transparent';
+                const tag = el.querySelector('.locked-tag');
+                if(tag) tag.remove();
+            });
+
+            // Apply new locks
+            const now = Date.now();
+            for (const [peerId, lock] of Object.entries(activeLocks)) {
+                // Expire lock after 10 seconds of inactivity
+                if (now - lock.ts > 10000) continue; 
+                
+                if (peerId === selfId) continue; // Don't lock myself
+
+                const el = document.getElementById(lock.lineId);
+                if (el) {
+                    el.classList.add('locked-line');
+                    el.style.borderLeftColor = lock.color;
+
+                    // Add Name Tag
+                    const tag = document.createElement('div');
+                    tag.className = 'locked-tag';
+                    tag.innerText = peerId.slice(0, 4);
+                    tag.style.backgroundColor = lock.color;
+                    el.appendChild(tag);
+                }
             }
         }
 
-        // Infinite Scroll Logic
-        ui.container.addEventListener('scroll', () => {
-            const scrollTop = ui.container.scrollTop;
-            const scrollHeight = ui.container.scrollHeight;
-            const clientHeight = ui.container.clientHeight;
-
-            // Add Top
-            if (scrollTop < clientHeight) {
-                const lines = 5;
-                ui.display.insertAdjacentHTML('afterbegin', '<div><br></div>'.repeat(lines));
-                ui.container.scrollTop += lines * lineHeight;
-            }
-            // Add Bottom
-            if (scrollHeight - scrollTop - clientHeight < clientHeight) {
-                ui.display.insertAdjacentHTML('beforeend', '<div><br></div>'.repeat(5));
-            }
-        });
-
-        // Handle Enter Key (Clean Divs)
+        // D. THE ENFORCER: Prevent typing in locked lines
         ui.display.addEventListener('keydown', (e) => {
+            // 1. Handle Enter (Ensure new lines get IDs)
             if (e.key === 'Enter') {
+                // Let default happen, but then immediately ID it? 
+                // Better: ExecCommand insertParagraph usually makes a div.
+                // We rely on MutationObserver or Input event to fix ID.
+            }
+
+            // 2. Lock Check
+            const sel = window.getSelection();
+            if (!sel.rangeCount) return;
+            let node = sel.anchorNode;
+            if (node.nodeType === 3) node = node.parentNode;
+            const line = node.closest('.editor-line');
+
+            if (line && line.classList.contains('locked-line')) {
                 e.preventDefault();
-                document.execCommand('insertHTML', false, '<div><br></div>');
+                alert("This line is being edited by someone else!");
             }
         });
 
-        // --- 5. NETWORK SYNC LOGIC ---
+        // --- 5. NETWORK EVENTS ---
 
-        function setupNetworkEvents() {
-            // Peer Joined
+        function setupEvents() {
             room.onPeerJoin(peerId => {
                 updateStatus();
-                // Push my current board state to the new peer (Sync)
-                if (ui.display.innerHTML.length > 50) {
-                    pushSync(ui.display.innerHTML, peerId);
-                }
+                // Push data to new peer
+                actions.pushSync(ui.display.innerHTML, peerId);
             });
-
             room.onPeerLeave(peerId => {
                 updateStatus();
-                removePeerVisuals(peerId);
+                delete activeLocks[peerId];
+                applyVisualLocks();
             });
-
-            // Receive Content Updates
-            getContent((html) => {
-                // Save to local
+            
+            actions.getPushSync(html => {
                 roomDB.get('content').put(html);
-                
-                // Update DOM if different
-                if (html !== ui.display.innerHTML) {
-                    const savedSel = saveSelection();
-                    ui.display.innerHTML = html;
-                    restoreSelection(savedSel);
-                }
-            });
-
-            // Receive Initial Sync
-            getPushSync((html) => {
-                roomDB.get('content').put(html);
-                const savedSel = saveSelection();
                 ui.display.innerHTML = html;
-                restoreSelection(savedSel);
-            });
-
-            // Receive Cursors
-            getCursor((data, peerId) => {
-                renderCursor(peerId, data);
-                renderMinimap(peerId, data);
+                ensureLineIDs();
             });
         }
 
         function updateStatus() {
             const count = Object.keys(room.getPeers()).length;
-            ui.peerCount.innerText = `Connected Peers: ${count}`;
-            if (count > 0) {
-                ui.statusInd.classList.add('connected');
-                ui.statusText.innerText = "Connected";
-            } else {
-                ui.statusInd.classList.remove('connected');
-                ui.statusText.innerText = "Waiting...";
-            }
+            ui.peerCount.innerText = `${count} Peer(s)`;
+            ui.statusDot.classList.toggle('on', count > 0);
         }
 
-        // --- 6. CURSOR LOGIC ---
+        // --- 6. INFINITE SCROLL ---
 
-        function broadcastCursor() {
-            const sel = window.getSelection();
-            if (sel.rangeCount === 0) return;
-            const range = sel.getRangeAt(0);
-            const rect = range.getBoundingClientRect();
-            const containerRect = ui.container.getBoundingClientRect();
-
-            const x = rect.left - containerRect.left + ui.container.scrollLeft;
-            const y = rect.top - containerRect.top + ui.container.scrollTop;
-
-            sendCursor({ x, y, color: myColor });
-        }
-
-        ['click', 'keyup', 'input', 'mouseup'].forEach(ev => 
-            ui.display.addEventListener(ev, broadcastCursor)
-        );
-
-        function renderCursor(id, data) {
-            let cursor = document.getElementById(`cursor-${id}`);
-            if (!cursor) {
-                cursor = document.createElement('div');
-                cursor.id = `cursor-${id}`;
-                cursor.className = 'remote-cursor';
-                
-                const flag = document.createElement('div');
-                flag.className = 'cursor-flag';
-                flag.innerText = id.slice(0,4);
-                flag.style.backgroundColor = data.color;
-                
-                cursor.appendChild(flag);
-                ui.cursorLayer.appendChild(cursor);
-            }
-            cursor.style.backgroundColor = data.color;
-            cursor.style.left = data.x + 'px';
-            cursor.style.top = data.y + 'px';
-        }
-
-        function renderMinimap(id, data) {
-            let dot = document.getElementById(`dot-${id}`);
-            if (!dot) {
-                dot = document.createElement('div');
-                dot.id = `dot-${id}`;
-                dot.className = 'scroll-dot';
-                dot.style.backgroundColor = data.color;
-                dot.onclick = () => ui.container.scrollTo({ top: data.y - (ui.container.clientHeight/2), behavior: 'smooth' });
-                ui.minimap.appendChild(dot);
-            }
-            const pct = (data.y / ui.container.scrollHeight) * 100;
-            dot.style.top = pct + '%';
-        }
-
-        function removePeerVisuals(id) {
-            const c = document.getElementById(`cursor-${id}`);
-            if(c) c.remove();
-            const d = document.getElementById(`dot-${id}`);
-            if(d) d.remove();
-        }
-
-        // --- 7. TOOLS LOGIC ---
-        function handleSelection() {
-            if (window.getSelection().toString().trim()) {
-                ui.tools.classList.add('visible');
-            } else {
-                ui.tools.classList.remove('visible');
-            }
-        }
-        ui.display.addEventListener('mouseup', handleSelection);
-        ui.display.addEventListener('keyup', handleSelection);
-
-        ui.tools.addEventListener('click', (e) => {
-            if(e.target.tagName === 'BUTTON') {
-                const cmd = e.target.id.replace('-button', '');
-                if(['bold','italic','underline'].includes(cmd)) {
-                    document.execCommand(cmd, false, null);
-                } else if(cmd === 'link') {
-                    const url = prompt('URL:');
-                    if(url) document.execCommand('createLink', false, url);
-                } else if(cmd === 'image') {
-                    const url = prompt('Image URL:');
-                    if(url) document.execCommand('insertImage', false, url);
-                }
+        ui.container.addEventListener('scroll', () => {
+            const { scrollTop, scrollHeight, clientHeight } = ui.container;
+            
+            // Add to Bottom
+            if (scrollHeight - scrollTop - clientHeight < 100) {
+                let html = '';
+                for(let i=0; i<5; i++) html += createEmptyLine();
+                ui.display.insertAdjacentHTML('beforeend', html);
             }
         });
 
         // --- HELPERS ---
-        function generateColor(str) {
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-            const c = (hash & 0x00AAAA).toString(16).toUpperCase(); 
-            return '#' + '00000'.substring(0, 6 - c.length) + c;
-        }
 
         function saveSelection() {
             const sel = window.getSelection();
-            return sel.rangeCount ? sel.getRangeAt(0) : null;
+            if(!sel.rangeCount) return null;
+            
+            const range = sel.getRangeAt(0);
+            const startNode = range.startContainer.nodeType === 3 ? range.startContainer.parentNode : range.startContainer;
+            const startLine = startNode.closest('.editor-line');
+            
+            if(!startLine) return null;
+
+            return {
+                lineId: startLine.id,
+                offset: range.startOffset // Simplified offset
+            };
         }
 
-        function restoreSelection(range) {
-            if (range) {
+        function restoreSelection(saved) {
+            if(!saved) return;
+            const line = document.getElementById(saved.lineId);
+            if(line) {
+                const range = document.createRange();
+                // Try to put cursor at end of that line (simple restoration)
+                range.selectNodeContents(line);
+                range.collapse(false); 
+                
                 const sel = window.getSelection();
                 sel.removeAllRanges();
                 sel.addRange(range);
             }
         }
 
-        // --- START ---
-        window.addEventListener('load', checkLogin);
-        window.addEventListener('hashchange', () => window.location.reload());
+        function stringToColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+            return '#' + '00000'.substring(0, 6 - c.length) + c;
+        }
+
+        function generateColor(str) { return stringToColor(str); }
+
+        // Tools Handling
+        document.addEventListener('selectionchange', () => {
+             const txt = window.getSelection().toString();
+             ui.tools.classList.toggle('visible', txt.length > 0);
+        });
+        
+        document.getElementById('btn-bold').onclick = () => document.execCommand('bold');
+        document.getElementById('btn-italic').onclick = () => document.execCommand('italic');
+        document.getElementById('btn-link').onclick = () => {
+            const url = prompt("URL:");
+            if(url) document.execCommand('createLink', false, url);
+        }
 
     </script>
 </body>
