@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Shared Editor</title>
+    <title>P2P Shared Editor (Stable)</title>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
@@ -35,7 +35,7 @@
             font-family: -apple-system, system-ui, sans-serif;
         }
         .status { font-size: 0.8rem; color: #666; display: flex; align-items: center; gap: 8px; }
-        .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; transition: background 0.3s; }
         .dot.on { background: #00e676; box-shadow: 0 0 5px #00e676; }
 
         #container { 
@@ -110,7 +110,7 @@
         <strong>Shared Document</strong>
         <div class="status">
             <span class="dot"></span>
-            <span id="peer-count">Offline</span>
+            <span id="peer-count">Connecting...</span>
         </div>
     </div>
 
@@ -143,7 +143,7 @@
         let roomId = null;
         let roomDB, room;
         
-        // Actions container (to fix the scope issue)
+        // Actions container
         const act = {}; 
         
         // Locking State: { "peerId": { lineId: "...", ts: 123456 } }
@@ -154,7 +154,7 @@
         function checkHash() {
             const hash = window.location.hash.replace('#', '');
             if(hash) {
-                roomId = 'doc-' + hash;
+                roomId = 'doc-stable-' + hash;
                 ui.login.classList.add('hidden');
                 startApp();
             } else {
@@ -179,18 +179,19 @@
             const gun = Gun({ peers: [], localStorage: true });
             roomDB = gun.get(roomId);
 
-            // B. Trystero
+            // B. Trystero with STABLE TRACKERS
             const config = { 
-                appId: 'doc-block-v2',
+                appId: 'doc-block-stable-v1',
                 trackerUrls: [
-                    'wss://tracker.openwebrtc.io', 
-                    'wss://tracker.btorrent.xyz', 
-                    'wss://tracker.webtorrent.dev'
+                    'wss://tracker.webtorrent.dev', 
+                    'wss://tracker.openwebrtc.io',
+                    'wss://tracker.files.fm:7073/announce',
+                    'wss://tracker.au.webtorrent.dev/announce'
                 ]
             };
             room = joinRoom(config, roomId);
 
-            // C. Actions (Initialize strictly here)
+            // C. Actions
             const [sendContent, getContent] = room.makeAction('content');
             const [sendLock, getLock] = room.makeAction('lock');
             const [pushSync, getPushSync] = room.makeAction('sync');
@@ -227,14 +228,12 @@
         }
 
         function ensureStructure() {
-            // Force block structure
             const children = Array.from(ui.display.children);
             if(children.length === 0) {
                 ui.display.innerHTML = createLine();
                 return;
             }
             children.forEach(child => {
-                // If it's not a div or missing ID, fix it
                 if(child.tagName !== 'DIV' || !child.id) {
                     child.outerHTML = `<div id="line-${Math.random().toString(36).substr(2,9)}" class="editor-line">${child.innerHTML || '<br>'}</div>`;
                 }
@@ -245,23 +244,18 @@
         // --- 4. INPUT & SYNC ---
 
         ui.display.addEventListener('input', () => {
-            ensureStructure(); // Sanitation
+            ensureStructure(); 
             const html = ui.display.innerHTML;
             
-            // Save & Send
             roomDB.get('content').put(html);
             if(act.sendContent) act.sendContent(html);
         });
 
         function handleRemoteContent(html) {
             roomDB.get('content').put(html);
-            
-            // Conflict Avoidance: Only update if I'm not typing furiously
-            // Or if the content is structurally different
             if(!document.hasFocus()) {
                 ui.display.innerHTML = html;
             } else {
-                // Simple merge: Replace DOM, try to keep cursor
                 const saved = saveSelection();
                 ui.display.innerHTML = html;
                 restoreSelection(saved);
@@ -270,7 +264,7 @@
         }
 
         function handleSync(html) {
-            // Trusted sync from new peer interaction
+            // New peer sends us their state
             ui.display.innerHTML = html;
             roomDB.get('content').put(html);
         }
@@ -287,14 +281,9 @@
             const line = node.closest('.editor-line');
 
             if(line && line.id) {
-                // Highlight Local
                 document.querySelectorAll('.my-line').forEach(e => e.classList.remove('my-line'));
                 line.classList.add('my-line');
-                
-                // Show tools
                 ui.tools.classList.toggle('visible', sel.toString().length > 0);
-
-                // Broadcast
                 if(act.sendLock) act.sendLock({ lineId: line.id, peerId: selfId });
             }
         });
@@ -310,7 +299,6 @@
         }
 
         function reapplyVisualLocks() {
-            // Clean old locks
             document.querySelectorAll('.locked-line').forEach(el => {
                 el.classList.remove('locked-line');
                 el.style.borderLeftColor = 'transparent';
@@ -318,10 +306,9 @@
                 if(tag) tag.remove();
             });
 
-            // Apply active locks
             const now = Date.now();
             for(const [pid, lock] of Object.entries(activeLocks)) {
-                if(now - lock.ts > 30000) continue; // Expire old locks
+                if(now - lock.ts > 30000) continue; 
                 if(pid === selfId) continue;
 
                 const el = document.getElementById(lock.lineId);
@@ -339,7 +326,7 @@
             }
         }
 
-        // C. ENFORCE LOCKS (Stop Typing)
+        // C. ENFORCE LOCKS
         ui.display.addEventListener('keydown', (e) => {
             const sel = window.getSelection();
             if(!sel.rangeCount) return;
@@ -347,14 +334,11 @@
             if(node.nodeType === 3) node = node.parentNode;
             const line = node.closest('.editor-line');
 
-            // If line is locked by someone else
             if(line && line.classList.contains('locked-line')) {
                 e.preventDefault();
-                alert("This line is locked by another user.");
-                return;
+                return; // Silently block or alert
             }
 
-            // Handle Enter key cleanly
             if(e.key === 'Enter') {
                 e.preventDefault();
                 document.execCommand('insertHTML', false, createLine());
@@ -365,7 +349,6 @@
 
         function handlePeerJoin(id) {
             updateStatus();
-            // Sync strategy: Send my full state to the new guy
             if(ui.display.innerHTML.length > 50 && act.pushSync) {
                 act.pushSync(ui.display.innerHTML, id);
             }
@@ -379,7 +362,7 @@
 
         function updateStatus() {
             const count = Object.keys(room.getPeers()).length;
-            ui.peerCount.innerText = count > 0 ? `${count} Peer(s)` : 'Offline';
+            ui.peerCount.innerText = count > 0 ? `${count} Peer(s)` : 'Waiting for peers...';
             ui.dot.classList.toggle('on', count > 0);
         }
 
@@ -403,12 +386,9 @@
             const sel = window.getSelection();
             if(!sel.rangeCount) return null;
             const range = sel.getRangeAt(0);
-            
-            // Save based on Line ID if possible
             const startNode = range.startContainer.nodeType === 3 ? range.startContainer.parentNode : range.startContainer;
             const line = startNode.closest('.editor-line');
             if(!line) return null;
-
             return { lineId: line.id, offset: range.startOffset };
         }
 
@@ -418,14 +398,13 @@
             if(line) {
                 const range = document.createRange();
                 range.selectNodeContents(line);
-                range.collapse(false); // Move to end of line
+                range.collapse(false);
                 const sel = window.getSelection();
                 sel.removeAllRanges();
                 sel.addRange(range);
             }
         }
         
-        // Tools
         document.getElementById('btn-bold').onclick = () => document.execCommand('bold');
         document.getElementById('btn-italic').onclick = () => document.execCommand('italic');
         document.getElementById('btn-link').onclick = () => {
