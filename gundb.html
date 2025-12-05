@@ -3,17 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Infinite P2P Editor</title>
+    <title>P2P Layered Editor</title>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
             --bg: #ffffff;
             --text: #1a1a1a;
-            --line-height: 24px;
+            --line-height: 28px;
+            --blur-strength: 4px;
         }
         
         body { 
-            margin: 0; font-family: 'Courier New', Courier, monospace;
+            margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             background: var(--bg); color: var(--text); 
             overflow: hidden; height: 100vh; display: flex; flex-direction: column; 
         }
@@ -21,19 +22,18 @@
         /* --- LOGIN --- */
         #login {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #fff; z-index: 2000;
+            background: #fff; z-index: 3000;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
         #login.hidden { display: none; }
         #login input { padding: 15px; font-size: 1.2rem; border: 2px solid #333; margin-bottom: 15px; text-align: center; border-radius: 8px; }
         #login button { padding: 15px 30px; background: #333; color: white; border: none; cursor: pointer; font-size: 1rem; border-radius: 8px; font-weight: bold; }
 
-        /* --- UI --- */
+        /* --- UI STRUCTURE --- */
         #header {
             height: 50px; background: #f8f9fa; border-bottom: 1px solid #ddd;
             display: flex; justify-content: space-between; align-items: center; padding: 0 20px;
-            font-family: -apple-system, system-ui, sans-serif;
-            z-index: 10;
+            z-index: 100;
         }
         .status { font-size: 0.8rem; color: #666; display: flex; align-items: center; gap: 8px; }
         .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; transition: background 0.3s; }
@@ -41,216 +41,397 @@
 
         #container { 
             flex: 1; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; 
-            position: relative;
+            position: relative; padding-bottom: 50vh;
         }
 
         #display {
             min-height: 100%; outline: none; 
-            padding: 40px 60px; /* Margins */
+            padding: 40px 80px; /* Extra left padding for tags */
             font-size: 16px; 
             line-height: var(--line-height);
+            transition: filter 0.3s;
         }
 
-        /* --- LINE LOCKING --- */
-        .editor-line {
-            min-height: var(--line-height);
-            display: block; /* Forces line break behavior */
-            padding-left: 5px;
-            border-left: 4px solid transparent; 
-            margin-bottom: 1px;
+        /* --- LINE LOGIC --- */
+        
+        /* Base Line Style */
+        .line {
             position: relative;
-            white-space: pre-wrap; /* Keeps spaces/tabs */
+            min-height: var(--line-height);
+            padding: 2px 5px;
+            margin-bottom: 4px;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+            transform-origin: top;
         }
 
-        .locked-line {
-            background-color: rgba(0, 0, 0, 0.03);
-            transition: background 0.2s, border-color 0.2s;
-        }
-        .locked-tag {
+        /* The Hex Label (Floating Left) */
+        .line::before {
+            content: attr(data-hex);
             position: absolute;
-            left: -60px; top: 0;
-            font-size: 0.7rem; color: #fff;
-            padding: 2px 6px; border-radius: 4px;
-            font-family: sans-serif; text-align: right;
-            width: 50px; pointer-events: none;
+            left: -70px; top: 50%; transform: translateY(-50%);
+            font-size: 0.65rem;
+            font-family: monospace;
+            color: #fff;
+            background-color: var(--line-color, #ccc);
+            padding: 2px 6px;
+            border-radius: 4px;
+            opacity: 0.7;
+            pointer-events: none;
         }
 
-        /* --- MINIMAP --- */
-        #minimap {
-            position: absolute; right: 5px; top: 50px; bottom: 0;
-            width: 12px; z-index: 100; pointer-events: none;
-        }
-        .scroll-dot {
-            position: absolute; right: 0;
-            width: 8px; height: 8px; border-radius: 50%;
-            cursor: pointer; pointer-events: auto;
-            transition: top 0.2s;
-            box-shadow: 0 0 2px rgba(0,0,0,0.5);
-        }
-        .scroll-dot:hover { transform: scale(1.5); }
+        /* --- OWNERSHIP STYLES --- */
 
-        .my-line { background-color: rgba(0, 0, 0, 0.01); }
-
-        /* --- TOOLS --- */
-        #tools {
-            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: #222; padding: 10px; border-radius: 50px; 
-            display: flex; gap: 10px; opacity: 0; pointer-events: none; transition: 0.2s;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-            z-index: 200;
+        /* MY LINES: Editable */
+        .line[contenteditable="true"] {
+            cursor: text;
         }
-        #tools.visible { opacity: 1; pointer-events: auto; }
-        #tools button { width: 36px; height: 36px; border-radius: 50%; border:none; cursor: pointer; background: #444; color: white; font-weight: bold; }
-        #tools button:hover { background: #666; }
+
+        /* PEER LINES: Non-Editable (Protected) */
+        .line[contenteditable="false"] {
+            cursor: pointer; /* Indicates clickability */
+            user-select: none; /* Can't select text easily */
+            border: 1px solid transparent;
+        }
+
+        /* Hovering over peer line (Light Grey) */
+        .line[contenteditable="false"]:hover {
+            background-color: #f0f0f0;
+            border-color: #e0e0e0;
+        }
+
+        /* The "Alert" Highlight (When someone comments on your line) */
+        .line.alert-highlight {
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        /* --- FOCUS MODE (BLUR) --- */
+        
+        /* When we are in a "Thread", body gets this class */
+        body.focus-active #display .line {
+            filter: blur(var(--blur-strength));
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        /* The lines involved in the interaction stay sharp */
+        body.focus-active #display .line.focused-thread {
+            filter: none;
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1.02);
+            z-index: 10;
+            background: white;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+
+        /* Animation for new line sliding in */
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); max-height: 0; }
+            to { opacity: 1; transform: translateY(0); max-height: 100px; }
+        }
+        .slide-in {
+            animation: slideDown 0.3s ease forwards;
+        }
 
     </style>
 </head>
 <body>
 
-    <!-- LOGIN -->
     <div id="login">
-        <h2>Infinite P2P Notebook</h2>
-        <input type="text" id="color-input" placeholder="Enter Room Name (e.g. infinite)" required>
-        <button id="btn-login">Join Room</button>
+        <h2>Layered P2P Editor</h2>
+        <input type="text" id="room-input" placeholder="Room Name" required>
+        <button id="btn-login">Enter</button>
     </div>
 
-    <!-- HEADER -->
     <div id="header">
-        <strong>P2P Editor</strong>
+        <strong>P2P Layers</strong>
         <div class="status">
             <span class="dot"></span>
-            <span id="peer-count">Connecting...</span>
+            <span id="peer-count">Offline</span>
         </div>
     </div>
 
-    <!-- MAIN AREA -->
     <div id="container">
         <div id="display" contenteditable="true" spellcheck="false"></div>
-    </div>
-    
-    <!-- MINIMAP -->
-    <div id="minimap"></div>
-
-    <!-- TOOLS -->
-    <div id="tools">
-        <button id="btn-bold">B</button>
-        <button id="btn-italic">I</button>
-        <button id="btn-link">🔗</button>
     </div>
 
     <script type="module">
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
-        // --- 1. CONFIG & STATE ---
+        // --- 1. SETUP ---
         const ui = {
             login: document.getElementById('login'),
-            input: document.getElementById('color-input'),
+            roomInput: document.getElementById('room-input'),
             display: document.getElementById('display'),
             container: document.getElementById('container'),
-            minimap: document.getElementById('minimap'),
             peerCount: document.getElementById('peer-count'),
-            dot: document.querySelector('.dot'),
-            tools: document.getElementById('tools')
+            dot: document.querySelector('.dot')
         };
 
-        const myColor = generateColor(selfId);
+        const myColor = stringToColor(selfId);
         let roomId = null;
         let roomDB, room;
         const act = {}; 
-        const activeLocks = {}; 
 
         // --- 2. BOOTSTRAP ---
+        
         function checkHash() {
             const hash = window.location.hash.replace('#', '');
             if(hash) {
-                roomId = 'doc-infinite-v4-' + hash;
+                roomId = 'layer-doc-v1-' + hash;
                 ui.login.classList.add('hidden');
-                startApp();
+                initNetwork();
             } else {
                 ui.login.classList.remove('hidden');
             }
         }
 
         document.getElementById('btn-login').onclick = () => {
-            const val = ui.input.value.trim();
+            const val = ui.roomInput.value.trim();
             if(val) { window.location.hash = val; checkHash(); }
         };
         window.addEventListener('load', checkHash);
 
-        // --- 3. NETWORK START ---
-        function startApp() {
+        // --- 3. NETWORK ---
+
+        function initNetwork() {
             const gun = Gun({ peers: [], localStorage: true });
             roomDB = gun.get(roomId);
 
             const config = { 
-                appId: 'doc-infinite-v4',
-                trackerUrls: [
-                    'wss://tracker.webtorrent.dev', 
-                    'wss://tracker.openwebrtc.io',
-                    'wss://tracker.files.fm:7073/announce'
-                ]
+                appId: 'layer-doc-v1',
+                trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io']
             };
             room = joinRoom(config, roomId);
 
             // Actions
             const [sendContent, getContent] = room.makeAction('content');
-            const [sendLock, getLock] = room.makeAction('lock');
-            const [pushSync, getPushSync] = room.makeAction('sync');
+            const [sendPing, getPing] = room.makeAction('ping'); // For highlighting lines
             const [reqSync, getReqSync] = room.makeAction('req');
+            const [pushSync, getPushSync] = room.makeAction('sync');
 
             act.sendContent = sendContent;
-            act.sendLock = sendLock;
+            act.sendPing = sendPing;
             act.pushSync = pushSync;
             act.reqSync = reqSync;
 
+            // Listeners
             getContent(handleRemoteContent);
-            getLock(handleRemoteLock);
-            getPushSync(handleSync);
-            getReqSync((_, pid) => {
-                // If someone asks for data, send it
-                if(ui.display.innerHTML.length > 100) act.pushSync(ui.display.innerHTML, pid);
+            getPing(handlePing); // Handle Highlight Pings
+            getReqSync((_, pid) => act.pushSync(ui.display.innerHTML, pid));
+            getPushSync((html) => {
+                ui.display.innerHTML = html;
+                roomDB.get('content').put(html);
+                enforceProtection(); // Re-run protection logic on sync
             });
-            
-            room.onPeerJoin(handlePeerJoin);
-            room.onPeerLeave(handlePeerLeave);
 
-            // Load Data or Init Fresh
+            room.onPeerJoin(id => {
+                updateStatus();
+                if(ui.display.innerHTML.length > 50) act.pushSync(ui.display.innerHTML, id);
+                else act.reqSync(null, id);
+            });
+            room.onPeerLeave(updateStatus);
+
+            // Local Load
             roomDB.get('content').once((data) => {
-                if(data && data.includes('class="editor-line"')) {
-                    // Data exists: Load it
+                if(data && data.includes('class="line"')) {
                     ui.display.innerHTML = data;
-                    ensureStructure();
-                    // Scroll to bottom/content (simple default)
-                    ui.container.scrollTop = ui.container.scrollHeight / 2;
                 } else {
-                    // No data: Create FRESH INFINITE CANVAS
-                    initFreshCanvas();
+                    initFresh();
+                }
+                enforceProtection();
+            });
+        }
+
+        // --- 4. DOM LOGIC & PROTECTION ---
+
+        function createLine(text = '', owner = selfId) {
+            const id = 'line-' + Math.random().toString(36).substr(2, 9);
+            const color = stringToColor(owner);
+            // Default to Editable if I created it
+            const editable = (owner === selfId) ? "true" : "false";
+            
+            return `<div id="${id}" class="line" 
+                        data-owner="${owner}" 
+                        data-hex="${color}" 
+                        style="--line-color: ${color}"
+                        contenteditable="${editable}">${text || '<br>'}</div>`;
+        }
+
+        function initFresh() {
+            let html = '';
+            for(let i=0; i<10; i++) html += createLine();
+            ui.display.innerHTML = html;
+        }
+
+        // The Enforcer: Scans DOM and locks lines that aren't mine
+        function enforceProtection() {
+            const lines = Array.from(ui.display.children);
+            lines.forEach(line => {
+                if(!line.classList.contains('line')) return; // skip junk
+
+                const owner = line.getAttribute('data-owner');
+                
+                if (owner === selfId) {
+                    // It's mine
+                    line.setAttribute('contenteditable', 'true');
+                } else {
+                    // It's someone else's -> PROTECT IT
+                    line.setAttribute('contenteditable', 'false');
                 }
             });
         }
 
-        // --- 4. INFINITE CANVAS & STRUCTURE ---
+        // --- 5. INTERACTION (CLICK & REPLY) ---
 
-        function createLine() {
-            const id = 'line-' + Math.random().toString(36).substr(2, 9);
-            // Default empty line
-            return `<div id="${id}" class="editor-line"><br></div>`;
+        ui.display.addEventListener('click', (e) => {
+            // Find clicked line
+            const targetLine = e.target.closest('.line');
+            if (!targetLine) return;
+
+            // Check if it's protected (someone else's)
+            const isProtected = targetLine.getAttribute('contenteditable') === 'false';
+            
+            // SCENARIO 1: Clicking Someone Else's Line (To Comment)
+            if (isProtected) {
+                // 1. Enter Focus Mode
+                enterFocusMode(targetLine);
+
+                // 2. Create New Line Below
+                const newLineHTML = createLine('', selfId);
+                targetLine.insertAdjacentHTML('afterend', newLineHTML);
+                
+                const newLine = targetLine.nextElementSibling;
+                newLine.classList.add('slide-in'); // Animation
+                newLine.classList.add('focused-thread'); // Keep it sharp in blur mode
+                
+                // 3. Move Cursor
+                placeCaret(newLine);
+
+                // 4. Notify Owner (Highlight their screen)
+                const ownerId = targetLine.getAttribute('data-owner');
+                act.sendPing({ 
+                    targetId: targetLine.id, 
+                    actorColor: myColor 
+                }, ownerId); // Send specifically to owner? No, Trystero is broadcast usually, logic in handlePing
+
+                saveAndBroadcast();
+                return;
+            }
+
+            // SCENARIO 2: Clicking My Own Line (That might be highlighted)
+            if (targetLine.classList.contains('alert-highlight')) {
+                // Remove highlight
+                targetLine.classList.remove('alert-highlight');
+                targetLine.style.backgroundColor = '';
+                
+                // If there's a comment below, reveal/focus it
+                const next = targetLine.nextElementSibling;
+                if(next) {
+                    enterFocusMode(targetLine, next);
+                    next.scrollIntoView({behavior:'smooth', block:'center'});
+                }
+                saveAndBroadcast();
+            }
+        });
+
+        // Focus Mode Logic (Blur Background)
+        function enterFocusMode(mainLine, secondaryLine = null) {
+            document.body.classList.add('focus-active');
+            
+            // Clean previous thread focus
+            document.querySelectorAll('.focused-thread').forEach(el => el.classList.remove('focused-thread'));
+
+            // Highlight current thread
+            mainLine.classList.add('focused-thread');
+            if(secondaryLine) secondaryLine.classList.add('focused-thread');
+
+            // Exit focus mode when clicking background
+            const exitHandler = (e) => {
+                if(!e.target.closest('.focused-thread')) {
+                    document.body.classList.remove('focus-active');
+                    document.querySelectorAll('.focused-thread').forEach(el => el.classList.remove('focused-thread'));
+                    document.removeEventListener('click', exitHandler, true);
+                }
+            };
+            // Delay listener slightly so immediate click doesn't trigger it
+            setTimeout(() => document.addEventListener('click', exitHandler, true), 50);
         }
 
-        function initFreshCanvas() {
-            // Generate 100 lines
-            let html = '';
-            for(let i=0; i<100; i++) html += createLine();
-            ui.display.innerHTML = html;
+        // --- 6. PING HANDLER (The Notification) ---
 
-            // SCROLL TO CENTER
-            setTimeout(() => {
-                const middleLine = ui.display.children[50];
-                if(middleLine) {
-                    middleLine.scrollIntoView({ block: 'center' });
-                    placeCaret(middleLine);
+        function handlePing(data) {
+            // Check if the ping is for a line I have locally
+            const el = document.getElementById(data.targetId);
+            if(el) {
+                // Check if I am the owner of this line
+                const myLine = el.getAttribute('data-owner') === selfId;
+                
+                if(myLine) {
+                    // Highlight it with the Actor's color
+                    el.classList.add('alert-highlight');
+                    el.style.backgroundColor = data.actorColor;
                 }
-            }, 100);
+            }
+        }
+
+        // --- 7. INPUT & SYNC ---
+
+        ui.display.addEventListener('input', () => {
+            saveAndBroadcast();
+        });
+
+        // Custom Enter Key (Always creates a DIV with ID)
+        ui.display.addEventListener('keydown', (e) => {
+            if(e.key === 'Enter') {
+                e.preventDefault();
+                // Insert new line
+                const newLineHTML = createLine('', selfId);
+                document.execCommand('insertHTML', false, newLineHTML);
+                // Fix structure immediately (execCommand can be messy)
+                enforceProtection();
+                saveAndBroadcast();
+            }
+        });
+
+        function saveAndBroadcast() {
+            const html = ui.display.innerHTML;
+            roomDB.get('content').put(html);
+            if(act.sendContent) act.sendContent(html);
+        }
+
+        function handleRemoteContent(html) {
+            roomDB.get('content').put(html);
+            
+            // Store current selection/focus
+            const hadFocus = document.hasFocus();
+            let savedSel = null;
+            if(hadFocus) savedSel = saveSelection();
+
+            ui.display.innerHTML = html;
+            
+            // Re-apply protection (crucial so I can't edit new lines from others)
+            enforceProtection();
+
+            if(hadFocus && savedSel) restoreSelection(savedSel);
+        }
+
+        // --- HELPERS ---
+
+        function updateStatus() {
+            const count = Object.keys(room.getPeers()).length;
+            ui.peerCount.innerText = count > 0 ? `${count} Peer(s)` : 'Offline';
+            ui.dot.classList.toggle('on', count > 0);
+        }
+
+        function stringToColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
+            return '#' + '00000'.substring(0, 6 - c.length) + c;
         }
 
         function placeCaret(el) {
@@ -260,241 +441,15 @@
             const sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
+            el.focus();
         }
-
-        function ensureStructure() {
-            // Ensure everything is wrapped in .editor-line
-            const children = Array.from(ui.display.children);
-            if(children.length === 0) { ui.display.innerHTML = createLine(); return; }
-            
-            children.forEach(child => {
-                if(child.tagName !== 'DIV' || !child.id) {
-                    child.outerHTML = `<div id="line-${Math.random().toString(36).substr(2,9)}" class="editor-line">${child.innerHTML || '<br>'}</div>`;
-                }
-                if(!child.classList.contains('editor-line')) child.classList.add('editor-line');
-            });
-        }
-
-        // --- 5. ENTER KEY & INPUT HANDLING ---
-
-        // Custom Enter Key Handler (Crucial for the "New Line" logic)
-        ui.display.addEventListener('keydown', (e) => {
-            // A. Handle Enter
-            if (e.key === 'Enter') {
-                e.preventDefault(); // Stop browser weirdness
-
-                // 1. Get current line
-                const sel = window.getSelection();
-                const range = sel.getRangeAt(0);
-                const currentLine = range.startContainer.nodeType === 3 
-                    ? range.startContainer.parentNode.closest('.editor-line') 
-                    : range.startContainer.closest('.editor-line');
-
-                // 2. Create new line DOM element
-                const id = 'line-' + Math.random().toString(36).substr(2, 9);
-                const newLine = document.createElement('div');
-                newLine.id = id;
-                newLine.className = 'editor-line';
-                newLine.innerHTML = '<br>'; // Empty placeholder
-
-                // 3. Insert AFTER current line
-                if (currentLine && currentLine.nextSibling) {
-                    ui.display.insertBefore(newLine, currentLine.nextSibling);
-                } else {
-                    ui.display.appendChild(newLine);
-                }
-
-                // 4. Move Cursor
-                placeCaret(newLine);
-
-                // 5. Trigger Save
-                triggerSave();
-                return;
-            }
-
-            // B. Enforce Locks
-            const sel = window.getSelection();
-            if(!sel.rangeCount) return;
-            const node = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentNode : sel.anchorNode;
-            const line = node.closest('.editor-line');
-            if(line && line.classList.contains('locked-line')) {
-                e.preventDefault();
-            }
-        });
-
-        // Simple Input Handler
-        ui.display.addEventListener('input', () => {
-            triggerSave();
-        });
-
-        function triggerSave() {
-            const html = ui.display.innerHTML;
-            roomDB.get('content').put(html);
-            if(act.sendContent) act.sendContent(html);
-        }
-
-        // --- 6. INFINITE SCROLL LOGIC ---
-
-        ui.container.addEventListener('scroll', () => {
-            const scrollTop = ui.container.scrollTop;
-            const scrollHeight = ui.container.scrollHeight;
-            const clientHeight = ui.container.clientHeight;
-
-            // A. Scroll Up (Prepend)
-            if (scrollTop < 100) {
-                const oldHeight = scrollHeight;
-                let html = '';
-                for(let i=0; i<10; i++) html += createLine();
-                ui.display.insertAdjacentHTML('afterbegin', html);
-                
-                // Adjust scroll so we don't jump
-                const newHeight = ui.container.scrollHeight;
-                ui.container.scrollTop = scrollTop + (newHeight - oldHeight);
-            }
-
-            // B. Scroll Down (Append)
-            if (scrollHeight - scrollTop - clientHeight < 100) {
-                let html = '';
-                for(let i=0; i<10; i++) html += createLine();
-                ui.display.insertAdjacentHTML('beforeend', html);
-            }
-        });
-
-        // --- 7. SYNC & LOCKS ---
-
-        function handleRemoteContent(html) {
-            roomDB.get('content').put(html);
-            if(!document.hasFocus()) {
-                ui.display.innerHTML = html;
-            } else {
-                const saved = saveSelection();
-                ui.display.innerHTML = html;
-                restoreSelection(saved);
-            }
-            reapplyVisualLocks();
-        }
-
-        function handleSync(html) {
-            // Joining user receives this
-            console.log("Received Sync");
-            ui.display.innerHTML = html;
-            roomDB.get('content').put(html);
-            
-            // Auto-scroll to active action (simple heuristic: look for last locked line)
-            setTimeout(() => {
-                const locks = Object.values(activeLocks);
-                if(locks.length > 0) {
-                    const lastLock = locks[locks.length-1];
-                    const el = document.getElementById(lastLock.lineId);
-                    if(el) el.scrollIntoView({ block: 'center' });
-                } else {
-                    // Or just middle
-                    ui.container.scrollTop = ui.container.scrollHeight / 2;
-                }
-            }, 500);
-        }
-
-        // Broadcast Lock
-        document.addEventListener('selectionchange', () => {
-            const sel = window.getSelection();
-            if(!sel.rangeCount) return;
-            const node = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentNode : sel.anchorNode;
-            const line = node.closest('.editor-line');
-
-            if(line && line.id) {
-                // UI Highlight
-                document.querySelectorAll('.my-line').forEach(e => e.classList.remove('my-line'));
-                line.classList.add('my-line');
-                ui.tools.classList.toggle('visible', sel.toString().length > 0);
-                
-                // Network
-                if(act.sendLock) act.sendLock({ lineId: line.id, peerId: selfId });
-            }
-        });
-
-        function handleRemoteLock(data, peerId) {
-            activeLocks[peerId] = { lineId: data.lineId, ts: Date.now(), color: stringToColor(peerId) };
-            reapplyVisualLocks();
-        }
-
-        function reapplyVisualLocks() {
-            // Clean UI
-            document.querySelectorAll('.locked-line').forEach(el => {
-                el.classList.remove('locked-line');
-                el.style.borderLeftColor = 'transparent';
-                const tag = el.querySelector('.locked-tag');
-                if(tag) tag.remove();
-            });
-            ui.minimap.innerHTML = ''; // Clean minimap
-
-            const now = Date.now();
-            const totalHeight = ui.container.scrollHeight;
-
-            for(const [pid, lock] of Object.entries(activeLocks)) {
-                if(now - lock.ts > 60000) continue; // 1 min expiry
-                if(pid === selfId) continue;
-
-                const el = document.getElementById(lock.lineId);
-                if(el) {
-                    // 1. Line Style
-                    el.classList.add('locked-line');
-                    el.style.borderLeftColor = lock.color;
-                    
-                    const tag = document.createElement('div');
-                    tag.className = 'locked-tag';
-                    tag.innerText = pid.slice(0,4);
-                    tag.style.backgroundColor = lock.color;
-                    el.appendChild(tag);
-
-                    // 2. Minimap Dot
-                    if(totalHeight > 0) {
-                        const dot = document.createElement('div');
-                        dot.className = 'scroll-dot';
-                        dot.style.backgroundColor = lock.color;
-                        dot.style.top = (el.offsetTop / totalHeight * 100) + '%';
-                        dot.onclick = () => el.scrollIntoView({behavior:'smooth', block:'center'});
-                        ui.minimap.appendChild(dot);
-                    }
-                }
-            }
-        }
-
-        // --- 8. PEER MGMT ---
-        function handlePeerJoin(id) {
-            updateStatus();
-            // Ask for sync immediately if I'm new, or send if I'm old
-            if(ui.display.innerHTML.length < 500) {
-                act.reqSync(null, id);
-            } else {
-                act.pushSync(ui.display.innerHTML, id);
-            }
-        }
-        function handlePeerLeave(id) {
-            updateStatus();
-            delete activeLocks[id];
-            reapplyVisualLocks();
-        }
-        function updateStatus() {
-            const count = Object.keys(room.getPeers()).length;
-            ui.peerCount.innerText = count > 0 ? `${count} Peer(s)` : 'Waiting...';
-            ui.dot.classList.toggle('on', count > 0);
-        }
-
-        // --- HELPERS ---
-        function stringToColor(str) {
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-            const c = (hash & 0x00FFFFFF).toString(16).toUpperCase();
-            return '#' + '00000'.substring(0, 6 - c.length) + c;
-        }
-        function generateColor(str) { return stringToColor(str); }
 
         function saveSelection() {
             const sel = window.getSelection();
             if(!sel.rangeCount) return null;
             const range = sel.getRangeAt(0);
-            const startNode = range.startContainer.nodeType === 3 ? range.startContainer.parentNode : range.startContainer;
-            const line = startNode.closest('.editor-line');
+            const node = range.startContainer.nodeType === 3 ? range.startContainer.parentNode : range.startContainer;
+            const line = node.closest('.line');
             if(!line) return null;
             return { lineId: line.id, offset: range.startOffset };
         }
@@ -504,22 +459,21 @@
             const line = document.getElementById(saved.lineId);
             if(line) {
                 const range = document.createRange();
-                range.selectNodeContents(line);
-                range.collapse(true); // default to start
-                // Try to respect offset if possible (simplified)
+                // Try to restore offset safely
+                try {
+                    if(line.childNodes[0]) {
+                        range.setStart(line.childNodes[0], Math.min(saved.offset, line.innerText.length));
+                    } else {
+                        range.selectNodeContents(line);
+                    }
+                } catch(e) { range.selectNodeContents(line); }
+                
+                range.collapse(true);
                 const sel = window.getSelection();
                 sel.removeAllRanges();
                 sel.addRange(range);
             }
         }
-
-        // Tools
-        document.getElementById('btn-bold').onclick = () => document.execCommand('bold');
-        document.getElementById('btn-italic').onclick = () => document.execCommand('italic');
-        document.getElementById('btn-link').onclick = () => {
-            const url = prompt("URL:");
-            if(url) document.execCommand('createLink', false, url);
-        };
 
     </script>
 </body>
