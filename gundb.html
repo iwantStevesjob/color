@@ -3,168 +3,158 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Layered Editor</title>
+    <title>P2P Ownership Editor</title>
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
     <style>
         :root {
             --bg: #ffffff;
             --text: #1a1a1a;
-            --line-height: 28px;
-            --blur-strength: 4px;
+            --blur: 0px;
         }
         
         body { 
-            margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background: var(--bg); color: var(--text); 
             overflow: hidden; height: 100vh; display: flex; flex-direction: column; 
         }
 
-        /* --- LOGIN --- */
+        /* --- LOGIN & HEADER --- */
         #login {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #fff; z-index: 3000;
+            background: #fff; z-index: 5000;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
         #login.hidden { display: none; }
-        #login input { padding: 15px; font-size: 1.2rem; border: 2px solid #333; margin-bottom: 15px; text-align: center; border-radius: 8px; }
-        #login button { padding: 15px 30px; background: #333; color: white; border: none; cursor: pointer; font-size: 1rem; border-radius: 8px; font-weight: bold; }
+        #login input { padding: 15px; border: 2px solid #333; margin-bottom: 10px; border-radius: 8px; text-align: center; }
+        #login button { padding: 15px 30px; background: #333; color: #fff; border: none; cursor: pointer; border-radius: 8px; }
 
-        /* --- UI STRUCTURE --- */
         #header {
             height: 50px; background: #f8f9fa; border-bottom: 1px solid #ddd;
             display: flex; justify-content: space-between; align-items: center; padding: 0 20px;
             z-index: 100;
         }
         .status { font-size: 0.8rem; color: #666; display: flex; align-items: center; gap: 8px; }
-        .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; transition: background 0.3s; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; }
         .dot.on { background: #00e676; box-shadow: 0 0 5px #00e676; }
 
+        /* --- EDITOR SURFACE --- */
         #container { 
             flex: 1; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; 
-            position: relative; padding-bottom: 50vh;
+            padding-bottom: 50vh; position: relative;
         }
 
         #display {
             min-height: 100%; outline: none; 
-            padding: 40px 80px; /* Extra left padding for tags */
-            font-size: 16px; 
-            line-height: var(--line-height);
-            transition: filter 0.3s;
+            padding: 40px 80px; /* Space for labels */
         }
 
-        /* --- LINE LOGIC --- */
-        
-        /* Base Line Style */
+        /* --- THE LINE BLOCK --- */
         .line {
             position: relative;
-            min-height: var(--line-height);
-            padding: 2px 5px;
-            margin-bottom: 4px;
+            min-height: 28px;
+            margin-bottom: 6px;
+            padding: 4px 8px;
             border-radius: 4px;
+            outline: none;
             transition: all 0.3s ease;
-            transform-origin: top;
+            /* Dynamic Blur Logic */
+            filter: blur(var(--blur));
+            opacity: 1;
         }
 
-        /* The Hex Label (Floating Left) */
-        .line::before {
-            content: attr(data-hex);
-            position: absolute;
-            left: -70px; top: 50%; transform: translateY(-50%);
-            font-size: 0.65rem;
-            font-family: monospace;
-            color: #fff;
-            background-color: var(--line-color, #ccc);
-            padding: 2px 6px;
-            border-radius: 4px;
-            opacity: 0.7;
-            pointer-events: none;
-        }
-
-        /* --- OWNERSHIP STYLES --- */
-
-        /* MY LINES: Editable */
+        /* 1. MY LINES */
         .line[contenteditable="true"] {
             cursor: text;
         }
 
-        /* PEER LINES: Non-Editable (Protected) */
+        /* 2. PEER LINES */
         .line[contenteditable="false"] {
-            cursor: pointer; /* Indicates clickability */
-            user-select: none; /* Can't select text easily */
+            cursor: pointer;
             border: 1px solid transparent;
         }
-
-        /* Hovering over peer line (Light Grey) */
         .line[contenteditable="false"]:hover {
-            background-color: #f0f0f0;
-            border-color: #e0e0e0;
+            background-color: #f5f5f5;
+            border-color: #ddd;
         }
 
-        /* The "Alert" Highlight (When someone comments on your line) */
-        .line.alert-highlight {
+        /* 3. HEX LABELS */
+        .line::before {
+            content: attr(data-hex);
+            position: absolute;
+            left: -70px; top: 6px;
+            font-family: monospace; font-size: 0.7rem;
+            color: white;
+            background-color: var(--owner-color);
+            padding: 2px 5px; border-radius: 4px;
+            opacity: 0.5; pointer-events: none;
+        }
+        .line:hover::before { opacity: 1; }
+
+        /* 4. NOTIFICATION HIGHLIGHT (When someone replies to you) */
+        .line.ping-highlight {
+            background-color: var(--pinger-color) !important;
             color: white;
             font-weight: bold;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            filter: blur(0px) !important; /* Always visible */
+            z-index: 20;
         }
 
-        /* --- FOCUS MODE (BLUR) --- */
+        /* --- FOCUS MODE (BLUR OTHERS) --- */
+        /* When body has .focus-mode, all lines blur EXCEPT the active one */
+        body.focus-mode { --blur: 3px; }
         
-        /* When we are in a "Thread", body gets this class */
-        body.focus-active #display .line {
-            filter: blur(var(--blur-strength));
-            opacity: 0.4;
-            pointer-events: none;
-        }
-
-        /* The lines involved in the interaction stay sharp */
-        body.focus-active #display .line.focused-thread {
-            filter: none;
+        body.focus-mode .line.active-thread,
+        body.focus-mode .line.ping-highlight {
+            --blur: 0px;
             opacity: 1;
-            pointer-events: auto;
-            transform: scale(1.02);
+            transform: scale(1.01);
             z-index: 10;
             background: white;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            box-shadow: 0 0 0 100vw rgba(255,255,255,0.7); /* Hacks a backdrop */
         }
 
-        /* Animation for new line sliding in */
-        @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-10px); max-height: 0; }
-            to { opacity: 1; transform: translateY(0); max-height: 100px; }
+        /* --- ANIMATION --- */
+        @keyframes slideOpen {
+            from { opacity: 0; transform: translateY(-10px); max-height: 0; margin: 0; }
+            to { opacity: 1; transform: translateY(0); max-height: 500px; margin-bottom: 6px; }
         }
         .slide-in {
-            animation: slideDown 0.3s ease forwards;
+            animation: slideOpen 0.3s ease forwards;
         }
 
     </style>
 </head>
 <body>
 
+    <!-- LOGIN -->
     <div id="login">
-        <h2>Layered P2P Editor</h2>
+        <h2>P2P Owner Editor</h2>
         <input type="text" id="room-input" placeholder="Room Name" required>
-        <button id="btn-login">Enter</button>
+        <button id="btn-enter">Enter</button>
     </div>
 
+    <!-- UI -->
     <div id="header">
         <strong>P2P Layers</strong>
         <div class="status">
             <span class="dot"></span>
-            <span id="peer-count">Offline</span>
+            <span id="peer-count">Connecting...</span>
         </div>
     </div>
 
     <div id="container">
-        <div id="display" contenteditable="true" spellcheck="false"></div>
+        <!-- Not contenteditable! The children are. -->
+        <div id="display"></div>
     </div>
 
     <script type="module">
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
-        // --- 1. SETUP ---
+        // --- STATE ---
         const ui = {
             login: document.getElementById('login'),
-            roomInput: document.getElementById('room-input'),
+            input: document.getElementById('room-input'),
             display: document.getElementById('display'),
             container: document.getElementById('container'),
             peerCount: document.getElementById('peer-count'),
@@ -176,62 +166,61 @@
         let roomDB, room;
         const act = {}; 
 
-        // --- 2. BOOTSTRAP ---
-        
+        // --- 1. BOOTSTRAP ---
         function checkHash() {
             const hash = window.location.hash.replace('#', '');
             if(hash) {
-                roomId = 'layer-doc-v1-' + hash;
+                roomId = 'doc-owner-v2-' + hash;
                 ui.login.classList.add('hidden');
                 initNetwork();
             } else {
                 ui.login.classList.remove('hidden');
             }
         }
-
-        document.getElementById('btn-login').onclick = () => {
-            const val = ui.roomInput.value.trim();
+        document.getElementById('btn-enter').onclick = () => {
+            const val = ui.input.value.trim();
             if(val) { window.location.hash = val; checkHash(); }
         };
         window.addEventListener('load', checkHash);
 
-        // --- 3. NETWORK ---
-
+        // --- 2. NETWORK ---
         function initNetwork() {
+            // Gun
             const gun = Gun({ peers: [], localStorage: true });
             roomDB = gun.get(roomId);
 
+            // Trystero (Stable Trackers)
             const config = { 
-                appId: 'layer-doc-v1',
-                trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io']
+                appId: 'doc-owner-v2',
+                trackerUrls: [
+                    'wss://tracker.webtorrent.dev', 
+                    'wss://tracker.openwebrtc.io',
+                    'wss://tracker.files.fm:7073/announce'
+                ]
             };
             room = joinRoom(config, roomId);
 
             // Actions
             const [sendContent, getContent] = room.makeAction('content');
-            const [sendPing, getPing] = room.makeAction('ping'); // For highlighting lines
-            const [reqSync, getReqSync] = room.makeAction('req');
+            const [sendPing, getPing] = room.makeAction('ping');
             const [pushSync, getPushSync] = room.makeAction('sync');
 
             act.sendContent = sendContent;
             act.sendPing = sendPing;
             act.pushSync = pushSync;
-            act.reqSync = reqSync;
 
-            // Listeners
+            // Handlers
             getContent(handleRemoteContent);
-            getPing(handlePing); // Handle Highlight Pings
-            getReqSync((_, pid) => act.pushSync(ui.display.innerHTML, pid));
+            getPing(handlePing);
             getPushSync((html) => {
                 ui.display.innerHTML = html;
                 roomDB.get('content').put(html);
-                enforceProtection(); // Re-run protection logic on sync
+                enforceOwnership();
             });
 
             room.onPeerJoin(id => {
                 updateStatus();
                 if(ui.display.innerHTML.length > 50) act.pushSync(ui.display.innerHTML, id);
-                else act.reqSync(null, id);
             });
             room.onPeerLeave(updateStatus);
 
@@ -240,187 +229,175 @@
                 if(data && data.includes('class="line"')) {
                     ui.display.innerHTML = data;
                 } else {
-                    initFresh();
+                    // Create 10 empty lines owned by NO ONE (so anyone can claim? or me?)
+                    // Let's create 10 lines owned by Me for start
+                    let html = '';
+                    for(let i=0; i<10; i++) html += createLineHTML('', selfId);
+                    ui.display.innerHTML = html;
                 }
-                enforceProtection();
+                enforceOwnership();
             });
         }
 
-        // --- 4. DOM LOGIC & PROTECTION ---
+        // --- 3. DOM & OWNERSHIP ---
 
-        function createLine(text = '', owner = selfId) {
+        function createLineHTML(text = '', owner) {
             const id = 'line-' + Math.random().toString(36).substr(2, 9);
             const color = stringToColor(owner);
-            // Default to Editable if I created it
-            const editable = (owner === selfId) ? "true" : "false";
-            
+            // NOTE: We set contenteditable in HTML string, but enforceOwnership() fixes it on load/sync
             return `<div id="${id}" class="line" 
                         data-owner="${owner}" 
-                        data-hex="${color}" 
-                        style="--line-color: ${color}"
-                        contenteditable="${editable}">${text || '<br>'}</div>`;
+                        data-hex="${color}"
+                        style="--owner-color: ${color}">${text || '<br>'}</div>`;
         }
 
-        function initFresh() {
-            let html = '';
-            for(let i=0; i<10; i++) html += createLine();
-            ui.display.innerHTML = html;
-        }
-
-        // The Enforcer: Scans DOM and locks lines that aren't mine
-        function enforceProtection() {
+        // Scans DOM and locks/unlocks based on SelfID
+        function enforceOwnership() {
             const lines = Array.from(ui.display.children);
             lines.forEach(line => {
-                if(!line.classList.contains('line')) return; // skip junk
-
                 const owner = line.getAttribute('data-owner');
-                
                 if (owner === selfId) {
-                    // It's mine
                     line.setAttribute('contenteditable', 'true');
                 } else {
-                    // It's someone else's -> PROTECT IT
                     line.setAttribute('contenteditable', 'false');
                 }
             });
         }
 
-        // --- 5. INTERACTION (CLICK & REPLY) ---
+        // --- 4. INTERACTION LOGIC (The Core) ---
 
+        // CLICK HANDLING
         ui.display.addEventListener('click', (e) => {
-            // Find clicked line
-            const targetLine = e.target.closest('.line');
-            if (!targetLine) return;
+            const line = e.target.closest('.line');
+            if(!line) return;
 
-            // Check if it's protected (someone else's)
-            const isProtected = targetLine.getAttribute('contenteditable') === 'false';
-            
-            // SCENARIO 1: Clicking Someone Else's Line (To Comment)
-            if (isProtected) {
-                // 1. Enter Focus Mode
-                enterFocusMode(targetLine);
+            const isMine = line.getAttribute('data-owner') === selfId;
 
-                // 2. Create New Line Below
-                const newLineHTML = createLine('', selfId);
-                targetLine.insertAdjacentHTML('afterend', newLineHTML);
-                
-                const newLine = targetLine.nextElementSibling;
-                newLine.classList.add('slide-in'); // Animation
-                newLine.classList.add('focused-thread'); // Keep it sharp in blur mode
-                
-                // 3. Move Cursor
-                placeCaret(newLine);
-
-                // 4. Notify Owner (Highlight their screen)
-                const ownerId = targetLine.getAttribute('data-owner');
-                act.sendPing({ 
-                    targetId: targetLine.id, 
-                    actorColor: myColor 
-                }, ownerId); // Send specifically to owner? No, Trystero is broadcast usually, logic in handlePing
-
-                saveAndBroadcast();
+            // SCENARIO A: Clicking MY line (Check for Highlight)
+            if (isMine) {
+                if(line.classList.contains('ping-highlight')) {
+                    // Clear notification
+                    line.classList.remove('ping-highlight');
+                    line.style.setProperty('--pinger-color', '');
+                    saveAndSend();
+                    
+                    // Slide down to the reply
+                    const next = line.nextElementSibling;
+                    if(next) {
+                        next.scrollIntoView({behavior:'smooth', block:'center'});
+                        focusLine(next);
+                    }
+                }
+                activateFocusMode(line);
                 return;
             }
 
-            // SCENARIO 2: Clicking My Own Line (That might be highlighted)
-            if (targetLine.classList.contains('alert-highlight')) {
-                // Remove highlight
-                targetLine.classList.remove('alert-highlight');
-                targetLine.style.backgroundColor = '';
+            // SCENARIO B: Clicking PEER line (The Reply)
+            if (!isMine) {
+                e.preventDefault(); // Don't focus the read-only line
                 
-                // If there's a comment below, reveal/focus it
-                const next = targetLine.nextElementSibling;
-                if(next) {
-                    enterFocusMode(targetLine, next);
-                    next.scrollIntoView({behavior:'smooth', block:'center'});
-                }
-                saveAndBroadcast();
+                // 1. Create Reply Line
+                const newLineHTML = createLineHTML('', selfId);
+                line.insertAdjacentHTML('afterend', newLineHTML);
+                
+                const newLine = line.nextElementSibling;
+                newLine.classList.add('slide-in');
+                
+                // 2. Focus and Blur others
+                activateFocusMode(newLine); // Focus me, blur rest
+                newLine.focus();
+
+                // 3. Notify Owner
+                const owner = line.getAttribute('data-owner');
+                act.sendPing({ targetId: line.id, pingerColor: myColor }, owner);
+
+                saveAndSend();
             }
         });
 
-        // Focus Mode Logic (Blur Background)
-        function enterFocusMode(mainLine, secondaryLine = null) {
-            document.body.classList.add('focus-active');
+        // FOCUS MODE (Blur Effect)
+        function activateFocusMode(activeElement) {
+            // Clear old active classes
+            document.querySelectorAll('.active-thread').forEach(el => el.classList.remove('active-thread'));
             
-            // Clean previous thread focus
-            document.querySelectorAll('.focused-thread').forEach(el => el.classList.remove('focused-thread'));
-
-            // Highlight current thread
-            mainLine.classList.add('focused-thread');
-            if(secondaryLine) secondaryLine.classList.add('focused-thread');
-
-            // Exit focus mode when clicking background
-            const exitHandler = (e) => {
-                if(!e.target.closest('.focused-thread')) {
-                    document.body.classList.remove('focus-active');
-                    document.querySelectorAll('.focused-thread').forEach(el => el.classList.remove('focused-thread'));
-                    document.removeEventListener('click', exitHandler, true);
-                }
-            };
-            // Delay listener slightly so immediate click doesn't trigger it
-            setTimeout(() => document.addEventListener('click', exitHandler, true), 50);
+            // Activate
+            document.body.classList.add('focus-mode');
+            activeElement.classList.add('active-thread');
         }
 
-        // --- 6. PING HANDLER (The Notification) ---
-
-        function handlePing(data) {
-            // Check if the ping is for a line I have locally
-            const el = document.getElementById(data.targetId);
-            if(el) {
-                // Check if I am the owner of this line
-                const myLine = el.getAttribute('data-owner') === selfId;
-                
-                if(myLine) {
-                    // Highlight it with the Actor's color
-                    el.classList.add('alert-highlight');
-                    el.style.backgroundColor = data.actorColor;
-                }
+        // Deactivate Focus Mode when clicking outside lines
+        ui.container.addEventListener('click', (e) => {
+            if(!e.target.closest('.line')) {
+                document.body.classList.remove('focus-mode');
+                document.querySelectorAll('.active-thread').forEach(el => el.classList.remove('active-thread'));
             }
-        }
-
-        // --- 7. INPUT & SYNC ---
-
-        ui.display.addEventListener('input', () => {
-            saveAndBroadcast();
         });
 
-        // Custom Enter Key (Always creates a DIV with ID)
+        // --- 5. INPUT & KEYS ---
+
+        // Custom Enter Key (Create new line owned by ME)
         ui.display.addEventListener('keydown', (e) => {
             if(e.key === 'Enter') {
                 e.preventDefault();
-                // Insert new line
-                const newLineHTML = createLine('', selfId);
-                document.execCommand('insertHTML', false, newLineHTML);
-                // Fix structure immediately (execCommand can be messy)
-                enforceProtection();
-                saveAndBroadcast();
+                const newLineHTML = createLineHTML('', selfId);
+                
+                // Insert after current
+                const sel = window.getSelection();
+                const currentLine = sel.anchorNode.nodeType===3 ? sel.anchorNode.parentNode.closest('.line') : sel.anchorNode.closest('.line');
+                
+                if(currentLine) {
+                    currentLine.insertAdjacentHTML('afterend', newLineHTML);
+                    const next = currentLine.nextElementSibling;
+                    focusLine(next);
+                } else {
+                    // Fallback
+                    document.execCommand('insertHTML', false, newLineHTML);
+                }
+                
+                enforceOwnership();
+                saveAndSend();
             }
         });
 
-        function saveAndBroadcast() {
+        ui.display.addEventListener('input', () => {
+            saveAndSend();
+        });
+
+        function saveAndSend() {
             const html = ui.display.innerHTML;
             roomDB.get('content').put(html);
             if(act.sendContent) act.sendContent(html);
         }
 
         function handleRemoteContent(html) {
-            roomDB.get('content').put(html);
-            
-            // Store current selection/focus
-            const hadFocus = document.hasFocus();
+            // Save state
+            const wasFocus = document.hasFocus();
             let savedSel = null;
-            if(hadFocus) savedSel = saveSelection();
+            if(wasFocus) savedSel = saveSelection();
 
+            roomDB.get('content').put(html);
             ui.display.innerHTML = html;
             
-            // Re-apply protection (crucial so I can't edit new lines from others)
-            enforceProtection();
+            enforceOwnership(); // Critical: re-lock lines
+            
+            if(wasFocus && savedSel) restoreSelection(savedSel);
+        }
 
-            if(hadFocus && savedSel) restoreSelection(savedSel);
+        // --- 6. PING HANDLER ---
+        function handlePing(data) {
+            // { targetId, pingerColor }
+            const el = document.getElementById(data.targetId);
+            if(el && el.getAttribute('data-owner') === selfId) {
+                // Highlight my line
+                el.classList.add('ping-highlight');
+                el.style.setProperty('--pinger-color', data.pingerColor);
+                
+                // Also trigger focus mode locally so I see it clearly?
+                // Optional: For now just highlight
+            }
         }
 
         // --- HELPERS ---
-
         function updateStatus() {
             const count = Object.keys(room.getPeers()).length;
             ui.peerCount.innerText = count > 0 ? `${count} Peer(s)` : 'Offline';
@@ -434,7 +411,7 @@
             return '#' + '00000'.substring(0, 6 - c.length) + c;
         }
 
-        function placeCaret(el) {
+        function focusLine(el) {
             const range = document.createRange();
             range.selectNodeContents(el);
             range.collapse(true);
@@ -442,14 +419,14 @@
             sel.removeAllRanges();
             sel.addRange(range);
             el.focus();
+            activateFocusMode(el);
         }
 
         function saveSelection() {
             const sel = window.getSelection();
             if(!sel.rangeCount) return null;
             const range = sel.getRangeAt(0);
-            const node = range.startContainer.nodeType === 3 ? range.startContainer.parentNode : range.startContainer;
-            const line = node.closest('.line');
+            const line = (range.startContainer.nodeType===3 ? range.startContainer.parentNode : range.startContainer).closest('.line');
             if(!line) return null;
             return { lineId: line.id, offset: range.startOffset };
         }
@@ -459,21 +436,29 @@
             const line = document.getElementById(saved.lineId);
             if(line) {
                 const range = document.createRange();
-                // Try to restore offset safely
-                try {
-                    if(line.childNodes[0]) {
-                        range.setStart(line.childNodes[0], Math.min(saved.offset, line.innerText.length));
-                    } else {
-                        range.selectNodeContents(line);
-                    }
-                } catch(e) { range.selectNodeContents(line); }
-                
+                // Safe restore logic
+                if(line.childNodes.length > 0) {
+                     try { range.setStart(line.childNodes[0], Math.min(saved.offset, line.innerText.length)); }
+                     catch(e) { range.selectNodeContents(line); }
+                } else {
+                    range.selectNodeContents(line);
+                }
                 range.collapse(true);
                 const sel = window.getSelection();
                 sel.removeAllRanges();
                 sel.addRange(range);
             }
         }
+
+        // Infinite Scroll (Append empty lines for Me if at bottom)
+        ui.container.addEventListener('scroll', () => {
+             if(ui.container.scrollHeight - ui.container.scrollTop - ui.container.clientHeight < 100) {
+                 let html = '';
+                 for(let i=0;i<3;i++) html += createLineHTML('', selfId);
+                 ui.display.insertAdjacentHTML('beforeend', html);
+                 enforceOwnership();
+             }
+        });
 
     </script>
 </body>
