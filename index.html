@@ -684,64 +684,95 @@ window.addEventListener("message", (event) => {
         }
         init();
 
-        // --- STORAGE ACCESS API LOGIC ---
+      // --- STORAGE ACCESS API IMPLEMENTATION (MDN COMPLIANT) ---
 
-// 1. Check if we are inside an iframe
-if (window.self !== window.top) {
+async function initStorageAccess() {
+    // 1. Check if we are inside an iframe
+    if (window.self === window.top) return; // Exit if top-level
+
+    const container = document.body;
     
-    // Stop the 3D animation loop to save resources (Optional but recommended)
-    // if(window.cancelAnimationFrame) cancelAnimationFrame(animationId);
+    // Helper to create the UI
+    const showButton = () => {
+        container.innerHTML = "";
+        Object.assign(container.style, {
+            display: "flex", justifyContent: "center", alignItems: "center", 
+            height: "100vh", background: "#fff", margin: 0
+        });
 
-    // 2. Create a UI Overlay with a Button
-    document.body.innerHTML = ""; // Clear the 3D canvas
-    document.body.style.backgroundColor = "#fff";
-    document.body.style.display = "flex";
-    document.body.style.justifyContent = "center";
-    document.body.style.alignItems = "center";
+        const btn = document.createElement("button");
+        btn.innerText = "🔌 Connect to Sphere";
+        Object.assign(btn.style, {
+            padding: "12px 24px", fontSize: "16px", cursor: "pointer",
+            background: "#000", color: "#fff", border: "none", borderRadius: "8px"
+        });
 
-    const btn = document.createElement("button");
-    btn.innerText = "🔌 Connect Sphere Color";
-    btn.style.padding = "15px 25px";
-    btn.style.fontSize = "16px";
-    btn.style.cursor = "pointer";
-    btn.style.background = "#000";
-    btn.style.color = "#fff";
-    btn.style.border = "none";
-    btn.style.borderRadius = "8px";
+        container.appendChild(btn);
 
-    document.body.appendChild(btn);
+        // 3. Attach the Event Listener (User Gesture is MANDATORY)
+        btn.addEventListener("click", handleAccessRequest);
+    };
 
-    // 3. The Magic: Request Storage Access on Click
-    btn.addEventListener("click", async () => {
+    const attemptRetrieval = async () => {
         try {
-            // This is the specific API that asks the browser:
-            // "Can I please see my original LocalStorage?"
+            // 4. Try to read from the 'unpartitioned' storage
+            const legacyColor = localStorage.getItem("lastSphereColor");
+            
+            if (legacyColor) {
+                console.log("Success! Found unpartitioned color:", legacyColor);
+                window.parent.postMessage(legacyColor, "*");
+                
+                // Update UI to show success
+                container.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold;">Synced: ${legacyColor}</div>`;
+                document.body.style.backgroundColor = legacyColor;
+            } else {
+                console.warn("Access Granted, but 'lastSphereColor' is missing from LocalStorage.");
+                // Debugging: Log what IS in storage
+                console.log("Storage contents:", JSON.stringify(localStorage));
+                
+                container.innerHTML = `<div style="font-family:sans-serif; color:red;">Storage Empty<br><small>Visit colorlog.in directly first</small></div>`;
+            }
+        } catch (e) {
+            console.error("Error reading storage:", e);
+        }
+    };
+
+    const handleAccessRequest = async () => {
+        try {
+            // 5. The API Call
+            // Note: This must be awaited.
             await document.requestStorageAccess();
             
-            // If the promise resolves, we now have access!
-            const realColor = localStorage.getItem("lastSphereColor");
+            // If we pass this line, the browser has linked the storage buckets.
+            await attemptRetrieval();
             
-            if (realColor) {
-                btn.innerText = "Synced!";
-                btn.style.background = "green";
-                // Send the color to the parent
-                window.parent.postMessage(realColor, "*");
-            } else {
-                btn.innerText = "No Color Found";
-                console.log("Access granted, but storage was empty.");
-            }
-
         } catch (err) {
-            // The user denied it, or the browser rejected it
-            btn.innerText = "Access Denied";
-            console.error("Storage Access API Error:", err);
-            
-            // Explanation for debugging:
-            // This usually fails if the user has NEVER visited colorlog.in 
-            // as a top-level site before.
+            console.error("Storage Access Denied:", err);
+            // This usually happens if the user denies the prompt 
+            // OR if the user has not interacted with the site recently.
+            container.innerHTML = "Access Denied by Browser";
         }
-    });
+    };
+
+    // 2. LOGIC FLOW START
+    try {
+        // MDN recommends checking if we already have access first
+        const hasAccess = await document.hasStorageAccess();
+        
+        if (hasAccess) {
+            // We already have access, just grab it (no button needed)
+            await attemptRetrieval();
+        } else {
+            // We don't have access, show the button to get the User Gesture
+            showButton();
+        }
+    } catch (e) {
+        console.error("Storage Access API not supported", e);
+    }
 }
+
+// Start the process
+initStorageAccess();
     </script>
 </body>
 </html>
