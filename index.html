@@ -644,98 +644,125 @@
         }
         // ---------------------------------------------------------------------------------------
 
-    // --- STORAGE ACCESS API IMPLEMENTATION (MDN COMPLIANT + FALLBACK) ---
+   // --- DIAGNOSTIC STORAGE ACCESS API ---
+// Replace the bottom of your script with this:
 
-    async function initStorageAccess() {
-        // 1. Check if we are inside an iframe
-        if (window.self === window.top) return; // Exit if top-level
+async function initDiagnosticMode() {
+    // 1. Only run if we are inside an iframe
+    if (window.self === window.top) return;
 
-        const container = document.body;
+    const container = document.body;
+    
+    // UI: Create a clean white slate with a button
+    const resetUI = (msg = "🔍 Inspect Storage") => {
+        container.innerHTML = "";
+        Object.assign(container.style, {
+            display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", 
+            height: "100vh", background: "#fff", margin: 0, fontFamily: "monospace", padding: "20px", boxSizing: "border-box", textAlign: "left"
+        });
+
+        const btn = document.createElement("button");
+        btn.innerText = msg;
+        Object.assign(btn.style, {
+            padding: "12px 24px", fontSize: "16px", cursor: "pointer",
+            background: "#000", color: "#fff", border: "none", borderRadius: "8px", marginBottom: "20px"
+        });
         
-        // Helper to create the UI
-        const showButton = () => {
-            container.innerHTML = "";
-            Object.assign(container.style, {
-                display: "flex", justifyContent: "center", alignItems: "center", 
-                height: "100vh", background: "#fff", margin: 0
-            });
+        const output = document.createElement("pre");
+        output.id = "debug-output";
+        Object.assign(output.style, {
+            background: "#eee", color: "#333", padding: "10px", width: "100%", 
+            overflow: "auto", borderRadius: "4px", fontSize: "10px", maxHeight: "200px"
+        });
+        output.innerText = "Waiting for interaction...";
 
-            const btn = document.createElement("button");
-            btn.innerText = "🔌 Connect to Sphere";
-            Object.assign(btn.style, {
-                padding: "12px 24px", fontSize: "16px", cursor: "pointer",
-                background: "#000", color: "#fff", border: "none", borderRadius: "8px"
-            });
+        container.appendChild(btn);
+        container.appendChild(output);
 
-            container.appendChild(btn);
+        btn.addEventListener("click", runDiagnostics);
+    };
 
-            // 3. Attach the Event Listener (User Gesture is MANDATORY)
-            btn.addEventListener("click", handleAccessRequest);
-        };
-
-        const attemptRetrieval = async () => {
-            try {
-                // 4. Try to read from the 'unpartitioned' storage
-                let finalColor = localStorage.getItem("lastSphereColor");
-                
-                // --- FIX 3: Fallback to the P2P key if lastSphereColor is missing ---
-                if (!finalColor) {
-                    try {
-                        const p2pData = JSON.parse(localStorage.getItem('p2p_editor_user_v1'));
-                        if (p2pData && p2pData.color) {
-                            finalColor = p2pData.color;
-                            console.log("Found color in P2P data:", finalColor);
-                        }
-                    } catch (e) { console.error("Could not parse P2P data", e); }
+    // HELPER: Read IndexedDB (Async)
+    const readIndexedDB = () => {
+        return new Promise((resolve) => {
+            const req = indexedDB.open('SphereAppDB', 1);
+            req.onerror = () => resolve("IDB: Connection Failed");
+            req.onsuccess = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('userPreferences')) {
+                    resolve("IDB: Store 'userPreferences' not found.");
+                    return;
                 }
-                // --------------------------------------------------------------------
+                const tx = db.transaction(['userPreferences'], 'readonly');
+                const store = tx.objectStore('userPreferences');
+                const getReq = store.get('favColor');
                 
-                if (finalColor) {
-                    console.log("Success! Found color:", finalColor);
-                    window.parent.postMessage(finalColor, "*");
-                    
-                    // Update UI to show success
-                    container.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold;">Synced: ${finalColor}</div>`;
-                    document.body.style.backgroundColor = finalColor;
-                } else {
-                    console.warn("Access Granted, but no color found.");
-                    container.innerHTML = `<div style="font-family:sans-serif; color:red;">Storage Empty<br><small>Visit colorlog.in directly first</small></div>`;
-                }
-            } catch (e) {
-                console.error("Error reading storage:", e);
-            }
-        };
+                getReq.onsuccess = () => {
+                    const res = getReq.result;
+                    resolve(res ? `IDB favColor: ${JSON.stringify(res)}` : "IDB: 'favColor' is undefined");
+                };
+                getReq.onerror = () => resolve("IDB: Read Error");
+            };
+        });
+    };
 
-        const handleAccessRequest = async () => {
-            try {
-                // 5. The API Call
-                await document.requestStorageAccess();
-                
-                // If we pass this line, the browser has linked the storage buckets.
-                await attemptRetrieval();
-                
-            } catch (err) {
-                console.error("Storage Access Denied:", err);
-                container.innerHTML = "Access Denied by Browser";
-            }
-        };
+    const runDiagnostics = async () => {
+        const out = document.getElementById("debug-output");
+        out.innerText = "Requesting Access...\n";
 
-        // 2. LOGIC FLOW START
         try {
-            const hasAccess = await document.hasStorageAccess();
-            
-            if (hasAccess) {
-                await attemptRetrieval();
-            } else {
-                showButton();
-            }
-        } catch (e) {
-            console.error("Storage Access API not supported", e);
-        }
-    }
+            // 1. Ask Browser for Permission
+            await document.requestStorageAccess();
+            out.innerText += "✅ API Permission GRANTED.\n\n";
 
-    // Start the process
-    initStorageAccess();
+            // 2. Dump LocalStorage
+            out.innerText += "--- LOCAL STORAGE ---\n";
+            if (localStorage.length === 0) {
+                out.innerText += "EMPTY (length: 0)\n";
+            } else {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    const val = localStorage.getItem(key);
+                    out.innerText += `[${key}]: ${val.substring(0, 50)}${val.length>50?'...':''}\n`;
+                }
+            }
+
+            // 3. Dump IndexedDB
+            out.innerText += "\n--- INDEXED DB ---\n";
+            const idbResult = await readIndexedDB();
+            out.innerText += idbResult + "\n";
+
+            // 4. Send Message if we found something useful
+            const lsColor = localStorage.getItem("lastSphereColor");
+            if (lsColor) {
+                out.innerText += `\n🚀 SENDING: ${lsColor}`;
+                window.parent.postMessage(lsColor, "*");
+                document.body.style.backgroundColor = lsColor;
+            }
+
+        } catch (err) {
+            console.error(err);
+            out.innerText += `❌ DENIED: ${err.message}\n`;
+            out.innerText += "This usually means:\n1. Not HTTPS\n2. User hasn't visited colorlog.in recently as top-level.\n3. Browser Strict Privacy.";
+        }
+    };
+
+    // Initialize
+    try {
+        const hasAccess = await document.hasStorageAccess();
+        if (hasAccess) {
+            resetUI("📂 Inspect (Access Pre-Approved)");
+            // Optional: Auto-run if you want
+            // runDiagnostics(); 
+        } else {
+            resetUI("🔍 Inspect Storage");
+        }
+    } catch (e) {
+        resetUI("⚠️ API Not Supported");
+    }
+}
+
+initDiagnosticMode();
     </script>
 </body>
 </html>
