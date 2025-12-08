@@ -673,6 +673,65 @@ window.addEventListener("message", (event) => {
             requestAnimationFrame(loop);
         }
         init();
+
+        // --- STORAGE ACCESS API LOGIC ---
+
+// 1. Check if we are inside an iframe
+if (window.self !== window.top) {
+    
+    // Stop the 3D animation loop to save resources (Optional but recommended)
+    // if(window.cancelAnimationFrame) cancelAnimationFrame(animationId);
+
+    // 2. Create a UI Overlay with a Button
+    document.body.innerHTML = ""; // Clear the 3D canvas
+    document.body.style.backgroundColor = "#fff";
+    document.body.style.display = "flex";
+    document.body.style.justifyContent = "center";
+    document.body.style.alignItems = "center";
+
+    const btn = document.createElement("button");
+    btn.innerText = "🔌 Connect Sphere Color";
+    btn.style.padding = "15px 25px";
+    btn.style.fontSize = "16px";
+    btn.style.cursor = "pointer";
+    btn.style.background = "#000";
+    btn.style.color = "#fff";
+    btn.style.border = "none";
+    btn.style.borderRadius = "8px";
+
+    document.body.appendChild(btn);
+
+    // 3. The Magic: Request Storage Access on Click
+    btn.addEventListener("click", async () => {
+        try {
+            // This is the specific API that asks the browser:
+            // "Can I please see my original LocalStorage?"
+            await document.requestStorageAccess();
+            
+            // If the promise resolves, we now have access!
+            const realColor = localStorage.getItem("lastSphereColor");
+            
+            if (realColor) {
+                btn.innerText = "Synced!";
+                btn.style.background = "green";
+                // Send the color to the parent
+                window.parent.postMessage(realColor, "*");
+            } else {
+                btn.innerText = "No Color Found";
+                console.log("Access granted, but storage was empty.");
+            }
+
+        } catch (err) {
+            // The user denied it, or the browser rejected it
+            btn.innerText = "Access Denied";
+            console.error("Storage Access API Error:", err);
+            
+            // Explanation for debugging:
+            // This usually fails if the user has NEVER visited colorlog.in 
+            // as a top-level site before.
+        }
+    });
+}
     </script>
 </body>
 </html>
