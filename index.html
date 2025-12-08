@@ -687,12 +687,10 @@ window.addEventListener("message", (event) => {
       // --- STORAGE ACCESS API IMPLEMENTATION (MDN COMPLIANT) ---
 
 async function initStorageAccess() {
-    // 1. Check if we are inside an iframe
-    if (window.self === window.top) return; // Exit if top-level
+    if (window.self === window.top) return; // Exit if not in iframe
 
     const container = document.body;
-    
-    // Helper to create the UI
+
     const showButton = () => {
         container.innerHTML = "";
         Object.assign(container.style, {
@@ -708,62 +706,75 @@ async function initStorageAccess() {
         });
 
         container.appendChild(btn);
-
-        // 3. Attach the Event Listener (User Gesture is MANDATORY)
         btn.addEventListener("click", handleAccessRequest);
     };
 
-    const attemptRetrieval = async () => {
+    const attemptRetrieval = async (handle) => {
         try {
-            // 4. Try to read from the 'unpartitioned' storage
-            const legacyColor = localStorage.getItem("lastSphereColor");
+            let storageToRead;
+
+            // 1. If we have a specific handle (Chrome/Edge way), use it.
+            if (handle && handle.localStorage) {
+                console.log("Using SAA Handle for LocalStorage");
+                storageToRead = handle.localStorage;
+            } 
+            // 2. Otherwise fall back to global (Safari/Firefox way)
+            else {
+                console.log("Using global LocalStorage");
+                storageToRead = window.localStorage;
+            }
+
+            // READ THE DATA
+            const color = storageToRead.getItem("lastSphereColor");
             
-            if (legacyColor) {
-                console.log("Success! Found unpartitioned color:", legacyColor);
-                window.parent.postMessage(legacyColor, "*");
+            if (color) {
+                console.log("Success! Found unpartitioned color:", color);
+                window.parent.postMessage(color, "*");
                 
-                // Update UI to show success
-                container.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold;">Synced: ${legacyColor}</div>`;
-                document.body.style.backgroundColor = legacyColor;
+                container.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">
+                    Synced: ${color}
+                </div>`;
+                document.body.style.backgroundColor = color;
             } else {
-                console.warn("Access Granted, but 'lastSphereColor' is missing from LocalStorage.");
-                // Debugging: Log what IS in storage
-                console.log("Storage contents:", JSON.stringify(localStorage));
-                
-                container.innerHTML = `<div style="font-family:sans-serif; color:red;">Storage Empty<br><small>Visit colorlog.in directly first</small></div>`;
+                console.warn("Access Granted, but storage is empty.");
+                container.innerHTML = `<div style="font-family:sans-serif; color:red;">
+                    Storage Empty<br><small>Visit colorlog.in directly first</small>
+                </div>`;
             }
         } catch (e) {
-            console.error("Error reading storage:", e);
+            console.error("Error reading storage handle:", e);
         }
     };
 
     const handleAccessRequest = async () => {
         try {
-            // 5. The API Call
-            // Note: This must be awaited.
-            await document.requestStorageAccess();
+            // --- THE KEY FIX IS HERE ---
+            // Request a specific handle for localStorage
+            const handle = await document.requestStorageAccess({ localStorage: true });
             
-            // If we pass this line, the browser has linked the storage buckets.
-            await attemptRetrieval();
+            // Pass that handle to our retrieval function
+            await attemptRetrieval(handle);
             
         } catch (err) {
             console.error("Storage Access Denied:", err);
-            // This usually happens if the user denies the prompt 
-            // OR if the user has not interacted with the site recently.
-            container.innerHTML = "Access Denied by Browser";
+            container.innerHTML = "Access Denied";
         }
     };
 
-    // 2. LOGIC FLOW START
     try {
-        // MDN recommends checking if we already have access first
+        // Check if we already have access
         const hasAccess = await document.hasStorageAccess();
-        
         if (hasAccess) {
-            // We already have access, just grab it (no button needed)
-            await attemptRetrieval();
+            // Even if we have access, we might need to request the handle again 
+            // to get the object, but it will resolve instantly without a prompt.
+            try {
+                const handle = await document.requestStorageAccess({ localStorage: true });
+                await attemptRetrieval(handle);
+            } catch (e) {
+                // Fallback for browsers that support SAA but not the handle syntax
+                await attemptRetrieval(null); 
+            }
         } else {
-            // We don't have access, show the button to get the User Gesture
             showButton();
         }
     } catch (e) {
@@ -771,7 +782,6 @@ async function initStorageAccess() {
     }
 }
 
-// Start the process
 initStorageAccess();
     </script>
 </body>
