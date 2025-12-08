@@ -116,16 +116,6 @@
 
     <!-- P2P MODULE SCRIPT -->
     <script type="module">
-
-        // --- DEBUG CHECKER ---
-// Run this when you visit https://colorlog.in directly
-const checkKey = "lastSphereColor";
-const checkVal = localStorage.getItem(checkKey);
-
-alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking for: ${checkKey}\nFound value: ${checkVal}`);
-// ---------------------
-
-        
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
         const STORAGE_KEY = 'p2p_editor_user_v1';
@@ -146,7 +136,12 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
             
             // Temporary Sphere Color
             myUser.color = '#' + cleanHex;
+            
+            // --- FIX 1: Explicitly save to Last Sphere Color for the Iframe ---
             localStorage.setItem(STORAGE_KEY, JSON.stringify(myUser));
+            localStorage.setItem("lastSphereColor", '#' + cleanHex); // This ensures the API finds it
+            // -------------------------------------------------------------
+
             document.getElementById('user-badge').style.backgroundColor = myUser.color;
 
             ui.status.innerText = "Checking Network...";
@@ -231,7 +226,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
 
         function createLine() { return `<div id="line-${Math.random().toString(36).substr(2,9)}" class="editor-line"><br></div>`; }
         
-        // --- SALVAGED: Reduced line count for stability ---
         function initFreshCanvas() { 
             let html = ''; 
             for(let i=0; i<100; i++) html += createLine();
@@ -256,7 +250,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
             });
         }
 
-        // --- SALVAGED: Improved Infinite Scroll & Resize ---
         ui.container.addEventListener('scroll', () => {
             const scrollTop = ui.container.scrollTop;
             const scrollHeight = ui.container.scrollHeight;
@@ -283,7 +276,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
         
         window.addEventListener('resize', renderMinimap);
 
-        // --- SALVAGED: Improved Input Handler ---
         ui.display.addEventListener('keydown', (e) => {
             if(e.key === 'Enter') {
                 e.preventDefault();
@@ -307,7 +299,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
                 renderMinimap();
                 return;
             }
-            // Protect locked lines
             if(e.target.closest('.locked-line')) e.preventDefault();
         });
 
@@ -332,14 +323,12 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
             reapplyVisualLocks(); 
         }
 
-        // --- SALVAGED: Auto-jump on Sync ---
         function handleSync(html) { 
             isFresh = false; 
             ui.display.innerHTML = html; 
             refreshOwnership(); 
             roomDB.get('content').put(html); 
             
-            // Wait for render, then jump to active peer
             setTimeout(() => {
                 const locks = Object.values(activeLocks);
                 if(locks.length > 0) {
@@ -358,7 +347,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
             }); 
         }
         
-        // --- CURSORS & LOCKS ---
         document.addEventListener('selectionchange', () => {
             const sel = window.getSelection(); if(!sel.rangeCount) return;
             const n = sel.anchorNode.nodeType===3?sel.anchorNode.parentNode:sel.anchorNode; 
@@ -378,7 +366,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
             reapplyVisualLocks(); 
         }
 
-        // --- SALVAGED: Cleaner Visual Locks ---
         function reapplyVisualLocks() {
             document.querySelectorAll('.locked-line').forEach(el=>{
                 el.classList.remove('locked-line'); 
@@ -406,7 +393,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
             renderMinimap();
         }
 
-        // --- SALVAGED: Better Minimap Logic ---
         function renderMinimap() {
             ui.minimap.innerHTML = '';
             const totalHeight = ui.container.scrollHeight;
@@ -418,7 +404,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
                 if(el) { 
                     const d=document.createElement('div'); d.className='scroll-dot'; 
                     d.style.backgroundColor=lock.color; 
-                    // Calculate relative to the container content
                     const topPercent = (el.offsetTop / totalHeight) * 100;
                     d.style.top = topPercent + '%'; 
                     d.onclick=()=>el.scrollIntoView({block:'center', behavior: 'smooth'}); 
@@ -427,12 +412,10 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
             }
         }
 
-        // --- SALVAGED: Smart Join Logic ---
         function handlePeerJoin(id) { 
             updatePreviewStatus(); 
             const hasRealText = ui.display.innerText.trim().length > 0;
             
-            // If we are fresh/empty, don't overwrite peers. Ask for sync.
             if(isFresh || !hasRealText) {
                 console.log("Empty canvas, requesting sync...");
                 act.reqSync(null, id); 
@@ -452,7 +435,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
         document.getElementById('btn-italic').onclick = () => document.execCommand('italic');
         document.getElementById('btn-link').onclick = () => { const u=prompt("URL:"); if(u) document.execCommand('createLink', false, u); };
         
-        // Highlight grouping
         ui.display.addEventListener('mouseover', (e) => {
             const line = e.target.closest('.editor-line');
             if (line && line.dataset.owner) {
@@ -467,7 +449,6 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
     <script>
         const DB_CONFIG = { name: 'SphereAppDB', version: 1, storeName: 'userPreferences' };
         
-        // Tracking current session color for the iframe request
         let currentLoggedColor = null; 
 
         const dbService = {
@@ -478,38 +459,10 @@ alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking 
         };
 
         dbService.init();
-        
-        // --- IFRAME COMMUNICATION LOGIC START ---
-window.addEventListener("message", (event) => {
-    if (event.data === "getSphereColor") {
-        
-        // --- DEBUGGING LOGS ---
-        console.log("--- IFRAME DEBUG ---");
-        console.log("Iframe Origin:", window.location.origin);
-        console.log("Am I inside an iframe?", window.self !== window.top);
-        
-        // This will likely print 'null' or 'undefined' in the iframe, 
-        // even though it prints the color when you visit the site directly.
-        const actualValue = localStorage.getItem("lastSphereColor");
-        console.log("Value in Storage:", actualValue); 
-        console.log("--------------------");
-        // ----------------------
-
-        let savedColor = actualValue;
-        if (!savedColor) {
-            savedColor = "#ff0000"; 
-        }
-        event.source.postMessage(savedColor, event.origin);
-    }
-});
-// --- IFRAME COMMUNICATION LOGIC END ---
 
         document.getElementById('login-btn').addEventListener('click', async () => {
             const currentHex = document.getElementById('color-hex').innerText;
-            
-            // Set the session state so the iframe listener knows we are active
             currentLoggedColor = currentHex; 
-            
             await dbService.saveColor(currentHex);
             if(window.enterRoomUI) window.enterRoomUI();
         });
@@ -606,7 +559,6 @@ window.addEventListener("message", (event) => {
             const cam=Vec3.normalize(state.cameraPos), axis=Vec3.cross(norm,cam), dot=Vec3.dot(norm,cam);
             state.landing.rotationAxis = Vec3.len(axis)<.001?[1,0,0]:Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis)<.001?(dot>0?0:Math.PI):Math.acos(Math.min(1,Math.max(-1,dot)));
             
-            // Trigger P2P Preview (Updated to verify existence)
             if(window.connectAndPreview) window.connectAndPreview(hex);
         }
 
@@ -682,97 +634,105 @@ window.addEventListener("message", (event) => {
             }
             requestAnimationFrame(loop);
         }
-        init();
+        
+        // --- FIX 2: Only run the 3D Engine if this is the REAL site (not the iframe widget) ---
+        if (window.self === window.top) {
+            init();
+        }
+        // ---------------------------------------------------------------------------------------
 
-      // --- STORAGE ACCESS API IMPLEMENTATION (MDN COMPLIANT) ---
+    // --- STORAGE ACCESS API IMPLEMENTATION (MDN COMPLIANT + FALLBACK) ---
 
-async function initStorageAccess() {
-    // 1. Check if we are inside an iframe
-    if (window.self === window.top) return; // Exit if top-level
+    async function initStorageAccess() {
+        // 1. Check if we are inside an iframe
+        if (window.self === window.top) return; // Exit if top-level
 
-    const container = document.body;
-    
-    // Helper to create the UI
-    const showButton = () => {
-        container.innerHTML = "";
-        Object.assign(container.style, {
-            display: "flex", justifyContent: "center", alignItems: "center", 
-            height: "100vh", background: "#fff", margin: 0
-        });
+        const container = document.body;
+        
+        // Helper to create the UI
+        const showButton = () => {
+            container.innerHTML = "";
+            Object.assign(container.style, {
+                display: "flex", justifyContent: "center", alignItems: "center", 
+                height: "100vh", background: "#fff", margin: 0
+            });
 
-        const btn = document.createElement("button");
-        btn.innerText = "🔌 Connect to Sphere";
-        Object.assign(btn.style, {
-            padding: "12px 24px", fontSize: "16px", cursor: "pointer",
-            background: "#000", color: "#fff", border: "none", borderRadius: "8px"
-        });
+            const btn = document.createElement("button");
+            btn.innerText = "🔌 Connect to Sphere";
+            Object.assign(btn.style, {
+                padding: "12px 24px", fontSize: "16px", cursor: "pointer",
+                background: "#000", color: "#fff", border: "none", borderRadius: "8px"
+            });
 
-        container.appendChild(btn);
+            container.appendChild(btn);
 
-        // 3. Attach the Event Listener (User Gesture is MANDATORY)
-        btn.addEventListener("click", handleAccessRequest);
-    };
+            // 3. Attach the Event Listener (User Gesture is MANDATORY)
+            btn.addEventListener("click", handleAccessRequest);
+        };
 
-    const attemptRetrieval = async () => {
+        const attemptRetrieval = async () => {
+            try {
+                // 4. Try to read from the 'unpartitioned' storage
+                let finalColor = localStorage.getItem("lastSphereColor");
+                
+                // --- FIX 3: Fallback to the P2P key if lastSphereColor is missing ---
+                if (!finalColor) {
+                    try {
+                        const p2pData = JSON.parse(localStorage.getItem('p2p_editor_user_v1'));
+                        if (p2pData && p2pData.color) {
+                            finalColor = p2pData.color;
+                            console.log("Found color in P2P data:", finalColor);
+                        }
+                    } catch (e) { console.error("Could not parse P2P data", e); }
+                }
+                // --------------------------------------------------------------------
+                
+                if (finalColor) {
+                    console.log("Success! Found color:", finalColor);
+                    window.parent.postMessage(finalColor, "*");
+                    
+                    // Update UI to show success
+                    container.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold;">Synced: ${finalColor}</div>`;
+                    document.body.style.backgroundColor = finalColor;
+                } else {
+                    console.warn("Access Granted, but no color found.");
+                    container.innerHTML = `<div style="font-family:sans-serif; color:red;">Storage Empty<br><small>Visit colorlog.in directly first</small></div>`;
+                }
+            } catch (e) {
+                console.error("Error reading storage:", e);
+            }
+        };
+
+        const handleAccessRequest = async () => {
+            try {
+                // 5. The API Call
+                await document.requestStorageAccess();
+                
+                // If we pass this line, the browser has linked the storage buckets.
+                await attemptRetrieval();
+                
+            } catch (err) {
+                console.error("Storage Access Denied:", err);
+                container.innerHTML = "Access Denied by Browser";
+            }
+        };
+
+        // 2. LOGIC FLOW START
         try {
-            // 4. Try to read from the 'unpartitioned' storage
-            const legacyColor = localStorage.getItem("lastSphereColor");
+            const hasAccess = await document.hasStorageAccess();
             
-            if (legacyColor) {
-                console.log("Success! Found unpartitioned color:", legacyColor);
-                window.parent.postMessage(legacyColor, "*");
-                
-                // Update UI to show success
-                container.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold;">Synced: ${legacyColor}</div>`;
-                document.body.style.backgroundColor = legacyColor;
+            if (hasAccess) {
+                await attemptRetrieval();
             } else {
-                console.warn("Access Granted, but 'lastSphereColor' is missing from LocalStorage.");
-                // Debugging: Log what IS in storage
-                console.log("Storage contents:", JSON.stringify(localStorage));
-                
-                container.innerHTML = `<div style="font-family:sans-serif; color:red;">Storage Empty<br><small>Visit colorlog.in directly first</small></div>`;
+                showButton();
             }
         } catch (e) {
-            console.error("Error reading storage:", e);
+            console.error("Storage Access API not supported", e);
         }
-    };
-
-    const handleAccessRequest = async () => {
-        try {
-            // 5. The API Call
-            // Note: This must be awaited.
-            await document.requestStorageAccess();
-            
-            // If we pass this line, the browser has linked the storage buckets.
-            await attemptRetrieval();
-            
-        } catch (err) {
-            console.error("Storage Access Denied:", err);
-            // This usually happens if the user denies the prompt 
-            // OR if the user has not interacted with the site recently.
-            container.innerHTML = "Access Denied by Browser";
-        }
-    };
-
-    // 2. LOGIC FLOW START
-    try {
-        // MDN recommends checking if we already have access first
-        const hasAccess = await document.hasStorageAccess();
-        
-        if (hasAccess) {
-            // We already have access, just grab it (no button needed)
-            await attemptRetrieval();
-        } else {
-            // We don't have access, show the button to get the User Gesture
-            showButton();
-        }
-    } catch (e) {
-        console.error("Storage Access API not supported", e);
     }
-}
 
-// Start the process
-initStorageAccess();
+    // Start the process
+    initStorageAccess();
     </script>
 </body>
 </html>
