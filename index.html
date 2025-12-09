@@ -25,17 +25,10 @@
         #login-btn.hidden { display: none; }
 
         /* --- DASHBOARD (CHAT CONTAINER) --- */
-        #dashboard-panel {
-            position: fixed; bottom: 0; left: 0; width: 100vw; height: 98vh; 
-            background-color: white; z-index: 200; 
-            transform: translateY(100%); transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-            display: flex; flex-direction: column; 
-            box-shadow: 0 -20px 50px rgba(0,0,0,0.2);
-            padding: 0; 
-        }
+        #dashboard-panel { position: fixed; bottom: 0; left: 0; width: 100vw; height: 98vh; background-color: white; z-index: 200; transform: translateY(100%); transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; box-shadow: 0 -20px 50px rgba(0,0,0,0.2); padding: 0; }
         #dashboard-panel.active { transform: translateY(0); }
 
-        /* --- SPHERE UI CONTROLS --- */
+        /* --- UI CONTROLS --- */
         #freeze-btn { position: absolute; top: 20px; left: 20px; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%; cursor: pointer; backdrop-filter: blur(10px); transition: all 0.3s ease; z-index: 10; }
         #freeze-btn:hover { background: rgba(255, 255, 255, 0.2); transform: scale(1.05); }
         body.light-mode #freeze-btn { background: rgba(0, 0, 0, 0.1); color: #000; border-color: rgba(0, 0, 0, 0.2); }
@@ -46,6 +39,12 @@
         .cone-data:last-child { border-right: none; padding-right: 0; }
         .cone-title { text-transform: uppercase; font-weight: bold; cursor: pointer; }
         .coord-val { color: white; min-width: 38px; cursor: ns-resize; }
+
+        /* --- DEBUG BUTTON STYLE --- */
+        #debug-btn { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 20px; cursor: pointer; font-family: 'Menlo', monospace; font-size: 0.8rem; z-index: 10; backdrop-filter: blur(10px); transition: all 0.2s; }
+        #debug-btn:hover { background: rgba(255,255,255,0.2); }
+        body.light-mode #debug-btn { color: black; border-color: rgba(0,0,0,0.2); background: rgba(0,0,0,0.1); }
+        #debug-btn.active { background: rgba(255, 0, 0, 0.5); border-color: red; color: white; }
 
         /* --- P2P CHAT STYLES --- */
         :root { --line-height: 24px; }
@@ -61,7 +60,7 @@
         .editor-line { min-height: var(--line-height); display: block; padding-left: 5px; border-left: 4px solid transparent; position: relative; white-space: pre-wrap; transition: border-left-color 0.4s ease; }
         .editor-line:hover, .editor-line.group-hover { border-left-color: var(--owner-color, transparent); }
         
-        /* PEER LOCK STYLES (Improved from Old Version) */
+        /* PEER LOCK STYLES */
         .locked-line { background-color: rgba(0,0,0,0); border-left-width: 3px !important; border-left-color: var(--lock-color) !important; }
         .locked-tag { position: absolute; left: 0; top: 0; transform: translateX(-100%); height: 100%; background-color: var(--lock-color); color: transparent; font-family: sans-serif; font-size: 10px; white-space: nowrap; width: 0; opacity: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; border-radius: 2px 0 0 2px; pointer-events: auto; transition: width 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.1s; }
         .locked-line:hover .locked-tag { width: 20px; opacity: 1; color: transparent; }
@@ -90,6 +89,9 @@
         <button id="login-btn"><span>ENTER ROOM</span></button>
     </div>
 
+    <!-- DEBUG TOGGLE -->
+    <button id="debug-btn">DEBUG OFF</button>
+
     <div id="dashboard-panel">
         <div id="chat-header">
             <div><span id="user-badge" title="Your Color"></span></div>
@@ -116,16 +118,6 @@
 
     <!-- P2P MODULE SCRIPT -->
     <script type="module">
-
-        // --- DEBUG CHECKER ---
-// Run this when you visit https://colorlog.in directly
-const checkKey = "lastSphereColor";
-const checkVal = localStorage.getItem(checkKey);
-
-//alert(`DEBUG CHECK\n\nAm I in an iframe? ${window.self !== window.top}\nLooking for: ${checkKey}\nFound value: ${checkVal}`);
-// ---------------------
-
-        
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
         const STORAGE_KEY = 'p2p_editor_user_v1';
@@ -139,12 +131,9 @@ const checkVal = localStorage.getItem(checkKey);
         const ui = { display: document.getElementById('display'), container: document.getElementById('chat-container'), minimap: document.getElementById('minimap'), peerCount: document.getElementById('peer-count'), dot: document.querySelector('.dot'), tools: document.getElementById('tools'), status: document.getElementById('room-status'), btn: document.getElementById('login-btn') };
         let roomDB, room, roomId, act = {}, activeLocks = {}, myCurrentLineId = null, isFresh = true, peerCountInt = 0;
         
-        // --- STEP 1: Connect & Update Identity ---
         window.connectAndPreview = (hex) => {
             const cleanHex = hex.replace('#','');
             roomId = 'doc-infinite-' + cleanHex;
-            
-            // Temporary Sphere Color
             myUser.color = '#' + cleanHex;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(myUser));
             document.getElementById('user-badge').style.backgroundColor = myUser.color;
@@ -154,13 +143,11 @@ const checkVal = localStorage.getItem(checkKey);
 
             if(room) room.leave();
 
-            // Initialize GunJS
             try {
                 const gun = Gun({ peers: [], localStorage: false });
                 roomDB = gun.get(roomId);
             } catch(e) { console.error(e); ui.status.innerText = "Error"; return; }
 
-            // Initialize Trystero
             room = joinRoom({ appId: 'doc-infinite-v4', trackerUrls: ['wss://tracker.webtorrent.dev','wss://tracker.openwebrtc.io'] }, roomId);
             
             const [sendContent, getContent] = room.makeAction('content');
@@ -169,12 +156,10 @@ const checkVal = localStorage.getItem(checkKey);
             const [reqSync, getReqSync] = room.makeAction('req');
             Object.assign(act, { sendContent, sendLock, pushSync, reqSync });
 
-            // --- LISTENERS ---
             getContent(handleRemoteContent);
             getPushSync(handleSync);
             getLock((data, pid) => handleRemoteLock(data, pid));
             
-            // Handle Sync Requests (Salvaged Logic)
             getReqSync((_, pid) => { 
                 if(!isFresh && ui.display.innerText.trim().length > 0) act.pushSync(ui.display.innerHTML, pid); 
             });
@@ -182,10 +167,8 @@ const checkVal = localStorage.getItem(checkKey);
             room.onPeerJoin(id => { handlePeerJoin(id); updatePreviewStatus(); });
             room.onPeerLeave(id => { handlePeerLeave(id); updatePreviewStatus(); });
 
-            // --- LOAD DATA ---
             roomDB.get('content').once((data) => {
                 if(data && data.includes('class="editor-line"')) {
-                    console.log("Room exists. Switching to Joiner mode.");
                     const randColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
                     myUser.color = randColor;
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(myUser));
@@ -195,18 +178,13 @@ const checkVal = localStorage.getItem(checkKey);
                     isFresh = false;
                     ensureStructure(); 
                     refreshOwnership();
-                    
-                    // Center view initially
                     setTimeout(() => { ui.container.scrollTop = ui.container.scrollHeight / 2; }, 100);
-
                 } else {
-                    console.log("New room. Remaining Creator.");
                     initFreshCanvas(); 
                 }
             });
 
             setTimeout(updatePreviewStatus, 1000);
-            
             setTimeout(() => {
                 if (peerCountInt === 0 && visitedRooms.includes(roomId)) window.enterRoomUI();
             }, 1500);
@@ -231,14 +209,11 @@ const checkVal = localStorage.getItem(checkKey);
 
         function createLine() { return `<div id="line-${Math.random().toString(36).substr(2,9)}" class="editor-line"><br></div>`; }
         
-        // --- SALVAGED: Reduced line count for stability ---
         function initFreshCanvas() { 
             let html = ''; 
             for(let i=0; i<100; i++) html += createLine();
-            
             ui.display.innerHTML = html; 
             isFresh = true; 
-            
             setTimeout(() => {
                 const middle = ui.display.children[50];
                 if(middle) {
@@ -256,7 +231,6 @@ const checkVal = localStorage.getItem(checkKey);
             });
         }
 
-        // --- SALVAGED: Improved Infinite Scroll & Resize ---
         ui.container.addEventListener('scroll', () => {
             const scrollTop = ui.container.scrollTop;
             const scrollHeight = ui.container.scrollHeight;
@@ -283,7 +257,6 @@ const checkVal = localStorage.getItem(checkKey);
         
         window.addEventListener('resize', renderMinimap);
 
-        // --- SALVAGED: Improved Input Handler ---
         ui.display.addEventListener('keydown', (e) => {
             if(e.key === 'Enter') {
                 e.preventDefault();
@@ -307,7 +280,6 @@ const checkVal = localStorage.getItem(checkKey);
                 renderMinimap();
                 return;
             }
-            // Protect locked lines
             if(e.target.closest('.locked-line')) e.preventDefault();
         });
 
@@ -332,14 +304,11 @@ const checkVal = localStorage.getItem(checkKey);
             reapplyVisualLocks(); 
         }
 
-        // --- SALVAGED: Auto-jump on Sync ---
         function handleSync(html) { 
             isFresh = false; 
             ui.display.innerHTML = html; 
             refreshOwnership(); 
             roomDB.get('content').put(html); 
-            
-            // Wait for render, then jump to active peer
             setTimeout(() => {
                 const locks = Object.values(activeLocks);
                 if(locks.length > 0) {
@@ -358,7 +327,6 @@ const checkVal = localStorage.getItem(checkKey);
             }); 
         }
         
-        // --- CURSORS & LOCKS ---
         document.addEventListener('selectionchange', () => {
             const sel = window.getSelection(); if(!sel.rangeCount) return;
             const n = sel.anchorNode.nodeType===3?sel.anchorNode.parentNode:sel.anchorNode; 
@@ -368,7 +336,6 @@ const checkVal = localStorage.getItem(checkKey);
                 document.querySelectorAll('.my-line').forEach(e=>e.classList.remove('my-line')); 
                 line.classList.add('my-line');
                 ui.tools.classList.toggle('visible', sel.toString().length>0);
-                
                 if(act.sendLock) act.sendLock({ lineId: line.id, userColor: myUser.color });
             }
         });
@@ -378,7 +345,6 @@ const checkVal = localStorage.getItem(checkKey);
             reapplyVisualLocks(); 
         }
 
-        // --- SALVAGED: Cleaner Visual Locks ---
         function reapplyVisualLocks() {
             document.querySelectorAll('.locked-line').forEach(el=>{
                 el.classList.remove('locked-line'); 
@@ -396,7 +362,6 @@ const checkVal = localStorage.getItem(checkKey);
                     el.classList.add('locked-line'); 
                     el.style.setProperty('--lock-color', lock.color); 
                     el.contentEditable="false"; 
-                    
                     const tag = document.createElement('div');
                     tag.className = 'locked-tag';
                     tag.innerText = lock.color;
@@ -406,19 +371,16 @@ const checkVal = localStorage.getItem(checkKey);
             renderMinimap();
         }
 
-        // --- SALVAGED: Better Minimap Logic ---
         function renderMinimap() {
             ui.minimap.innerHTML = '';
             const totalHeight = ui.container.scrollHeight;
             const now = Date.now();
-            
             for(const [pid, lock] of Object.entries(activeLocks)) {
                 if(now - lock.ts > 60000 || pid === selfId) continue; 
                 const el = document.getElementById(lock.lineId);
                 if(el) { 
                     const d=document.createElement('div'); d.className='scroll-dot'; 
                     d.style.backgroundColor=lock.color; 
-                    // Calculate relative to the container content
                     const topPercent = (el.offsetTop / totalHeight) * 100;
                     d.style.top = topPercent + '%'; 
                     d.onclick=()=>el.scrollIntoView({block:'center', behavior: 'smooth'}); 
@@ -427,19 +389,14 @@ const checkVal = localStorage.getItem(checkKey);
             }
         }
 
-        // --- SALVAGED: Smart Join Logic ---
         function handlePeerJoin(id) { 
             updatePreviewStatus(); 
             const hasRealText = ui.display.innerText.trim().length > 0;
-            
-            // If we are fresh/empty, don't overwrite peers. Ask for sync.
             if(isFresh || !hasRealText) {
-                console.log("Empty canvas, requesting sync...");
                 act.reqSync(null, id); 
             } else {
                 act.pushSync(ui.display.innerHTML, id);
             }
-            
             if(myCurrentLineId && act.sendLock) act.sendLock({ lineId: myCurrentLineId, userColor: myUser.color }, id);
         }
 
@@ -452,7 +409,6 @@ const checkVal = localStorage.getItem(checkKey);
         document.getElementById('btn-italic').onclick = () => document.execCommand('italic');
         document.getElementById('btn-link').onclick = () => { const u=prompt("URL:"); if(u) document.execCommand('createLink', false, u); };
         
-        // Highlight grouping
         ui.display.addEventListener('mouseover', (e) => {
             const line = e.target.closest('.editor-line');
             if (line && line.dataset.owner) {
@@ -463,68 +419,32 @@ const checkVal = localStorage.getItem(checkKey);
 
     </script>
 
-    <!-- SPHERE LOGIC SCRIPT (MODIFIED FOR INTEGRATION) -->
+    <!-- SPHERE LOGIC SCRIPT -->
     <script>
-        const DB_CONFIG = { name: 'SphereAppDB', version: 1, storeName: 'userPreferences' };
-        
-        // Tracking current session color for the iframe request
-        let currentLoggedColor = null; 
-
-        const dbService = {
-            db: null,
-            init() { return new Promise((resolve, reject) => { const r = indexedDB.open(DB_CONFIG.name, DB_CONFIG.version); r.onupgradeneeded = e => { const db = e.target.result; if (!db.objectStoreNames.contains(DB_CONFIG.storeName)) db.createObjectStore(DB_CONFIG.storeName, { keyPath: 'id' }); }; r.onsuccess = e => { this.db = e.target.result; resolve(this.db); }; r.onerror = e => reject(e.target.errorCode); }); },
-            saveColor(hex) { return new Promise((res, rej) => { if (!this.db) return rej("DB error"); const tx = this.db.transaction([DB_CONFIG.storeName], 'readwrite').objectStore(DB_CONFIG.storeName).put({ id: 'favColor', value: hex, timestamp: Date.now() }); tx.onsuccess = () => res(hex); }); },
-            getColor() { return new Promise((res, rej) => { if (!this.db) return rej("DB error"); this.db.transaction([DB_CONFIG.storeName], 'readonly').objectStore(DB_CONFIG.storeName).get('favColor').onsuccess = e => res(e.target.result?.value || null); }); }
-        };
-
-        dbService.init();
-        
-        // --- IFRAME COMMUNICATION LOGIC START ---
-window.addEventListener("message", (event) => {
-    if (event.data === "getSphereColor") {
-        
-        // --- DEBUGGING LOGS ---
-        console.log("--- IFRAME DEBUG ---");
-        console.log("Iframe Origin:", window.location.origin);
-        console.log("Am I inside an iframe?", window.self !== window.top);
-        
-        // This will likely print 'null' or 'undefined' in the iframe, 
-        // even though it prints the color when you visit the site directly.
-        const actualValue = localStorage.getItem("lastSphereColor");
-        console.log("Value in Storage:", actualValue); 
-        console.log("--------------------");
-        // ----------------------
-
-        let savedColor = actualValue;
-        if (!savedColor) {
-            savedColor = "#ff0000"; 
-        }
-        event.source.postMessage(savedColor, event.origin);
-    }
-});
-// --- IFRAME COMMUNICATION LOGIC END ---
+        // Global scope access to storage, defaults to standard localStorage
+        // but can be upgraded to SAA handle if in iframe
+        let storageScope = window.localStorage;
 
         document.getElementById('login-btn').addEventListener('click', async () => {
             const currentHex = document.getElementById('color-hex').innerText;
             
-            localStorage.setItem("lastSphereColor", currentHex);
-            // Set the session state so the iframe listener knows we are active
-            currentLoggedColor = currentHex; 
+            // Save to whatever storage scope we have access to
+            try {
+                storageScope.setItem("lastSphereColor", currentHex);
+            } catch(e) { console.error("Could not save color", e); }
             
-            await dbService.saveColor(currentHex);
             if(window.enterRoomUI) window.enterRoomUI();
         });
 
-        // --- WebGPU & 3D Logic ---
         const Vec3={create:(x=0,y=0,z=0)=>[x,y,z],add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],scale:(v,s)=>[v[0]*s,v[1]*s,v[2]*s],dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],cross:(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],len:v=>Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]),normalize:v=>{const l=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);return l>0?[v[0]/l,v[1]/l,v[2]/l]:[0,0,0]},dist:(a,b)=>Math.sqrt(Math.pow(a[0]-b[0],2)+Math.pow(a[1]-b[1],2)+Math.pow(a[2]-b[2],2))};
-        const Mat4={perspective:(f,a,n,fr)=>{const nf=1/(n-fr),f_t=1/Math.tan(f/2);return[f_t/a,0,0,0,0,f_t,0,0,0,0,(fr+n)*nf,-1,0,0,2*fr*n*nf,0]},lookAt:(e,c,u)=>{const z=Vec3.normalize(Vec3.sub(e,c)),x=Vec3.normalize(Vec3.cross(u,z)),y=Vec3.cross(z,x);return[x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-Vec3.dot(x,e),-Vec3.dot(y,e),-Vec3.dot(z,e),1]},multiply:(a,b)=>{const o=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=a[i+k*4]*b[k+j*4];o[i+j*4]=s}return o},rotationX:r=>[1,0,0,0,0,Math.cos(r),Math.sin(r),0,0,-Math.sin(r),Math.cos(r),0,0,0,0,1],rotationY:r=>{const c=Math.cos(r),s=Math.sin(r);return[c,0,-s,0,0,1,0,0,s,0,c,0,0,0,0,1]},translation:v=>[1,0,0,0,0,1,0,0,0,0,1,0,v[0],v[1],v[2],1],scale:v=>[v[0],0,0,0,0,v[1],0,0,0,0,v[2],0,0,0,0,1],rotationAxis:(a,r)=>{const c=Math.cos(r),s=Math.sin(r),t=1-c,x=a[0],y=a[1],z=a[2];return[t*x*x+c,t*x*y+z*s,t*x*z-y*s,0,t*x*y-z*s,t*y*y+c,t*y*z+x*s,0,t*x*z+y*s,t*y*z-x*s,t*z*z+c,0,0,0,0,1]},identity:()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]};
+        const Mat4={perspective:(f,a,n,fr)=>{const nf=1/(n-fr),f_t=1/Math.tan(f/2);return[f_t/a,0,0,0,0,f_t,0,0,0,0,(fr+n)*nf,-1,0,0,2*fr*n*nf,0]},lookAt:(e,c,u)=>{const z=Vec3.normalize(Vec3.sub(e,c)),x=Vec3.normalize(Vec3.cross(u,z)),y=Vec3.cross(z,x);return[x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-Vec3.dot(x,e),-Vec3.dot(y,e),-Vec3.dot(z,e),1]},multiply:(a,b)=>{const o=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=a[i+k*4]*b[k+j*4];o[i+j*4]=s}return o},rotationX:r=>[1,0,0,0,0,Math.cos(r),Math.sin(r),0,0,-Math.sin(r),Math.cos(r),0,0,0,0,1],translation:v=>[1,0,0,0,0,1,0,0,0,0,1,0,v[0],v[1],v[2],1],scale:v=>[v[0],0,0,0,0,v[1],0,0,0,0,v[2],0,0,0,0,1],rotationAxis:(a,r)=>{const c=Math.cos(r),s=Math.sin(r),t=1-c,x=a[0],y=a[1],z=a[2];return[t*x*x+c,t*x*y+z*s,t*x*z-y*s,0,t*x*y-z*s,t*y*y+c,t*y*z+x*s,0,t*x*z+y*s,t*y*z-x*s,t*z*z+c,0,0,0,0,1]},identity:()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]};
 
-        const state={canvas:null,device:null,context:null,pipelines:{sphere:null,cone:null},buffers:{},bindGroups:{sphere:null,cones:[]},cameraPos:[0,0,4],sphere:{rotation:Mat4.identity(),indexCount:0},cones:[{color:[1,0,0],pos:[0,.98,.69],vel:[0,0,0],name:"RED",cssColor:"#ff4444",active:true},{color:[0,1,0],pos:[-.85,-.49,.69],vel:[0,0,0],name:"GREEN",cssColor:"#44ff44",active:true},{color:[0,0,1],pos:[.85,-.49,.69],vel:[0,0,0],name:"BLUE",cssColor:"#4444ff",active:true}],isFrozen:true,hasRotated:false,mouse:{x:0,y:0,down:false},draggedConeIndex:-1,valueScrub:{active:false,coneIndex:-1,coordIndex:0,startY:0},lastTime:0,clickData:{startX:0,startY:0,startTime:0},landing:{active:false,progress:0,rotationAxis:[1,0,0],rotationAngle:0,baseRotation:Mat4.identity(),coneStartPositions:[],handleStartPos:[0,0,0],showHandle:false,startDist:4.0,targetDist:1.25},dragStart:{active:false,mouseDir:[0,0,1],sphereRotation:null,conePositions:[]},handle:{active:false,pos:[0,0,0],color:[1,1,1]},msaaTexture:null,depthTexture:null,sampleCount:4,presentationFormat:null};
+        const state={canvas:null,device:null,context:null,pipelines:{sphere:null,cone:null},buffers:{},bindGroups:{sphere:null,cones:[]},cameraPos:[0,0,4],sphere:{rotation:Mat4.identity(),indexCount:0},cones:[{color:[1,0,0],pos:[0,.98,.69],vel:[0,0,0],name:"RED",cssColor:"#ff4444",active:true},{color:[0,1,0],pos:[-.85,-.49,.69],vel:[0,0,0],name:"GREEN",cssColor:"#44ff44",active:true},{color:[0,0,1],pos:[.85,-.49,.69],vel:[0,0,0],name:"BLUE",cssColor:"#4444ff",active:true}],isFrozen:true,hasRotated:false,mouse:{x:0,y:0,down:false},draggedConeIndex:-1,valueScrub:{active:false,coneIndex:-1,coordIndex:0,startY:0},lastTime:0,clickData:{startX:0,startY:0,startTime:0},landing:{active:false,progress:0,rotationAxis:[1,0,0],rotationAngle:0,baseRotation:Mat4.identity(),coneStartPositions:[],handleStartPos:[0,0,0],showHandle:false,startDist:4.0,targetDist:1.25},dragStart:{active:false,mouseDir:[0,0,1],sphereRotation:null,conePositions:[]},handle:{active:false,pos:[0,0,0],color:[1,1,1]},msaaTexture:null,depthTexture:null,sampleCount:4,presentationFormat:null, debugMode:false};
 
         function rgbToHex(r, g, b) { const toHex = c => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2,'0'); return '#' + toHex(r) + toHex(g) + toHex(b); }
         function hexToRgbNormalized(hex) { hex = hex.replace(/^#/, ''); if (hex.length === 3) hex = hex.split('').map(x=>x+x).join(''); const bigint = parseInt(hex, 16); return [(bigint >> 16 & 255) / 255, (bigint >> 8 & 255) / 255, (bigint & 255) / 255]; }
 
-        const sphereShaderWGSL=`struct Uniforms{mvp:mat4x4<f32>,model:mat4x4<f32>,normalMatrix:mat4x4<f32>,viewPos:vec3<f32>,l1:vec3<f32>,c1:vec3<f32>,l2:vec3<f32>,c2:vec3<f32>,l3:vec3<f32>,c3:vec3<f32>,};@group(0) @binding(0) var<uniform> u:Uniforms;struct VI{@location(0) p:vec3<f32>,@location(1) n:vec3<f32>};struct VO{@builtin(position) P:vec4<f32>,@location(0) vP:vec3<f32>,@location(1) vN:vec3<f32>};@vertex fn vs_main(i:VI)->VO{var o:VO;o.P=u.mvp*vec4<f32>(i.p,1.0);o.vP=(u.model*vec4<f32>(i.p,1.0)).xyz;o.vN=(u.normalMatrix*vec4<f32>(i.n,0.0)).xyz;return o;}fn ACES(x:vec3<f32>)->vec3<f32>{let a=2.51;let b=0.03;let c=2.43;let d=0.59;let e=0.14;return clamp((x*(a*x+b))/(x*(c*x+d)+e),vec3<f32>(0.0),vec3<f32>(1.0));}fn getI(lp:vec3<f32>,N:vec3<f32>,fp:vec3<f32>)->f32{let L=normalize(lp-fp);let distSq=dot(lp-fp,lp-fp);return pow(max(dot(N,L)+1.0,0.0)/2.0,2.5)*(1.0/(1.0+distSq*0.05));}@fragment fn fs_main(i:VO)->@location(0) vec4<f32>{let N=normalize(i.vN);let d1=getI(u.l1,N,i.vP);let d2=getI(u.l2,N,i.vP);let d3=getI(u.l3,N,i.vP);var l=(u.c1*d1)+(u.c2*d2)+(u.c3*d3);let ep=0.001;l=l+((u.c1+u.c2)*2.0*d1*d2/(d1+d2+ep)*1.8)+((u.c2+u.c3)*2.0*d2*d3/(d2+d3+ep)*1.8)+((u.c3+u.c1)*2.0*d3*d1/(d3+d1+ep)*1.8);let m=pow(min(d1,min(d2,d3)),6.0);l=l+(vec3<f32>(1.0)*m*80.0);l=max(l-vec3<f32>(0.01),vec3<f32>(0.0))*2.0;return vec4<f32>(pow(ACES(l),vec3<f32>(1.0/2.2)),1.0);}`;
+        const sphereShaderWGSL=`struct Uniforms{mvp:mat4x4<f32>,model:mat4x4<f32>,normalMatrix:mat4x4<f32>,viewPos:vec3<f32>,l1:vec3<f32>,c1:vec3<f32>,l2:vec3<f32>,c2:vec3<f32>,l3:vec3<f32>,c3:vec3<f32>,debug:f32,};@group(0) @binding(0) var<uniform> u:Uniforms;struct VI{@location(0) p:vec3<f32>,@location(1) n:vec3<f32>};struct VO{@builtin(position) P:vec4<f32>,@location(0) vP:vec3<f32>,@location(1) vN:vec3<f32>};@vertex fn vs_main(i:VI)->VO{var o:VO;o.P=u.mvp*vec4<f32>(i.p,1.0);o.vP=(u.model*vec4<f32>(i.p,1.0)).xyz;o.vN=(u.normalMatrix*vec4<f32>(i.n,0.0)).xyz;return o;}fn ACES(x:vec3<f32>)->vec3<f32>{let a=2.51;let b=0.03;let c=2.43;let d=0.59;let e=0.14;return clamp((x*(a*x+b))/(x*(c*x+d)+e),vec3<f32>(0.0),vec3<f32>(1.0));}fn getI(lp:vec3<f32>,N:vec3<f32>,fp:vec3<f32>)->f32{let L=normalize(lp-fp);let distSq=dot(lp-fp,lp-fp);return pow(max(dot(N,L)+1.0,0.0)/2.0,2.5)*(1.0/(1.0+distSq*0.05));}@fragment fn fs_main(i:VO)->@location(0) vec4<f32>{let N=normalize(i.vN);if(u.debug > 0.5){let L1=normalize(u.l1-i.vP);let L2=normalize(u.l2-i.vP);let L3=normalize(u.l3-i.vP);if(dot(N,L1)>0.0 && dot(N,L2)>0.0 && dot(N,L3)>0.0){return vec4<f32>(1.0,0.0,0.0,1.0);}}let d1=getI(u.l1,N,i.vP);let d2=getI(u.l2,N,i.vP);let d3=getI(u.l3,N,i.vP);var l=(u.c1*d1)+(u.c2*d2)+(u.c3*d3);let ep=0.001;l=l+((u.c1+u.c2)*2.0*d1*d2/(d1+d2+ep)*1.8)+((u.c2+u.c3)*2.0*d2*d3/(d2+d3+ep)*1.8)+((u.c3+u.c1)*2.0*d3*d1/(d3+d1+ep)*1.8);let m=pow(min(d1,min(d2,d3)),6.0);l=l+(vec3<f32>(1.0)*m*80.0);l=max(l-vec3<f32>(0.01),vec3<f32>(0.0))*2.0;return vec4<f32>(pow(ACES(l),vec3<f32>(1.0/2.2)),1.0);}`;
         const coneShaderWGSL=`struct U{mvp:mat4x4<f32>,c:vec3<f32>};@group(0) @binding(0) var<uniform> u:U;@vertex fn vs_main(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32>{return u.mvp*vec4<f32>(p,1.0);}@fragment fn fs_main()->@location(0) vec4<f32>{return vec4<f32>(u.c,1.0);}`;
 
         function findPositionFromColor(targetHex) {
@@ -550,6 +470,12 @@ window.addEventListener("message", (event) => {
             state.canvas.addEventListener('touchend', (e)=>{e.preventDefault();onMouseUp(e)});
             document.getElementById('freeze-btn').addEventListener('click', toggleFreeze);
             
+            document.getElementById('debug-btn').onclick = function() {
+                state.debugMode = !state.debugMode;
+                this.classList.toggle('active', state.debugMode);
+                this.innerText = state.debugMode ? "DEBUG ON" : "DEBUG OFF";
+            };
+
             state.cones.forEach((cone, i) => {
                  const el = document.getElementById(`data-${i}`);
                  if (el) {
@@ -570,7 +496,7 @@ window.addEventListener("message", (event) => {
             const dev = state.device, sphereGeo = createSphere(1.0, 128, 128), coneGeo = createCone(0.1, 0.3, 64);
             state.buffers.sphereVertex = createBuffer(dev, sphereGeo.p, GPUBufferUsage.VERTEX); state.buffers.sphereNormal = createBuffer(dev, sphereGeo.n, GPUBufferUsage.VERTEX); state.buffers.sphereIndex = createBuffer(dev, sphereGeo.i, GPUBufferUsage.INDEX); state.sphere.indexCount = sphereGeo.i.length;
             state.buffers.coneVertex = createBuffer(dev, coneGeo.p, GPUBufferUsage.VERTEX); state.buffers.coneIndex = createBuffer(dev, coneGeo.i, GPUBufferUsage.INDEX); state.coneIndexCount = coneGeo.i.length;
-            state.buffers.sphereUniform = dev.createBuffer({ size: 304, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST }); state.buffers.coneUniform = dev.createBuffer({ size: 1024, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST });
+            state.buffers.sphereUniform = dev.createBuffer({ size: 320, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST }); state.buffers.coneUniform = dev.createBuffer({ size: 1024, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST });
             
             const sm = dev.createShaderModule({ code: sphereShaderWGSL }), cm = dev.createShaderModule({ code: coneShaderWGSL });
             state.pipelines.sphere = dev.createRenderPipeline({ layout: 'auto', vertex: { module: sm, entryPoint: 'vs_main', buffers: [{arrayStride:12,attributes:[{shaderLocation:0,offset:0,format:'float32x3'}]},{arrayStride:12,attributes:[{shaderLocation:1,offset:0,format:'float32x3'}]}]}, fragment: { module: sm, entryPoint: 'fs_main', targets: [{format:state.presentationFormat}]}, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } });
@@ -606,8 +532,6 @@ window.addEventListener("message", (event) => {
             const card = document.getElementById('login-card'); card.style.color = getLuminance(col[0],col[1],col[2])>0.5?'black':'white';
             const cam=Vec3.normalize(state.cameraPos), axis=Vec3.cross(norm,cam), dot=Vec3.dot(norm,cam);
             state.landing.rotationAxis = Vec3.len(axis)<.001?[1,0,0]:Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis)<.001?(dot>0?0:Math.PI):Math.acos(Math.min(1,Math.max(-1,dot)));
-            
-            // Trigger P2P Preview (Updated to verify existence)
             if(window.connectAndPreview) window.connectAndPreview(hex);
         }
 
@@ -654,8 +578,12 @@ window.addEventListener("message", (event) => {
                 state.cameraPos = Vec3.scale(Vec3.normalize([0,0,4]), state.landing.startDist+(state.landing.targetDist-state.landing.startDist)*t*t*t);
             }
             const view = Mat4.lookAt(state.cameraPos, [0,0,0], [0,1,0]), vp = Mat4.multiply(proj, view), tp = getTargetPos(state.mouse.x, state.mouse.y);
-            state.cones.forEach((c, i) => { const el=document.getElementById(`title-${i}`); if(el){ el.style.color=c.active?c.cssColor:'grey'; ['x','y','z'].forEach((a,ai)=>document.getElementById(`${a}-${i}`).innerText=c.pos[ai].toFixed(2)); } });
             
+            // REDUNDANCY FIX: Only update DOM text if not frozen (i.e., Light Mode/Tracker is visible)
+            if (!state.isFrozen) {
+                state.cones.forEach((c, i) => { const el=document.getElementById(`title-${i}`); if(el){ el.style.color=c.active?c.cssColor:'grey'; ['x','y','z'].forEach((a,ai)=>document.getElementById(`${a}-${i}`).innerText=c.pos[ai].toFixed(2)); } });
+            }
+
             if (!state.isFrozen) {
                 if (state.mouse.down) {
                     if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if(c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; });
@@ -669,7 +597,8 @@ window.addEventListener("message", (event) => {
 
             if (state.device && state.pipelines.sphere && state.msaaTexture) {
                 const enc = state.device.createCommandEncoder(), pass = enc.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: state.isFrozen?{r:0,g:0,b:0,a:0}:{r:0,g:0,b:0,a:1}, loadOp: 'clear', storeOp: 'discard' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'discard' } });
-                const sd = new Float32Array(76); sd.set(Mat4.multiply(vp, state.sphere.rotation), 0); sd.set(state.sphere.rotation, 16); sd.set(state.sphere.rotation, 32); sd.set(state.cameraPos, 48); [0,1,2].forEach(i=>{sd.set(state.cones[i].pos,52+i*8); sd.set(state.cones[i].active?state.cones[i].color:[0,0,0],56+i*8);});
+                const sd = new Float32Array(80); sd.set(Mat4.multiply(vp, state.sphere.rotation), 0); sd.set(state.sphere.rotation, 16); sd.set(state.sphere.rotation, 32); sd.set(state.cameraPos, 48); [0,1,2].forEach(i=>{sd.set(state.cones[i].pos,52+i*8); sd.set(state.cones[i].active?state.cones[i].color:[0,0,0],56+i*8);});
+                sd[76] = state.debugMode ? 1.0 : 0.0;
                 state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, sd);
                 pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount);
                 if (!state.isFrozen) {
@@ -685,18 +614,32 @@ window.addEventListener("message", (event) => {
         }
         init();
 
-      // --- STORAGE ACCESS API IMPLEMENTATION (MDN COMPLIANT) ---
+// --- CROSS-ORIGIN & IFRAME STORAGE LOGIC ---
+
+window.addEventListener("message", (event) => {
+    if (event.data === "getSphereColor") {
+        let savedColor = storageScope.getItem("lastSphereColor");
+        if (!savedColor) {
+            savedColor = "#ff0000"; 
+        }
+        event.source.postMessage(savedColor, event.origin);
+    }
+});
 
 async function initStorageAccess() {
-    if (window.self === window.top) return; // Exit if not in iframe
+    // Only run this logic if we are inside an iframe
+    if (window.self === window.top) return; 
 
-    const container = document.body;
-
+    // Helper: Creates a non-destructive overlay for the Connect button
     const showButton = () => {
-        container.innerHTML = "";
-        Object.assign(container.style, {
-            display: "flex", justifyContent: "center", alignItems: "center", 
-            height: "100vh", background: "#fff", margin: 0
+        if (document.getElementById('saa-overlay')) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'saa-overlay';
+        Object.assign(overlay.style, {
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            background: '#fff', zIndex: 10000, display: 'flex',
+            justifyContent: 'center', alignItems: 'center'
         });
 
         const btn = document.createElement("button");
@@ -706,41 +649,36 @@ async function initStorageAccess() {
             background: "#000", color: "#fff", border: "none", borderRadius: "8px"
         });
 
-        container.appendChild(btn);
+        overlay.appendChild(btn);
+        document.body.appendChild(overlay);
+
         btn.addEventListener("click", handleAccessRequest);
     };
 
+    // Helper: Logic to determine if we should show sync state or let user pick
     const attemptRetrieval = async (handle) => {
         try {
-            let storageToRead;
-
-            // 1. If we have a specific handle (Chrome/Edge way), use it.
+            // Update global scope if handle is provided (so save works later)
             if (handle && handle.localStorage) {
-                console.log("Using SAA Handle for LocalStorage");
-                storageToRead = handle.localStorage;
+                storageScope = handle.localStorage;
             } 
-            // 2. Otherwise fall back to global (Safari/Firefox way)
-            else {
-                console.log("Using global LocalStorage");
-                storageToRead = window.localStorage;
-            }
 
-            // READ THE DATA
-            const color = storageToRead.getItem("lastSphereColor");
+            const color = storageScope.getItem("lastSphereColor");
+            const overlay = document.getElementById('saa-overlay');
             
             if (color) {
-                console.log("Success! Found unpartitioned color:", color);
+                // DATA FOUND: Sync with parent, show success on overlay
                 window.parent.postMessage(color, "*");
-                
-                container.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">
-                    Synced: ${color}
-                </div>`;
-                document.body.style.backgroundColor = color;
+                if (overlay) {
+                    overlay.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${color}</div>`;
+                    document.body.style.backgroundColor = color;
+                    // Optional: fade out overlay if you want them to see the sphere anyway
+                }
             } else {
-                console.warn("Access Granted, but storage is empty.");
-                container.innerHTML = `<div style="font-family:sans-serif; color:red;">
-                    Storage Empty<br><small>Visit colorlog.in directly first</small>
-                </div>`;
+                // DATA EMPTY: We want the user to pick a color.
+                // Remove the overlay so they can see the Sphere (which init() loaded in bg)
+                if (overlay) overlay.remove();
+                console.log("Storage empty. revealing Sphere for selection.");
             }
         } catch (e) {
             console.error("Error reading storage handle:", e);
@@ -749,29 +687,23 @@ async function initStorageAccess() {
 
     const handleAccessRequest = async () => {
         try {
-            // Request a specific handle for localStorage
             const handle = await document.requestStorageAccess({ localStorage: true });
-            
-            // Pass that handle to our retrieval function
             await attemptRetrieval(handle);
-            
         } catch (err) {
-            console.error("Storage Access Denied:", err);
-            container.innerHTML = "Access Denied";
+            const overlay = document.getElementById('saa-overlay');
+            if(overlay) overlay.innerHTML = "Access Denied";
         }
     };
 
     try {
-        // Check if we already have access
         const hasAccess = await document.hasStorageAccess();
         if (hasAccess) {
-            // Even if we have access, we might need to request the handle again 
-            // to get the object, but it will resolve instantly without a prompt.
             try {
+                // Try to get handle immediately without prompt
                 const handle = await document.requestStorageAccess({ localStorage: true });
                 await attemptRetrieval(handle);
             } catch (e) {
-                // Fallback for browsers that support SAA but not the handle syntax
+                // Fallback for older implementations
                 await attemptRetrieval(null); 
             }
         } else {
