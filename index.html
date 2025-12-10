@@ -88,8 +88,7 @@
 <body class="light-mode">
     <canvas id="gpu-canvas"></canvas>
     <div id="flash-overlay"></div>
-
-        <div id="hover-trigger"></div>
+    <div id="hover-trigger"></div>
 
     <nav id="top-nav">
         <div class="nav-item">Settings</div>
@@ -185,8 +184,8 @@
                     localStorage.setItem(this.VISITED_KEY, JSON.stringify(this.visitedRooms));
                 }
             }
-            
-connectAndPreview(hex) {
+
+            connectAndPreview(hex) {
                 const cleanHex = hex.replace('#', '');
                 this.roomId = 'doc-infinite-' + cleanHex;
 
@@ -230,16 +229,7 @@ connectAndPreview(hex) {
                 this.room.onPeerJoin(id => { this.handlePeerJoin(id); this.updateStatus(); });
                 this.room.onPeerLeave(id => { this.updateStatus(); this.reapplyVisualLocks(); });
 
-                // --- CHANGED SECTION START ---
                 this.roomDB.get('content').once((data) => {
-                    // FIX: If we have already manually initialized lines (via enterRoomUI), 
-                    // ignore this delayed listener so it doesn't overwrite your work 
-                    // and reset the cursor position.
-                    if (this.ui.display.getElementsByClassName('editor-line').length > 0) {
-                        console.log("Canvas already initialized manually. Skipping DB load.");
-                        return;
-                    }
-
                     if (data && data.includes('class="editor-line"')) {
                         console.log("Found existing content.");
                         this.ui.display.innerHTML = data;
@@ -250,14 +240,12 @@ connectAndPreview(hex) {
                         this.initFreshCanvas();
                     }
                 });
-                // --- CHANGED SECTION END ---
 
                 setTimeout(() => this.updateStatus(), 1000);
                 setTimeout(() => {
                     if (this.peerCountInt === 0 && this.visitedRooms.includes(this.roomId)) window.enterRoomUI();
                 }, 1500);
             }
-
 
             enterRoomUI() {
                 this.addVisited(this.roomId);
@@ -270,16 +258,53 @@ connectAndPreview(hex) {
 
                 window.location.hash = this.roomId.replace('doc-infinite-', '');
                 
-                // 1. FIX: Force initialization immediately if the canvas is empty.
-                // This ensures buffers exist and scrollbar is correct BEFORE you start typing.
-                const hasContent = this.ui.display.querySelector('.editor-line');
-                if (!hasContent) {
-                    this.initFreshCanvas();
-                }
-
+                // Wait for slide up transition to mostly finish
+                setTimeout(() => {
+                    this.prepareEditorFocus(); 
+                }, 600);
             }
 
-           
+            // CRITICAL NEW LOGIC: Autofocus + Center Sandwich
+            prepareEditorFocus() {
+                this.ui.display.focus();
+                
+                // 1. Identify the target line (last line, or create one if empty)
+                let lines = this.ui.display.getElementsByClassName('editor-line');
+                if (lines.length === 0) {
+                    this.ui.display.innerHTML = this.createLine();
+                    lines = this.ui.display.getElementsByClassName('editor-line');
+                }
+                const targetLine = lines[lines.length - 1];
+
+                // 2. Create the "Sandwich" (Infinite Scroll Buffer)
+                // Add 50 lines above and 50 lines below the target
+                let bufferHtml = '';
+                for(let i=0; i<50; i++) bufferHtml += this.createLine();
+                
+                // Inject safely
+                targetLine.insertAdjacentHTML('beforebegin', bufferHtml);
+                targetLine.insertAdjacentHTML('afterend', bufferHtml);
+
+                // 3. Set Cursor to Target Line
+                const range = document.createRange();
+                const sel = window.getSelection();
+                range.selectNodeContents(targetLine);
+                range.collapse(false); // Collapse to end of line
+                sel.removeAllRanges();
+                sel.addRange(range);
+
+                // 4. Force Scroll Center based on Math (Not just scrollIntoView)
+                // Calculate where the line is relative to the container content
+                const lineTop = targetLine.offsetTop;
+                const containerHeight = this.ui.container.clientHeight;
+                const lineHeight = targetLine.clientHeight;
+                
+                // Scroll = Line Position - Half Screen + Half Line
+                this.ui.container.scrollTop = lineTop - (containerHeight / 2) + (lineHeight / 2);
+                
+                this.renderMinimap();
+            }
+
             createLine() {
                 return `<div id="line-${Math.random().toString(36).substr(2, 9)}" class="editor-line"><br></div>`;
             }
@@ -287,31 +312,26 @@ connectAndPreview(hex) {
             initFreshCanvas() {
                 let html = '';
     
-                // 1. Create exactly 101 lines 
-                // (Indices 0-49 are above, 50 is center, 51-100 are below)
-                for(let i=0; i<101; i++) html += this.createLine();
-                
-                this.ui.display.innerHTML = html;
-                this.isFresh = true;
+    // 1. Create exactly 101 lines 
+    // (Indices 0-49 are above, 50 is center, 51-100 are below)
+    for(let i=0; i<51; i++) html += createLine();
+    
+    ui.display.innerHTML = html;
+    isFresh = true;
 
-                // 2. Execute immediately.
-                const lines = this.ui.display.getElementsByClassName('editor-line');
-                const middleLine = lines[50]; 
-                
-                if(middleLine) {
-                    // 3. Force "Instant" Scroll
-                    middleLine.scrollIntoView({ block: 'center', behavior: 'auto' });
-                    
-                    // 4. Set Focus / Place Caret safely
-                    const range = document.createRange();
-                    const sel = window.getSelection();
-                    range.selectNodeContents(middleLine);
-                    range.collapse(true); // Collapse to start of line
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    
-                    this.currentLineId = middleLine.id;
-                }
+    // 2. No setTimeout needed. Execute immediately.
+    const middleLine = ui.display.children[25]; // Index 50 is the 51st line
+    
+    if(middleLine) {
+        // 3. Force "Instant" Scroll
+        // behavior: 'auto' overrides smooth scrolling for this action
+        middleLine.scrollIntoView({ block: 'center', behavior: 'auto' });
+        
+        // 4. Set Focus
+        placeCaret(middleLine);
+        
+        // 5. CRITICAL: For
+    }
             }
 
             ensureStructure() {
