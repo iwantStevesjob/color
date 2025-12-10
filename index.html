@@ -102,7 +102,7 @@
     <div id="login-card">
         <div id="color-hex">#FFFFFF</div>
         <div id="room-status">Initializing...</div>
-        <button id="login-btn"><span>ENTER ROOM</span></button>
+        <button id="login-btn"><span>LOGIN</span></button>
     </div>
 
     <!-- DEBUG TOGGLE -->
@@ -133,7 +133,6 @@
     </div>
 
     <!-- P2P MODULE SCRIPT -->
-        <!-- P2P MODULE SCRIPT -->
     <script type="module">
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
@@ -172,6 +171,7 @@
                 this.activeLocks = {};
                 this.currentLineId = null;
                 this.isFresh = true;
+                this.hasAutoScrolled = false;
                 this.peerCountInt = 0;
 
                 this.bindEvents();
@@ -190,7 +190,7 @@
                 }
             }
             
-connectAndPreview(hex) {
+            connectAndPreview(hex) {
                 const cleanHex = hex.replace('#', '');
                 this.roomId = 'doc-infinite-' + cleanHex;
 
@@ -204,7 +204,7 @@ connectAndPreview(hex) {
                 if (this.room) this.room.leave();
 
                 try {
-                    const gun = Gun({ peers: [], localStorage: false });
+                    const gun = Gun({ peers: [], localStorage: true });
                     this.roomDB = gun.get(this.roomId);
                 } catch (e) {
                     console.error(e);
@@ -228,40 +228,60 @@ connectAndPreview(hex) {
                 getReqSync((_, pid) => {
                     if (!this.isFresh && this.ui.display.innerText.trim().length > 0) {
                         this.actions.pushSync(this.ui.display.innerHTML, pid);
+                        if (this.currentLineId && this.actions.sendLock) {
+                            this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, pid);
+                        }
                     }
                 });
 
                 this.room.onPeerJoin(id => { this.handlePeerJoin(id); this.updateStatus(); });
                 this.room.onPeerLeave(id => { this.updateStatus(); this.reapplyVisualLocks(); });
 
-                // --- CHANGED SECTION START ---
+                // --- DATA LOADING LOGIC (BACKGROUND) ---
                 this.roomDB.get('content').once((data) => {
-                    // FIX: If we have already manually initialized lines (via enterRoomUI), 
-                    // ignore this delayed listener so it doesn't overwrite your work 
-                    // and reset the cursor position.
-                    if (this.ui.display.getElementsByClassName('editor-line').length > 0) {
-                        console.log("Canvas already initialized manually. Skipping DB load.");
-                        return;
+                    // Check 1: Manual content already exists?
+                    if (this.ui.display.getElementsByClassName('editor-line').length > 0) return;
+
+                    // Check 2: Evaluate DB Data
+                    let isMostlyEmpty = false;
+                    let validData = null;
+
+                    // Ensure data is a valid string and check content length
+                    if (data && typeof data === 'string') {
+                        validData = data;
+                        const temp = document.createElement('div');
+                        temp.innerHTML = data;
+                        if (temp.innerText.trim().length < 5) isMostlyEmpty = true;
+                    } else if (data && typeof data === 'object') {
+                         // Handle edge case where Gun returns object ref
+                         console.warn("GunDB returned object instead of string, treating as empty");
+                         isMostlyEmpty = true;
+                    } else {
+                        isMostlyEmpty = true;
                     }
 
-                    if (data && data.includes('class="editor-line"')) {
-                        console.log("Found existing content.");
-                        this.ui.display.innerHTML = data;
+                    if (validData && validData.includes('class="editor-line"') && !isMostlyEmpty) {
+                        // PATH A: Load existing, BUT DO NOT FOCUS YET
+                        console.log("DB: Loaded existing content (Background)");
+                        this.ui.display.innerHTML = validData;
                         this.isFresh = false;
                         this.ensureStructure();
                     } else {
-                        console.log("No content found. Initializing fresh.");
-                        this.initFreshCanvas();
+                        // PATH B: Load Fresh Template, BUT DO NOT FOCUS YET
+                        console.log("DB: Initializing fresh template (Background)");
+                        this.ui.display.innerHTML = this.generateFreshLines();
+                        this.isFresh = true;
                     }
+                    
+                    // IMPORTANT: Update Status now that data is loaded
+                    this.updateStatus();
                 });
-                // --- CHANGED SECTION END ---
 
                 setTimeout(() => this.updateStatus(), 1000);
                 setTimeout(() => {
                     if (this.peerCountInt === 0 && this.visitedRooms.includes(this.roomId)) window.enterRoomUI();
                 }, 1500);
             }
-
 
             enterRoomUI() {
                 this.addVisited(this.roomId);
@@ -274,48 +294,68 @@ connectAndPreview(hex) {
 
                 window.location.hash = this.roomId.replace('doc-infinite-', '');
                 
-                // 1. FIX: Force initialization immediately if the canvas is empty.
-                // This ensures buffers exist and scrollbar is correct BEFORE you start typing.
+                // Ensure content exists
                 const hasContent = this.ui.display.querySelector('.editor-line');
                 if (!hasContent) {
-                    this.initFreshCanvas();
+                    this.ui.display.innerHTML = this.generateFreshLines();
+                    this.isFresh = true;
                 }
 
+                // --- FOCUS LOGIC (FOREGROUND) ---
+                // Only run this when the UI is actually activating
+                
+                // Check if content is logically "empty/fresh" to decide scroll behavior
+                const isEmpty = this.ui.display.innerText.trim().length < 5;
+                
+                if (this.isFresh || isEmpty) {
+                    // Force Center Focus for new/empty docs
+                    this.focusCenter();
+                } else {
+                    // Just ensure it's interactive for existing docs
+                    // (Optional: You could save/restore scroll position here if desired)
+                    this.ui.display.focus();
+                }
             }
 
-           
+            generateFreshLines() {
+                let html = '';
+                for(let i=0; i<101; i++) html += this.createLine();
+                return html;
+            }
+
             createLine() {
                 return `<div id="line-${Math.random().toString(36).substr(2, 9)}" class="editor-line"><br></div>`;
             }
 
-            initFreshCanvas() {
-                let html = '';
-    
-                // 1. Create exactly 101 lines 
-                // (Indices 0-49 are above, 50 is center, 51-100 are below)
-                for(let i=0; i<101; i++) html += this.createLine();
-                
-                this.ui.display.innerHTML = html;
-                this.isFresh = true;
+            focusCenter() {
+                // Wait slightly for the slide-up transition or DOM paint
+                let attempts = 0;
+                const focusInterval = setInterval(() => {
+                    attempts++;
+                    const lines = this.ui.display.getElementsByClassName('editor-line');
+                    const middleLine = lines[50]; 
+                    
+                    if(middleLine) {
+                        middleLine.scrollIntoView({ block: 'center', behavior: 'auto' });
+                        
+                        const range = document.createRange();
+                        const sel = window.getSelection();
+                        range.selectNodeContents(middleLine);
+                        range.collapse(true);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                        
+                        this.ui.display.focus();
+                        this.currentLineId = middleLine.id;
 
-                // 2. Execute immediately.
-                const lines = this.ui.display.getElementsByClassName('editor-line');
-                const middleLine = lines[50]; 
-                
-                if(middleLine) {
-                    // 3. Force "Instant" Scroll
-                    middleLine.scrollIntoView({ block: 'center', behavior: 'auto' });
-                    
-                    // 4. Set Focus / Place Caret safely
-                    const range = document.createRange();
-                    const sel = window.getSelection();
-                    range.selectNodeContents(middleLine);
-                    range.collapse(true); // Collapse to start of line
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    
-                    this.currentLineId = middleLine.id;
-                }
+                        // Stop if successfully focused or timed out
+                        if (document.activeElement === this.ui.display || attempts > 20) {
+                            clearInterval(focusInterval);
+                        }
+                    } else {
+                        clearInterval(focusInterval);
+                    }
+                }, 50);
             }
 
             ensureStructure() {
@@ -327,7 +367,6 @@ connectAndPreview(hex) {
                 });
             }
 
-            // Standard Infinite Scroll Maintenance
             checkBuffers() {
                 const scrollTop = this.ui.container.scrollTop;
                 const scrollHeight = this.ui.container.scrollHeight;
@@ -350,8 +389,6 @@ connectAndPreview(hex) {
                 }
                 if (updated) this.renderMinimap();
             }
-
-            // ... (Rest of logic remains same: logout, sync, lock, etc) ...
             
             logout() {
                 this.ui.dashboard.classList.remove('active');
@@ -371,8 +408,8 @@ connectAndPreview(hex) {
             updateStatus() {
                 const peers = Object.keys(this.room.getPeers()).length;
                 this.peerCountInt = peers;
-                this.ui.status.innerText = peers === 0 ? "ROOM AVAILABLE" : `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
-                this.ui.peerCount.innerText = peers > 0 ? `${peers} Peer(s)` : 'Waiting...';
+                this.ui.status.innerText = peers === 0 ? "COLOR AVAILABLE" : `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
+                this.ui.peerCount.innerText = peers > 0 ? `${peers} visitors(s)` : 'offline';
                 this.ui.dot.classList.toggle('on', peers > 0);
             }
 
@@ -380,8 +417,17 @@ connectAndPreview(hex) {
                 this.isFresh = false;
                 this.ui.display.innerHTML = html;
                 this.roomDB.get('content').put(html);
-                // Don't auto-scroll on passive sync, only initially
-                setTimeout(() => this.renderMinimap(), 100);
+                this.reapplyVisualLocks();
+                
+                setTimeout(() => {
+                    this.renderMinimap();
+                    const remoteIds = Object.keys(this.activeLocks).filter(id => id !== selfId);
+                    if (remoteIds.length > 0) {
+                        const lock = this.activeLocks[remoteIds[0]];
+                        const el = document.getElementById(lock.lineId);
+                        if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                    }
+                }, 200);
             }
 
             handleRemoteContent(html) {
@@ -402,8 +448,12 @@ connectAndPreview(hex) {
             handlePeerJoin(id) {
                 const hasRealText = this.ui.display.innerText.trim().length > 0;
                 if (this.isFresh || !hasRealText) this.actions.reqSync(null, id);
-                else this.actions.pushSync(this.ui.display.innerHTML, id);
-                if (this.currentLineId && this.actions.sendLock) this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
+                else {
+                    this.actions.pushSync(this.ui.display.innerHTML, id);
+                    if (this.currentLineId && this.actions.sendLock) {
+                        this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
+                    }
+                }
             }
 
             refreshOwnership() {
@@ -419,6 +469,7 @@ connectAndPreview(hex) {
             }
 
             reapplyVisualLocks() {
+                // 1. Clean up old locks (Existing code)
                 document.querySelectorAll('.locked-line').forEach(el => {
                     el.classList.remove('locked-line');
                     el.style.removeProperty('--lock-color');
@@ -426,9 +477,13 @@ connectAndPreview(hex) {
                     if (el.dataset.owner && el.dataset.owner !== this.user.id) el.contentEditable = "false";
                     else el.contentEditable = "true";
                 });
+
                 const now = Date.now();
+                
+                // 2. Apply active locks (Existing loop)
                 for (const [pid, lock] of Object.entries(this.activeLocks)) {
                     if (now - lock.ts > 60000 || pid === selfId) continue;
+                    
                     const el = document.getElementById(lock.lineId);
                     if (el) {
                         el.classList.add('locked-line');
@@ -438,6 +493,14 @@ connectAndPreview(hex) {
                         tag.className = 'locked-tag';
                         tag.innerText = lock.color;
                         el.appendChild(tag);
+
+                        // --- NEW SIMPLIFIED LOGIC START ---
+                        // If we haven't auto-scrolled yet, do it now and flip the switch
+                        if (!this.hasAutoScrolled) {
+                            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                            this.hasAutoScrolled = true;
+                        }
+                        // --- NEW SIMPLIFIED LOGIC END ---
                     }
                 }
                 this.renderMinimap();
