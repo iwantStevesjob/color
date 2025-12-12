@@ -633,22 +633,30 @@
 
         class ColorDB {
             constructor() {
+                console.log('[ColorDB] Constructor called - initializing database wrapper');
                 this.dbName = 'ColorDB';
                 this.dbVersion = 1;
                 this.db = null;
             }
 
             init() {
+                console.log('[ColorDB] init() called - opening IndexedDB...');
                 return new Promise((resolve, reject) => {
                     const request = indexedDB.open(this.dbName, this.dbVersion);
-                    request.onerror = (event) => { console.error("IDB Error", event); reject(event); };
+                    request.onerror = (event) => {
+                        console.error('[ColorDB] ERROR opening IndexedDB:', event);
+                        reject(event);
+                    };
                     request.onsuccess = (event) => {
                         this.db = event.target.result;
+                        console.log('[ColorDB] IndexedDB opened successfully');
                         resolve(this.db);
                     };
                     request.onupgradeneeded = (event) => {
+                        console.log('[ColorDB] Upgrade needed - creating/updating schema...');
                         const db = event.target.result;
                         if (!db.objectStoreNames.contains('rooms')) {
+                            console.log('[ColorDB] Creating "rooms" object store');
                             db.createObjectStore('rooms', { keyPath: 'hex' });
                         }
                     };
@@ -656,18 +664,32 @@
             }
 
             async getRoom(hex) {
-                if (!this.db) await this.init();
+                console.log(`[ColorDB] getRoom() called for hex: ${hex}`);
+                if (!this.db) {
+                    console.log('[ColorDB] DB not initialized, calling init()...');
+                    await this.init();
+                }
                 return new Promise(resolve => {
                     const transaction = this.db.transaction(['rooms'], 'readonly');
                     const store = transaction.objectStore('rooms');
                     const req = store.get(hex);
-                    req.onsuccess = () => resolve(req.result);
-                    req.onerror = () => resolve(null);
+                    req.onsuccess = () => {
+                        console.log(`[ColorDB] getRoom() result for ${hex}:`, req.result ? 'FOUND' : 'NOT FOUND', req.result);
+                        resolve(req.result);
+                    };
+                    req.onerror = () => {
+                        console.error(`[ColorDB] getRoom() ERROR for ${hex}`);
+                        resolve(null);
+                    };
                 });
             }
 
             async saveRoom(hex, skeleton, content) {
-                if (!this.db) await this.init();
+                console.log(`[ColorDB] saveRoom() called for hex: ${hex}, skeleton length: ${skeleton?.length}, content keys: ${Object.keys(content || {}).length}`);
+                if (!this.db) {
+                    console.log('[ColorDB] DB not initialized, calling init()...');
+                    await this.init();
+                }
                 return new Promise(resolve => {
                     const transaction = this.db.transaction(['rooms'], 'readwrite');
                     const store = transaction.objectStore('rooms');
@@ -678,18 +700,35 @@
                         content: content    // Map of ID -> HTML
                     };
                     store.put(data);
-                    transaction.oncomplete = () => resolve();
+                    transaction.oncomplete = () => {
+                        console.log(`[ColorDB] saveRoom() completed for ${hex}`);
+                        resolve();
+                    };
+                    transaction.onerror = () => {
+                        console.error(`[ColorDB] saveRoom() ERROR for ${hex}`);
+                        resolve();
+                    };
                 });
             }
 
             async getAllRooms() {
-                if (!this.db) await this.init();
+                console.log('[ColorDB] getAllRooms() called');
+                if (!this.db) {
+                    console.log('[ColorDB] DB not initialized, calling init()...');
+                    await this.init();
+                }
                 return new Promise(resolve => {
                     const transaction = this.db.transaction(['rooms'], 'readonly');
                     const store = transaction.objectStore('rooms');
                     const req = store.getAll();
-                    req.onsuccess = () => resolve(req.result);
-                    req.onerror = () => resolve([]);
+                    req.onsuccess = () => {
+                        console.log(`[ColorDB] getAllRooms() found ${req.result?.length || 0} rooms`);
+                        resolve(req.result);
+                    };
+                    req.onerror = () => {
+                        console.error('[ColorDB] getAllRooms() ERROR');
+                        resolve([]);
+                    };
                 });
             }
         }
@@ -700,6 +739,8 @@
 
         class EditorApp {
             constructor() {
+                console.log('[EditorApp] ========== CONSTRUCTOR STARTED ==========');
+                console.log('[EditorApp] Initializing P2P Editor Application...');
                 this.STORAGE_KEY = 'p2p_editor_user_v1';
                 this.VISITED_KEY = 'p2p_visited_rooms_v1';
 
@@ -721,14 +762,21 @@
                 };
 
                 // FIX 1: Initialize IDB Wrapper
+                console.log('[EditorApp] Initializing ColorDB...');
                 this.db = new ColorDB();
-                this.db.init();
+                this.db.init().then(() => {
+                    console.log('[EditorApp] ColorDB initialized successfully');
+                }).catch(err => {
+                    console.error('[EditorApp] ColorDB initialization failed:', err);
+                });
 
                 this.user = JSON.parse(localStorage.getItem(this.STORAGE_KEY)) || {
                     id: 'user_' + Math.random().toString(36).substr(2, 9),
                     color: '#000000'
                 };
+                console.log('[EditorApp] User loaded:', this.user);
                 this.visitedRooms = JSON.parse(localStorage.getItem(this.VISITED_KEY)) || [];
+                console.log(`[EditorApp] Visited rooms loaded: ${this.visitedRooms.length} rooms`);
 
                 this.room = null;
                 this.room = null;
@@ -739,17 +787,187 @@
                 this.currentLineId = null;
                 this.isFresh = true;
                 this.hasAutoScrolled = false;
+                this.pendingRemoteData = null; // Store remote data for conflict resolution
+                this.statusTimeoutAttempts = 20; // Default to 20 (5 seconds)
+                this.lastLineCount = 0;
 
                 this.bindEvents();
                 this.setupGlobalExposure();
+                console.log('[EditorApp] Events bound and globals exposed');
 
                 if (!window.location.hash || window.location.hash.length < 2) {
+                    console.log('[EditorApp] No hash in URL, running sequenced scan');
                     this.runSequencedScan();
+                } else {
+                    console.log(`[EditorApp] URL hash detected: ${window.location.hash}`);
+                    // AUTO-CONNECT: Try to load from local DB immediately
+                    this.tryAutoConnectFromHash();
                 }
             }
 
+            async tryAutoConnectFromHash() {
+                const hex = window.location.hash.replace('#', '');
+                console.log(`[EditorApp] tryAutoConnectFromHash() for hex: ${hex}`);
+
+                this.statusTimeoutAttempts = 20; // URL hash needs full 5s delay
+
+                this.roomId = 'doc-infinite-' + hex;
+                this.user.color = '#' + hex;
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.user));
+                this.ui.userBadge.style.backgroundColor = this.user.color;
+
+                // Check if we have local data for this color
+                const localData = await this.db.getRoom(hex);
+
+                if (localData && localData.skeleton && localData.skeleton.length > 0) {
+                    console.log(`[EditorApp] Found local data for ${hex} - ${localData.skeleton.length} lines`);
+                    console.log('[EditorApp] BYPASSING Initializing status - loading directly from local DB');
+
+                    // Load local data immediately
+                    await this.renderFromLocalDB();
+
+                    // Enter room UI immediately (skip login card entirely)
+                    this.enterRoomUI();
+
+                    // Join network in background - will handle conflicts
+                    this.joinNetworkWithConflictDetection();
+                } else {
+                    console.log(`[EditorApp] No local data for ${hex} - showing login card`);
+                    // No local data, show the normal login flow
+                    this.ui.loginCard.classList.add('visible');
+                    this.ui.status.innerText = "Checking Network...";
+
+                    // Start network connection
+                    this.joinNetwork(false);
+
+                    // Generate fresh content after delay if still empty
+                    setTimeout(async () => {
+                        if (!this.ui.display.querySelector('.editor-line')) {
+                            console.log('[EditorApp] No content after timeout, generating fresh');
+                            this.ui.display.innerHTML = this.generateFreshLines();
+                            this.isFresh = true;
+                            this.ui.status.innerText = "COLOR AVAILABLE";
+                        }
+                    }, 3000);
+                }
+            }
+
+            joinNetworkWithConflictDetection() {
+                console.log('[EditorApp] joinNetworkWithConflictDetection() - connecting in background');
+
+                try {
+                    this.room = joinRoom({
+                        appId: 'doc-infinite-v5-idb',
+                        trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io']
+                    }, this.roomId);
+                    console.log('[EditorApp] Background room created');
+                } catch (e) {
+                    console.error('[EditorApp] Failed to create background room:', e);
+                    return;
+                }
+
+                const [sendSkeleton, getSkeleton] = this.room.makeAction('skeleton');
+                const [sendFragment, getFragment] = this.room.makeAction('fragment');
+                const [sendLock, getLock] = this.room.makeAction('lock');
+                const [reqSync, getReqSync] = this.room.makeAction('req');
+
+                this.actions = { sendSkeleton, sendFragment, sendLock, reqSync };
+
+                // Handle incoming skeleton - check for conflicts
+                getSkeleton((ids, peerId) => {
+                    console.log(`[EditorApp] RECEIVED skeleton from peer ${peerId}, ${ids?.length || 0} IDs`);
+
+                    // Get our current local IDs
+                    const myIds = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
+                    const myContent = this.ui.display.innerText.trim();
+
+                    // Check if this is significantly different (conflict)
+                    const idsDifferent = JSON.stringify(myIds.slice(0, 10)) !== JSON.stringify((ids || []).slice(0, 10));
+
+                    if (idsDifferent && myContent.length > 10) {
+                        console.log('[EditorApp] CONFLICT DETECTED - local data differs from remote');
+                        this.pendingRemoteData = { skeleton: ids, peerId };
+
+                        // Ask user what to do
+                        const syncWithPeers = confirm(
+                            `Other users are in this room with different content.\n\n` +
+                            `• Click OK to sync with them (your local changes may be overwritten)\n` +
+                            `• Click Cancel to stay offline with your local content`
+                        );
+
+                        if (syncWithPeers) {
+                            console.log('[EditorApp] User chose to sync with peers');
+                            this.handleRemoteSkeleton(ids);
+                            // Request full content
+                            this.actions.reqSync(null);
+                        } else {
+                            console.log('[EditorApp] User chose to stay offline');
+                            // Disconnect from room
+                            try { this.room.leave(); } catch (e) { }
+                            this.room = null;
+                            this.actions = {};
+                            this.ui.peerCount.innerText = "Offline (by choice)";
+                            this.ui.dot.classList.remove('on');
+                        }
+                    } else {
+                        // No significant conflict, merge normally
+                        this.handleRemoteSkeleton(ids);
+                    }
+                });
+
+                getFragment((fragMap, peerId) => {
+                    console.log(`[EditorApp] RECEIVED fragments from peer ${peerId}, ${Object.keys(fragMap || {}).length} fragments`);
+                    this.handleRemoteFragments(fragMap);
+                });
+
+                getLock((data, pid) => {
+                    this.handleRemoteLock(data, pid);
+                });
+
+                getReqSync((_, pid) => {
+                    console.log(`[EditorApp] RECEIVED sync request from peer ${pid}`);
+                    const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
+                    if (ids.length > 0) {
+                        this.actions.sendSkeleton(ids, pid);
+                        const allFragments = this.getAllFragments();
+                        if (Object.keys(allFragments).length > 0) {
+                            this.actions.sendFragment(allFragments, pid);
+                        }
+                    }
+                });
+
+                this.room.onPeerJoin(id => {
+                    console.log(`[EditorApp] PEER JOINED: ${id}`);
+                    this.handlePeerJoin(id);
+                    this.updateStatus();
+                });
+
+                this.room.onPeerLeave(id => {
+                    console.log(`[EditorApp] PEER LEFT: ${id}`);
+                    this.updateStatus();
+                    this.reapplyVisualLocks();
+                });
+
+                // Start status polling
+                let attempts = 0;
+                const poll = setInterval(() => {
+                    attempts++;
+                    if (!this.room) { clearInterval(poll); return; }
+                    const peers = Object.keys(this.room.getPeers()).length;
+                    this.updateStatus(peers, attempts);
+
+                    // Request sync early to detect conflicts
+                    if (attempts === 2 && peers > 0) {
+                        console.log('[EditorApp] Requesting sync to check for conflicts');
+                        this.actions.reqSync(null);
+                    }
+
+                    if (attempts > 60) clearInterval(poll);
+                }, 250);
+            }
+
             setupGlobalExposure() {
-                window.connectAndPreview = (hex) => this.connectAndPreview(hex);
+                window.connectAndPreview = (hex, fromUrl) => this.connectAndPreview(hex, fromUrl);
                 window.enterRoomUI = () => this.enterRoomUI();
             }
 
@@ -760,46 +978,77 @@
                 }
             }
 
-            connectAndPreview(hex) {
+            connectAndPreview(hex, fromUrl = false) {
+                console.log(`[EditorApp] connectAndPreview() called with hex: ${hex}, fromUrl: ${fromUrl}`);
+
+                // Set status timeout: 20 attempts (5s) for URL, 2 attempts (0.5s) for click
+                this.statusTimeoutAttempts = fromUrl ? 20 : 2;
+
                 const cleanHex = hex.replace('#', '');
                 this.roomId = 'doc-infinite-' + cleanHex;
                 this.user.color = '#' + cleanHex;
+                console.log(`[EditorApp] Room ID set to: ${this.roomId}`);
                 localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.user));
+                try { localStorage.setItem("lastSphereColor", '#' + cleanHex); } catch (e) { }
                 this.ui.userBadge.style.backgroundColor = this.user.color;
 
-                this.ui.status.innerText = "Accessing Database...";
-                this.ui.btn.classList.remove('hidden');
-
                 // Clean up previous room if exists
-                if (this.room) { try { this.room.leave(); } catch (e) { } this.room = null; }
-
-                // Removed GunDB roomDB creation
+                if (this.room) {
+                    console.log('[EditorApp] Cleaning up previous room connection');
+                    try { this.room.leave(); } catch (e) { console.warn('[EditorApp] Error leaving room:', e); }
+                    this.room = null;
+                }
                 this.roomDB = null;
 
-                if (this.visitedRooms.includes(this.roomId)) {
-                    this.ui.status.innerText = "Loading Local...";
-                    this.renderFromLocalDB().then(() => {
-                        this.enterRoomUI();
-                        this.joinNetwork(true);
-                    });
-                } else {
+                // Check for local data first
+                this.db.getRoom(cleanHex).then(localData => {
+                    if (localData && localData.skeleton && localData.skeleton.length > 0) {
+                        console.log(`[EditorApp] Found local data for ${cleanHex} - loading directly`);
+                        this.ui.status.innerText = "Loading...";
+                        this.ui.btn.classList.remove('hidden');
+
+                        this.renderFromLocalDB().then(() => {
+                            console.log('[EditorApp] Local DB render complete');
+                            // Show login card briefly then user can click to enter
+                            this.ui.status.innerText = "READY";
+                            // Use conflict detection for network join
+                            this.joinNetworkWithConflictDetection();
+                        });
+                    } else {
+                        console.log(`[EditorApp] No local data for ${cleanHex}`);
+                        this.ui.status.innerText = "Checking Network...";
+                        this.ui.btn.classList.remove('hidden');
+
+                        this.joinNetwork(false);
+
+                        // Generate fresh if not loaded quickly
+                        setTimeout(async () => {
+                            console.log('[EditorApp] 3s timeout - checking if display has content...');
+                            if (!this.ui.display.querySelector('.editor-line')) {
+                                console.log('[EditorApp] No content found, generating fresh');
+                                this.ui.display.innerHTML = this.generateFreshLines();
+                                this.isFresh = true;
+                                this.ui.status.innerText = "COLOR AVAILABLE";
+                            }
+                        }, 3000);
+                    }
+                }).catch(err => {
+                    console.error('[EditorApp] Error checking local DB:', err);
                     this.ui.status.innerText = "Checking Network...";
+                    this.ui.btn.classList.remove('hidden');
                     this.joinNetwork(false);
-                    // Generate fresh if not loaded quickly
-                    setTimeout(async () => {
-                        if (!this.ui.display.querySelector('.editor-line')) {
-                            // Check DB one last time properly
-                            await this.renderFromLocalDB();
-                        }
-                    }, 2000);
-                }
+                });
             }
 
             async renderFromLocalDB() {
-                const data = await this.db.getRoom(this.user.color.replace('#', ''));
+                console.log('[EditorApp] renderFromLocalDB() called');
+                const hex = this.user.color.replace('#', '');
+                console.log(`[EditorApp] Fetching room data for hex: ${hex}`);
+                const data = await this.db.getRoom(hex);
                 this.ui.display.innerHTML = '';
 
                 if (data && data.skeleton && data.skeleton.length > 0) {
+                    console.log(`[EditorApp] Found local data - skeleton length: ${data.skeleton.length}`);
                     data.skeleton.forEach(id => {
                         if (data.content && data.content[id]) {
                             this.ui.display.insertAdjacentHTML('beforeend', data.content[id]);
@@ -812,48 +1061,92 @@
                         }
                     });
                     this.isFresh = false;
+                    console.log('[EditorApp] Rendered local content, isFresh = false');
                 } else {
+                    console.log('[EditorApp] No local data found, generating fresh lines');
                     this.ui.display.innerHTML = this.generateFreshLines();
                     this.isFresh = true;
                 }
                 this.ensureStructure();
+                console.log('[EditorApp] renderFromLocalDB() complete');
             }
 
             joinNetwork(isBackground) {
+                console.log(`[EditorApp] joinNetwork() called, isBackground: ${isBackground}`);
+                console.log(`[EditorApp] Attempting to join room: ${this.roomId}`);
                 try {
                     // Start Trystero
+                    console.log('[EditorApp] Creating Trystero room with trackers: wss://tracker.webtorrent.dev, wss://tracker.openwebrtc.io');
                     this.room = joinRoom({ appId: 'doc-infinite-v5-idb', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId);
-                } catch (e) { return; }
+                    console.log('[EditorApp] Trystero room created successfully');
+                } catch (e) {
+                    console.error('[EditorApp] ERROR creating Trystero room:', e);
+                    return;
+                }
 
                 // Define Actions
+                console.log('[EditorApp] Setting up Trystero actions (skeleton, fragment, lock, req)');
                 const [sendSkeleton, getSkeleton] = this.room.makeAction('skeleton');
                 const [sendFragment, getFragment] = this.room.makeAction('fragment');
                 const [sendLock, getLock] = this.room.makeAction('lock');
                 const [reqSync, getReqSync] = this.room.makeAction('req');
 
                 this.actions = { sendSkeleton, sendFragment, sendLock, reqSync };
+                console.log('[EditorApp] Actions created and stored');
 
                 // Handlers
-                getSkeleton((ids) => this.handleRemoteSkeleton(ids));
-                getFragment((fragMap) => this.handleRemoteFragments(fragMap));
-                getLock((data, pid) => this.handleRemoteLock(data, pid));
+                getSkeleton((ids, peerId) => {
+                    console.log(`[EditorApp] RECEIVED skeleton from peer ${peerId}, ${ids?.length || 0} IDs`);
+                    if (ids && ids.length > 0) {
+                        console.log(`[EditorApp] First 3 skeleton IDs received: ${ids.slice(0, 3).join(', ')}`);
+                    }
+                    this.handleRemoteSkeleton(ids);
+                });
+                getFragment((fragMap, peerId) => {
+                    const keys = Object.keys(fragMap || {});
+                    console.log(`[EditorApp] RECEIVED fragments from peer ${peerId}, ${keys.length} fragments`);
+                    if (keys.length > 0) {
+                        // Show sample of what was received
+                        const sampleId = keys[0];
+                        const sampleHtml = fragMap[sampleId];
+                        console.log(`[EditorApp] Sample fragment ID: ${sampleId}`);
+                        console.log(`[EditorApp] Sample fragment HTML length: ${sampleHtml?.length || 0} chars`);
+                    }
+                    this.handleRemoteFragments(fragMap);
+                });
+                getLock((data, pid) => {
+                    console.log(`[EditorApp] RECEIVED lock from peer ${pid}:`, data);
+                    this.handleRemoteLock(data, pid);
+                });
 
                 // Respond to Sync Requests
                 getReqSync((_, pid) => {
-                    const ids = Array.from(this.ui.display.children).map(el => el.id);
+                    console.log(`[EditorApp] RECEIVED sync request from peer ${pid}`);
+                    const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
+                    console.log(`[EditorApp] Responding with ${ids.length} skeleton IDs`);
+                    console.log(`[EditorApp] First 5 IDs: ${ids.slice(0, 5).join(', ')}`);
                     if (ids.length > 0) {
                         this.actions.sendSkeleton(ids, pid);
-                        const visible = this.getVisibleFragments();
-                        if (Object.keys(visible).length > 0) this.actions.sendFragment(visible, pid);
+                        console.log(`[EditorApp] SENT skeleton to peer ${pid}`);
+                        // Send ALL fragments for full sync
+                        const allFragments = this.getAllFragments();
+                        if (Object.keys(allFragments).length > 0) {
+                            this.actions.sendFragment(allFragments, pid);
+                            console.log(`[EditorApp] SENT ${Object.keys(allFragments).length} ALL fragments to peer ${pid}`);
+                        }
+                    } else {
+                        console.log(`[EditorApp] No skeleton IDs to send - display may be empty`);
                     }
                 });
 
                 // Events
                 this.room.onPeerJoin(id => {
+                    console.log(`[EditorApp] PEER JOINED: ${id}`);
                     this.handlePeerJoin(id);
                     this.updateStatus();
                 });
                 this.room.onPeerLeave(id => {
+                    console.log(`[EditorApp] PEER LEFT: ${id}`);
                     this.updateStatus();
                     this.reapplyVisualLocks();
                 });
@@ -861,68 +1154,100 @@
                 // Status Polling & Initial Sync Request
                 let attempts = 0;
                 let connected = false;
+                console.log('[EditorApp] Starting status polling loop');
 
                 // Immediately request sync in case peers are already there but silent
                 setTimeout(() => {
-                    if (this.room) this.actions.reqSync(null);
+                    if (this.room) {
+                        console.log('[EditorApp] Sending initial sync request (500ms delay)');
+                        this.actions.reqSync(null);
+                    }
                 }, 500);
 
                 const poll = setInterval(() => {
                     attempts++;
-                    if (!this.room) { clearInterval(poll); return; }
+                    if (!this.room) {
+                        console.log('[EditorApp] Poll: Room no longer exists, clearing interval');
+                        clearInterval(poll);
+                        return;
+                    }
 
                     const peers = Object.keys(this.room.getPeers()).length;
-                    if (peers > 0) connected = true;
+                    if (peers > 0 && !connected) {
+                        console.log(`[EditorApp] Poll #${attempts}: First connection! Peers: ${peers}`);
+                        connected = true;
+                    }
+                    if (attempts % 10 === 0) {
+                        console.log(`[EditorApp] Poll #${attempts}: Peers: ${peers}, Connected: ${connected}`);
+                    }
 
                     this.updateStatus(peers, attempts);
 
                     // Periodically request sync if we look empty but peers exist
                     if (peers > 0 && this.ui.display.innerText.trim().length < 5 && attempts % 4 === 0) {
+                        console.log(`[EditorApp] Poll #${attempts}: Display empty with peers, requesting sync`);
                         this.actions.reqSync(null);
                     }
 
-                    if (attempts > 120) clearInterval(poll); // Stop polling status after ~30s
+                    if (attempts > 120) {
+                        console.log('[EditorApp] Poll: Reached 120 attempts (~30s), stopping poll');
+                        clearInterval(poll);
+                    }
                 }, 250);
             }
 
             enterRoomUI() {
-                if (this.ui.dashboard.classList.contains('active')) return;
+                console.log('[EditorApp] enterRoomUI() called');
+                if (this.ui.dashboard.classList.contains('active')) {
+                    console.log('[EditorApp] Dashboard already active, returning');
+                    return;
+                }
                 this.addVisited(this.roomId);
+                console.log(`[EditorApp] Added ${this.roomId} to visited rooms`);
                 this.ui.btn.classList.add('hidden');
                 this.ui.loginCard.classList.remove('visible');
                 this.ui.dashboard.classList.add('active');
                 this.ui.hoverTrigger.style.display = 'block';
                 this.ui.topNav.classList.add('active');
                 window.location.hash = this.roomId.replace('doc-infinite-', '');
+                console.log('[EditorApp] Dashboard UI activated');
 
                 const hasContent = this.ui.display.querySelector('.editor-line');
                 if (!hasContent) {
+                    console.log('[EditorApp] No content in display, generating fresh lines');
                     this.ui.display.innerHTML = this.generateFreshLines();
                     this.isFresh = true;
                 }
                 const isEmpty = this.ui.display.innerText.trim().length < 5;
+                console.log(`[EditorApp] Content state: hasContent=${!!hasContent}, isEmpty=${isEmpty}, isFresh=${this.isFresh}`);
                 if (this.isFresh || isEmpty) this.focusCenter();
                 else this.ui.display.focus();
+                console.log('[EditorApp] enterRoomUI() complete');
             }
 
             async runSequencedScan() {
+                console.log('[EditorApp] runSequencedScan() started');
                 const queue = [...this.visitedRooms];
+                console.log(`[EditorApp] Scanning ${queue.length} visited rooms for peer counts`);
                 for (const rId of queue) {
                     if (!rId) continue;
                     try {
+                        console.log(`[EditorApp] Scanning room: ${rId}`);
                         const r = joinRoom({ appId: 'doc-infinite-v4', trackerUrls: ['wss://tracker.webtorrent.dev'] }, rId);
                         await new Promise(res => {
                             setTimeout(() => {
                                 let count = 0;
                                 try { count = Object.keys(r.getPeers()).length; } catch (e) { }
+                                console.log(`[EditorApp] Room ${rId}: ${count} peers found`);
                                 r.leave();
                                 const hex = rId.replace('doc-infinite-', '#');
                                 window.postMessage({ type: 'handle-ready', hex: hex, count: count }, '*');
                                 res();
                             }, 1000);
                         });
-                    } catch (e) { console.warn("Scan err", rId); }
+                    } catch (e) { console.warn("[EditorApp] Scan error for room:", rId, e); }
                 }
+                console.log('[EditorApp] runSequencedScan() complete');
             }
 
             generateFreshLines() {
@@ -980,10 +1305,25 @@
                     this.ui.display.insertAdjacentHTML('beforeend', html);
                     updated = true;
                 }
-                if (updated) this.renderMinimap();
+                if (updated) {
+                    this.renderMinimap();
+                    this.broadcastSkeleton();
+                }
+            }
+
+            broadcastSkeleton() {
+                if (!this.room || !this.actions || !this.actions.sendSkeleton) return;
+                const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
+                console.log(`[EditorApp] Broadcasting skeleton update (${ids.length} lines)`);
+                this.actions.sendSkeleton(ids);
             }
 
             async logout() {
+                console.log('[EditorApp] logout() called');
+
+                // Stop the landing loop immediately to prevent race condition where loop adds 'visible' class
+                if (window.resetSphereView) window.resetSphereView();
+
                 this.ui.dashboard.classList.remove('active', 'revealed');
                 this.ui.loginCard.classList.remove('visible');
                 this.ui.btn.classList.remove('hidden');
@@ -991,7 +1331,11 @@
                 this.ui.topNav.classList.remove('active');
 
                 window.location.hash = '';
-                if (this.room) { try { this.room.leave(); } catch (e) { } this.room = null; }
+                if (this.room) {
+                    console.log('[EditorApp] Leaving current room');
+                    try { this.room.leave(); } catch (e) { console.warn('[EditorApp] Error leaving room:', e); }
+                    this.room = null;
+                }
 
                 this.ui.display.innerHTML = '';
                 this.ui.minimap.innerHTML = '';
@@ -1000,27 +1344,38 @@
                 this.isFresh = true;
                 this.ui.peerCount.innerText = "Disconnected";
                 this.ui.dot.classList.remove('on');
+                console.log('[EditorApp] State reset complete');
 
                 if (window.updateVisitedFromDB) await window.updateVisitedFromDB();
-                if (window.resetSphereView) window.resetSphereView();
             }
 
             updateStatus(peerCountOverride = null, attempts = 0) {
-                if (!this.room) return;
+                if (!this.room) {
+                    console.log('[EditorApp] updateStatus() called but room is null');
+                    return;
+                }
                 const peers = peerCountOverride !== null ? peerCountOverride : Object.keys(this.room.getPeers()).length;
 
                 if (peers === 0) {
                     // Don't give up too early
-                    if (attempts < 20) { // First 5 seconds
+                    if (attempts < this.statusTimeoutAttempts) {
                         this.ui.status.innerText = "SEARCHING...";
                         this.ui.peerCount.innerText = "Connecting...";
+                        if (attempts === 1) console.log('[EditorApp] Status: SEARCHING... (no peers yet)');
                     } else {
+                        if (this.ui.status.innerText !== "COLOR AVAILABLE") {
+                            console.log(`[EditorApp] Status changed: COLOR AVAILABLE (after ${attempts} attempts, no peers found)`);
+                        }
                         this.ui.status.innerText = "COLOR AVAILABLE";
                         this.ui.peerCount.innerText = "Offline";
                     }
                     this.ui.dot.classList.remove('on');
                 } else {
-                    this.ui.status.innerText = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
+                    const newStatus = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
+                    if (this.ui.status.innerText !== newStatus) {
+                        console.log(`[EditorApp] Status changed: ${newStatus}`);
+                    }
+                    this.ui.status.innerText = newStatus;
                     this.ui.peerCount.innerText = `${peers} visitors(s)`;
                     this.ui.dot.classList.add('on');
                 }
@@ -1042,88 +1397,146 @@
                 return visible;
             }
 
+            getAllFragments() {
+                // Get ALL fragments for full sync
+                const all = {};
+                Array.from(this.ui.display.children).forEach(el => {
+                    if (el.id) {
+                        all[el.id] = el.outerHTML;
+                    }
+                });
+                console.log(`[EditorApp] getAllFragments() returning ${Object.keys(all).length} fragments`);
+                return all;
+            }
+
             async handleRemoteSkeleton(ids) {
+                console.log(`[EditorApp] handleRemoteSkeleton() processing ${ids?.length || 0} IDs`);
+                console.log(`[EditorApp] First 5 received IDs: ${ids?.slice(0, 5).join(', ')}`);
+
                 // Received a list of IDs. Reconstruct DOM order.
                 // We keep existing elements if they exist, create new ones if they don't.
                 // Order matches `ids` array.
 
                 const currentMap = {};
-                Array.from(this.ui.display.children).forEach(el => currentMap[el.id] = el);
+                Array.from(this.ui.display.children).forEach(el => {
+                    if (el.id) currentMap[el.id] = el;
+                });
+                console.log(`[EditorApp] Current display has ${Object.keys(currentMap).length} elements`);
 
-                // Clear display (temporarily, we append back in order)
-                // Note: This might be jarring if typing, but skeleton sync usually happens on join.
-
+                // Build new fragment with correct order
                 const fragment = document.createDocumentFragment();
+                let newCount = 0, existingCount = 0;
                 ids.forEach(id => {
+                    if (!id) return; // Skip empty IDs
                     let el = currentMap[id];
                     if (!el) {
                         el = document.createElement('div');
                         el.id = id;
                         el.className = 'editor-line';
                         el.innerHTML = '<br>'; // Placeholder until fragment arrives
+                        newCount++;
+                    } else {
+                        existingCount++;
                     }
                     fragment.appendChild(el);
                     delete currentMap[id]; // Mark as used
                 });
+                console.log(`[EditorApp] Skeleton: ${existingCount} existing, ${newCount} new elements`);
 
-                // Remove anything not in skeleton? 
-                // "Maintain ownership" implies we shouldn't delete other ppl's stuff lightly, 
-                // but skeleton is truth. Let's assume skeleton is authoritative for structure.
+                // Remove anything not in the new skeleton
+                const removedCount = Object.keys(currentMap).length;
                 for (const id in currentMap) {
                     currentMap[id].remove();
                 }
+                if (removedCount > 0) console.log(`[EditorApp] Removed ${removedCount} elements not in skeleton`);
 
+                // CRITICAL: Clear the display and add the new ordered content
+                this.ui.display.innerHTML = '';
                 this.ui.display.appendChild(fragment);
+                console.log(`[EditorApp] Skeleton applied to display. Final child count: ${this.ui.display.children.length}`);
 
                 // Save new structure
                 await this.triggerSave(null);
+                console.log('[EditorApp] handleRemoteSkeleton() complete');
             }
 
             async handleRemoteFragments(fragMap) {
+                console.log(`[EditorApp] handleRemoteFragments() processing ${Object.keys(fragMap || {}).length} fragments`);
+                let updatedCount = 0, skippedCount = 0, notFoundCount = 0;
                 // Apply content updates
                 for (const [id, html] of Object.entries(fragMap)) {
                     // html is outerHTML
                     const tempDiv = document.createElement('div');
                     tempDiv.innerHTML = html;
                     const newEl = tempDiv.firstElementChild;
-                    if (!newEl) continue;
+                    if (!newEl) {
+                        console.log(`[EditorApp] Fragment ${id}: Failed to parse HTML`);
+                        skippedCount++;
+                        continue;
+                    }
 
                     const el = document.getElementById(id);
                     if (el) {
-                        // Sync Ownership attributes
-                        if (el.dataset.owner !== newEl.dataset.owner) {
-                            el.dataset.owner = newEl.dataset.owner || '';
-                            const newColor = newEl.style.getPropertyValue('--owner-color');
+                        // Always sync ownership attributes
+                        const newOwner = newEl.dataset.owner || '';
+                        const newColor = newEl.style.getPropertyValue('--owner-color');
+
+                        if (el.dataset.owner !== newOwner) {
+                            el.dataset.owner = newOwner;
                             if (newColor) el.style.setProperty('--owner-color', newColor);
                             else el.style.removeProperty('--owner-color');
-
-                            // If I don't own it, update editable
-                            if (el.dataset.owner && el.dataset.owner !== this.user.id) el.contentEditable = "false";
-                            else el.contentEditable = "true";
                         }
 
-                        // Sync Content
-                        if (el.innerHTML !== newEl.innerHTML && document.activeElement !== el) {
+                        // If I don't own it, update editable
+                        if (el.dataset.owner && el.dataset.owner !== this.user.id) {
+                            el.contentEditable = "false";
+                        } else {
+                            el.contentEditable = "true";
+                        }
+
+                        // Sync Content - update if different and I'm not actively editing this element
+                        const iAmEditing = document.activeElement === el;
+                        const contentDifferent = el.innerHTML !== newEl.innerHTML;
+
+                        if (contentDifferent && !iAmEditing) {
+                            console.log(`[EditorApp] Fragment ${id}: Updating content (was different)`);
                             el.innerHTML = newEl.innerHTML;
+                            updatedCount++;
+                        } else if (contentDifferent && iAmEditing) {
+                            console.log(`[EditorApp] Fragment ${id}: Skipped - user is editing this element`);
+                            skippedCount++;
                         }
+                    } else {
+                        console.log(`[EditorApp] Fragment target element not found: ${id}`);
+                        notFoundCount++;
                     }
                 }
+                console.log(`[EditorApp] Fragments: ${updatedCount} updated, ${skippedCount} skipped, ${notFoundCount} not found`);
                 await this.triggerSave(null);
+                console.log('[EditorApp] handleRemoteFragments() complete');
             }
 
             handlePeerJoin(id) {
+                console.log(`[EditorApp] handlePeerJoin() - sending state to new peer: ${id}`);
                 // When a peer joins, we immediately send them our state
                 // This covers the case where THEY join US.
                 // The 'reqSync' covers the case where WE join THEM.
                 const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
+                console.log(`[EditorApp] Sending ${ids.length} skeleton IDs to peer ${id}`);
+                console.log(`[EditorApp] First 5 IDs: ${ids.slice(0, 5).join(', ')}`);
                 if (ids.length > 0) {
                     this.actions.sendSkeleton(ids, id);
-                    const visible = this.getVisibleFragments();
-                    if (Object.keys(visible).length > 0) {
-                        this.actions.sendFragment(visible, id);
+                    // Send ALL fragments, not just visible ones, for full sync
+                    const allFragments = this.getAllFragments();
+                    console.log(`[EditorApp] Sending ${Object.keys(allFragments).length} ALL fragments to peer ${id}`);
+                    if (Object.keys(allFragments).length > 0) {
+                        this.actions.sendFragment(allFragments, id);
                     }
                 }
-                if (this.currentLineId && this.actions.sendLock) this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
+                if (this.currentLineId && this.actions.sendLock) {
+                    console.log(`[EditorApp] Sending lock info for line ${this.currentLineId} to peer ${id}`);
+                    this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
+                }
             }
 
             handleRemoteLock(data, pid) {
@@ -1178,20 +1591,30 @@
                 const currentHex = this.user.color.replace('#', '');
 
                 // 1. Snapshot current state
-                const ids = Array.from(this.ui.display.children).map(el => el.id);
+                const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
                 const content = {};
                 // Use outerHTML to persist attributes
-                Array.from(this.ui.display.children).forEach(el => content[el.id] = el.outerHTML);
+                Array.from(this.ui.display.children).forEach(el => {
+                    if (el.id) content[el.id] = el.outerHTML;
+                });
 
                 // 2. Save to IDB
+                console.log(`[EditorApp] triggerSave() - saving ${ids.length} lines to IndexedDB for hex: ${currentHex}`);
                 await this.db.saveRoom(currentHex, ids, content);
 
                 // 3. Broadcast specific change if applicable
-                if (changedLineId && this.actions.sendFragment) {
+                if (changedLineId && this.room && this.actions && this.actions.sendFragment) {
                     const el = document.getElementById(changedLineId);
                     if (el) {
-                        this.actions.sendFragment({ [changedLineId]: el.outerHTML });
+                        const fragmentData = { [changedLineId]: el.outerHTML };
+                        const contentPreview = el.innerText.substring(0, 50);
+                        console.log(`[EditorApp] Broadcasting fragment change for line: ${changedLineId}`);
+                        console.log(`[EditorApp] Content preview: "${contentPreview}..."`);
+                        console.log(`[EditorApp] Room exists: ${!!this.room}, Peers: ${this.room ? Object.keys(this.room.getPeers()).length : 0}`);
+                        this.actions.sendFragment(fragmentData);
                     }
+                } else if (changedLineId) {
+                    console.log(`[EditorApp] triggerSave() - NOT broadcasting: room=${!!this.room}, actions=${!!this.actions}, sendFragment=${!!(this.actions?.sendFragment)}`);
                 }
             }
 
@@ -1211,6 +1634,13 @@
                 this.ui.topNav.addEventListener('mouseleave', hideNav);
                 this.ui.display.addEventListener('input', () => {
                     this.isFresh = false;
+
+                    // Check for structural changes (lines added/removed)
+                    if (this.ui.display.children.length !== this.lastLineCount) {
+                        this.lastLineCount = this.ui.display.children.length;
+                        this.broadcastSkeleton();
+                    }
+
                     for (let child of this.ui.display.children) {
                         if (!child.id || !child.classList.contains('editor-line')) {
                             if (!child.id) child.id = 'line-' + Math.random().toString(36).substr(2, 9);
@@ -1345,7 +1775,7 @@
             setupColorTooltip();
             if (window.location.hash && window.location.hash.length > 1) {
                 const matchPos = findPositionFromColor(window.location.hash);
-                if (matchPos) triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(window.location.hash));
+                if (matchPos) triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(window.location.hash), true);
             }
             requestAnimationFrame(loop);
         }
@@ -1422,7 +1852,7 @@
                         const dx = e.clientX - screenPos.x;
                         const dy = e.clientY - screenPos.y;
                         if (Math.sqrt(dx * dx + dy * dy) < 30) {
-                            triggerLanding(h.pos, worldPos, h.color);
+                            triggerLanding(h.pos, worldPos, h.color, false);
                             return;
                         }
                     }
@@ -1433,21 +1863,22 @@
                 const pSphere = Vec3.add(r.o, Vec3.scale(r.d, tSphere));
                 if (Vec3.dot(pSphere, pSphere) <= 1) {
                     const hp = Vec3.sub(pSphere, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(pSphere, pSphere))));
-                    triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)));
+                    triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false);
                 }
             }
         }
         function getLuminance(r, g, b) { return 0.299 * r + 0.587 * g + 0.114 * b; }
-        function triggerLanding(norm, pos, col) {
+        function triggerLanding(norm, pos, col, fromUrl = false) {
             state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: true, targetDist: 1.25 }; state.handle.color = [...col]; state.hasRotated = true;
             const hex = rgbToHex(col[0], col[1], col[2]); document.getElementById('color-hex').innerText = hex.toUpperCase();
+            try { localStorage.setItem("lastSphereColor", hex); } catch (e) { } // FIX: Save on landing trigger too
             const isLight = getLuminance(col[0], col[1], col[2]) > 0.5;
             const textColor = isLight ? 'black' : 'white';
             document.getElementById('login-card').style.color = textColor;
             document.getElementById('top-nav').style.setProperty('--nav-color', textColor);
             const cam = Vec3.normalize(state.cameraPos), axis = Vec3.cross(norm, cam), dot = Vec3.dot(norm, cam);
             state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot)));
-            if (window.connectAndPreview) window.connectAndPreview(hex);
+            if (window.connectAndPreview) window.connectAndPreview(hex, fromUrl);
         }
         function toggleFreeze() {
             const f = document.getElementById('flash-overlay');
@@ -1638,6 +2069,35 @@
         }
         init();
 
+        window.updateVisitedFromDB = async function () {
+            if (!window.ColorDB) return;
+            const db = new window.ColorDB();
+            const rooms = await db.getAllRooms();
+            if (rooms && rooms.length > 0) {
+                const ids = rooms.map(r => 'doc-infinite-' + r.hex);
+                localStorage.setItem('p2p_visited_rooms_v1', JSON.stringify(ids));
+
+                // Also update in-memory state so Sphere updates immediately
+                if (typeof state !== 'undefined' && state.historyHandles) {
+                    state.historyHandles = [];
+                    rooms.forEach(r => {
+                        const hex = '#' + r.hex;
+                        if (typeof findPositionFromColor === 'function') {
+                            const pos = findPositionFromColor(hex);
+                            if (pos) {
+                                state.historyHandles.push({
+                                    pos: Vec3.normalize(pos),
+                                    color: hexToRgbNormalized(hex),
+                                    hex: hex,
+                                    peerCount: 0
+                                });
+                            }
+                        }
+                    });
+                }
+            }
+        };
+
         window.addEventListener("message", (event) => {
             if (event.data === "getSphereColor") {
                 let savedColor = storageScope.getItem("lastSphereColor");
@@ -1669,19 +2129,6 @@
 
         async function initStorageAccess() {
             if (window.self === window.top) return;
-            const container = document.body;
-            const showButton = () => {
-                if (document.getElementById('saa-overlay')) return;
-                const overlay = document.createElement('div');
-                overlay.id = 'saa-overlay';
-                Object.assign(overlay.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
-                const btn = document.createElement("button");
-                btn.innerText = "🔌 Connect to Sphere";
-                Object.assign(btn.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
-                overlay.appendChild(btn);
-                document.body.appendChild(overlay);
-                btn.addEventListener("click", handleAccessRequest);
-            };
 
             const attemptRetrieval = async (handle) => {
                 try {
@@ -1703,35 +2150,25 @@
                 catch (err) { const overlay = document.getElementById('saa-overlay'); if (overlay) overlay.innerHTML = "Access Denied"; }
             };
 
+            const showButton = () => {
+                if (document.getElementById('saa-overlay')) return;
+                const overlay = document.createElement('div');
+                overlay.id = 'saa-overlay';
+                Object.assign(overlay.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
+                const btn = document.createElement("button");
+                btn.innerText = "🔌 Connect to Sphere";
+                Object.assign(btn.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
+                overlay.appendChild(btn);
+                document.body.appendChild(overlay);
+                btn.addEventListener("click", handleAccessRequest);
+            };
+
             try {
                 const hasAccess = await document.hasStorageAccess();
                 if (hasAccess) {
                     try { const handle = await document.requestStorageAccess({ localStorage: true }); await attemptRetrieval(handle); }
                     catch (e) { await attemptRetrieval(null); }
                 } else { showButton(); }
-
-                // Add DB History Update function
-                window.updateVisitedFromDB = async () => {
-                    if (!window.ColorDB) return;
-                    const db = new window.ColorDB();
-                    const allRooms = await db.getAllRooms();
-                    state.historyHandles = [];
-                    allRooms.forEach(room => {
-                        const hex = '#' + room.hex;
-                        const pos = findPositionFromColor(hex);
-                        if (pos) {
-                            state.historyHandles.push({
-                                pos: Vec3.normalize(pos),
-                                color: hexToRgbNormalized(hex),
-                                hex: hex,
-                                peerCount: 0 // Local for now
-                            });
-                        }
-                    });
-                };
-
-                // Initial load
-                window.updateVisitedFromDB();
             } catch (e) { console.error("Storage Access API not supported", e); }
         }
 
