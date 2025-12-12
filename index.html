@@ -3,10 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Color</title>
+    <title>Color - Smooth Logout</title>
+    
+    <!-- GunDB & Adapters -->
     <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/lib/radix.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/lib/radisk.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/lib/store.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
+
    <style>
-        /* --- CORE & SPHERE STYLES --- */
+        /* --- CORE STYLES --- */
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Inter', sans-serif; transition: background-color 0.5s ease; user-select: none; }
         body.light-mode { background-color: #f0f0f0; }
         canvas { display: block; width: 100vw; height: 100vh; }
@@ -14,7 +21,7 @@
         #flash-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: white; z-index: 9999; pointer-events: none; opacity: 0; transition: opacity 0.8s ease-out; }
         #flash-overlay.active { opacity: 1; transition: none; }
 
-        /* --- LOGIN CARD UI --- */
+        /* --- LOGIN CARD --- */
         #login-card { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; opacity: 0; pointer-events: none; transition: opacity 1s ease; }
         #login-card.visible { opacity: 1; pointer-events: auto; }
         #color-hex { font-size: 5rem; font-weight: 900; margin: 0; text-transform: uppercase; letter-spacing: -2px; line-height: 1; }
@@ -24,75 +31,70 @@
         #login-btn:hover span { filter: invert(1); }
         #login-btn.hidden { display: none; }
 
-        /* --- NAVIGATION & SLIVER LOGIC --- */
+        /* --- UI OVERLAYS --- */
         #hover-trigger { position: fixed; top: 0; left: 0; width: 100vw; height: 3vh; z-index: 300; display: none; }
         #top-nav { position: fixed; top: 0; left: 0; width: 100vw; height: 12vh; display: flex; align-items: center; justify-content: center; gap: 30px; z-index: 150; transition: opacity 0.5s ease; background: linear-gradient(to bottom, rgba(0,0,0,0.4), transparent); opacity: 0; pointer-events: none; }
         #top-nav.active { opacity: 1; pointer-events: auto; }
+        /* FIXED: Logout button is now same color as other items */
         .nav-item { font-family: 'Inter', sans-serif; font-weight: 600; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; cursor: pointer; opacity: 0.8; transition: 0.2s; text-decoration: none; display: flex; align-items: center; gap: 8px; color: var(--nav-color, white); }
         .nav-item:hover { opacity: 1; transform: translateY(2px); }
-        .nav-item.logout { color: #ff4444; }
-
-        /* --- DASHBOARD (CHAT CONTAINER) --- */
+        
+        /* --- DASHBOARD --- */
         #dashboard-panel { position: fixed; bottom: 0; left: 0; width: 100vw; height: 98vh; background-color: white; z-index: 200; transform: translateY(100%); transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1); display: flex; flex-direction: column; box-shadow: 0 -20px 50px rgba(0,0,0,0.2); padding: 0; }
         #dashboard-panel.active { transform: translateY(0); }
         #dashboard-panel.active.revealed { transform: translateY(12vh); }
 
-        /* --- UI CONTROLS --- */
-        #freeze-btn { position: absolute; top: 20px; left: 20px; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%; cursor: pointer; backdrop-filter: blur(10px); transition: all 0.3s ease; z-index: 10; }
-        #freeze-btn:hover { background: rgba(255, 255, 255, 0.2); transform: scale(1.05); }
-        body.light-mode #freeze-btn { background: rgba(0, 0, 0, 0.1); color: #000; border-color: rgba(0, 0, 0, 0.2); }
-        
-        #tracker { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; padding: 10px 25px; background: rgba(0, 0, 0, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 50px; backdrop-filter: blur(10px); z-index: 10; pointer-events: none; box-shadow: 0 10px 30px rgba(0,0,0,0.5); white-space: nowrap; }
-        body.light-mode #tracker { display: none; }
-        .cone-data { display: flex; gap: 8px; font-size: 11px; font-family: 'Menlo', monospace; color: rgba(255, 255, 255, 0.6); border-right: 1px solid rgba(255,255,255,0.2); padding-right: 20px; pointer-events: auto; cursor: default; }
-        .cone-data:last-child { border-right: none; padding-right: 0; }
-        .cone-title { text-transform: uppercase; font-weight: bold; cursor: pointer; }
-        .coord-val { color: white; min-width: 38px; cursor: ns-resize; }
-
+        /* --- DEBUG & TOOLS --- */
+        #debug-panel { position: fixed; top: 70px; right: 20px; background: rgba(0,0,0,0.9); border: 1px solid #333; padding: 15px; border-radius: 10px; z-index: 2000; color: #0f0; font-family: 'Menlo', monospace; font-size: 12px; display: none; max-height: 80vh; overflow-y: auto; width: 300px; }
+        #debug-panel.visible { display: block; }
         #debug-btn { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 8px 16px; border-radius: 20px; cursor: pointer; font-family: 'Menlo', monospace; font-size: 0.8rem; z-index: 10; backdrop-filter: blur(10px); transition: all 0.2s; }
         #debug-btn:hover { background: rgba(255,255,255,0.2); }
         body.light-mode #debug-btn { color: black; border-color: rgba(0,0,0,0.2); background: rgba(0,0,0,0.1); }
         #debug-btn.active { background: rgba(255, 0, 0, 0.5); border-color: red; color: white; }
+        #reset-btn { margin-top: 10px; width: 100%; background: #333; color: white; border: 1px solid #555; padding: 5px; cursor: pointer; }
+        #reset-btn:hover { background: #900; }
 
-        /* --- P2P CHAT STYLES --- */
-        :root { --line-height: 24px; }
+        /* TOOLTIP */
+        .sphere-tooltip { position: absolute; display: none; padding: 8px 12px; background: rgba(0,0,0,0.85); color: #fff; font-Family: monospace; border-radius: 4px; pointer-events: none; z-index: 1000; transform: translate(15px, 15px); text-align: left; line-height: 1.4; box-shadow: 0 4px 12px rgba(0,0,0,0.4); backdrop-filter: blur(4px); }
+        .sphere-tooltip .hex { font-size: 14px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 2px; margin-bottom: 2px; display: block; }
+        .sphere-tooltip .meta { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+        .sphere-tooltip .meta.online { color: #00e676; font-weight: bold; }
+
+        /* CHAT UI */
         #chat-header { height: 50px; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; font-family: -apple-system, system-ui, sans-serif; flex-shrink: 0; }
         .status { font-size: 0.8rem; color: #666; display: flex; align-items: center; gap: 8px; }
         .dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; transition: background 0.3s; }
         .dot.on { background: #00e676; box-shadow: 0 0 5px #00e676; }
         #user-badge { width: 15px; height: 15px; border-radius: 3px; display: inline-block; margin-right: 5px; border: 1px solid #999; }
-        
         #chat-container { flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; background: #fff; color: #1a1a1a; font-family: 'Courier New', monospace; }
-        #display { min-height: 100%; outline: none; padding: 40px 60px; font-size: 16px; line-height: var(--line-height); position: relative; }
-        
-        .editor-line { min-height: var(--line-height); display: block; padding-left: 5px; border-left: 4px solid transparent; position: relative; white-space: pre-wrap; transition: border-left-color 0.4s ease; }
+        #display { min-height: 100%; outline: none; padding: 40px 60px; font-size: 16px; line-height: 24px; position: relative; }
+        .editor-line { min-height: 24px; display: block; padding-left: 5px; border-left: 4px solid transparent; white-space: pre-wrap; transition: border-left-color 0.4s ease; }
         .editor-line:hover, .editor-line.group-hover { border-left-color: var(--owner-color, transparent); }
-        
         .locked-line { background-color: rgba(0,0,0,0); border-left-width: 3px !important; border-left-color: var(--lock-color) !important; }
-        .locked-tag { position: absolute; left: 0; top: 0; transform: translateX(-100%); height: 100%; background-color: var(--lock-color); color: transparent; font-family: sans-serif; font-size: 10px; white-space: nowrap; width: 0; opacity: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; border-radius: 2px 0 0 2px; pointer-events: auto; transition: width 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.1s; }
+        .locked-tag { position: absolute; left: 0; top: 0; transform: translateX(-100%); height: 100%; background-color: var(--lock-color); color: transparent; font-family: sans-serif; font-size: 10px; white-space: nowrap; width: 0; opacity: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; border-radius: 2px 0 0 2px; pointer-events: auto; transition: width 0.3s, opacity 0.1s; }
         .locked-line:hover .locked-tag { width: 20px; opacity: 1; color: transparent; }
-        .locked-line .locked-tag:hover { width: 60px !important; padding: 0 6px; color: #fff !important; z-index: 999; transition: width 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.1s, color 0.4s ease-in; }
-
+        .locked-line .locked-tag:hover { width: 60px !important; padding: 0 6px; color: #fff !important; z-index: 999; color: 0.4s ease-in; }
         #minimap { position: absolute; right: 5px; top: 60px; bottom: 0; width: 12px; z-index: 201; pointer-events: none; }
         .scroll-dot { position: absolute; right: 0; width: 8px; height: 8px; border-radius: 50%; cursor: pointer; pointer-events: auto; transition: top 0.1s ease-out; box-shadow: 0 0 2px rgba(0,0,0,0.5); }
-        .scroll-dot:hover { transform: scale(1.5); }
-        .my-line { background-color: rgba(0,0,0,0); }
-
         #tools { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #222; padding: 10px; border-radius: 50px; display: flex; gap: 10px; opacity: 0; pointer-events: none; transition: 0.2s; box-shadow: 0 5px 15px rgba(0,0,0,0.2); z-index: 205; }
         #tools.visible { opacity: 1; pointer-events: auto; }
         #tools button { width: 36px; height: 36px; border-radius: 50%; border:none; cursor: pointer; background: #444; color: white; font-weight: bold; }
-        #tools button:hover { background: #666; }
+        #freeze-btn { position: absolute; top: 20px; left: 20px; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, 0.1); color: white; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 50%; cursor: pointer; backdrop-filter: blur(10px); transition: all 0.3s ease; z-index: 10; }
+        body.light-mode #freeze-btn { background: rgba(0, 0, 0, 0.1); color: #000; border-color: rgba(0, 0, 0, 0.2); }
+        #tracker { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 20px; padding: 10px 25px; background: rgba(0, 0, 0, 0.75); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 50px; backdrop-filter: blur(10px); z-index: 10; pointer-events: none; }
+        body.light-mode #tracker { display: none; }
+        .cone-data { display: flex; gap: 8px; font-size: 11px; font-family: 'Menlo', monospace; color: rgba(255, 255, 255, 0.6); border-right: 1px solid rgba(255,255,255,0.2); padding-right: 20px; pointer-events: auto; cursor: default; }
+        .cone-data:last-child { border-right: none; padding-right: 0; }
+        .cone-title { text-transform: uppercase; font-weight: bold; cursor: pointer; }
+        .coord-val { color: white; min-width: 38px; cursor: ns-resize; }
     </style>
 </head>
 
 <body class="light-mode">
     <canvas id="gpu-canvas"></canvas>
     <div id="flash-overlay"></div>
-
-    <!-- Hover trigger that only works when logged in -->
     <div id="hover-trigger"></div>
 
-    <!-- Navigation Overlay -->
     <nav id="top-nav">
         <div class="nav-item">Settings</div>
         <div class="nav-item">Home</div>
@@ -105,8 +107,11 @@
         <button id="login-btn"><span>LOGIN</span></button>
     </div>
 
-    <!-- DEBUG TOGGLE -->
     <button id="debug-btn">DEBUG OFF</button>
+    <div id="debug-panel">
+        <h3>System Tools</h3>
+        <button id="reset-btn">WIPE ALL DATA</button>
+    </div>
 
     <div id="dashboard-panel">
         <div id="chat-header">
@@ -125,14 +130,14 @@
         <button id="btn-link">🔗</button>
     </div>
 
-    <div id="freeze-btn" title="Toggle Light/Dark Mode"><svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/></svg></div>
+    <div id="freeze-btn"><svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/></svg></div>
     <div id="tracker">
         <div class="cone-data" id="data-0"></div>
         <div class="cone-data" id="data-1"></div>
         <div class="cone-data" id="data-2"></div>
     </div>
 
-    <!-- P2P MODULE SCRIPT -->
+    <!-- P2P APP SCRIPT -->
     <script type="module">
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
@@ -172,10 +177,13 @@
                 this.currentLineId = null;
                 this.isFresh = true;
                 this.hasAutoScrolled = false;
-                this.peerCountInt = 0;
 
                 this.bindEvents();
                 this.setupGlobalExposure();
+
+                if(!window.location.hash || window.location.hash.length < 2) {
+                    this.runSequencedScan();
+                }
             }
 
             setupGlobalExposure() {
@@ -184,7 +192,7 @@
             }
 
             addVisited(r) {
-                if (!this.visitedRooms.includes(r)) {
+                if (r && !this.visitedRooms.includes(r)) {
                     this.visitedRooms.push(r);
                     localStorage.setItem(this.VISITED_KEY, JSON.stringify(this.visitedRooms));
                 }
@@ -193,26 +201,57 @@
             connectAndPreview(hex) {
                 const cleanHex = hex.replace('#', '');
                 this.roomId = 'doc-infinite-' + cleanHex;
-
                 this.user.color = '#' + cleanHex;
                 localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.user));
                 this.ui.userBadge.style.backgroundColor = this.user.color;
 
-                this.ui.status.innerText = "Checking Network...";
+                this.ui.status.innerText = "Accessing Database...";
                 this.ui.btn.classList.remove('hidden');
 
-                if (this.room) this.room.leave();
+                if (this.room) { try { this.room.leave(); } catch(e){} this.room = null; }
 
                 try {
-                    const gun = Gun({ peers: [], localStorage: true });
+                    const gun = Gun({ peers: [], localStorage: false, radisk: true });
                     this.roomDB = gun.get(this.roomId);
                 } catch (e) {
-                    console.error(e);
-                    this.ui.status.innerText = "Error";
+                    this.ui.status.innerText = "Storage Error";
                     return;
                 }
 
-                this.room = joinRoom({ appId: 'doc-infinite-v4', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId);
+                if (this.visitedRooms.includes(this.roomId)) {
+                    this.ui.status.innerText = "Loading Local...";
+                    this.loadLocalContent(() => {
+                        this.enterRoomUI();
+                        this.joinNetwork(true); 
+                    });
+                } else {
+                    this.ui.status.innerText = "Checking Network...";
+                    this.joinNetwork(false);
+                    setTimeout(() => { if(!this.ui.display.innerHTML) this.loadLocalContent(); }, 2000);
+                }
+            }
+
+            loadLocalContent(callback = null) {
+                this.roomDB.get('content').once((data) => {
+                    if (this.ui.display.getElementsByClassName('editor-line').length > 0) return;
+                    let validData = null;
+                    if (data && typeof data === 'string' && data.includes('class="editor-line"')) validData = data;
+                    if (validData) {
+                        this.ui.display.innerHTML = validData;
+                        this.isFresh = false;
+                        this.ensureStructure();
+                    } else {
+                        this.ui.display.innerHTML = this.generateFreshLines();
+                        this.isFresh = true;
+                    }
+                    if (callback) callback();
+                });
+            }
+
+            joinNetwork(isBackground) {
+                try {
+                    this.room = joinRoom({ appId: 'doc-infinite-v4', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId);
+                } catch(e) { return; }
 
                 const [sendContent, getContent] = this.room.makeAction('content');
                 const [sendLock, getLock] = this.room.makeAction('lock');
@@ -222,7 +261,7 @@
                 this.actions = { sendContent, sendLock, pushSync, reqSync };
 
                 getContent((html) => this.handleRemoteContent(html));
-                getPushSync((html) => this.handleSync(html));
+                getPushSync((html) => this.handleRemoteContent(html)); 
                 getLock((data, pid) => this.handleRemoteLock(data, pid));
                 
                 getReqSync((_, pid) => {
@@ -237,83 +276,51 @@
                 this.room.onPeerJoin(id => { this.handlePeerJoin(id); this.updateStatus(); });
                 this.room.onPeerLeave(id => { this.updateStatus(); this.reapplyVisualLocks(); });
 
-                // --- DATA LOADING LOGIC (BACKGROUND) ---
-                this.roomDB.get('content').once((data) => {
-                    // Check 1: Manual content already exists?
-                    if (this.ui.display.getElementsByClassName('editor-line').length > 0) return;
-
-                    // Check 2: Evaluate DB Data
-                    let isMostlyEmpty = false;
-                    let validData = null;
-
-                    // Ensure data is a valid string and check content length
-                    if (data && typeof data === 'string') {
-                        validData = data;
-                        const temp = document.createElement('div');
-                        temp.innerHTML = data;
-                        if (temp.innerText.trim().length < 5) isMostlyEmpty = true;
-                    } else if (data && typeof data === 'object') {
-                         // Handle edge case where Gun returns object ref
-                         console.warn("GunDB returned object instead of string, treating as empty");
-                         isMostlyEmpty = true;
-                    } else {
-                        isMostlyEmpty = true;
-                    }
-
-                    if (validData && validData.includes('class="editor-line"') && !isMostlyEmpty) {
-                        // PATH A: Load existing, BUT DO NOT FOCUS YET
-                        console.log("DB: Loaded existing content (Background)");
-                        this.ui.display.innerHTML = validData;
-                        this.isFresh = false;
-                        this.ensureStructure();
-                    } else {
-                        // PATH B: Load Fresh Template, BUT DO NOT FOCUS YET
-                        console.log("DB: Initializing fresh template (Background)");
-                        this.ui.display.innerHTML = this.generateFreshLines();
-                        this.isFresh = true;
-                    }
-                    
-                    // IMPORTANT: Update Status now that data is loaded
+                let attempts = 0;
+                const poll = setInterval(() => {
+                    attempts++;
+                    if(!this.room) { clearInterval(poll); return; }
                     this.updateStatus();
-                });
-
-                setTimeout(() => this.updateStatus(), 1000);
-                setTimeout(() => {
-                    if (this.peerCountInt === 0 && this.visitedRooms.includes(this.roomId)) window.enterRoomUI();
-                }, 1500);
+                    if(attempts > 32) clearInterval(poll);
+                }, 250);
             }
 
             enterRoomUI() {
+                if(this.ui.dashboard.classList.contains('active')) return;
                 this.addVisited(this.roomId);
                 this.ui.btn.classList.add('hidden');
                 this.ui.loginCard.classList.remove('visible');
                 this.ui.dashboard.classList.add('active');
-                
                 this.ui.hoverTrigger.style.display = 'block';
                 this.ui.topNav.classList.add('active');
-
                 window.location.hash = this.roomId.replace('doc-infinite-', '');
                 
-                // Ensure content exists
                 const hasContent = this.ui.display.querySelector('.editor-line');
                 if (!hasContent) {
                     this.ui.display.innerHTML = this.generateFreshLines();
                     this.isFresh = true;
                 }
-
-                // --- FOCUS LOGIC (FOREGROUND) ---
-                // Only run this when the UI is actually activating
-                
-                // Check if content is logically "empty/fresh" to decide scroll behavior
                 const isEmpty = this.ui.display.innerText.trim().length < 5;
-                
-                if (this.isFresh || isEmpty) {
-                    // Force Center Focus for new/empty docs
-                    this.focusCenter();
-                } else {
-                    // Just ensure it's interactive for existing docs
-                    // (Optional: You could save/restore scroll position here if desired)
-                    this.ui.display.focus();
+                if (this.isFresh || isEmpty) this.focusCenter();
+                else this.ui.display.focus();
+            }
+
+            async runSequencedScan() {
+                const queue = [...this.visitedRooms];
+                for (const rId of queue) {
+                    if(!rId) continue;
+                    try {
+                        const r = joinRoom({ appId: 'doc-infinite-v4', trackerUrls: ['wss://tracker.webtorrent.dev'] }, rId);
+                        await new Promise(res => {
+                            setTimeout(() => {
+                                const count = Object.keys(r.getPeers()).length;
+                                r.leave();
+                                const hex = rId.replace('doc-infinite-', '#');
+                                window.postMessage({ type: 'handle-ready', hex: hex, count: count }, '*');
+                                res();
+                            }, 1000);
+                        });
+                    } catch(e) { console.warn("Scan err", rId); }
                 }
             }
 
@@ -323,46 +330,32 @@
                 return html;
             }
 
-            createLine() {
-                return `<div id="line-${Math.random().toString(36).substr(2, 9)}" class="editor-line"><br></div>`;
-            }
+            createLine() { return `<div id="line-${Math.random().toString(36).substr(2, 9)}" class="editor-line"><br></div>`; }
 
             focusCenter() {
-                // Wait slightly for the slide-up transition or DOM paint
                 let attempts = 0;
                 const focusInterval = setInterval(() => {
                     attempts++;
                     const lines = this.ui.display.getElementsByClassName('editor-line');
                     const middleLine = lines[50]; 
-                    
                     if(middleLine) {
                         middleLine.scrollIntoView({ block: 'center', behavior: 'auto' });
-                        
                         const range = document.createRange();
                         const sel = window.getSelection();
                         range.selectNodeContents(middleLine);
                         range.collapse(true);
                         sel.removeAllRanges();
                         sel.addRange(range);
-                        
                         this.ui.display.focus();
                         this.currentLineId = middleLine.id;
-
-                        // Stop if successfully focused or timed out
-                        if (document.activeElement === this.ui.display || attempts > 20) {
-                            clearInterval(focusInterval);
-                        }
-                    } else {
-                        clearInterval(focusInterval);
-                    }
+                        if (document.activeElement === this.ui.display || attempts > 20) clearInterval(focusInterval);
+                    } else clearInterval(focusInterval);
                 }, 50);
             }
 
             ensureStructure() {
                 Array.from(this.ui.display.children).forEach(child => {
-                    if (child.tagName !== 'DIV' || !child.id) {
-                        child.outerHTML = `<div id="line-${Math.random().toString(36).substr(2, 9)}" class="editor-line">${child.innerHTML || '<br>'}</div>`;
-                    }
+                    if (child.tagName !== 'DIV' || !child.id) child.outerHTML = `<div id="line-${Math.random().toString(36).substr(2, 9)}" class="editor-line">${child.innerHTML || '<br>'}</div>`;
                     if (!child.classList.contains('editor-line')) child.classList.add('editor-line');
                 });
             }
@@ -372,7 +365,6 @@
                 const scrollHeight = this.ui.container.scrollHeight;
                 const clientHeight = this.ui.container.clientHeight;
                 let updated = false;
-
                 if (scrollTop < 100) {
                     const oldHeight = scrollHeight;
                     let html = '';
@@ -390,58 +382,56 @@
                 if (updated) this.renderMinimap();
             }
             
+            // --- MODIFIED LOGOUT FUNCTION ---
             logout() {
-                this.ui.dashboard.classList.remove('active');
-                this.ui.dashboard.classList.remove('revealed');
+                // 1. Hide UI (Slide down effect)
+                this.ui.dashboard.classList.remove('active', 'revealed');
                 this.ui.loginCard.classList.remove('visible');
                 this.ui.btn.classList.remove('hidden');
                 this.ui.hoverTrigger.style.display = 'none';
                 this.ui.topNav.classList.remove('active');
+
+                // 2. Logic Reset
                 window.location.hash = '';
-                if(this.room) this.room.leave();
-                this.room = null;
-                const freezeBtn = document.getElementById('freeze-btn');
-                if (document.body.classList.contains('light-mode')) freezeBtn.click(); 
-                window.location.reload(); 
+                if(this.room) { try{this.room.leave();}catch(e){} this.room = null; }
+
+                // 3. Trigger Sphere Animation (Zoom out to white)
+                if(window.resetSphereView) window.resetSphereView();
             }
 
             updateStatus() {
+                if(!this.room) return;
                 const peers = Object.keys(this.room.getPeers()).length;
-                this.peerCountInt = peers;
                 this.ui.status.innerText = peers === 0 ? "COLOR AVAILABLE" : `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
                 this.ui.peerCount.innerText = peers > 0 ? `${peers} visitors(s)` : 'offline';
                 this.ui.dot.classList.toggle('on', peers > 0);
             }
 
-            handleSync(html) {
-                this.isFresh = false;
-                this.ui.display.innerHTML = html;
-                this.roomDB.get('content').put(html);
-                this.reapplyVisualLocks();
-                
-                setTimeout(() => {
-                    this.renderMinimap();
-                    const remoteIds = Object.keys(this.activeLocks).filter(id => id !== selfId);
-                    if (remoteIds.length > 0) {
-                        const lock = this.activeLocks[remoteIds[0]];
-                        const el = document.getElementById(lock.lineId);
-                        if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                    }
-                }, 200);
-            }
-
             handleRemoteContent(html) {
-                this.isFresh = false;
                 this.roomDB.get('content').put(html);
-                if (!document.hasFocus()) {
-                    this.ui.display.innerHTML = html;
-                    this.refreshOwnership();
-                } else {
-                    const s = this.saveSel();
-                    this.ui.display.innerHTML = html;
-                    this.refreshOwnership();
-                    this.restoreSel(s);
-                }
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = html;
+                const newNodes = Array.from(tempDiv.children);
+                const container = this.ui.display;
+                newNodes.forEach((newNode, index) => {
+                    const existingNode = document.getElementById(newNode.id);
+                    if (existingNode) {
+                        if (existingNode.innerHTML !== newNode.innerHTML && document.activeElement !== existingNode) existingNode.innerHTML = newNode.innerHTML;
+                        if (existingNode.dataset.owner !== newNode.dataset.owner) {
+                            existingNode.dataset.owner = newNode.dataset.owner || '';
+                            const newColor = newNode.style.getPropertyValue('--owner-color');
+                            if(newColor) existingNode.style.setProperty('--owner-color', newColor);
+                            else existingNode.style.removeProperty('--owner-color');
+                            existingNode.contentEditable = (existingNode.dataset.owner && existingNode.dataset.owner !== this.user.id) ? "false" : "true";
+                        }
+                    } else {
+                        const ref = container.children[index];
+                        if (ref) container.insertBefore(newNode.cloneNode(true), ref);
+                        else container.appendChild(newNode.cloneNode(true));
+                    }
+                });
+                const newIds = new Set(newNodes.map(n => n.id));
+                Array.from(container.children).forEach(child => { if (child.id && !newIds.has(child.id)) child.remove(); });
                 this.reapplyVisualLocks();
             }
 
@@ -450,17 +440,8 @@
                 if (this.isFresh || !hasRealText) this.actions.reqSync(null, id);
                 else {
                     this.actions.pushSync(this.ui.display.innerHTML, id);
-                    if (this.currentLineId && this.actions.sendLock) {
-                        this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
-                    }
+                    if (this.currentLineId && this.actions.sendLock) this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
                 }
-            }
-
-            refreshOwnership() {
-                document.querySelectorAll('.editor-line').forEach(l => {
-                    if (l.dataset.owner && l.dataset.owner !== this.user.id) l.contentEditable = "false";
-                    else { l.contentEditable = "true"; if (l.dataset.owner === this.user.id) l.style.setProperty('--owner-color', this.user.color); }
-                });
             }
 
             handleRemoteLock(data, pid) {
@@ -469,7 +450,6 @@
             }
 
             reapplyVisualLocks() {
-                // 1. Clean up old locks (Existing code)
                 document.querySelectorAll('.locked-line').forEach(el => {
                     el.classList.remove('locked-line');
                     el.style.removeProperty('--lock-color');
@@ -477,13 +457,9 @@
                     if (el.dataset.owner && el.dataset.owner !== this.user.id) el.contentEditable = "false";
                     else el.contentEditable = "true";
                 });
-
                 const now = Date.now();
-                
-                // 2. Apply active locks (Existing loop)
                 for (const [pid, lock] of Object.entries(this.activeLocks)) {
                     if (now - lock.ts > 60000 || pid === selfId) continue;
-                    
                     const el = document.getElementById(lock.lineId);
                     if (el) {
                         el.classList.add('locked-line');
@@ -493,14 +469,6 @@
                         tag.className = 'locked-tag';
                         tag.innerText = lock.color;
                         el.appendChild(tag);
-
-                        // --- NEW SIMPLIFIED LOGIC START ---
-                        // If we haven't auto-scrolled yet, do it now and flip the switch
-                        if (!this.hasAutoScrolled) {
-                            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                            this.hasAutoScrolled = true;
-                        }
-                        // --- NEW SIMPLIFIED LOGIC END ---
                     }
                 }
                 this.renderMinimap();
@@ -534,7 +502,6 @@
                 this.ui.container.addEventListener('scroll', () => this.checkBuffers());
                 window.addEventListener('resize', () => this.renderMinimap());
                 this.ui.logoutBtn.addEventListener('click', () => this.logout());
-
                 const revealNav = () => this.ui.dashboard.classList.add('revealed');
                 const hideNav = (e) => {
                     const to = e.relatedTarget;
@@ -545,33 +512,14 @@
                 this.ui.hoverTrigger.addEventListener('mouseleave', hideNav);
                 this.ui.topNav.addEventListener('mouseenter', revealNav);
                 this.ui.topNav.addEventListener('mouseleave', hideNav);
-
-                this.ui.display.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const sel = window.getSelection();
-                        if (!sel.rangeCount) return;
-                        const range = sel.getRangeAt(0);
-                        const currentLine = range.startContainer.nodeType === 3 ? range.startContainer.parentNode.closest('.editor-line') : range.startContainer.closest('.editor-line');
-                        const newLine = document.createElement('div');
-                        newLine.id = 'line-' + Math.random().toString(36).substr(2, 9);
-                        newLine.className = 'editor-line';
-                        newLine.dataset.owner = this.user.id;
-                        newLine.style.setProperty('--owner-color', this.user.color);
-                        newLine.innerHTML = '<br>';
-                        if (currentLine && currentLine.nextSibling) this.ui.display.insertBefore(newLine, currentLine.nextSibling);
-                        else this.ui.display.appendChild(newLine);
-                        const r = document.createRange(); r.selectNodeContents(newLine); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
-                        this.isFresh = false;
-                        this.triggerSave();
-                        this.checkBuffers(); 
-                        return;
-                    }
-                    if (e.target.closest('.locked-line')) e.preventDefault();
-                });
-
                 this.ui.display.addEventListener('input', () => {
                     this.isFresh = false;
+                    for (let child of this.ui.display.children) {
+                        if (!child.id || !child.classList.contains('editor-line')) {
+                             if(!child.id) child.id = 'line-' + Math.random().toString(36).substr(2, 9);
+                             child.classList.add('editor-line');
+                        }
+                    }
                     const n = window.getSelection().anchorNode;
                     const line = (n.nodeType === 3 ? n.parentNode : n).closest('.editor-line');
                     if (line) {
@@ -581,7 +529,6 @@
                     }
                     this.triggerSave();
                 });
-
                 document.addEventListener('selectionchange', () => {
                     const sel = window.getSelection();
                     if (!sel.rangeCount) return;
@@ -595,11 +542,9 @@
                         if (this.actions.sendLock) this.actions.sendLock({ lineId: line.id, userColor: this.user.color });
                     }
                 });
-
                 document.getElementById('btn-bold').onclick = () => document.execCommand('bold');
                 document.getElementById('btn-italic').onclick = () => document.execCommand('italic');
                 document.getElementById('btn-link').onclick = () => { const u = prompt("URL:"); if (u) document.execCommand('createLink', false, u); };
-
                 this.ui.display.addEventListener('mouseover', (e) => {
                     const line = e.target.closest('.editor-line');
                     if (line && line.dataset.owner) {
@@ -608,45 +553,22 @@
                 });
                 this.ui.display.addEventListener('mouseout', () => document.querySelectorAll('.group-hover').forEach(el => el.classList.remove('group-hover')));
             }
-
-            saveSel() {
-                const s = window.getSelection();
-                if (!s.rangeCount) return null;
-                const r = s.getRangeAt(0);
-                const l = (r.startContainer.nodeType === 3 ? r.startContainer.parentNode : r.startContainer).closest('.editor-line');
-                return l ? { id: l.id, off: r.startOffset } : null;
-            }
-
-            restoreSel(s) {
-                if (!s) return;
-                const l = document.getElementById(s.id);
-                if (l) {
-                    const r = document.createRange();
-                    r.selectNodeContents(l);
-                    r.collapse(true);
-                    window.getSelection().removeAllRanges();
-                    window.getSelection().addRange(r);
-                }
-            }
         }
-
         new EditorApp();
     </script>
 
-    <!-- SPHERE LOGIC SCRIPT -->
+    <!-- SPHERE LOGIC -->
     <script>
         let storageScope = window.localStorage;
-
         document.getElementById('login-btn').addEventListener('click', async () => {
             const currentHex = document.getElementById('color-hex').innerText;
-            try { storageScope.setItem("lastSphereColor", currentHex); } catch(e) { console.error("Could not save color", e); }
+            try { storageScope.setItem("lastSphereColor", currentHex); } catch(e) {}
             if(window.enterRoomUI) window.enterRoomUI();
         });
 
         const Vec3={create:(x=0,y=0,z=0)=>[x,y,z],add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],scale:(v,s)=>[v[0]*s,v[1]*s,v[2]*s],dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],cross:(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],len:v=>Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]),normalize:v=>{const l=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);return l>0?[v[0]/l,v[1]/l,v[2]/l]:[0,0,0]},dist:(a,b)=>Math.sqrt(Math.pow(a[0]-b[0],2)+Math.pow(a[1]-b[1],2)+Math.pow(a[2]-b[2],2))};
         const Mat4={perspective:(f,a,n,fr)=>{const nf=1/(n-fr),f_t=1/Math.tan(f/2);return[f_t/a,0,0,0,0,f_t,0,0,0,0,(fr+n)*nf,-1,0,0,2*fr*n*nf,0]},lookAt:(e,c,u)=>{const z=Vec3.normalize(Vec3.sub(e,c)),x=Vec3.normalize(Vec3.cross(u,z)),y=Vec3.cross(z,x);return[x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-Vec3.dot(x,e),-Vec3.dot(y,e),-Vec3.dot(z,e),1]},multiply:(a,b)=>{const o=new Float32Array(16);for(let i=0;i<4;i++)for(let j=0;j<4;j++){let s=0;for(let k=0;k<4;k++)s+=a[i+k*4]*b[k+j*4];o[i+j*4]=s}return o},rotationX:r=>[1,0,0,0,0,Math.cos(r),Math.sin(r),0,0,-Math.sin(r),Math.cos(r),0,0,0,0,1],translation:v=>[1,0,0,0,0,1,0,0,0,0,1,0,v[0],v[1],v[2],1],scale:v=>[v[0],0,0,0,0,v[1],0,0,0,0,v[2],0,0,0,0,1],rotationAxis:(a,r)=>{const c=Math.cos(r),s=Math.sin(r),t=1-c,x=a[0],y=a[1],z=a[2];return[t*x*x+c,t*x*y+z*s,t*x*z-y*s,0,t*x*y-z*s,t*y*y+c,t*y*z+x*s,0,t*x*z+y*s,t*y*z-x*s,t*z*z+c,0,0,0,0,1]},identity:()=>[1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]};
-
-        const state={canvas:null,device:null,context:null,pipelines:{sphere:null,cone:null},buffers:{},bindGroups:{sphere:null,cones:[]},cameraPos:[0,0,4],sphere:{rotation:Mat4.identity(),indexCount:0},cones:[{color:[1,0,0],pos:[0,.98,.69],vel:[0,0,0],name:"RED",cssColor:"#ff4444",active:true},{color:[0,1,0],pos:[-.85,-.49,.69],vel:[0,0,0],name:"GREEN",cssColor:"#44ff44",active:true},{color:[0,0,1],pos:[.85,-.49,.69],vel:[0,0,0],name:"BLUE",cssColor:"#4444ff",active:true}],isFrozen:true,hasRotated:false,mouse:{x:0,y:0,down:false},draggedConeIndex:-1,valueScrub:{active:false,coneIndex:-1,coordIndex:0,startY:0},lastTime:0,clickData:{startX:0,startY:0,startTime:0},landing:{active:false,progress:0,rotationAxis:[1,0,0],rotationAngle:0,baseRotation:Mat4.identity(),coneStartPositions:[],handleStartPos:[0,0,0],showHandle:false,startDist:4.0,targetDist:1.25},dragStart:{active:false,mouseDir:[0,0,1],sphereRotation:null,conePositions:[]},handle:{active:false,pos:[0,0,0],color:[1,1,1]},msaaTexture:null,depthTexture:null,sampleCount:4,presentationFormat:null, debugMode:false};
+        const state={canvas:null,device:null,context:null,pipelines:{sphere:null,cone:null},buffers:{},bindGroups:{sphere:null,cones:[]},cameraPos:[0,0,4],sphere:{rotation:Mat4.identity(),indexCount:0},cones:[{color:[1,0,0],pos:[0,.98,.69],vel:[0,0,0],name:"RED",cssColor:"#ff4444",active:true},{color:[0,1,0],pos:[-.85,-.49,.69],vel:[0,0,0],name:"GREEN",cssColor:"#44ff44",active:true},{color:[0,0,1],pos:[.85,-.49,.69],vel:[0,0,0],name:"BLUE",cssColor:"#4444ff",active:true}],historyHandles:[],hasRotated:false,mouse:{x:0,y:0,down:false},draggedConeIndex:-1,valueScrub:{active:false,coneIndex:-1,coordIndex:0,startY:0},lastTime:0,clickData:{startX:0,startY:0,startTime:0},landing:{active:false,progress:0,rotationAxis:[1,0,0],rotationAngle:0,baseRotation:Mat4.identity(),coneStartPositions:[],handleStartPos:[0,0,0],showHandle:false,startDist:4.0,targetDist:1.25},dragStart:{active:false,mouseDir:[0,0,1],sphereRotation:null,conePositions:[]},handle:{active:false,pos:[0,0,0],color:[1,1,1]},msaaTexture:null,depthTexture:null,sampleCount:4,presentationFormat:null, debugMode:false, uiCache:[], vpMatrix: Mat4.identity(), returning: null};
 
         function rgbToHex(r, g, b) { const toHex = c => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2,'0'); return '#' + toHex(r) + toHex(g) + toHex(b); }
         function hexToRgbNormalized(hex) { hex = hex.replace(/^#/, ''); if (hex.length === 3) hex = hex.split('').map(x=>x+x).join(''); const bigint = parseInt(hex, 16); return [(bigint >> 16 & 255) / 255, (bigint >> 8 & 255) / 255, (bigint & 255) / 255]; }
@@ -669,6 +591,23 @@
             const adapter = await navigator.gpu.requestAdapter(); state.device = await adapter.requestDevice();
             state.context = state.canvas.getContext('webgpu'); state.presentationFormat = navigator.gpu.getPreferredCanvasFormat();
             state.context.configure({ device: state.device, format: state.presentationFormat, alphaMode: 'premultiplied' });
+            
+            // CLEAN UP DATA BUT DO NOT POPULATE HANDLES YET
+            const visited = JSON.parse(localStorage.getItem('p2p_visited_rooms_v1')) || [];
+            const validVisited = [];
+            visited.forEach(roomId => {
+                if(!roomId) return;
+                try {
+                    const hex = roomId.replace('doc-infinite-', '#');
+                    const pos = findPositionFromColor(hex);
+                    if (pos) validVisited.push(roomId);
+                } catch(e) {}
+            });
+            if(validVisited.length !== visited.length) localStorage.setItem('p2p_visited_rooms_v1', JSON.stringify(validVisited));
+            
+            // HANDLES START EMPTY (Wait for Network Scan)
+            state.historyHandles = [];
+
             await createAssets();
             window.addEventListener('resize', onResize); onResize();
             state.canvas.addEventListener('mousedown', onMouseDown); window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
@@ -681,16 +620,22 @@
                 state.debugMode = !state.debugMode;
                 this.classList.toggle('active', state.debugMode);
                 this.innerText = state.debugMode ? "DEBUG ON" : "DEBUG OFF";
+                document.getElementById('debug-panel').classList.toggle('visible', state.debugMode);
             };
 
-            state.cones.forEach((cone, i) => {
-                 const el = document.getElementById(`data-${i}`);
-                 if (el) {
-                     el.innerHTML = `<span class="cone-title" id="title-${i}">${cone.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`;
-                     document.getElementById(`title-${i}`).addEventListener('click', (e) => { if (state.isFrozen) return; e.stopPropagation(); state.cones[i].active = !state.cones[i].active; });
-                     ['x','y','z'].forEach((axis, axIdx) => document.getElementById(`${axis}-${i}`).addEventListener('mousedown', (e) => { if (state.isFrozen) return; e.preventDefault(); e.stopPropagation(); state.valueScrub = { active: true, coneIndex: i, coordIndex: axIdx, startY: e.clientY }; }));
-                 }
-            });
+            document.getElementById('reset-btn').onclick = async () => {
+                if(confirm("Permanently wipe all local data?")) {
+                    localStorage.clear();
+                    try {
+                        const dbs = await window.indexedDB.databases();
+                        for (const db of dbs) { await window.indexedDB.deleteDatabase(db.name); }
+                    } catch(e) {}
+                    window.location.reload();
+                }
+            };
+
+            state.uiCache = state.cones.map((c, i) => { const el = document.getElementById(`data-${i}`); if (el) { el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`; const titleEl = document.getElementById(`title-${i}`); titleEl.addEventListener('click', (e) => { if (document.body.classList.contains('light-mode')) return; e.stopPropagation(); state.cones[i].active = !state.cones[i].active; }); ['x','y','z'].forEach((axis, axIdx) => document.getElementById(`${axis}-${i}`).addEventListener('mousedown', (e) => { if (document.body.classList.contains('light-mode')) return; e.preventDefault(); e.stopPropagation(); state.valueScrub = { active: true, coneIndex: i, coordIndex: axIdx, startY: e.clientY }; })); return { title: titleEl, x: document.getElementById(`x-${i}`), y: document.getElementById(`y-${i}`), z: document.getElementById(`z-${i}`), lastPos: [null, null, null], lastActive: null }; } return null; });
+
             setupColorTooltip();
             if (window.location.hash && window.location.hash.length > 1) {
                 const matchPos = findPositionFromColor(window.location.hash);
@@ -703,33 +648,87 @@
             const dev = state.device, sphereGeo = createSphere(1.0, 128, 128), coneGeo = createCone(0.1, 0.3, 64);
             state.buffers.sphereVertex = createBuffer(dev, sphereGeo.p, GPUBufferUsage.VERTEX); state.buffers.sphereNormal = createBuffer(dev, sphereGeo.n, GPUBufferUsage.VERTEX); state.buffers.sphereIndex = createBuffer(dev, sphereGeo.i, GPUBufferUsage.INDEX); state.sphere.indexCount = sphereGeo.i.length;
             state.buffers.coneVertex = createBuffer(dev, coneGeo.p, GPUBufferUsage.VERTEX); state.buffers.coneIndex = createBuffer(dev, coneGeo.i, GPUBufferUsage.INDEX); state.coneIndexCount = coneGeo.i.length;
-            state.buffers.sphereUniform = dev.createBuffer({ size: 320, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST }); state.buffers.coneUniform = dev.createBuffer({ size: 1024, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST });
+            state.buffers.sphereUniform = dev.createBuffer({ size: 320, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST }); 
+            state.buffers.coneUniform = dev.createBuffer({ size: 65536, usage: GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST });
             
             const sm = dev.createShaderModule({ code: sphereShaderWGSL }), cm = dev.createShaderModule({ code: coneShaderWGSL });
             state.pipelines.sphere = dev.createRenderPipeline({ layout: 'auto', vertex: { module: sm, entryPoint: 'vs_main', buffers: [{arrayStride:12,attributes:[{shaderLocation:0,offset:0,format:'float32x3'}]},{arrayStride:12,attributes:[{shaderLocation:1,offset:0,format:'float32x3'}]}]}, fragment: { module: sm, entryPoint: 'fs_main', targets: [{format:state.presentationFormat}]}, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } });
             state.pipelines.cone = dev.createRenderPipeline({ layout: 'auto', vertex: { module: cm, entryPoint: 'vs_main', buffers: [{arrayStride:12,attributes:[{shaderLocation:0,offset:0,format:'float32x3'}]}]}, fragment: { module: cm, entryPoint: 'fs_main', targets: [{format:state.presentationFormat}]}, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } });
             state.bindGroups.sphere = dev.createBindGroup({ layout: state.pipelines.sphere.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.sphereUniform } }] });
-            state.bindGroups.cones = [0,1,2,3].map(i => dev.createBindGroup({ layout: state.pipelines.cone.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.coneUniform, offset: i * 256, size: 80 } }] }));
+            
+            state.getBindGroupForHandle = (idx) => {
+                 return dev.createBindGroup({ layout: state.pipelines.cone.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.coneUniform, offset: idx * 256, size: 80 } }] });
+            };
+            state.bindGroups.cones = [0,1,2,3].map(i => state.getBindGroupForHandle(i)); 
         }
 
         function createBuffer(dev, data, usage) { const buf = dev.createBuffer({ size: data.byteLength, usage: usage|GPUBufferUsage.COPY_DST, mappedAtCreation: true }); (data instanceof Float32Array?new Float32Array(buf.getMappedRange()):new Uint16Array(buf.getMappedRange())).set(data); buf.unmap(); return buf; }
         function createSphere(r, latB, longB) { const p=[],n=[],idx=[]; for(let la=0;la<=latB;la++) for(let lo=0;lo<=longB;lo++){ const th=la*Math.PI/latB, ph=lo*2*Math.PI/longB, x=Math.cos(ph)*Math.sin(th), y=Math.cos(th), z=Math.sin(ph)*Math.sin(th); n.push(x,y,z); p.push(r*x,r*y,r*z); } for(let la=0;la<latB;la++) for(let lo=0;lo<longB;lo++){ const f=(la*(longB+1))+lo, s=f+longB+1; idx.push(f,f+1,s,s,f+1,s+1); } return {p:new Float32Array(p),n:new Float32Array(n),i:new Uint16Array(idx)}; }
         function createCone(r, h, s) { const p=[0,h,0],n=[0,1,0],idx=[]; for(let i=0;i<=s;i++){ const th=i*2*Math.PI/s, x=r*Math.cos(th), z=r*Math.sin(th); p.push(x,0,z); const nv=Vec3.normalize([x,.5,z]); n.push(nv[0],nv[1],nv[2]); } p.push(0,0,0); n.push(0,-1,0); const bc=p.length/3-1; for(let i=1;i<=s;i++) idx.push(0,i,i+1,bc,i+1,i); return {p:new Float32Array(p),n:new Float32Array(n),i:new Uint16Array(idx)}; }
-
         function onResize() { if(!state.device)return; const w=Math.ceil(window.innerWidth),h=Math.ceil(window.innerHeight); state.canvas.width=w; state.canvas.height=h; if(state.msaaTexture)state.msaaTexture.destroy(); if(state.depthTexture)state.depthTexture.destroy(); state.msaaTexture=state.device.createTexture({size:[w,h],sampleCount:4,format:state.presentationFormat,usage:GPUTextureUsage.RENDER_ATTACHMENT}); state.depthTexture=state.device.createTexture({size:[w,h],sampleCount:4,format:'depth24plus',usage:GPUTextureUsage.RENDER_ATTACHMENT}); }
-        
         function getMouseRay(x, y) { const aspect = state.canvas.width/state.canvas.height, ndcX = (x/state.canvas.width)*2-1, ndcY = -(y/state.canvas.height)*2+1; const dir = Vec3.normalize([ndcX*aspect*Math.tan(Math.PI/8), ndcY*Math.tan(Math.PI/8), -1]); return {o:state.cameraPos, d:dir}; }
         function getTargetPos(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0,0,0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)); return Vec3.dot(p, p) <= 1 ? Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1-Vec3.dot(p, p)))) : Vec3.scale(Vec3.normalize(p), 1); }
         function calculateConePosition(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0,0,0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)), dist = Math.sqrt(Vec3.dot(p, p)), R = 1.2; if(dist <= R) return Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(R*R - Vec3.dot(p, p)))); const axis = Vec3.cross(Vec3.normalize(r.o), r.d); return Vec3.scale(transformPos(Vec3.normalize(r.o), Mat4.rotationAxis(Vec3.normalize(Vec3.len(axis)<.001?[1,0,0]:axis), Math.acos(R/Vec3.len(r.o))+(dist-R))), R); }
         function transformPos(p, m) { return [ m[0]*p[0]+m[4]*p[1]+m[8]*p[2]+m[12], m[1]*p[0]+m[5]*p[1]+m[9]*p[2]+m[13], m[2]*p[0]+m[6]*p[1]+m[10]*p[2]+m[14] ]; }
 
-        function onMouseDown(e) { if(state.valueScrub.active) return; state.mouse={x:e.clientX,y:e.clientY,down:true}; state.clickData={startX:e.clientX,startY:e.clientY,startTime:Date.now()}; if(state.isFrozen){ const p=getTargetPos(state.mouse.x,state.mouse.y), r=getMouseRay(state.mouse.x,state.mouse.y); if(Vec3.dot(Vec3.add(r.o,Vec3.scale(r.d,Vec3.dot(Vec3.sub([0,0,0],r.o),r.d))),Vec3.add(r.o,Vec3.scale(r.d,Vec3.dot(Vec3.sub([0,0,0],r.o),r.d))))<=1) { state.dragStart={active:true,mouseDir:Vec3.normalize(p),sphereRotation:[...state.sphere.rotation],conePositions:state.cones.map(c=>[...c.pos])}; state.handle={active:true,pos:p,color:getSurfaceColor(p,Vec3.normalize(p))}; state.hasRotated=true; } } }
+        function projectToScreen(worldPos) {
+            const m = state.vpMatrix;
+            const x = worldPos[0], y = worldPos[1], z = worldPos[2];
+            const clipX = x*m[0] + y*m[4] + z*m[8] + m[12];
+            const clipY = x*m[1] + y*m[5] + z*m[9] + m[13];
+            const clipW = x*m[3] + y*m[7] + z*m[11] + m[15];
+
+            if (clipW <= 0) return null; // Behind camera
+
+            const ndcX = clipX / clipW;
+            const ndcY = clipY / clipW;
+
+            return {
+                x: (ndcX + 1) * state.canvas.width / 2,
+                y: (1 - ndcY) * state.canvas.height / 2
+            };
+        }
+
+        function onMouseDown(e) { 
+            if(state.valueScrub.active) return; 
+            state.mouse={x:e.clientX,y:e.clientY,down:true}; 
+            state.clickData={startX:e.clientX,startY:e.clientY,startTime:Date.now()}; 
+            if(document.body.classList.contains('light-mode')){ 
+                const p=getTargetPos(state.mouse.x,state.mouse.y), r=getMouseRay(state.mouse.x,state.mouse.y); 
+                if(Vec3.dot(Vec3.add(r.o,Vec3.scale(r.d,Vec3.dot(Vec3.sub([0,0,0],r.o),r.d))),Vec3.add(r.o,Vec3.scale(r.d,Vec3.dot(Vec3.sub([0,0,0],r.o),r.d))))<=1) { 
+                    state.dragStart={active:true,mouseDir:Vec3.normalize(p),sphereRotation:[...state.sphere.rotation],conePositions:state.cones.map(c=>[...c.pos])}; 
+                    state.handle={active:true,pos:p,color:getSurfaceColor(p,Vec3.normalize(p))}; 
+                    state.hasRotated=true; 
+                } 
+            } 
+        }
         function onMouseMove(e) { state.mouse.x=e.clientX; state.mouse.y=e.clientY; }
+        
         function onMouseUp(e) { 
             state.mouse.down=false; state.handle.active=false; if(state.valueScrub.active){ state.valueScrub.active=false; return; }
-            if(state.isFrozen && Math.sqrt((e.clientX-state.clickData.startX)**2+(e.clientY-state.clickData.startY)**2)<5 && Date.now()-state.clickData.startTime<250) {
-                const r=getMouseRay(e.clientX,e.clientY), t=Vec3.dot(Vec3.sub([0,0,0],r.o),r.d), p=Vec3.add(r.o,Vec3.scale(r.d,t));
-                if(Vec3.dot(p,p)<=1) { const hp=Vec3.sub(p,Vec3.scale(r.d,Math.sqrt(1-Vec3.dot(p,p)))); triggerLanding(Vec3.normalize(hp),hp,getSurfaceColor(hp,Vec3.normalize(hp))); }
+            const dist = Math.sqrt((e.clientX-state.clickData.startX)**2+(e.clientY-state.clickData.startY)**2);
+            if(document.body.classList.contains('light-mode') && dist < 5 && Date.now()-state.clickData.startTime<250) {
+                // 1. CHECK HANDLES WITH PROJECTION
+                for(let h of state.historyHandles) {
+                    const worldPos = transformPos(h.pos, state.sphere.rotation);
+                    const screenPos = projectToScreen(worldPos);
+                    if(screenPos) {
+                        const dx = e.clientX - screenPos.x;
+                        const dy = e.clientY - screenPos.y;
+                        if (Math.sqrt(dx*dx + dy*dy) < 30) {
+                            triggerLanding(h.pos, worldPos, h.color);
+                            return;
+                        }
+                    }
+                }
+                // 2. CHECK SPHERE SURFACE
+                const r=getMouseRay(e.clientX,e.clientY);
+                const tSphere=Vec3.dot(Vec3.sub([0,0,0],r.o),r.d);
+                const pSphere=Vec3.add(r.o,Vec3.scale(r.d,tSphere));
+                if(Vec3.dot(pSphere,pSphere)<=1) { 
+                   const hp=Vec3.sub(pSphere,Vec3.scale(r.d,Math.sqrt(1-Vec3.dot(pSphere,pSphere)))); 
+                   triggerLanding(Vec3.normalize(hp),hp,getSurfaceColor(hp,Vec3.normalize(hp))); 
+                }
             }
         }
         function getLuminance(r,g,b){return 0.299*r+0.587*g+0.114*b;}
@@ -740,20 +739,21 @@
             const textColor = isLight ? 'black' : 'white';
             document.getElementById('login-card').style.color = textColor;
             document.getElementById('top-nav').style.setProperty('--nav-color', textColor);
-
             const cam=Vec3.normalize(state.cameraPos), axis=Vec3.cross(norm,cam), dot=Vec3.dot(norm,cam);
             state.landing.rotationAxis = Vec3.len(axis)<.001?[1,0,0]:Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis)<.001?(dot>0?0:Math.PI):Math.acos(Math.min(1,Math.max(-1,dot)));
             if(window.connectAndPreview) window.connectAndPreview(hex);
         }
-
         function toggleFreeze() {
-            state.isFrozen = !state.isFrozen; const f = document.getElementById('flash-overlay');
-            state.landing={active:false,showHandle:false}; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
-            state.cameraPos = [0, 0, 4]; document.body.classList.toggle('light-mode', state.isFrozen);
-            f.style.backgroundColor = state.isFrozen ? 'white' : 'black'; document.body.style.backgroundColor = ''; 
+            const f = document.getElementById('flash-overlay');
+            const isFrozen = document.body.classList.toggle('light-mode'); 
+            state.landing={active:false,showHandle:false}; 
+            document.getElementById('login-card').classList.remove('visible'); 
+            document.getElementById('dashboard-panel').classList.remove('active');
+            state.cameraPos = [0, 0, 4]; 
+            f.style.backgroundColor = isFrozen ? 'white' : 'black'; 
+            document.body.style.backgroundColor = ''; 
             f.classList.remove('active'); void f.offsetWidth; f.classList.add('active'); setTimeout(() => f.classList.remove('active'), 0);
         }
-
         function getSurfaceColor(p, n) {
             const getI = (i) => { if(!state.cones[i].active) return 0; const L=Vec3.sub(state.cones[i].pos,p), d=Vec3.dot(L,L); return Math.pow(Math.max(Vec3.dot(n,Vec3.normalize(L))+1,0)/2,2.5)*(1/(1+d*.05)); };
             const d=[getI(0),getI(1),getI(2)], c=state.cones.map(x=>x.color);
@@ -764,24 +764,95 @@
         }
 
         function setupColorTooltip() {
-            const t = document.createElement('div'); Object.assign(t.style, {position:'absolute',display:'none',padding:'8px',background:'rgba(0,0,0,0.8)',color:'#fff',fontFamily:'monospace',borderRadius:'4px',pointerEvents:'none',zIndex:'1000',transform:'translate(15px,15px)'}); document.body.appendChild(t);
+            const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t);
             window.addEventListener('mousemove', e => {
-                if (!state.isFrozen) { t.style.display='none'; return; }
-                if (e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) {
-                    t.style.display = 'none';
-                    return;
+                if (!document.body.classList.contains('light-mode')) { t.style.display='none'; return; }
+                if (e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) { t.style.display = 'none'; return; }
+
+                // 1. CHECK HANDLES (Using Screen Projection - Fixes "Pimple" issue)
+                for(let h of state.historyHandles) {
+                    const worldPos = transformPos(h.pos, state.sphere.rotation);
+                    const screenPos = projectToScreen(worldPos);
+                    
+                    if (screenPos) {
+                        const dx = e.clientX - screenPos.x;
+                        const dy = e.clientY - screenPos.y;
+                        
+                        // Hit radius of 30px
+                        if (Math.sqrt(dx*dx + dy*dy) < 30) {
+                            const count = h.peerCount;
+                            const meta = count > 0 ? `${count} PEER${count>1?'S':''} ONLINE` : "LOGIN";
+                            const metaClass = count > 0 ? "meta online" : "meta";
+                            t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${metaClass}">${meta}</span>`;
+                            t.style.display='block'; t.style.left=e.clientX+'px'; t.style.top=e.clientY+'px';
+                            t.style.border = `1px solid ${h.hex}`;
+                            return; 
+                        }
+                    }
                 }
+
+                // 2. CHECK SPHERE
                 const r=getMouseRay(e.clientX,e.clientY), tV=Vec3.dot(Vec3.sub([0,0,0],r.o),r.d), p=Vec3.add(r.o,Vec3.scale(r.d,tV));
                 if (Vec3.dot(p,p)>1 || (tV-Math.sqrt(1-Vec3.dot(p,p)))<0) { t.style.display='none'; return; }
                 const h=Vec3.add(r.o,Vec3.scale(r.d,tV-Math.sqrt(1-Vec3.dot(p,p)))), c=getSurfaceColor(h,Vec3.normalize(h));
-                t.innerText = rgbToHex(c[0],c[1],c[2]).toUpperCase(); t.style.display='block'; t.style.left=e.clientX+'px'; t.style.top=e.clientY+'px'; t.style.border='1px solid '+t.innerText;
+                const hex = rgbToHex(c[0],c[1],c[2]).toUpperCase();
+                t.innerHTML = `<span class="hex">${hex}</span>`;
+                t.style.display='block'; t.style.left=e.clientX+'px'; t.style.top=e.clientY+'px'; 
+                t.style.border = `1px solid ${hex}`;
             });
         }
+
+        window.resetSphereView = function() {
+            // 1. UI Resets
+            state.hasRotated = false;
+            document.body.classList.add('light-mode');
+            document.body.style.backgroundColor = ''; 
+            state.landing.active = false;
+            document.getElementById('color-hex').innerText = "#FFFFFF";
+
+            // 2. Capture Starting State
+            const startPos = [...state.cameraPos];
+            const startRot = [...state.sphere.rotation];
+            const identity = Mat4.identity();
+            const startTime = performance.now();
+            
+            // The default "Home" positions for Red, Green, Blue cones
+            const defaults = [[0,.98,.69], [-.85,-.49,.69], [.85,-.49,.69]];
+
+            // 3. Animation Loop
+            function animate(now) {
+                const progress = Math.min((now - startTime) / 1000, 1);
+                const ease = 1 - Math.pow(1 - progress, 3); // Cubic Ease-Out
+
+                // Move Camera back to center (0,0,4)
+                state.cameraPos = [
+                    startPos[0] * (1 - ease),
+                    startPos[1] * (1 - ease),
+                    startPos[2] + (4 - startPos[2]) * ease
+                ];
+
+                // Rotate Sphere back to Identity (0 rotation)
+                const currentRot = new Float32Array(16);
+                for(let i=0; i<16; i++) {
+                    currentRot[i] = startRot[i] + (identity[i] - startRot[i]) * ease;
+                }
+                state.sphere.rotation = currentRot;
+
+                // Sync Cones to the new Rotation
+                // (Required because cone positions are stored as World Coordinates in this engine)
+                state.cones.forEach((c, i) => {
+                    c.pos = transformPos(defaults[i], currentRot);
+                });
+
+                if (progress < 1) requestAnimationFrame(animate);
+            }
+            requestAnimationFrame(animate);
+        };
 
         function loop(ts) {
             const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts;
             const aspect = state.canvas.width/state.canvas.height, proj = Mat4.perspective(Math.PI/4, aspect, .1, 100);
-            if (state.isFrozen && state.hasRotated) { const c=getSurfaceColor([0,0,1],[0,0,1]); document.body.style.backgroundColor=rgbToHex(c[0],c[1],c[2]); }
+            if (document.body.classList.contains('light-mode') && state.hasRotated) { const c=getSurfaceColor([0,0,1],[0,0,1]); document.body.style.backgroundColor=rgbToHex(c[0],c[1],c[2]); }
             if (state.valueScrub.active) { const d = Math.abs(state.valueScrub.startY-state.mouse.y); if(d>5) state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY-state.mouse.y)*Math.pow((d-5)/500,3)*.05; }
             if (state.landing.active) {
                 state.landing.progress = Math.min(state.landing.progress+dt*.5, 1);
@@ -792,13 +863,30 @@
                 if(state.landing.showHandle) state.handle.pos=transformPos(state.landing.handleStartPos,rot);
                 state.cameraPos = Vec3.scale(Vec3.normalize([0,0,4]), state.landing.startDist+(state.landing.targetDist-state.landing.startDist)*t*t*t);
             }
-            const view = Mat4.lookAt(state.cameraPos, [0,0,0], [0,1,0]), vp = Mat4.multiply(proj, view), tp = getTargetPos(state.mouse.x, state.mouse.y);
             
-            if (!state.isFrozen) {
-                state.cones.forEach((c, i) => { const el=document.getElementById(`title-${i}`); if(el){ el.style.color=c.active?c.cssColor:'grey'; ['x','y','z'].forEach((a,ai)=>document.getElementById(`${a}-${i}`).innerText=c.pos[ai].toFixed(2)); } });
+            // --- NEW RETURNING ANIMATION ---
+            if (state.returning && state.returning.active) {
+                state.returning.progress += dt;
+                const t = Math.min(state.returning.progress, 1);
+                const ease = 1 - Math.pow(1 - t, 3); 
+                state.cameraPos = [
+                    state.returning.startPos[0] * (1-ease),
+                    state.returning.startPos[1] * (1-ease),
+                    state.returning.startPos[2] + (4 - state.returning.startPos[2]) * ease
+                ];
+                if (t >= 1) state.returning.active = false;
             }
 
-            if (!state.isFrozen) {
+            const view = Mat4.lookAt(state.cameraPos, [0,0,0], [0,1,0]);
+            state.vpMatrix = Mat4.multiply(proj, view); 
+            const vp = state.vpMatrix;
+            const tp = getTargetPos(state.mouse.x, state.mouse.y);
+            
+            if (!document.body.classList.contains('light-mode')) { 
+                state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; } ['x', 'y', 'z'].forEach((axis, axIdx) => { const val = c.pos[axIdx]; if (Math.abs(val - cache.lastPos[axIdx]) > 0.005) { cache[axis].innerText = val.toFixed(2); cache.lastPos[axIdx] = val; } }); });
+            }
+
+            if (!document.body.classList.contains('light-mode')) {
                 if (state.mouse.down) {
                     if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if(c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; });
                     if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1/dt); c.pos = np; }
@@ -810,17 +898,35 @@
             } else { state.dragStart.active=false; state.handle.active=false; }
 
             if (state.device && state.pipelines.sphere && state.msaaTexture) {
-                const enc = state.device.createCommandEncoder(), pass = enc.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: state.isFrozen?{r:0,g:0,b:0,a:0}:{r:0,g:0,b:0,a:1}, loadOp: 'clear', storeOp: 'discard' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'discard' } });
+                const enc = state.device.createCommandEncoder(), pass = enc.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode')?{r:0,g:0,b:0,a:0}:{r:0,g:0,b:0,a:1}, loadOp: 'clear', storeOp: 'discard' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'discard' } });
                 const sd = new Float32Array(80); sd.set(Mat4.multiply(vp, state.sphere.rotation), 0); sd.set(state.sphere.rotation, 16); sd.set(state.sphere.rotation, 32); sd.set(state.cameraPos, 48); [0,1,2].forEach(i=>{sd.set(state.cones[i].pos,52+i*8); sd.set(state.cones[i].active?state.cones[i].color:[0,0,0],56+i*8);});
                 sd[76] = state.debugMode ? 1.0 : 0.0;
                 state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, sd);
                 pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount);
-                if (!state.isFrozen) {
+                if (!document.body.classList.contains('light-mode')) {
                     pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, state.buffers.coneVertex); pass.setIndexBuffer(state.buffers.coneIndex, 'uint16');
                     state.cones.forEach((c, i) => { if(c.active) { let m; if(Vec3.len(Vec3.cross([0,1,0],c.pos))>.001){const y=Vec3.normalize(c.pos),x=Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0,1,0],y))<.01?[0,0,1]:[0,1,0],y)),z=Vec3.cross(x,y);m=[x[0],x[1],x[2],0,y[0],y[1],y[2],0,z[0],z[1],z[2],0,c.pos[0],c.pos[1],c.pos[2],1];}else m=Mat4.multiply(Mat4.translation(c.pos),c.pos[1]<0?Mat4.rotationX(Math.PI):Mat4.identity()); const cd=new Float32Array(20); cd.set(Mat4.multiply(vp, Mat4.multiply(m, Mat4.scale([.5,.5,.5]))),0); cd.set(c.color,16); state.device.queue.writeBuffer(state.buffers.coneUniform, i*256, cd); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount); } });
-                } else if (state.handle.active || state.landing.showHandle) {
+                } else {
                     pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16');
-                    const hd=new Float32Array(20); hd.set(Mat4.multiply(vp,Mat4.multiply(Mat4.translation(state.handle.pos),Mat4.scale([.08,.08,.08]))),0); hd.set(state.handle.color,16); state.device.queue.writeBuffer(state.buffers.coneUniform, 3*256, hd); pass.setBindGroup(0, state.bindGroups.cones[3]); pass.drawIndexed(state.sphere.indexCount);
+                    if (state.handle.active || state.landing.showHandle) {
+                        const hd=new Float32Array(20); hd.set(Mat4.multiply(vp,Mat4.multiply(Mat4.translation(state.handle.pos),Mat4.scale([.08,.08,.08]))),0); hd.set(state.handle.color,16); 
+                        state.device.queue.writeBuffer(state.buffers.coneUniform, 3*256, hd); 
+                        pass.setBindGroup(0, state.getBindGroupForHandle(3)); 
+                        pass.drawIndexed(state.sphere.indexCount);
+                    }
+                    let bindIdx = 4;
+                    state.historyHandles.forEach((h) => {
+                         const worldPos = transformPos(h.pos, state.sphere.rotation);
+                         if(worldPos[2] > -0.5) {
+                            const hd=new Float32Array(20); 
+                            hd.set(Mat4.multiply(vp,Mat4.multiply(Mat4.translation(worldPos),Mat4.scale([.08,.08,.08]))),0); 
+                            hd.set(h.color,16); 
+                            state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx*256, hd); 
+                            pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); 
+                            pass.drawIndexed(state.sphere.indexCount);
+                            bindIdx++;
+                         }
+                    });
                 }
                 pass.end(); state.device.queue.submit([enc.finish()]);
             }
@@ -828,96 +934,72 @@
         }
         init();
 
-window.addEventListener("message", (event) => {
-    if (event.data === "getSphereColor") {
-        let savedColor = storageScope.getItem("lastSphereColor");
-        if (!savedColor) {
-            savedColor = "#ff0000"; 
-        }
-        event.source.postMessage(savedColor, event.origin);
-    }
-});
-
-async function initStorageAccess() {
-    if (window.self === window.top) return; 
-
-    const container = document.body;
-
-    const showButton = () => {
-        if (document.getElementById('saa-overlay')) return;
-
-        const overlay = document.createElement('div');
-        overlay.id = 'saa-overlay';
-        Object.assign(overlay.style, {
-            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-            background: '#fff', zIndex: 10000, display: 'flex',
-            justifyContent: 'center', alignItems: 'center'
-        });
-
-        const btn = document.createElement("button");
-        btn.innerText = "🔌 Connect to Sphere";
-        Object.assign(btn.style, {
-            padding: "12px 24px", fontSize: "16px", cursor: "pointer",
-            background: "#000", color: "#fff", border: "none", borderRadius: "8px"
-        });
-
-        overlay.appendChild(btn);
-        document.body.appendChild(overlay);
-
-        btn.addEventListener("click", handleAccessRequest);
-    };
-
-    const attemptRetrieval = async (handle) => {
-        try {
-            if (handle && handle.localStorage) {
-                storageScope = handle.localStorage;
-            } 
-
-            const color = storageScope.getItem("lastSphereColor");
-            const overlay = document.getElementById('saa-overlay');
-            
-            if (color) {
-                window.parent.postMessage(color, "*");
-                if (overlay) {
-                    overlay.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${color}</div>`;
-                    document.body.style.backgroundColor = color;
+        window.addEventListener("message", (event) => {
+            if (event.data === "getSphereColor") {
+                let savedColor = storageScope.getItem("lastSphereColor");
+                if (!savedColor) savedColor = "#ff0000"; 
+                event.source.postMessage(savedColor, event.origin);
+            }
+            if (event.data && event.data.type === 'handle-ready') {
+                const hex = event.data.hex;
+                const pos = findPositionFromColor(hex);
+                if (pos) {
+                    state.historyHandles.push({
+                        pos: Vec3.normalize(pos),
+                        color: hexToRgbNormalized(hex),
+                        hex: hex,
+                        peerCount: event.data.count
+                    });
                 }
-            } else {
-                if (overlay) overlay.remove();
             }
-        } catch (e) {
-            console.error("Error reading storage handle:", e);
-        }
-    };
+        });
 
-    const handleAccessRequest = async () => {
-        try {
-            const handle = await document.requestStorageAccess({ localStorage: true });
-            await attemptRetrieval(handle);
-        } catch (err) {
-            const overlay = document.getElementById('saa-overlay');
-            if(overlay) overlay.innerHTML = "Access Denied";
-        }
-    };
+        async function initStorageAccess() {
+            if (window.self === window.top) return; 
+            const container = document.body;
+            const showButton = () => {
+                if (document.getElementById('saa-overlay')) return;
+                const overlay = document.createElement('div');
+                overlay.id = 'saa-overlay';
+                Object.assign(overlay.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
+                const btn = document.createElement("button");
+                btn.innerText = "🔌 Connect to Sphere";
+                Object.assign(btn.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
+                overlay.appendChild(btn);
+                document.body.appendChild(overlay);
+                btn.addEventListener("click", handleAccessRequest);
+            };
 
-    try {
-        const hasAccess = await document.hasStorageAccess();
-        if (hasAccess) {
+            const attemptRetrieval = async (handle) => {
+                try {
+                    if (handle && handle.localStorage) storageScope = handle.localStorage;
+                    const color = storageScope.getItem("lastSphereColor");
+                    const overlay = document.getElementById('saa-overlay');
+                    if (color) {
+                        window.parent.postMessage(color, "*");
+                        if (overlay) {
+                            overlay.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${color}</div>`;
+                            document.body.style.backgroundColor = color;
+                        }
+                    } else { if (overlay) overlay.remove(); }
+                } catch (e) { console.error("Error reading storage handle:", e); }
+            };
+
+            const handleAccessRequest = async () => {
+                try { const handle = await document.requestStorageAccess({ localStorage: true }); await attemptRetrieval(handle); } 
+                catch (err) { const overlay = document.getElementById('saa-overlay'); if(overlay) overlay.innerHTML = "Access Denied"; }
+            };
+
             try {
-                const handle = await document.requestStorageAccess({ localStorage: true });
-                await attemptRetrieval(handle);
-            } catch (e) {
-                await attemptRetrieval(null); 
-            }
-        } else {
-            showButton();
+                const hasAccess = await document.hasStorageAccess();
+                if (hasAccess) {
+                    try { const handle = await document.requestStorageAccess({ localStorage: true }); await attemptRetrieval(handle); } 
+                    catch (e) { await attemptRetrieval(null); }
+                } else { showButton(); }
+            } catch (e) { console.error("Storage Access API not supported", e); }
         }
-    } catch (e) {
-        console.error("Storage Access API not supported", e);
-    }
-}
 
-initStorageAccess();
+        initStorageAccess();
     </script>
 </body>
 </html>
