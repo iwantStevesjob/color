@@ -434,14 +434,20 @@
         }
 
         async function startWebRTC(targetId) {
+            log("Starting WebRTC negotiation...");
             const pc = new RTCPeerConnection(RTC_CONFIG);
             state.parentPC = pc;
+
+            // Force DataChannel support in SDP (Crucial for Viewer as Offerer)
+            const initDc = pc.createDataChannel('init-negotiation');
+            initDc.onopen = () => { log("Init DC Open"); initDc.close(); };
 
             pc.addTransceiver('video', { direction: 'recvonly' });
             pc.addTransceiver('audio', { direction: 'recvonly' });
 
             // Handle Live Stream
             pc.ontrack = e => {
+                log("Track received");
                 document.getElementById('main-video').srcObject = e.streams[0];
                 state.stream = e.streams[0];
                 state.streamType = 'live';
@@ -451,6 +457,7 @@
 
             // Handle File Stream (DataChannel)
             pc.ondatachannel = e => {
+                log(`Rx DataChannel: ${e.channel.label}`);
                 const dc = e.channel;
                 if (dc.label === 'file-transfer') {
                     setupReceiver(dc);
@@ -459,11 +466,17 @@
 
             pc.onicecandidate = e => {
                 if (e.candidate) state.actions.sendJson({ type: 'ICE', candidate: e.candidate }, targetId);
+                else log("ICE Gathering Complete");
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                log(`ICE Connection State: ${pc.iceConnectionState}`);
             };
 
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             state.actions.sendJson({ type: 'OFFER', sdp: offer }, targetId);
+            log("Offer sent");
         }
 
         // FILE RECEIVER (Viewer)
