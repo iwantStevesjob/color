@@ -1,234 +1,668 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StreamLink P2P Stable</title>
+    <title>Torrent Tree Streamer</title>
     <style>
-        :root { --bg: #0d1117; --panel: #161b22; --accent: #238636; --text: #e6edf3; }
-        body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 20px; text-align: center; }
-        
-        .container { max-width: 800px; margin: 0 auto; display: grid; gap: 20px; }
-        .panel { background: var(--panel); border: 1px solid #30363d; padding: 20px; border-radius: 8px; }
-        
-        /* Hidden host player needed for captureStream */
-        #host-source { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+        :root {
+            --bg: #000;
+            --panel: #111;
+            --primary: #00ff88;
+            --text: #eee;
+        }
 
-        video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 6px; border: 1px solid #30363d; }
-        
-        button { background: #21262d; border: 1px solid #30363d; color: var(--text); padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
-        button:hover { background: #30363d; }
-        button.primary { background: var(--accent); border-color: rgba(255,255,255,0.1); }
-        
-        .bar { height: 4px; background: #21262d; width: 100%; margin-top: 8px; border-radius: 2px; }
-        .fill { height: 100%; background: #2f81f7; width: 0%; transition: width 0.2s; }
-        
-        #logs { text-align: left; height: 120px; overflow-y: auto; background: #000; border: 1px solid #30363d; padding: 10px; font-size: 11px; font-family: monospace; color: #7ee787; margin-top: 10px; }
-        .hidden { display: none !important; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Panels */
+        .panel {
+            background: var(--panel);
+            border: 1px solid #333;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        /* Video */
+        video {
+            width: 100%;
+            border-radius: 8px;
+            background: #000;
+            border: 1px solid #333;
+        }
+
+        .video-wrapper {
+            position: relative;
+            margin-top: 20px;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            pointer-events: none;
+            border: 1px solid #444;
+        }
+
+        /* UI Elements */
+        input[type="text"] {
+            background: #222;
+            border: 1px solid #444;
+            color: white;
+            padding: 12px;
+            width: 200px;
+            border-radius: 6px;
+            text-align: center;
+            font-family: monospace;
+        }
+
+        .btn-group {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        button {
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid #444;
+            background: #222;
+            color: #888;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            background: #333;
+        }
+
+        button.active {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: rgba(0, 255, 136, 0.1);
+        }
+
+        button.primary {
+            background: var(--primary);
+            color: black;
+            border: none;
+            font-weight: bold;
+        }
+
+        button.primary:hover {
+            opacity: 0.9;
+            background: var(--primary);
+        }
+
+        .file-upload {
+            border: 2px dashed #333;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        #logs {
+            font-family: monospace;
+            font-size: 10px;
+            color: #555;
+            text-align: left;
+            height: 100px;
+            overflow-y: auto;
+            border-top: 1px solid #222;
+            margin-top: 20px;
+            padding-top: 10px;
+        }
+
+        .log-sys {
+            color: var(--primary);
+        }
     </style>
-    
-    <script type="module">
-        import { joinRoom } from 'https://esm.sh/trystero@0.19.0/torrent';
-        window.joinRoom = joinRoom;
-    </script>
 </head>
+
 <body>
 
-<div class="container">
-    <h2>StreamLink <span style="color:#2f81f7">P2P</span></h2>
+    <div class="container">
+        <h2 style="font-weight: 300;">P2P <span style="color:var(--primary)">Torrent</span> Streamer</h2>
 
-    <div id="setup-panel" class="panel">
-        <input type="text" id="room-input" value="cinema-fix-v3" style="background:#0d1117; border:1px solid #30363d; color:white; padding:10px; border-radius:4px;">
-        <br><br>
-        <button onclick="startApp('viewer')">Join as Viewer</button>
-        <button class="primary" onclick="document.getElementById('file-input').click()">Host File</button>
-        <input type="file" id="file-input" accept="video/*" style="display:none" onchange="startApp('host')">
-    </div>
+        <!-- SETUP -->
+        <div id="setup-panel" class="panel">
+            <input type="text" id="room-id" value="movie-night-room" placeholder="Room Name">
 
-    <div id="player-panel" class="panel hidden">
-        <video id="host-source" playsinline muted></video> <!-- Source for capture -->
-        <video id="main-display" controls playsinline autoplay></video> <!-- View for user -->
-        
-        <div class="bar"><div id="buffer-bar" class="fill"></div></div>
-        <div style="display:flex; justify-content:space-between; font-size:12px; margin-top:5px; color:#8b949e;">
-            <span id="role-badge">Waiting...</span>
-            <span>Buffer: <span id="buffer-stat">0.0</span>s</span>
+            <div class="btn-group">
+                <button class="active" onclick="setMode('viewer')" id="btn-view">Viewer</button>
+                <button onclick="setMode('host-cam')" id="btn-cam">Host: Camera</button>
+                <button onclick="setMode('host-file')" id="btn-file">Host: File</button>
+            </div>
+
+            <div id="file-area" class="file-upload hidden">
+                <input type="file" id="video-input" accept="video/*">
+                <p style="font-size:0.8em; margin:5px 0 0;">Video will loop automatically</p>
+            </div>
+
+            <button class="primary" id="start-btn">Start / Join</button>
         </div>
+
+        <!-- STREAM -->
+        <div id="stream-panel" class="panel hidden">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div id="status" style="font-size: 0.9em; color: #888;">Initializing...</div>
+                <button onclick="location.reload()" style="padding: 5px 10px; font-size: 0.8em;">Disconnect</button>
+            </div>
+
+            <div class="video-wrapper">
+                <video id="main-video" autoplay playsinline controls></video>
+                <div class="overlay">
+                    <div>Role: <span id="role-disp">-</span></div>
+                    <div>Source: <span id="parent-disp">Searching...</span></div>
+                    <div>Downstream: <span id="child-count">0</span> peers</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="logs"></div>
     </div>
-    
-    <div id="logs"></div>
-</div>
 
-<script>
-    // --- CONFIG ---
-    // VP8 is the most compatible codec for Real-time MediaRecorder -> MSE pipeline
-    const CODEC = 'video/webm; codecs="vp8"'; 
-    const CHUNK_MS = 200; 
+    <!-- MODULE SCRIPT: Imports Trystero exactly like your working example -->
+    <script type="module">
+        // 1. IMPORT EXACTLY AS YOUR WORKING CODE DID
+        import { joinRoom } from 'https://esm.run/trystero/torrent';
 
-    let state = {
-        room: null,
-        peers: [],
-        recorder: null,
-        mediaSource: null,
-        sourceBuffer: null,
-        queue: [],
-        header: null, // Critical: stores the first WebM chunk (Initialization Segment)
-        busy: false
-    };
+        // 2. CONFIG
+        const MAX_CHILDREN = 2; // Binary Tree
+        const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    let sendData;
+        // 3. STATE
+        let state = {
+            mode: 'viewer',
+            room: null,
+            myId: null,
+            stream: null,      // For Live Cam
+            streamType: null,  // 'live' or 'file'
 
-    function log(msg) {
-        const box = document.getElementById('logs');
-        box.innerHTML += `<div>${msg}</div>`;
-        box.scrollTop = box.scrollHeight;
-    }
+            // File Streaming State
+            fileObj: null,
+            fileMeta: null,
+            fileChunks: [],    // Store received/read chunks for playback and relay
+            sourceBuffer: null,
+            mediaSource: null,
+            readingFile: false,
 
-    // --- APP START ---
-    async function startApp(role) {
-        document.getElementById('setup-panel').classList.add('hidden');
-        document.getElementById('player-panel').classList.remove('hidden');
-        document.getElementById('role-badge').innerText = role.toUpperCase();
+            parentPC: null,
+            childrenPCs: {}, // { peerId: RTCPeerConnection }
+            dataChannels: {}, // { peerId: RTCDataChannel } (Outgoing to children)
 
-        if (role === 'host') await initHost();
-        
-        initNetwork(role);
-    }
+            tree: {},        // Host Only: { peerId: { tier, parent, childrenCount } }
+            actions: {}      // Stores the send functions
+        };
 
-    // --- HOST LOGIC ---
-    async function initHost() {
-        const file = document.getElementById('file-input').files[0];
-        if (!file) return;
+        // 4. UI HANDLERS
+        window.setMode = (m) => {
+            state.mode = m;
+            document.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            if (m === 'viewer') document.getElementById('btn-view').classList.add('active');
+            if (m === 'host-cam') document.getElementById('btn-cam').classList.add('active');
+            if (m === 'host-file') document.getElementById('btn-file').classList.add('active');
+            document.getElementById('file-area').classList.toggle('hidden', m !== 'host-file');
+        };
 
-        const hostVid = document.getElementById('host-source');
-        const viewVid = document.getElementById('main-display');
-        
-        hostVid.src = URL.createObjectURL(file);
-        await new Promise(r => hostVid.onloadedmetadata = r); // Wait for dimensions
+        document.getElementById('start-btn').onclick = async () => {
+            const roomName = document.getElementById('room-id').value;
+            if (!roomName) return alert("Room name required");
 
-        // Capture stream (24fps to save CPU)
-        const stream = (hostVid.captureStream || hostVid.mozCaptureStream).call(hostVid, 24);
-        
-        // Show local preview (muted)
-        viewVid.srcObject = stream;
-        viewVid.muted = true;
+            // Host Media Setup
+            const vid = document.getElementById('main-video');
+            if (state.mode === 'host-cam') {
+                try {
+                    state.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    vid.srcObject = state.stream;
+                    vid.muted = true;
+                } catch (e) { return alert("Cam error: " + e); }
+            } else if (state.mode === 'host-file') {
+                const f = document.getElementById('video-input').files[0];
+                if (!f) return alert("Select file");
 
-        // Init Recorder
-        if (!MediaRecorder.isTypeSupported(CODEC)) return alert(`Browser needs ${CODEC}`);
-        
-        state.recorder = new MediaRecorder(stream, { 
-            mimeType: CODEC,
-            videoBitsPerSecond: 1500000 // 1.5 Mbps
-        });
+                // Local preview
+                vid.src = URL.createObjectURL(f);
+                vid.muted = true; // Host doesn't need to hear echo
+                vid.play();
 
-        state.recorder.ondataavailable = async (e) => {
-            if (e.data.size > 0) {
-                const chunk = await e.data.arrayBuffer();
-                
-                // First chunk is ALWAYS the header. Cache it.
-                if (!state.header) {
-                    state.header = chunk;
-                    log(`[HOST] Captured Header (${chunk.byteLength}b)`);
+                // Prepare for Streaming (Chunking)
+                state.fileObj = f;
+                state.streamType = 'file';
+                state.fileMeta = {
+                    name: f.name,
+                    size: f.size,
+                    mime: f.type || 'video/webm'
+                };
+
+                log(`Loaded file: ${f.name} (${(f.size / 1024 / 1024).toFixed(1)}MB)`);
+            }
+
+            // UI Transition
+            document.getElementById('setup-panel').classList.add('hidden');
+            document.getElementById('stream-panel').classList.remove('hidden');
+            document.getElementById('role-disp').innerText = state.mode.toUpperCase();
+
+            // Host Tree Init
+            if (state.mode.startsWith('host')) {
+                state.tree['HOST'] = { tier: 0, children: 0 };
+                document.getElementById('parent-disp').innerText = "N/A (Root)";
+                document.getElementById('status').innerText = "Broadcasting (Waiting for peers via Torrent)...";
+                document.getElementById('status').style.color = "var(--primary)";
+            }
+
+            joinP2P(roomName);
+        };
+
+        function log(msg) {
+            const l = document.getElementById('logs');
+            l.innerHTML = `<div><span class="log-sys">></span> ${msg}</div>` + l.innerHTML;
+        }
+
+        // 5. TRYSTERO LOGIC (Matching your working pattern)
+        function joinP2P(roomName) {
+            const appId = 'p2p-tree-video-v1';
+
+            // Use standard trackers + the ones from your working code
+            const trackerUrls = [
+                'wss://tracker.webtorrent.dev',
+                'wss://tracker.openwebrtc.io',
+                'wss://tracker.btorrent.xyz'
+            ];
+
+            log(`Connecting to Torrent trackers: ${roomName}`);
+
+            // JOIN ROOM
+            state.room = joinRoom({ appId, trackerUrls }, roomName);
+
+            // CREATE ACTIONS (Destructuring like your working code)
+            // makeAction returns [sendFunc, onReceiveFunc]
+            const [sendJson, getJson] = state.room.makeAction('json');
+
+            state.actions.sendJson = sendJson;
+
+            // HANDLE INCOMING MESSAGES
+            getJson((data, peerId) => {
+                handleMessage(data, peerId);
+            });
+
+            // HANDLE PEER EVENTS
+            state.room.onPeerJoin(peerId => {
+                log(`Peer joined: ${peerId.substr(0, 4)}`);
+                if (state.mode.startsWith('host')) {
+                    // Host announces presence immediately
+                    sendJson({ type: 'HOST_HERE' }, peerId);
+                }
+            });
+
+            state.room.onPeerLeave(peerId => {
+                if (state.childrenPCs[peerId]) {
+                    log(`Child ${peerId.substr(0, 4)} left`);
+                    delete state.childrenPCs[peerId];
+                    delete state.dataChannels[peerId];
+                    updateUI();
+                    if (state.tree[peerId]) delete state.tree[peerId];
+                }
+            });
+
+            // If Viewer, broadcast hello (in case Host is already there)
+            if (state.mode === 'viewer') {
+                setTimeout(() => sendJson({ type: 'VIEWER_HELLO' }), 1000);
+            }
+        }
+
+        // 6. APP LOGIC
+        function handleMessage(data, peerId) {
+            const isHost = state.mode.startsWith('host');
+
+            // A. DISCOVERY
+            if (data.type === 'HOST_HERE' && !isHost) {
+                log("Host found. Asking to join...");
+                state.actions.sendJson({ type: 'JOIN_REQ' }, peerId);
+            }
+            if (data.type === 'VIEWER_HELLO' && isHost) {
+                state.actions.sendJson({ type: 'HOST_HERE' }, peerId);
+            }
+
+            // B. TREE ASSIGNMENT (Host Side)
+            if (data.type === 'JOIN_REQ' && isHost) {
+                assignParent(peerId);
+            }
+
+            // C. TREE INSTRUCTION (Viewer Side)
+            if (data.type === 'CONNECT_TO') {
+                log(`Assigned to parent: ${data.parentId.substr(0, 4)}`);
+                document.getElementById('parent-disp').innerText = data.parentId.substr(0, 4);
+                connectToParent(data.parentId);
+            }
+
+            // D. WEBRTC SIGNALING
+            if (data.type === 'OFFER') handleOffer(data.sdp, peerId);
+            if (data.type === 'ANSWER') handleAnswer(data.sdp, peerId);
+            if (data.type === 'ICE') handleIce(data.candidate, peerId);
+        }
+
+        function assignParent(newPeerId) {
+            // Simple BFS to find node with space
+            // Since we don't have IDs of everyone in the tree (only Host knows structure loosely in this demo),
+            // we keep a local registry map 'state.tree'.
+
+            // Note: In a real distributed tree, this logic is complex. 
+            // Here: Host fills its own slots, then tells new peers to connect to its children.
+
+            let parentId = 'HOST'; // Default to me
+
+            // 1. Can Host take them?
+            if (state.tree['HOST'].children < MAX_CHILDREN) {
+                state.tree['HOST'].children++;
+                // I am the parent. Tell them to connect to ME (my Trystero ID isn't needed, they msg me directly)
+                // But wait, they need to know WHO to send the WebRTC offer to.
+                // If they send offer to ME, I handle it.
+                // So we say parentId = 'HOST' (virtual ID for logic) implies the sender of this message.
+                state.actions.sendJson({ type: 'CONNECT_TO', parentId: 'HOST_DIRECT' }, newPeerId);
+                return;
+            }
+
+            // 2. Scan children (Simple Round Robin for demo)
+            // Find a known child who has space (This implies Host tracks state)
+            // For this single-file demo without deep state tracking, we will just bounce them 
+            // to a random connected child if Host is full.
+            const connectedChildren = Object.keys(state.childrenPCs);
+            if (connectedChildren.length > 0) {
+                const randomChild = connectedChildren[Math.floor(Math.random() * connectedChildren.length)];
+                state.actions.sendJson({ type: 'CONNECT_TO', parentId: randomChild }, newPeerId);
+            } else {
+                // Should not happen if logic 1 works, but fallback
+                state.actions.sendJson({ type: 'CONNECT_TO', parentId: 'HOST_DIRECT' }, newPeerId);
+            }
+        }
+
+        // 7. WEBRTC CORE
+
+        // CONNECT UP (Viewer -> Parent)
+        async function connectToParent(targetId) {
+            // FIX: The original code logic for IDs.
+            // If targetId is 'HOST_DIRECT', we use the peerId we received HOST_HERE from.
+            if (targetId === 'HOST_DIRECT' && hostPeerId) {
+                startWebRTC(hostPeerId);
+            } else {
+                startWebRTC(targetId);
+            }
+        }
+
+        // RE-WRITE CONNECT LOGIC WITH CORRECT ID HANDLING
+        let hostPeerId = null; // Store Host ID when discovered
+
+        // Monkey-patching the previous logic to be more robust with IDs
+        const origHandleMessage = handleMessage;
+        handleMessage = (data, peerId) => {
+            if (data.type === 'HOST_HERE') hostPeerId = peerId;
+
+            // Custom handling for 'CONNECT_TO'
+            if (data.type === 'CONNECT_TO') {
+                const target = data.parentId === 'HOST_DIRECT' ? peerId : data.parentId;
+                log(`Connecting WebRTC to ${target.substr(0, 4)}`);
+                startWebRTC(target);
+                return;
+            }
+
+            // Pass to original handler
+            origHandleMessage(data, peerId);
+        }
+
+        async function startWebRTC(targetId) {
+            const pc = new RTCPeerConnection(RTC_CONFIG);
+            state.parentPC = pc;
+
+            pc.addTransceiver('video', { direction: 'recvonly' });
+            pc.addTransceiver('audio', { direction: 'recvonly' });
+
+            // Handle Live Stream
+            pc.ontrack = e => {
+                document.getElementById('main-video').srcObject = e.streams[0];
+                state.stream = e.streams[0];
+                state.streamType = 'live';
+                document.getElementById('status').innerText = "Live Stream (Cam)";
+                document.getElementById('status').style.color = "var(--primary)";
+            };
+
+            // Handle File Stream (DataChannel)
+            pc.ondatachannel = e => {
+                const dc = e.channel;
+                if (dc.label === 'file-transfer') {
+                    setupReceiver(dc);
+                }
+            };
+
+            pc.onicecandidate = e => {
+                if (e.candidate) state.actions.sendJson({ type: 'ICE', candidate: e.candidate }, targetId);
+            };
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            state.actions.sendJson({ type: 'OFFER', sdp: offer }, targetId);
+        }
+
+        // FILE RECEIVER (Viewer)
+        function setupReceiver(dc) {
+            state.streamType = 'file';
+            document.getElementById('status').innerText = "Buffering Stream...";
+            document.getElementById('status').style.color = "orange";
+
+            dc.onmessage = async (e) => {
+                const data = e.data;
+
+                // 1. Handle Metadata (Start)
+                if (typeof data === 'string') {
+                    const msg = JSON.parse(data);
+                    if (msg.type === 'meta') {
+                        state.fileMeta = msg;
+                        initMediaSource();
+                    }
+                    return;
                 }
 
-                if (state.peers.length > 0) sendData(chunk);
+                // 2. Handle Binary Chunk using ArrayBuffer
+                if (data instanceof ArrayBuffer) {
+                    // Determine if we need to cache (for relay)
+                    state.fileChunks.push(data);
+
+                    // Append to Buffer
+                    appendToBuffer(data);
+
+                    // Relay to Children
+                    broadcastToChildren(data);
+                }
             }
-        };
+        }
 
-        state.recorder.start(CHUNK_MS);
-        hostVid.play();
-        log("[HOST] Transcoding started.");
-    }
+        function initMediaSource() {
+            const vid = document.getElementById('main-video');
+            if (MediaSource.isTypeSupported(state.fileMeta.mime)) {
+                state.mediaSource = new MediaSource();
+                vid.src = URL.createObjectURL(state.mediaSource);
 
-    // --- VIEWER LOGIC ---
-    function initViewerMSE(onData) {
-        const vid = document.getElementById('main-display');
-        state.mediaSource = new MediaSource();
-        vid.src = URL.createObjectURL(state.mediaSource);
+                state.mediaSource.addEventListener('sourceopen', () => {
+                    try {
+                        state.sourceBuffer = state.mediaSource.addSourceBuffer(state.fileMeta.mime);
+                        state.sourceBuffer.addEventListener('updateend', () => processQueue());
 
-        state.mediaSource.addEventListener('sourceopen', () => {
-            log("[MSE] Source Open");
+                        document.getElementById('status').innerText = "Streaming (Buffered)";
+                        document.getElementById('status').style.color = "var(--primary)";
+
+                        processQueue();
+                    } catch (e) {
+                        log("MSE Error: " + e);
+                    }
+                });
+            } else {
+                alert("Browser doesn't support this file format for streaming. Try Chrome or a WebM/fMP4 file.");
+            }
+        }
+
+        let bufQueue = [];
+        function appendToBuffer(chunk) {
+            bufQueue.push(chunk);
+            processQueue();
+        }
+
+        function processQueue() {
+            if (!state.sourceBuffer || state.sourceBuffer.updating || bufQueue.length === 0) return;
+
             try {
-                // Important: mode='sequence' handles timestamp gaps if packets arrive late
-                state.sourceBuffer = state.mediaSource.addSourceBuffer(CODEC);
-                state.sourceBuffer.mode = 'sequence';
-                state.sourceBuffer.addEventListener('updateend', processQueue);
-                
-                // Try processing immediately in case header is waiting in queue
-                processQueue();
+                state.sourceBuffer.appendBuffer(bufQueue.shift());
             } catch (e) {
-                log(`[MSE Error] ${e.message}`);
+                log(e);
             }
-        });
-
-        return (data) => {
-            state.queue.push(new Uint8Array(data));
-            if (state.sourceBuffer && !state.sourceBuffer.updating) processQueue();
-        };
-    }
-
-    function processQueue() {
-        // SAFETY CHECKS
-        if (!state.sourceBuffer) return;
-        if (state.sourceBuffer.updating) return;
-        if (state.queue.length === 0) return;
-        if (state.mediaSource.readyState !== 'open') return;
-
-        const chunk = state.queue.shift();
-        
-        try {
-            state.sourceBuffer.appendBuffer(chunk);
-        } catch (e) {
-            log(`[Buffer Error] ${e.name}`);
-            // If InvalidStateError occurs, usually means MediaSource closed unexpectedly.
-            // We could try to re-init, but usually fatal.
         }
 
-        updateStats();
-    }
+        // CONNECT DOWN (Parent -> Child)
+        async function handleOffer(sdp, childId) {
+            log(`Relaying to ${childId.substr(0, 4)}`);
+            const pc = new RTCPeerConnection(RTC_CONFIG);
+            state.childrenPCs[childId] = pc;
+            updateUI();
 
-    function updateStats() {
-        const vid = document.getElementById('main-display');
-        if (state.sourceBuffer && state.sourceBuffer.buffered.length) {
-            const end = state.sourceBuffer.buffered.end(state.sourceBuffer.buffered.length - 1);
-            const diff = end - vid.currentTime;
-            
-            document.getElementById('buffer-stat').innerText = diff.toFixed(1);
-            
-            // Visual Bar
-            const pct = Math.min(100, (diff / 20) * 100);
-            document.getElementById('buffer-bar').style.width = `${pct}%`;
-
-            // Autoplay logic
-            if (vid.paused && diff > 1) vid.play().catch(()=>{});
-        }
-    }
-
-    // --- NETWORK ---
-    function initNetwork(role) {
-        const roomId = document.getElementById('room-input').value;
-        log(`[P2P] Connecting to ${roomId}...`);
-        
-        state.room = window.joinRoom({ appId: 'p2p-cinema-fix-v4' }, roomId);
-        const [send, get] = state.room.makeAction('stream');
-        sendData = send;
-
-        state.room.onPeerJoin(id => {
-            log(`[P2P] Peer joined: ${id}`);
-            state.peers.push(id);
-            
-            // HOST: Send cached header immediately to new peer
-            if (role === 'host' && state.header) {
-                log(`[HOST] Sending Header to ${id}`);
-                sendData(state.header, id);
+            // MODE 1: LIVE CAM
+            if (state.mode === 'host-cam' || state.streamType === 'live') {
+                if (state.stream) {
+                    state.stream.getTracks().forEach(t => pc.addTrack(t, state.stream));
+                }
             }
-        });
 
-        if (role === 'viewer') {
-            const handler = initViewerMSE();
-            get(handler);
+            // MODE 2: FILE STREAM
+            // Check if we have file data to send (Host or Relay)
+            if (state.mode === 'host-file' || state.streamType === 'file') {
+                const dc = pc.createDataChannel('file-transfer', { ordered: true });
+                state.dataChannels[childId] = dc;
+
+                dc.onopen = () => {
+                    log(`DataChannel open for ${childId.substr(0, 4)}`);
+
+                    // 1. Send Meta
+                    if (state.fileMeta) {
+                        dc.send(JSON.stringify({ type: 'meta', ...state.fileMeta }));
+                    }
+
+                    // 2. Send Cached Chunks (Catch up)
+                    if (state.fileChunks.length > 0) {
+                        log(`Sending ${state.fileChunks.length} cached chunks to ${childId.substr(0, 4)}`);
+                        state.fileChunks.forEach(chunk => {
+                            if (dc.readyState === 'open') dc.send(chunk);
+                        });
+                    }
+
+                    // 3. If Host, continue reading if not done
+                    if (state.mode === 'host-file' && !state.readingFile) {
+                        startReadingFile();
+                    }
+                };
+            }
+
+            pc.onicecandidate = e => {
+                if (e.candidate) state.actions.sendJson({ type: 'ICE', candidate: e.candidate }, childId);
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === 'disconnected') {
+                    delete state.childrenPCs[childId];
+                    delete state.dataChannels[childId];
+                    updateUI();
+                }
+            };
+
+            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            state.actions.sendJson({ type: 'ANSWER', sdp: answer }, childId);
         }
-    }
-</script>
+
+        // FILE READING HANDLER (HOST)
+        function startReadingFile() {
+            if (state.readingFile) return;
+            state.readingFile = true;
+
+            const file = state.fileObj;
+            const CHUNK_SIZE = 16 * 1024; // 16KB safe chunk
+            let offset = 0;
+            const reader = new FileReader();
+
+            reader.onload = e => {
+                const chunk = e.target.result;
+
+                // Cache
+                state.fileChunks.push(chunk);
+
+                // Broadcast
+                broadcastToChildren(chunk);
+
+                offset += chunk.byteLength;
+                // Loop with small delay to prevent freezing UI
+                if (offset < file.size) {
+                    setTimeout(() => {
+                        const slice = file.slice(offset, offset + CHUNK_SIZE);
+                        reader.readAsArrayBuffer(slice);
+                    }, 5);
+                } else {
+                    log("File read complete.");
+                    state.readingFile = false;
+                }
+            };
+
+            // Start first chunk
+            const slice = file.slice(0, CHUNK_SIZE);
+            reader.readAsArrayBuffer(slice);
+        }
+
+        function broadcastToChildren(data) {
+            Object.values(state.dataChannels).forEach(dc => {
+                if (dc.readyState === 'open') {
+                    try {
+                        dc.send(data);
+                    } catch (e) {
+                        console.error("Send error", e);
+                    }
+                }
+            });
+        }
+
+        async function handleAnswer(sdp, pid) {
+            if (state.parentPC) await state.parentPC.setRemoteDescription(new RTCSessionDescription(sdp));
+        }
+
+        async function handleIce(cand, pid) {
+            const c = new RTCIceCandidate(cand);
+            if (state.childrenPCs[pid]) await state.childrenPCs[pid].addIceCandidate(c);
+            else if (state.parentPC) await state.parentPC.addIceCandidate(c);
+        }
+
+        function updateUI() {
+            document.getElementById('child-count').innerText = Object.keys(state.childrenPCs).length;
+        }
+
+    </script>
 </body>
+
 </html>
