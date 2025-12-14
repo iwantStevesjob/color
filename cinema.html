@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>cinema</title>
+    <title>Torrent Tree Streamer</title>
     <style>
         :root {
             --bg: #000;
@@ -471,6 +471,8 @@
             document.getElementById('status').innerText = "Buffering Stream...";
             document.getElementById('status').style.color = "orange";
 
+            let chunkCount = 0;
+
             dc.onmessage = async (e) => {
                 const data = e.data;
 
@@ -487,6 +489,10 @@
 
                 // 2. Handle Binary Chunk using ArrayBuffer
                 if (data instanceof ArrayBuffer) {
+                    chunkCount++;
+                    if (chunkCount === 1) log(`Rx FIRST Chunk. Size: ${data.byteLength}. Queueing...`);
+                    if (chunkCount % 100 === 0) log(`Rx ${chunkCount} chunks...`);
+
                     // Determine if we need to cache (for relay)
                     state.fileChunks.push(data);
 
@@ -522,8 +528,10 @@
                     try {
                         state.sourceBuffer = state.mediaSource.addSourceBuffer(mime);
                         state.sourceBuffer.addEventListener('updateend', () => {
-                            // log("MSE Update End"); // Too noisy
                             processQueue();
+                        });
+                        state.sourceBuffer.addEventListener('error', (e) => {
+                            log("SourceBuffer Error: " + e);
                         });
 
                         document.getElementById('status').innerText = "Streaming (Buffered)";
@@ -562,13 +570,13 @@
 
                 // Try playing if we have data
                 const vid = document.getElementById('main-video');
-                if (vid.paused && bufQueue.length < 50) { // arbitrary buffer check
-                    vid.play().catch(e => { });
+                if (vid.paused && bufQueue.length < 50) {
+                    vid.play().catch(e => {
+                        // log("Autoplay prevented or waiting for data");
+                    });
                 }
             } catch (e) {
-                log(`MSE Append Error: ${e.message}`);
-                // If quota exceeded, we might need to remove old buffer, 
-                // but for this simple demo, we just log it.
+                log(`MSE Append Error: ${e.message} (Queue: ${bufQueue.length})`);
             }
         }
 
@@ -639,6 +647,7 @@
         function startReadingFile() {
             if (state.readingFile) return;
             state.readingFile = true;
+            log("Starting file read sequence...");
 
             const file = state.fileObj;
             const CHUNK_SIZE = 16 * 1024; // 16KB safe chunk
@@ -653,8 +662,15 @@
 
                 // Broadcast
                 broadcastToChildren(chunk);
+                if (offset === 0) log(`First chunk read & sent. Size: ${chunk.byteLength}`);
 
                 offset += chunk.byteLength;
+
+                // Update UI occasionally
+                if (offset % (CHUNK_SIZE * 100) === 0) {
+                    // log(`Progress: ${Math.round((offset/file.size)*100)}%`);
+                }
+
                 // Loop with small delay to prevent freezing UI
                 if (offset < file.size) {
                     setTimeout(() => {
@@ -662,7 +678,7 @@
                         reader.readAsArrayBuffer(slice);
                     }, 5);
                 } else {
-                    log("File read complete.");
+                    log("File read complete. Total Chunks: " + state.fileChunks.length);
                     state.readingFile = false;
                 }
             };
@@ -673,15 +689,21 @@
         }
 
         function broadcastToChildren(data) {
+            let sentCount = 0;
             Object.values(state.dataChannels).forEach(dc => {
                 if (dc.readyState === 'open') {
                     try {
                         dc.send(data);
+                        sentCount++;
                     } catch (e) {
                         console.error("Send error", e);
+                        log("Send chunk error: " + e.message);
                     }
+                } else {
+                    // log("Skipping closed DC");
                 }
             });
+            // if(sentCount === 0) log("No open channels to broadcast to");
         }
 
         async function handleAnswer(sdp, pid) {
