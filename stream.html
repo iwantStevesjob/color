@@ -3,386 +3,315 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Serverless Pyramid Stream (BitTorrent Signaling)</title>
-    <!-- Trystero: Serverless WebRTC Signaling via BitTorrent/IPFS -->
-    <script src="https://unpkg.com/trystero@0.19.0/dist/trystero-torrent.min.js"></script>
+    <title>P2P Streamer: Cam or File</title>
+    
     <style>
-        :root { --bg: #0f0f13; --panel: #1e1e24; --primary: #00e5ff; --text: #ffffff; }
-        body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; text-align: center; }
-        
-        /* Layout */
+        :root { --bg: #121212; --panel: #1e1e1e; --primary: #bb86fc; --secondary: #03dac6; --text: #e0e0e0; }
+        body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 20px; text-align: center; }
         .container { max-width: 900px; margin: 0 auto; }
         .hidden { display: none !important; }
-        
-        /* Panels */
-        .panel { background: var(--panel); padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); margin-bottom: 20px; }
-        
-        /* Video */
-        video { width: 100%; border-radius: 8px; background: #000; box-shadow: 0 0 20px rgba(0,229,255,0.2); }
-        .overlay { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.8); padding: 8px 12px; border-radius: 6px; font-size: 0.9em; pointer-events: none; }
+        .panel { background: var(--panel); padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.6); margin-bottom: 20px; }
+        video { width: 100%; border-radius: 8px; background: #000; box-shadow: 0 0 15px rgba(0,0,0,0.5); }
         .video-wrapper { position: relative; margin-top: 20px; }
-
-        /* Inputs & Buttons */
-        input { background: #333; border: 1px solid #444; color: white; padding: 12px; border-radius: 6px; font-size: 16px; width: 200px; text-align: center; }
-        button { background: var(--primary); color: #000; border: none; padding: 12px 25px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.2s; margin: 10px; }
-        button:hover { filter: brightness(1.2); }
-        button.secondary { background: #444; color: #fff; }
-
-        /* Logs */
-        #logs { font-family: 'Consolas', monospace; font-size: 12px; color: #888; text-align: left; height: 150px; overflow-y: auto; background: #111; padding: 10px; border-radius: 6px; border: 1px solid #333; }
-        .log-time { color: #555; margin-right: 5px; }
-        .log-info { color: #00e5ff; }
-        .log-warn { color: #ffeb3b; }
-        .log-err { color: #ff5252; }
+        .overlay { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 6px; font-size: 0.85em; pointer-events: none; }
+        input[type="text"] { background: #2c2c2c; border: 1px solid #444; color: white; padding: 12px; border-radius: 6px; width: 250px; text-align: center; font-size: 1.1em; margin-bottom: 20px; }
+        .mode-toggle { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
+        button { padding: 12px 24px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; font-size: 1em; transition: 0.2s; }
+        button.primary { background: var(--primary); color: #000; }
+        button.primary:hover { filter: brightness(1.1); }
+        button.outline { background: transparent; border: 2px solid #444; color: #aaa; }
+        button.outline.active { border-color: var(--secondary); color: var(--secondary); background: rgba(3, 218, 198, 0.1); }
+        .file-drop-area { border: 2px dashed #444; padding: 20px; border-radius: 8px; margin: 15px 0; background: #181818; }
+        input[type="file"] { display: none; }
+        .file-btn { background: #333; color: white; padding: 8px 15px; border-radius: 4px; cursor: pointer; display: inline-block; }
+        #logs { font-family: monospace; font-size: 12px; color: #777; text-align: left; height: 120px; overflow-y: auto; background: #000; padding: 10px; border-radius: 6px; border: 1px solid #333; }
+        .log-info { color: var(--secondary); }
     </style>
+
+    <!-- FIX: Import Trystero as a Module and attach to Window -->
+    <script type="module">
+        import { joinRoom } from 'https://esm.sh/trystero@0.19.0/torrent';
+        window.joinRoom = joinRoom; 
+        console.log("Trystero Library Loaded");
+    </script>
 </head>
 <body>
 
 <div class="container">
-    <h1>Serverless Pyramid Stream</h1>
-    <p style="color: #aaa; font-size: 0.9em;">
-        Signaling: BitTorrent Trackers (Trystero) | Transport: Raw WebRTC | Topology: Recursive Tree
-    </p>
-
+    <h1>P2P Streamer</h1>
+    
     <!-- STEP 1: SETUP -->
     <div id="setup-panel" class="panel">
-        <h3>1. Configuration</h3>
-        <input type="text" id="room-id" value="global-stream-room" placeholder="Enter Room Name">
-        <br><br>
-        <button onclick="startApp(true)">Start as HOST</button>
-        <button class="secondary" onclick="startApp(false)">Join as VIEWER</button>
-        <p id="net-score" style="font-size: 0.8em; color: #666; margin-top: 10px;"></p>
+        <input type="text" id="room-id" value="global-room" placeholder="Enter Room Name">
+        
+        <div class="mode-toggle">
+            <button class="outline active" id="btn-view" onclick="setRole('viewer')">Join as Viewer</button>
+            <button class="outline" id="btn-host-cam" onclick="setRole('host-cam')">Host: Camera</button>
+            <button class="outline" id="btn-host-file" onclick="setRole('host-file')">Host: File</button>
+        </div>
+
+        <div id="controls-viewer">
+            <p style="color:#aaa">Connect to the room and wait for the host.</p>
+            <button class="primary" onclick="initApp()">Join Room</button>
+        </div>
+
+        <div id="controls-cam" class="hidden">
+            <p style="color:#aaa">Broadcast your webcam and microphone.</p>
+            <button class="primary" onclick="initApp()">Start Camera Stream</button>
+        </div>
+
+        <div id="controls-file" class="hidden">
+            <div class="file-drop-area">
+                <p id="file-name" style="margin-bottom:10px; color: #fff;">No file selected</p>
+                <label for="video-input" class="file-btn">Choose Video File</label>
+                <input type="file" id="video-input" accept="video/*, .mkv, .mp4, .webm">
+            </div>
+            <button class="primary" onclick="initApp()">Start File Stream</button>
+        </div>
     </div>
 
     <!-- STEP 2: ACTIVE STREAM -->
     <div id="stream-panel" class="panel hidden">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h3 id="role-display">Viewer</h3>
-            <span id="status-badge" style="background: #333; padding: 5px 10px; border-radius: 4px;">Connecting to swarm...</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div id="status-badge" style="background: #333; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.9em;">Initializing...</div>
+            <button onclick="location.reload()" style="padding: 5px 10px; font-size: 0.8em; background: #333; color: #fff;">Leave</button>
         </div>
 
         <div class="video-wrapper">
-            <video id="main-video" autoplay playsinline controls muted></video>
+            <video id="main-video" autoplay playsinline controls></video>
             <div class="overlay">
-                <div>Tier: <span id="tier-display">-</span></div>
-                <div>Parent: <span id="parent-display">Searching...</span></div>
-                <div>Children: <span id="child-count">0</span>/<span id="max-children-display">2</span></div>
+                <div>Role: <span id="role-display">-</span></div>
+                <div>Source: <span id="parent-display">Searching...</span></div>
+                <div>Peers: <span id="child-count">0</span>/<span id="max-children-display">2</span></div>
             </div>
         </div>
     </div>
 
-    <!-- LOGS -->
     <div id="logs"></div>
 </div>
 
 <script>
     // --- CONFIGURATION ---
-    const MAX_CHILDREN = 2; // Binary Tree (Scale: 1->2->4->8...)
+    const MAX_CHILDREN = 2; 
     const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     // --- STATE ---
-    let room, sendSignaling, getPeerId; // Trystero handles
-    let isHost = false;
+    let selectedRole = 'viewer';
+    let room, sendSignaling, getPeerId;
     let myId = null;
     let myStream = null;
-    
-    // WebRTC Connections
-    let parentPC = null;     // Connection UP the tree
-    let childrenPCs = {};    // Connections DOWN the tree (Map<PeerId, RTCPeerConnection>)
-    
-    // Host Registry (Only used if isHost = true)
+    let parentPC = null;     
+    let childrenPCs = {};    
     let networkTree = {}; 
-    let pendingRequests = []; // Viewers waiting for assignment
+
+    // --- UI LOGIC ---
+    function setRole(role) {
+        selectedRole = role;
+        document.querySelectorAll('.outline').forEach(b => b.classList.remove('active'));
+        if(role === 'viewer') document.getElementById('btn-view').classList.add('active');
+        if(role === 'host-cam') document.getElementById('btn-host-cam').classList.add('active');
+        if(role === 'host-file') document.getElementById('btn-host-file').classList.add('active');
+
+        document.getElementById('controls-viewer').classList.add('hidden');
+        document.getElementById('controls-cam').classList.add('hidden');
+        document.getElementById('controls-file').classList.add('hidden');
+
+        if(role === 'viewer') document.getElementById('controls-viewer').classList.remove('hidden');
+        if(role === 'host-cam') document.getElementById('controls-cam').classList.remove('hidden');
+        if(role === 'host-file') document.getElementById('controls-file').classList.remove('hidden');
+    }
+
+    document.getElementById('video-input').addEventListener('change', function(e) {
+        const name = e.target.files[0] ? e.target.files[0].name : "No file selected";
+        document.getElementById('file-name').innerText = name;
+        document.getElementById('file-name').style.color = "#03dac6";
+    });
 
     // --- INITIALIZATION ---
-
-    async function startApp(hostMode) {
-        const roomName = document.getElementById('room-id').value;
-        if (!roomName) return alert("Please enter a room name");
-
-        isHost = hostMode;
-        
-        // UI Updates
-        document.getElementById('setup-panel').classList.add('hidden');
-        document.getElementById('stream-panel').classList.remove('hidden');
-        document.getElementById('role-display').innerText = isHost ? "HOST (Source)" : "VIEWER";
-        document.getElementById('max-children-display').innerText = MAX_CHILDREN;
-
-        // 1. Join Trystero Room (The "Lobby")
-        log(`Joining BitTorrent swarm: ${roomName}...`);
-        const config = { appId: 'pyramid-stream-v1' };
-        room = Trystero.joinRoom(config, roomName);
-        
-        // Trystero Helpers
-        [sendSignaling, getPeerId] = room.makeAction('signal'); // Create a custom event channel
-        myId = getPeerId();
-        log(`My Signaling ID: ${myId}`);
-
-        // 2. Setup Host or Viewer
-        if (isHost) {
-            await setupHost();
-        } else {
-            setupViewer();
+    async function initApp() {
+        if (!window.joinRoom) return alert("Library loading... please wait 2 seconds and try again.");
+        if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+            alert("Security Warning: WebRTC requires HTTPS or Localhost.");
         }
 
-        // 3. Listen for Signaling Messages (The "WebSocket" replacement)
-        room.onAction('signal', (data, peerId) => handleSignaling(data, peerId));
+        const roomName = document.getElementById('room-id').value;
+        if (!roomName) return alert("Enter a room name");
 
-        // 4. Handle Peer Joins (Discovery)
+        if (selectedRole === 'host-file') {
+            const files = document.getElementById('video-input').files;
+            if (files.length === 0) return alert("Please select a video file first.");
+        }
+
+        document.getElementById('setup-panel').classList.add('hidden');
+        document.getElementById('stream-panel').classList.remove('hidden');
+        document.getElementById('max-children-display').innerText = MAX_CHILDREN;
+
+        log(`Connecting to swarm: ${roomName}...`);
+        
+        // FIX: Use the window.joinRoom that we attached in the module script
+        room = window.joinRoom({ appId: 'p2p-fixed-stream' }, roomName);
+        
+        [sendSignaling, getPeerId] = room.makeAction('signal');
+        myId = getPeerId();
+        log(`My ID: ${myId}`);
+
+        if (selectedRole === 'viewer') {
+            setupViewer();
+        } else {
+            await setupHost();
+        }
+
+        room.onAction('signal', (data, peerId) => handleSignaling(data, peerId));
         room.onPeerJoin(peerId => {
-            log(`Swarm: Peer ${peerId.substr(0,5)} found.`);
-            if (isHost) {
-                // As host, we announce our presence so they know who to ask
-                sendSignaling({ type: 'HOST_ANNOUNCE' }, peerId);
-            }
+            log(`Peer joined: ${peerId.substr(0,5)}`);
+            if (selectedRole !== 'viewer') sendSignaling({ type: 'HOST_ANNOUNCE' }, peerId);
         });
     }
 
-    // --- HOST LOGIC (The Registry) ---
-
+    // --- HOST SETUP ---
     async function setupHost() {
-        try {
-            myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            document.getElementById('main-video').srcObject = myStream;
-            document.getElementById('main-video').muted = true;
-            document.getElementById('tier-display').innerText = "0";
-            document.getElementById('parent-display').innerText = "N/A";
-            document.getElementById('status-badge').innerText = "Broadcasting";
-            document.getElementById('status-badge').style.background = "#00e5ff";
-            document.getElementById('status-badge').style.color = "#000";
+        const videoEl = document.getElementById('main-video');
+        document.getElementById('role-display').innerText = "HOST";
+        document.getElementById('parent-display').innerText = "N/A (Me)";
+        document.getElementById('status-badge').innerText = "Broadcasting";
+        document.getElementById('status-badge').style.background = "#bb86fc";
 
-            // Initialize Tree
-            networkTree[myId] = { tier: 0, children: 0, id: myId };
-        } catch (e) {
-            error("Camera failed: " + e.message);
+        networkTree[myId] = { tier: 0, children: 0, id: myId };
+
+        if (selectedRole === 'host-cam') {
+            try {
+                myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                videoEl.srcObject = myStream;
+                videoEl.muted = true; 
+                log("Camera stream started.");
+            } catch (e) {
+                alert("Camera Error: " + e.message);
+            }
+        } else {
+            const file = document.getElementById('video-input').files[0];
+            const url = URL.createObjectURL(file);
+            videoEl.src = url;
+            videoEl.loop = true;
+            videoEl.muted = false; 
+            
+            try {
+                await videoEl.play();
+                if (videoEl.captureStream) {
+                    myStream = videoEl.captureStream();
+                } else if (videoEl.mozCaptureStream) {
+                    myStream = videoEl.mozCaptureStream();
+                } else {
+                    alert("Browser doesn't support file streaming.");
+                    return;
+                }
+                log("File stream started.");
+            } catch (e) {
+                alert("Playback Error: " + e.message);
+            }
         }
     }
-
-    // --- VIEWER LOGIC ---
 
     function setupViewer() {
-        // We wait for a HOST_ANNOUNCE or we broadcast a request
+        document.getElementById('role-display').innerText = "VIEWER";
         setTimeout(() => {
-            log("Broadcasting join request to swarm...");
-            // We calculate a rough "score" based on random ID or navigator.connection
-            const score = navigator.connection ? navigator.connection.downlink : 10;
-            // Broadcast to everyone "I want to join"
-            // Only the Host will reply with logic.
-            sendSignaling({ type: 'JOIN_REQUEST', score: score }); 
-        }, 2000); // Give Trystero time to connect
+            log("Sending join request...");
+            sendSignaling({ type: 'JOIN_REQUEST' }); 
+        }, 2000);
     }
 
-    // --- SIGNALING HANDLER (The Brains) ---
-
+    // --- SIGNALING ---
     async function handleSignaling(data, senderId) {
-        
-        // --- 1. REGISTRY MESSAGES (Host Logic) ---
-        
-        if (isHost && data.type === 'JOIN_REQUEST') {
-            log(`User ${senderId.substr(0,5)} wants to join.`);
-            assignParentInTree(senderId);
-        }
-
-        if (data.type === 'HOST_ANNOUNCE' && !isHost) {
-            log("Host found. Sending join request...");
-            const score = navigator.connection ? navigator.connection.downlink : 10;
-            sendSignaling({ type: 'JOIN_REQUEST', score: score }, senderId);
-        }
-
-        // --- 2. ARCHITECTURE INSTRUCTIONS ---
-
+        const isHost = selectedRole !== 'viewer';
+        if (isHost && data.type === 'JOIN_REQUEST') assignParentInTree(senderId);
+        if (!isHost && data.type === 'HOST_ANNOUNCE') sendSignaling({ type: 'JOIN_REQUEST' }, senderId);
         if (data.type === 'ASSIGN_PARENT') {
-            // "You are a child. Call this parent."
-            const { parentId, tier } = data;
-            log(`Assigned to Parent: ${parentId.substr(0,5)} (Tier ${tier})`);
-            
-            document.getElementById('tier-display').innerText = tier;
+            const { parentId } = data;
+            log(`Assigned Parent: ${parentId.substr(0,5)}`);
             document.getElementById('parent-display').innerText = parentId.substr(0,5) + "...";
-            
             connectToParent(parentId);
         }
-
-        if (data.type === 'PREPARE_FOR_CHILD') {
-            // "Someone is about to call you. Get ready."
-            log(`Instruction: Expecting call from child ${data.childId.substr(0,5)}`);
-            // We don't need to do much here, just knowing allows us to accept the offer
-        }
-
-        // --- 3. WEBRTC NEGOTIATION (SDP/ICE) ---
-
-        if (data.type === 'OFFER') {
-            handleIncomingOffer(data.sdp, senderId);
-        }
-
-        if (data.type === 'ANSWER') {
-            handleIncomingAnswer(data.sdp, senderId);
-        }
-
-        if (data.type === 'ICE') {
-            handleIncomingIce(data.candidate, senderId);
-        }
+        if (data.type === 'OFFER') handleOffer(data.sdp, senderId);
+        if (data.type === 'ANSWER') handleAnswer(data.sdp, senderId);
+        if (data.type === 'ICE') handleIce(data.candidate, senderId);
     }
 
-    // --- TREE ALGORITHM (Host Only) ---
-    
+    // --- TREE LOGIC ---
     function assignParentInTree(newPeerId) {
-        if (networkTree[newPeerId]) return; // Already in tree
-
-        // BFS to find a node with < MAX_CHILDREN
-        let queue = [myId]; // Start with Host
+        if (networkTree[newPeerId]) return;
+        let queue = [myId];
         let assignedParent = null;
-
         while (queue.length > 0) {
             let candidateId = queue.shift();
             let node = networkTree[candidateId];
-
             if (node.children < MAX_CHILDREN) {
                 assignedParent = candidateId;
                 break;
-            } else {
-                // Add existing children to queue to search deeper
-                // (In a real app, we would track children IDs in the node object)
-                // For this single-file simplified version, we iterate the whole tree
-                // This is O(n), inefficient for million users, fine for demo.
-                Object.values(networkTree)
-                    .filter(n => n.parentId === candidateId)
-                    .forEach(child => queue.push(child.id));
             }
+            Object.values(networkTree)
+                .filter(n => n.parentId === candidateId)
+                .forEach(child => queue.push(child.id));
         }
-
-        if (!assignedParent) assignedParent = myId; // Fallback
-
-        // Update Registry
+        if (!assignedParent) assignedParent = myId;
         const parentTier = networkTree[assignedParent].tier;
-        const newTier = parentTier + 1;
-        
-        networkTree[newPeerId] = { id: newPeerId, tier: newTier, children: 0, parentId: assignedParent };
+        networkTree[newPeerId] = { id: newPeerId, tier: parentTier + 1, children: 0, parentId: assignedParent };
         networkTree[assignedParent].children++;
-
-        // 1. Tell the Parent to expect a child (Optional, but good for security)
-        sendSignaling({ type: 'PREPARE_FOR_CHILD', childId: newPeerId }, assignedParent);
-
-        // 2. Tell the Child who to call
-        sendSignaling({ type: 'ASSIGN_PARENT', parentId: assignedParent, tier: newTier }, newPeerId);
+        sendSignaling({ type: 'ASSIGN_PARENT', parentId: assignedParent }, newPeerId);
     }
 
-    // --- WEBRTC CORE (The Transport) ---
-
-    // A. CONNECTING UP (Child -> Parent)
+    // --- WEBRTC ---
     async function connectToParent(parentId) {
         parentPC = new RTCPeerConnection(RTC_CONFIG);
-        
-        // Setup Receive
         parentPC.addTransceiver('video', { direction: 'recvonly' });
         parentPC.addTransceiver('audio', { direction: 'recvonly' });
-
         parentPC.ontrack = (event) => {
-            log("Video stream received!");
-            document.getElementById('main-video').srcObject = event.streams[0];
-            document.getElementById('status-badge').innerText = "Streaming";
-            document.getElementById('status-badge').style.background = "#00e5ff";
-            document.getElementById('status-badge').style.color = "#000";
-            
-            // CRITICAL: Store stream to relay it later
+            log("Stream received!");
+            const vid = document.getElementById('main-video');
+            vid.srcObject = event.streams[0];
+            vid.muted = false;
             myStream = event.streams[0];
+            document.getElementById('status-badge').innerText = "Live";
+            document.getElementById('status-badge').style.background = "#03dac6";
+            document.getElementById('status-badge').style.color = "#000";
         };
-
-        parentPC.onicecandidate = (event) => {
-            if (event.candidate) sendSignaling({ type: 'ICE', candidate: event.candidate }, parentId);
+        parentPC.onicecandidate = ev => {
+            if (ev.candidate) sendSignaling({ type: 'ICE', candidate: ev.candidate }, parentId);
         };
-
         const offer = await parentPC.createOffer();
         await parentPC.setLocalDescription(offer);
-        
-        // Send Offer via Trystero
         sendSignaling({ type: 'OFFER', sdp: offer }, parentId);
     }
 
-    // B. RECEIVING CONNECTION (Parent -> Child)
-    async function handleIncomingOffer(sdp, childId) {
-        log(`Processing connection from child: ${childId.substr(0,5)}`);
-        
+    async function handleOffer(sdp, childId) {
+        log(`Relaying to: ${childId.substr(0,5)}`);
         const pc = new RTCPeerConnection(RTC_CONFIG);
         childrenPCs[childId] = pc;
         updateStats();
-
-        // RELAY LOGIC: Take current stream tracks and add to new connection
-        if (myStream) {
-            myStream.getTracks().forEach(track => pc.addTrack(track, myStream));
-        } else {
-            warn("Got child request but have no stream yet!");
-        }
-
-        pc.onicecandidate = (event) => {
-            if (event.candidate) sendSignaling({ type: 'ICE', candidate: event.candidate }, childId);
+        if (myStream) myStream.getTracks().forEach(track => pc.addTrack(track, myStream));
+        pc.onicecandidate = ev => {
+            if (ev.candidate) sendSignaling({ type: 'ICE', candidate: ev.candidate }, childId);
         };
-
         pc.onconnectionstatechange = () => {
-             if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-                 log(`Child ${childId.substr(0,5)} disconnected`);
-                 delete childrenPCs[childId];
-                 updateStats();
-             }
+            if (pc.connectionState === 'disconnected') {
+                delete childrenPCs[childId];
+                updateStats();
+            }
         };
-
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-
         sendSignaling({ type: 'ANSWER', sdp: answer }, childId);
     }
 
-    async function handleIncomingAnswer(sdp, senderId) {
-        // Response from our Parent
-        await parentPC.setRemoteDescription(new RTCSessionDescription(sdp));
+    async function handleAnswer(sdp, senderId) { await parentPC.setRemoteDescription(new RTCSessionDescription(sdp)); }
+    async function handleIce(candidate, senderId) {
+        if (parentPC && !childrenPCs[senderId]) await parentPC.addIceCandidate(new RTCIceCandidate(candidate));
+        else if (childrenPCs[senderId]) await childrenPCs[senderId].addIceCandidate(new RTCIceCandidate(candidate));
     }
-
-    async function handleIncomingIce(candidate, senderId) {
-        // Is it from Parent or Child?
-        if (parentPC && isPeerId(senderId, parentPC)) {
-            await parentPC.addIceCandidate(new RTCIceCandidate(candidate));
-        } else if (childrenPCs[senderId]) {
-            await childrenPCs[senderId].addIceCandidate(new RTCIceCandidate(candidate));
-        }
-    }
-
-    // Helper to check if ID matches parent connection logic (simplified)
-    function isPeerId(id, pc) {
-        // In a real app we'd map IDs to PCs strictly. 
-        // Here we assume if it's not in childrenPCs, it's likely the parent.
-        return !childrenPCs[id];
-    }
-
-    // --- LOGGING & UTILS ---
-
-    function updateStats() {
-        document.getElementById('child-count').innerText = Object.keys(childrenPCs).length;
-    }
-
-    function log(msg) {
-        const d = new Date();
-        const time = `${d.getHours()}:${d.getMinutes()}:${d.getSeconds()}`;
+    function updateStats() { document.getElementById('child-count').innerText = Object.keys(childrenPCs).length; }
+    function log(msg) { 
         const div = document.getElementById('logs');
-        div.innerHTML += `<div><span class="log-time">[${time}]</span> <span class="log-info">${msg}</span></div>`;
-        div.scrollTop = div.scrollHeight;
-        console.log(msg);
+        div.innerHTML = `<div><span class="log-info">></span> ${msg}</div>` + div.innerHTML;
     }
-
-    function warn(msg) {
-        const div = document.getElementById('logs');
-        div.innerHTML += `<div><span class="log-warn">WARN: ${msg}</span></div>`;
-    }
-
-    function error(msg) {
-        const div = document.getElementById('logs');
-        div.innerHTML += `<div><span class="log-err">ERR: ${msg}</span></div>`;
-    }
-
-    // Display Network Score Estimation
-    if (navigator.connection) {
-        document.getElementById('net-score').innerText = `Your Est. Bandwidth: ${navigator.connection.downlink} Mbps`;
-    }
-
 </script>
 </body>
 </html>
