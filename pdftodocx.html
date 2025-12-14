@@ -1,0 +1,260 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Convertidor PDF a DOCX (JS Puro)</title>
+<!-- Estilos CSS -->
+<style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            width: 90%;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 1.5rem;
+}
+
+        /* Zona de Arrastrar y Soltar */
+.drop-zone {
+            border: 3px dashed #6c63ff;
+            border-radius: 10px;
+            padding: 40px 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background-color: #fafafa;
+            position: relative;
+        }
+
+        .drop-zone.dragover {
+            background-color: #e0e0ff;
+            border-color: #4a47a3;
+            transform: scale(1.02);
+        }
+
+        .drop-zone p {
+            font-size: 1.1rem;
+color: #666;
+            pointer-events: none; /* Evita interferencia al soltar */
+}
+
+        .drop-zone .icon {
+            font-size: 3rem;
+            color: #6c63ff;
+            margin-bottom: 10px;
+        }
+
+        /* Input oculto */
+        #fileInput {
+            display: none;
+        }
+
+        /* Estado y Botones */
+        #status {
+            margin-top: 20px;
+            font-weight: bold;
+            color: #333;
+            min-height: 24px;
+        }
+
+        .loading {
+            color: #d35400 !important;
+        }
+
+        .success {
+            color: #27ae60 !important;
+        }
+
+        .error {
+            color: #c0392b !important;
+        }
+
+        .download-btn {
+            display: none;
+            margin-top: 20px;
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            font-size: 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .download-btn:hover {
+            background-color: #219150;
+}
+</style>
+
+<!-- Librerías Externas (CDN) -->
+<!-- PDF.js para leer el PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- Docx.js para crear el Word -->
+<script src="https://unpkg.com/docx@7.1.0/build/index.js"></script>
+<!--FileSaver para descargar el archivo -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+</head>
+<body>
+
+<div class="container">
+<h1>PDF a Word (DOCX)</h1>
+
+<div class="drop-zone" id="dropZone">
+<div class="icon">📄➡️📝</div>
+<p>Arrastra tu PDF aquí<br>o haz clic para seleccionar</p>
+<input type="file" id="fileInput" accept="application/pdf">
+</div>
+
+<div id="status"></div>
+<button id="downloadBtn" class="download-btn">Descargar DOCX</button>
+</div>
+
+<!-- Lógica JavaScript -->
+<script>
+        // Configurar Worker de PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const statusDiv = document.getElementById('status');
+        const downloadBtn = document.getElementById('downloadBtn');
+
+        let convertedBlob = null;
+        let originalFileName = "documento";
+
+// Eventos de Arrastrar y Soltar
+dropZone.addEventListener('click', () =>fileInput.click());
+
+dropZone.addEventListener('dragover', (e) => {
+e.preventDefault();
+dropZone.classList.add('dragover');
+        });
+
+dropZone.addEventListener('dragleave', () => {
+dropZone.classList.remove('dragover');
+});
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+dropZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        downloadBtn.addEventListener('click', () => {
+            if (convertedBlob) {
+                saveAs(convertedBlob, originalFileName + ".docx");
+}
+        });
+
+        // Función Principal de Manejo de Archivo
+async function handleFile(file) {
+            if (file.type !== 'application/pdf') {
+showStatus("Error: Por favor selecciona un archivo PDF.", "error");
+return;
+            }
+
+            originalFileName = file.name.replace('.pdf', '');
+showStatus("Leyendo PDF y convirtiendo...", "loading");
+downloadBtn.style.display = 'none';
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+
+// Array para guardar los párrafos de docx
+const docChildren = [];
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    showStatus(`Procesando página ${i} de ${pdf.numPages}...`, "loading");
+
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+
+// Extraer líneas de texto
+                    // Nota: PDF.js devuelve fragmentos de texto ("items").
+                    // La reconstrucción perfecta del layout es compleja, aquí unimos por líneas básicas.
+letlastY = -1;
+letcurrentLine = "";
+
+                    // Ordenar items visualmente (de arriba a abajo)
+                    // (A veces pdf.js devuelve el texto en orden de renderizado, no visual)
+                    /* Simplificación para este ejemplo: iteramos tal cual vienen */
+
+const strings = textContent.items.map(item => item.str);
+
+// Agregar el texto al documento Word
+                    // Creamos un párrafo por cada línea de texto detectada
+strings.forEach((line) => {
+                        if(line.trim() !== "") {
+                            docChildren.push(
+                                new docx.Paragraph({
+                                    children: [new docx.TextRun(line)],
+spacing: { after: 120 } // Espacio pequeño después de cada línea
+                                })
+                            );
+                        }
+                    });
+
+                    // Añadir salto de página si no es la última
+if (i < pdf.numPages) {
+                        docChildren.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
+                    }
+                }
+
+                showStatus("Generando archivo DOCX...", "loading");
+
+                // Crear el documento DOCX
+                const doc = new docx.Document({
+                    sections: [{
+                        properties: {},
+                        children: docChildren,
+                    }],
+                });
+
+                // Empaquetar y preparar descarga
+                const blob = await docx.Packer.toBlob(doc);
+                convertedBlob = blob;
+
+                showStatus("¡Conversión completada!", "success");
+                downloadBtn.style.display = 'inline-block';
+
+} catch (error) {
+console.error(error);
+showStatus("Ocurrió un error al procesar el PDF.", "error");
+}
+        }
+
+        function showStatus(text, type) {
+            statusDiv.textContent = text;
+            statusDiv.className = type;
+        }
+</script>
+</body>
+</html>
