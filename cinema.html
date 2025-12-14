@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Buffered P2P Cinema</title>
+    <title>Buffered P2P Cinema (Flow Control)</title>
     <style>
-        body { background: #000; color: #eee; font-family: sans-serif; text-align: center; margin: 0; padding: 20px; }
+        body { background: #000; color: #eee; font-family: monospace; text-align: center; margin: 0; padding: 20px; }
         .container { max-width: 800px; margin: 0 auto; }
         .panel { border: 1px solid #333; padding: 20px; border-radius: 8px; background: #111; margin-bottom: 20px; }
         .hidden { display: none !important; }
@@ -18,10 +18,10 @@
         .progress-bar { width: 100%; height: 10px; background: #333; margin-top: 5px; border-radius: 5px; overflow: hidden; }
         .fill { height: 100%; background: #28a745; width: 0%; transition: width 0.2s; }
         
-        #stats { font-family: monospace; font-size: 12px; color: #888; margin-top: 10px; }
+        #stats { font-size: 12px; color: #888; margin-top: 10px; line-height: 1.6; }
+        #console-preview { text-align: left; height: 150px; overflow-y: scroll; background: #080808; border: 1px solid #333; padding: 5px; font-size: 11px; color: #0f0; margin-top: 10px; }
     </style>
     
-    <!-- Using Trystero Torrent Strategy -->
     <script type="module">
         import { joinRoom } from 'https://esm.run/trystero/torrent';
         window.joinRoom = joinRoom;
@@ -30,15 +30,15 @@
 <body>
 
 <div class="container">
-    <h2>P2P <span style="color:#007bff">Buffered</span> Cinema</h2>
+    <h2>P2P <span style="color:#007bff">Cinema</span> (Batched ACK)</h2>
 
     <!-- SETUP -->
     <div id="setup-panel" class="panel">
-        <input type="text" id="room-input" value="movie-night" style="padding:10px; border-radius:4px; border:none;">
+        <input type="text" id="room-input" value="cinema-ack-v1" style="padding:10px; border-radius:4px; border:none;">
         <br><br>
         
         <div id="host-controls">
-            <p><strong>Host:</strong> Select a video file (.mp4 recommended)</p>
+            <p><strong>Host:</strong> Select a video file (.mp4)</p>
             <input type="file" id="file-input" accept="video/mp4,video/webm">
             <br><br>
             <button onclick="startHost()">Start Broadcast</button>
@@ -51,30 +51,46 @@
 
     <!-- PLAYER -->
     <div id="player-panel" class="panel hidden">
-        <video id="video-player" controls playsinline></video>
+        <video id="video-player" controls playsinline muted></video>
         <div class="progress-bar"><div id="buffer-bar" class="fill"></div></div>
         
         <div id="stats">
-            Status: <span id="status-text">Connecting...</span> | 
-            Peers: <span id="peer-count">0</span> | 
-            Downloaded: <span id="dl-size">0</span> MB
+            <span>Status: <span id="status-text">Connecting...</span></span> | 
+            <span>Peers: <span id="peer-count">0</span></span> | 
+            <span>Buffer: <span id="buffer-stat">0s</span></span> |
+            <span>Downloaded: <span id="dl-size">0</span> MB</span>
         </div>
+        <div id="console-preview">Logs will appear here...</div>
     </div>
 </div>
 
 <script>
-    const CHUNK_SIZE = 16 * 1024; // 16KB chunks (Safe for WebRTC)
-    let room, sendChunk, getPeerId, onChunkReceived;
+    function logToScreen(msg) {
+        const div = document.getElementById('console-preview');
+        div.innerHTML += `> ${msg}<br>`;
+        div.scrollTop = div.scrollHeight;
+        console.log(msg); // Keep console clean for debug
+    }
+
+    const CHUNK_SIZE = 16 * 1024; 
+    const BATCH_SIZE = 50; // Host sends 50 chunks, then waits for ACK
+
+    let room, sendBinary, onBinaryReceived; 
+    
     let state = {
         role: 'viewer',
         peers: [],
         mediaSource: null,
         sourceBuffer: null,
-        queue: [], // Chunks waiting to be appended to buffer
+        queue: [], 
         totalBytes: 0,
-        isBufferBusy: false,
-        fileReader: null,
-        file: null
+        file: null,
+        chunkCounter: 0,
+        
+        // Flow Control State
+        chunksInBatch: 0,
+        viewerBatchCount: 0,
+        resumeStreamFn: null // Host stores the 'readNext' function here
     };
 
     // --- INITIALIZATION ---
@@ -86,21 +102,19 @@
         state.file = fileInput.files[0];
         state.role = 'host';
         
-        // Setup UI
+        logToScreen(`[HOST] File: ${state.file.name} (${(state.file.size/1024/1024).toFixed(2)} MB)`);
         initUI();
         
-        // Setup Video for Local Playback (Host watches directly)
         const vid = document.getElementById('video-player');
         vid.src = URL.createObjectURL(state.file);
         
-        // Start Trystero
         initP2P();
     }
 
     function startViewer() {
         state.role = 'viewer';
         initUI();
-        initMSE(); // Viewer needs MediaSource to buffer incoming data
+        initMSE(); 
         initP2P();
     }
 
@@ -109,81 +123,104 @@
         document.getElementById('player-panel').classList.remove('hidden');
     }
 
-    // --- P2P SIGNALING (Trystero) ---
+    // --- P2P SIGNALING ---
 
     function initP2P() {
         const roomName = document.getElementById('room-input').value;
-        const appId = 'p2p-buffered-cinema-v1';
+        const appId = 'p2p-cinema-ack-v7'; // Unique ID to avoid cache
         
         document.getElementById('status-text').innerText = "Joining Swarm...";
 
         room = window.joinRoom({ appId }, roomName);
         
-        // Create a binary channel for chunks
-        const [sendBin, getPid, onBin] = room.makeAction('binary');
-        sendChunk = sendBin;
-        onChunkReceived = onBin;
-        getPeerId = getPid;
+        const [sendBin, onBin] = room.makeAction('binary');
+        sendBinary = sendBin;
+        onBinaryReceived = onBin;
 
         room.onPeerJoin(peerId => {
+            logToScreen(`[P2P] Peer joined: ${peerId}`);
             state.peers.push(peerId);
             updateStats();
             
-            if (state.role === 'host') {
-                // New peer joined? Start sending them the file from 0!
-                // NOTE: A real robust app would check where they are. 
-                // Here we just stream the file linearly to everyone.
-                streamFileToPeer(peerId);
+            // Handshake Step 1: Viewer sends READY
+            if (state.role === 'viewer') {
+                logToScreen(`[VIEWER] Sending READY to ${peerId}...`);
+                setTimeout(() => sendBinary(new TextEncoder().encode("READY"), peerId), 1000);
             }
         });
 
         room.onPeerLeave(peerId => {
+            logToScreen(`[P2P] Peer left: ${peerId}`);
             state.peers = state.peers.filter(p => p !== peerId);
             updateStats();
         });
 
-        // Handle Incoming Chunks (Viewer Logic)
-        onChunkReceived((data, senderId) => {
+        onBinaryReceived((data, senderId) => {
+            // HOST RECEIVES MESSAGES
+            if (state.role === 'host') {
+                try {
+                    // Try to decode control messages (READY, ACK)
+                    const text = new TextDecoder().decode(data);
+                    
+                    if (text === "READY") {
+                        logToScreen(`[HOST] 🟢 Received READY. Starting stream.`);
+                        streamFileToPeer(senderId);
+                    }
+                    else if (text === "ACK") {
+                        // Flow Control: Resume streaming
+                        // logToScreen(`[HOST] 🔄 ACK received. Resuming batch.`);
+                        if (state.resumeStreamFn) {
+                            state.chunksInBatch = 0; // Reset counter
+                            state.resumeStreamFn(); // Call readNext()
+                        }
+                    }
+                } catch(e) { /* Ignore non-text */ }
+            }
+            
+            // VIEWER RECEIVES DATA
             if (state.role === 'viewer') {
-                handleIncomingChunk(data);
-                
-                // RECURSIVE RELAY (The "Bucket Brigade")
-                // If I have other peers connected (that aren't the sender), forward data!
-                // Note: Trystero is mesh, so usually the host sends to everyone. 
-                // But if Host -> A, and B joins A (but can't see Host), A forwards.
-                // For simplicity in this demo, we just process playback.
+                // Pass senderId so we can reply with ACK
+                handleIncomingChunk(data, senderId);
             }
         });
     }
 
-    // --- HOST LOGIC: READ & SEND FILE ---
+    // --- HOST LOGIC (WITH FLOW CONTROL) ---
 
     function streamFileToPeer(peerId) {
         if (!state.file) return;
-
-        // We create a dedicated reader for this peer to send file start-to-finish
-        // This is simplified. In production, you'd sync playback position.
+        
         let offset = 0;
+        let chunkNum = 0;
         const reader = new FileReader();
 
         reader.onload = (e) => {
-            if (state.peers.indexOf(peerId) === -1) return; // Peer left
+            if (state.peers.indexOf(peerId) === -1) return; 
 
-            const chunk = e.target.result; // ArrayBuffer
+            const chunk = e.target.result;
+            chunkNum++;
+            state.chunksInBatch++;
+
+            sendBinary(chunk, peerId);
             
-            // 1. Send Chunk
-            sendChunk(chunk, peerId);
+            if(chunkNum % 100 === 0 || chunkNum === 1) {
+                console.log(`[HOST] Sent chunk #${chunkNum}`);
+            }
             
-            // 2. Read Next
             offset += CHUNK_SIZE;
+
+            // --- FLOW CONTROL LOGIC ---
             if (offset < state.file.size) {
-                // Small delay to prevent flooding the data channel buffer
-                // Trystero/WebRTC handles backpressure internally but this helps UI
-                setTimeout(() => {
-                    readNext();
-                }, 5); 
+                if (state.chunksInBatch >= BATCH_SIZE) {
+                    // STOP! Wait for ACK.
+                    // logToScreen(`[HOST] ⏸️ Batch limit (${BATCH_SIZE}) reached. Waiting for ACK.`);
+                    return; 
+                }
+                
+                // If not at limit, keep sending fast (5ms)
+                setTimeout(() => readNext(), 5); 
             } else {
-                console.log("Finished sending file to", peerId);
+                logToScreen(`[HOST] ✅ Finished sending file.`);
             }
         };
 
@@ -192,64 +229,103 @@
             reader.readAsArrayBuffer(slice);
         };
 
+        // Save reference so the Event Handler can resume it later
+        state.resumeStreamFn = readNext;
+
+        // Start
         readNext();
     }
 
-    // --- VIEWER LOGIC: MEDIA SOURCE EXTENSIONS (MSE) ---
-function initMSE() {
-    const vid = document.getElementById('video-player');
-    state.mediaSource = new MediaSource();
-    vid.src = URL.createObjectURL(state.mediaSource);
+    // --- VIEWER LOGIC (SENDS ACKS) ---
 
-    state.mediaSource.addEventListener('sourceopen', () => {
-        // Standard H.264 MP4 mime type
-        const mime = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'; 
-        
-        try {
-            state.sourceBuffer = state.mediaSource.addSourceBuffer(mime);
+    function initMSE() {
+        const vid = document.getElementById('video-player');
+        state.mediaSource = new MediaSource();
+        vid.src = URL.createObjectURL(state.mediaSource);
+
+        state.mediaSource.addEventListener('sourceopen', () => {
+            logToScreen("[MSE] MediaSource Open.");
+            const mime = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'; 
             
-            // FIX: Set mode to 'sequence' to handle raw file slices
-            state.sourceBuffer.mode = 'sequence'; 
+            try {
+                state.sourceBuffer = state.mediaSource.addSourceBuffer(mime);
+                state.sourceBuffer.mode = 'sequence'; 
+                state.sourceBuffer.addEventListener('updateend', processQueue);
+                document.getElementById('status-text').innerText = "Waiting...";
+            } catch (e) {
+                logToScreen(`[MSE] ❌ Codec Error: ${e.message}`);
+            }
+        });
+    }
 
-            state.sourceBuffer.addEventListener('updateend', processQueue);
-            document.getElementById('status-text').innerText = "Ready to Buffer";
-        } catch (e) {
-            console.error(e);
-            alert("Codec Error: Try using a standard H.264 MP4 file.");
+    async function handleIncomingChunk(data, senderId) {
+        // Ignore "READY" echo
+        if (data.byteLength < 20) return; 
+
+        state.chunkCounter++;
+        state.viewerBatchCount++;
+
+        let chunk = data;
+
+        if (state.chunkCounter === 1) logToScreen("[VIEWER] 🎬 First chunk received!");
+
+        // --- FLOW CONTROL: SEND ACK ---
+        if (state.viewerBatchCount >= BATCH_SIZE) {
+            // logToScreen(`[VIEWER] 📤 Batch complete (${BATCH_SIZE}). Sending ACK.`);
+            sendBinary(new TextEncoder().encode("ACK"), senderId);
+            state.viewerBatchCount = 0; // Reset
         }
-    });
-}
-    function handleIncomingChunk(data) {
-    if (!data) return;
 
-    // FIX: Explicitly cast to Uint8Array. 
-    // This handles cases where Trystero returns a plain JS Array or an ArrayBuffer.
-    const chunk = new Uint8Array(data);
+        // Process Data
+        if (data instanceof Blob) {
+            chunk = await data.arrayBuffer();
+        } else if (!(chunk instanceof ArrayBuffer) && !ArrayBuffer.isView(chunk)) {
+            chunk = new Uint8Array(data);
+        }
 
-    state.totalBytes += chunk.byteLength;
-    document.getElementById('dl-size').innerText = (state.totalBytes / 1024 / 1024).toFixed(1);
-
-    state.queue.push(chunk);
-    processQueue();
-}
+        state.queue.push(chunk);
+        
+        if (state.sourceBuffer && !state.sourceBuffer.updating) {
+            processQueue();
+        }
+    }
 
     function processQueue() {
+        const vid = document.getElementById('video-player');
+        
+        if (state.mediaSource.readyState !== 'open') return;
+
         if (state.sourceBuffer && !state.sourceBuffer.updating && state.queue.length > 0) {
             const chunk = state.queue.shift();
             try {
                 state.sourceBuffer.appendBuffer(chunk);
+                
+                state.totalBytes += chunk.byteLength;
+                const dlSizeElem = document.getElementById('dl-size');
+                if (dlSizeElem) dlSizeElem.innerText = (state.totalBytes / 1024 / 1024).toFixed(2);
+                
             } catch (e) {
-                console.error("MSE Error:", e);
+                console.error(e);
+            }
+        }
+
+        if (state.sourceBuffer && state.sourceBuffer.buffered.length > 0) {
+            const end = state.sourceBuffer.buffered.end(state.sourceBuffer.buffered.length - 1);
+            
+            const bufferElem = document.getElementById('buffer-stat');
+            if (bufferElem) bufferElem.innerText = end.toFixed(1) + "s";
+            
+            // Autoplay (Muted needed for Chrome policy)
+            if (vid.paused && end > 2) { 
+                vid.play().catch(e => console.log("Autoplay blocked:", e));
             }
         }
     }
 
-    // --- UTILS ---
-
     function updateStats() {
         document.getElementById('peer-count').innerText = state.peers.length;
         if (state.peers.length > 0 && state.role === 'host') {
-            document.getElementById('status-text').innerText = "Streaming to Peers";
+            document.getElementById('status-text').innerText = "Connected";
         }
     }
 </script>
