@@ -2,332 +2,268 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Buffered P2P Cinema (Flow Control)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Cinema | Real-time Transcoding</title>
     <style>
-        body { background: #000; color: #eee; font-family: monospace; text-align: center; margin: 0; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .panel { border: 1px solid #333; padding: 20px; border-radius: 8px; background: #111; margin-bottom: 20px; }
-        .hidden { display: none !important; }
+        :root { --bg: #000; --panel: #111; --accent: #00e5ff; --text: #eee; }
+        body { background: var(--bg); color: var(--text); font-family: monospace; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+        
+        .container { width: 100%; max-width: 900px; display: grid; gap: 20px; }
+        .panel { background: var(--panel); border: 1px solid #333; padding: 20px; border-radius: 8px; }
         
         video { width: 100%; aspect-ratio: 16/9; background: #000; border: 1px solid #333; }
         
-        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin: 5px; }
-        button:hover { background: #0056b3; }
-        button.secondary { background: #444; }
+        button { background: #222; border: 1px solid #444; color: #fff; padding: 10px 20px; cursor: pointer; border-radius: 4px; font-family: inherit; transition: 0.2s; }
+        button:hover { border-color: var(--accent); color: var(--accent); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.primary { background: var(--accent); color: #000; border: none; font-weight: bold; }
+        button.primary:hover { background: #00b8cc; color: #000; }
 
-        .progress-bar { width: 100%; height: 10px; background: #333; margin-top: 5px; border-radius: 5px; overflow: hidden; }
-        .fill { height: 100%; background: #28a745; width: 0%; transition: width 0.2s; }
+        input[type="text"] { background: #222; border: 1px solid #444; color: #fff; padding: 10px; width: 200px; text-align: center; }
         
-        #stats { font-size: 12px; color: #888; margin-top: 10px; line-height: 1.6; }
-        #console-preview { text-align: left; height: 150px; overflow-y: scroll; background: #080808; border: 1px solid #333; padding: 5px; font-size: 11px; color: #0f0; margin-top: 10px; }
+        .hidden { display: none !important; }
+        .stats { font-size: 12px; color: #888; margin-top: 10px; display: flex; justify-content: space-between; }
+        .log-box { height: 100px; overflow-y: scroll; background: #050505; border: 1px solid #333; padding: 10px; font-size: 11px; color: #0f0; margin-top: 10px; white-space: pre-wrap; }
+
+        .progress-track { height: 5px; background: #333; margin-top: 5px; position: relative; }
+        .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.2s; }
     </style>
-    
+
     <script type="module">
-        import { joinRoom } from 'https://esm.run/trystero/torrent';
+        import { joinRoom } from 'https://esm.sh/trystero@0.19.0/torrent';
         window.joinRoom = joinRoom;
     </script>
 </head>
 <body>
 
 <div class="container">
-    <h2>P2P <span style="color:#007bff">Cinema</span> (Batched ACK)</h2>
-
-    <!-- SETUP -->
-    <div id="setup-panel" class="panel">
-        <input type="text" id="room-input" value="cinema-ack-v1" style="padding:10px; border-radius:4px; border:none;">
-        <br><br>
+    <div class="panel">
+        <h2 style="margin: 0 0 15px 0;">P2P Cinema <span style="color:var(--accent)">Transcoder</span></h2>
         
-        <div id="host-controls">
-            <p><strong>Host:</strong> Select a video file (.mp4)</p>
-            <input type="file" id="file-input" accept="video/mp4,video/webm">
+        <!-- SETUP UI -->
+        <div id="setup-ui">
+            <input type="text" id="room-input" value="cinema-transcode" placeholder="Room ID">
             <br><br>
-            <button onclick="startHost()">Start Broadcast</button>
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <div style="border:1px solid #333; padding: 15px; border-radius:4px;">
+                    <h3>HOST</h3>
+                    <input type="file" id="file-input" accept="video/*">
+                    <br><br>
+                    <button class="primary" onclick="startHost()">Broadcast File</button>
+                </div>
+                <div style="border:1px solid #333; padding: 15px; border-radius:4px;">
+                    <h3>VIEWER</h3>
+                    <p style="margin: 5px 0 22px 0; color:#666">Join room and wait</p>
+                    <button onclick="startViewer()">Join Stream</button>
+                </div>
+            </div>
         </div>
-        <hr style="border-color:#333; margin: 20px 0;">
-        <div id="viewer-controls">
-            <button class="secondary" onclick="startViewer()">Join as Viewer</button>
-        </div>
-    </div>
 
-    <!-- PLAYER -->
-    <div id="player-panel" class="panel hidden">
-        <video id="video-player" controls playsinline muted></video>
-        <div class="progress-bar"><div id="buffer-bar" class="fill"></div></div>
-        
-        <div id="stats">
-            <span>Status: <span id="status-text">Connecting...</span></span> | 
-            <span>Peers: <span id="peer-count">0</span></span> | 
-            <span>Buffer: <span id="buffer-stat">0s</span></span> |
-            <span>Downloaded: <span id="dl-size">0</span> MB</span>
+        <!-- PLAYER UI -->
+        <div id="player-ui" class="hidden">
+            <video id="host-source" class="hidden" playsinline muted></video>
+            <video id="main-display" controls playsinline autoplay></video>
+            <div class="progress-track"><div id="buffer-bar" class="progress-fill"></div></div>
+            
+            <div class="stats">
+                <span id="role-badge">ROLE: -</span>
+                <span>Buffer: <span id="buffer-stat">0</span>s</span>
+                <span>Peers: <span id="peer-count">0</span></span>
+            </div>
         </div>
-        <div id="console-preview">Logs will appear here...</div>
+        
+        <div id="logs" class="log-box"></div>
     </div>
 </div>
 
 <script>
-    function logToScreen(msg) {
-        const div = document.getElementById('console-preview');
-        div.innerHTML += `> ${msg}<br>`;
-        div.scrollTop = div.scrollHeight;
-        console.log(msg); // Keep console clean for debug
-    }
+    const CONFIG = {
+        appId: 'p2p-cinema-transcode-v1',
+        mimeType: 'video/webm; codecs="vp9"' 
+    };
 
-    const CHUNK_SIZE = 16 * 1024; 
-    const BATCH_SIZE = 50; // Host sends 50 chunks, then waits for ACK
-
-    let room, sendBinary, onBinaryReceived; 
-    
     let state = {
-        role: 'viewer',
+        room: null,
         peers: [],
         mediaSource: null,
         sourceBuffer: null,
-        queue: [], 
-        totalBytes: 0,
-        file: null,
-        chunkCounter: 0,
-        
-        // Flow Control State
-        chunksInBatch: 0,
-        viewerBatchCount: 0,
-        resumeStreamFn: null // Host stores the 'readNext' function here
+        queue: [],
+        isUpdating: false,
+        recorder: null,
+        isHost: false
     };
 
-    // --- INITIALIZATION ---
+    let sendChunk;
+
+    function log(msg) {
+        const d = document.getElementById('logs');
+        d.innerHTML += `> ${msg}\n`;
+        d.scrollTop = d.scrollHeight;
+        console.log(msg);
+    }
+
+    // --- BUTTON HANDLERS ---
+    
+    // This was missing in the previous version!
+    function startViewer() {
+        initP2P('viewer');
+    }
 
     async function startHost() {
         const fileInput = document.getElementById('file-input');
-        if (!fileInput.files.length) return alert("Please select a file!");
-        
-        state.file = fileInput.files[0];
-        state.role = 'host';
-        
-        logToScreen(`[HOST] File: ${state.file.name} (${(state.file.size/1024/1024).toFixed(2)} MB)`);
-        initUI();
-        
-        const vid = document.getElementById('video-player');
-        vid.src = URL.createObjectURL(state.file);
-        
-        initP2P();
-    }
+        if (!fileInput.files.length) return alert("Select a file first");
 
-    function startViewer() {
-        state.role = 'viewer';
-        initUI();
-        initMSE(); 
-        initP2P();
-    }
-
-    function initUI() {
-        document.getElementById('setup-panel').classList.add('hidden');
-        document.getElementById('player-panel').classList.remove('hidden');
-    }
-
-    // --- P2P SIGNALING ---
-
-    function initP2P() {
-        const roomName = document.getElementById('room-input').value;
-        const appId = 'p2p-cinema-ack-v7'; // Unique ID to avoid cache
+        // Prepare Host Video
+        const hostVid = document.getElementById('host-source');
+        const fileURL = URL.createObjectURL(fileInput.files[0]);
+        hostVid.src = fileURL;
         
-        document.getElementById('status-text').innerText = "Joining Swarm...";
-
-        room = window.joinRoom({ appId }, roomName);
+        await new Promise(r => hostVid.onloadedmetadata = r);
         
-        const [sendBin, onBin] = room.makeAction('binary');
-        sendBinary = sendBin;
-        onBinaryReceived = onBin;
+        // Start P2P
+        initP2P('host');
 
-        room.onPeerJoin(peerId => {
-            logToScreen(`[P2P] Peer joined: ${peerId}`);
-            state.peers.push(peerId);
-            updateStats();
-            
-            // Handshake Step 1: Viewer sends READY
-            if (state.role === 'viewer') {
-                logToScreen(`[VIEWER] Sending READY to ${peerId}...`);
-                setTimeout(() => sendBinary(new TextEncoder().encode("READY"), peerId), 1000);
-            }
+        // Setup Transcoding
+        let stream;
+        if (hostVid.captureStream) stream = hostVid.captureStream(30);
+        else if (hostVid.mozCaptureStream) stream = hostVid.mozCaptureStream(30);
+        else return alert("Browser does not support captureStream");
+
+        // Setup Preview
+        const displayVid = document.getElementById('main-display');
+        displayVid.srcObject = stream;
+        displayVid.muted = true; 
+
+        // Setup Recorder
+        let mime = CONFIG.mimeType;
+        if (!MediaRecorder.isTypeSupported(mime)) {
+            mime = 'video/webm; codecs="vp8"';
+            if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+        }
+        log(`Transcoding to: ${mime}`);
+
+        state.recorder = new MediaRecorder(stream, { 
+            mimeType: mime,
+            videoBitsPerSecond: 2500000 
         });
 
-        room.onPeerLeave(peerId => {
-            logToScreen(`[P2P] Peer left: ${peerId}`);
-            state.peers = state.peers.filter(p => p !== peerId);
-            updateStats();
-        });
-
-        onBinaryReceived((data, senderId) => {
-            // HOST RECEIVES MESSAGES
-            if (state.role === 'host') {
-                try {
-                    // Try to decode control messages (READY, ACK)
-                    const text = new TextDecoder().decode(data);
-                    
-                    if (text === "READY") {
-                        logToScreen(`[HOST] 🟢 Received READY. Starting stream.`);
-                        streamFileToPeer(senderId);
-                    }
-                    else if (text === "ACK") {
-                        // Flow Control: Resume streaming
-                        // logToScreen(`[HOST] 🔄 ACK received. Resuming batch.`);
-                        if (state.resumeStreamFn) {
-                            state.chunksInBatch = 0; // Reset counter
-                            state.resumeStreamFn(); // Call readNext()
-                        }
-                    }
-                } catch(e) { /* Ignore non-text */ }
-            }
-            
-            // VIEWER RECEIVES DATA
-            if (state.role === 'viewer') {
-                // Pass senderId so we can reply with ACK
-                handleIncomingChunk(data, senderId);
-            }
-        });
-    }
-
-    // --- HOST LOGIC (WITH FLOW CONTROL) ---
-
-    function streamFileToPeer(peerId) {
-        if (!state.file) return;
-        
-        let offset = 0;
-        let chunkNum = 0;
-        const reader = new FileReader();
-
-        reader.onload = (e) => {
-            if (state.peers.indexOf(peerId) === -1) return; 
-
-            const chunk = e.target.result;
-            chunkNum++;
-            state.chunksInBatch++;
-
-            sendBinary(chunk, peerId);
-            
-            if(chunkNum % 100 === 0 || chunkNum === 1) {
-                console.log(`[HOST] Sent chunk #${chunkNum}`);
-            }
-            
-            offset += CHUNK_SIZE;
-
-            // --- FLOW CONTROL LOGIC ---
-            if (offset < state.file.size) {
-                if (state.chunksInBatch >= BATCH_SIZE) {
-                    // STOP! Wait for ACK.
-                    // logToScreen(`[HOST] ⏸️ Batch limit (${BATCH_SIZE}) reached. Waiting for ACK.`);
-                    return; 
+        state.recorder.ondataavailable = async (e) => {
+            if (e.data.size > 0) {
+                const buffer = await e.data.arrayBuffer();
+                if (state.peers.length > 0) {
+                    sendChunk(buffer);
                 }
-                
-                // If not at limit, keep sending fast (5ms)
-                setTimeout(() => readNext(), 5); 
-            } else {
-                logToScreen(`[HOST] ✅ Finished sending file.`);
             }
         };
 
-        const readNext = () => {
-            const slice = state.file.slice(offset, offset + CHUNK_SIZE);
-            reader.readAsArrayBuffer(slice);
-        };
-
-        // Save reference so the Event Handler can resume it later
-        state.resumeStreamFn = readNext;
-
-        // Start
-        readNext();
+        state.recorder.start(100); 
+        hostVid.play();
+        log("Broadcasting started!");
     }
 
-    // --- VIEWER LOGIC (SENDS ACKS) ---
+    // --- P2P LOGIC ---
 
-    function initMSE() {
-        const vid = document.getElementById('video-player');
+    function initP2P(role) {
+        const roomId = document.getElementById('room-input').value;
+        document.getElementById('setup-ui').classList.add('hidden');
+        document.getElementById('player-ui').classList.remove('hidden');
+        document.getElementById('role-badge').innerText = `ROLE: ${role.toUpperCase()}`;
+
+        state.isHost = (role === 'host');
+        
+        log(`Joining room: ${roomId}...`);
+        
+        if (!window.joinRoom) return alert("Library loading... wait 1 sec");
+        state.room = window.joinRoom({ appId: CONFIG.appId }, roomId);
+
+        const [send, get] = state.room.makeAction('video-stream');
+        sendChunk = send;
+
+        state.room.onPeerJoin(id => {
+            log(`Peer joined: ${id}`);
+            state.peers.push(id);
+            document.getElementById('peer-count').innerText = state.peers.length;
+            
+            if(state.isHost && state.recorder && state.recorder.state === 'recording') {
+                state.recorder.requestData();
+            }
+        });
+
+        state.room.onPeerLeave(id => {
+            state.peers = state.peers.filter(p => p !== id);
+            document.getElementById('peer-count').innerText = state.peers.length;
+        });
+
+        if (!state.isHost) {
+            setupViewerMSE(get);
+        }
+    }
+
+    // --- VIEWER MSE LOGIC ---
+
+    function setupViewerMSE(getChunkAction) {
+        const vid = document.getElementById('main-display');
         state.mediaSource = new MediaSource();
         vid.src = URL.createObjectURL(state.mediaSource);
 
         state.mediaSource.addEventListener('sourceopen', () => {
-            logToScreen("[MSE] MediaSource Open.");
-            const mime = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'; 
+            log("MediaSource Ready. Waiting for data...");
+            
+            // Try to match the recorder's likely output
+            const mime = 'video/webm; codecs="vp9, opus"'; 
             
             try {
-                state.sourceBuffer = state.mediaSource.addSourceBuffer(mime);
-                state.sourceBuffer.mode = 'sequence'; 
+                if (MediaSource.isTypeSupported(mime)) {
+                    state.sourceBuffer = state.mediaSource.addSourceBuffer(mime);
+                } else {
+                    state.sourceBuffer = state.mediaSource.addSourceBuffer('video/webm; codecs="vp8, vorbis"');
+                }
+                
+                state.sourceBuffer.mode = 'sequence';
                 state.sourceBuffer.addEventListener('updateend', processQueue);
-                document.getElementById('status-text').innerText = "Waiting...";
+
             } catch (e) {
-                logToScreen(`[MSE] ❌ Codec Error: ${e.message}`);
+                log(`MSE Error: ${e.message}`);
             }
+        });
+
+        getChunkAction((data, peerId) => {
+            let chunk = data instanceof Uint8Array ? data : new Uint8Array(data);
+            state.queue.push(chunk);
+            if (state.sourceBuffer && !state.sourceBuffer.updating) processQueue();
         });
     }
 
-    async function handleIncomingChunk(data, senderId) {
-        // Ignore "READY" echo
-        if (data.byteLength < 20) return; 
-
-        state.chunkCounter++;
-        state.viewerBatchCount++;
-
-        let chunk = data;
-
-        if (state.chunkCounter === 1) logToScreen("[VIEWER] 🎬 First chunk received!");
-
-        // --- FLOW CONTROL: SEND ACK ---
-        if (state.viewerBatchCount >= BATCH_SIZE) {
-            // logToScreen(`[VIEWER] 📤 Batch complete (${BATCH_SIZE}). Sending ACK.`);
-            sendBinary(new TextEncoder().encode("ACK"), senderId);
-            state.viewerBatchCount = 0; // Reset
-        }
-
-        // Process Data
-        if (data instanceof Blob) {
-            chunk = await data.arrayBuffer();
-        } else if (!(chunk instanceof ArrayBuffer) && !ArrayBuffer.isView(chunk)) {
-            chunk = new Uint8Array(data);
-        }
-
-        state.queue.push(chunk);
-        
-        if (state.sourceBuffer && !state.sourceBuffer.updating) {
-            processQueue();
-        }
-    }
-
     function processQueue() {
-        const vid = document.getElementById('video-player');
-        
-        if (state.mediaSource.readyState !== 'open') return;
+        if (!state.sourceBuffer || state.sourceBuffer.updating || state.queue.length === 0) return;
 
-        if (state.sourceBuffer && !state.sourceBuffer.updating && state.queue.length > 0) {
-            const chunk = state.queue.shift();
-            try {
-                state.sourceBuffer.appendBuffer(chunk);
-                
-                state.totalBytes += chunk.byteLength;
-                const dlSizeElem = document.getElementById('dl-size');
-                if (dlSizeElem) dlSizeElem.innerText = (state.totalBytes / 1024 / 1024).toFixed(2);
-                
-            } catch (e) {
-                console.error(e);
-            }
-        }
-
-        if (state.sourceBuffer && state.sourceBuffer.buffered.length > 0) {
-            const end = state.sourceBuffer.buffered.end(state.sourceBuffer.buffered.length - 1);
-            
-            const bufferElem = document.getElementById('buffer-stat');
-            if (bufferElem) bufferElem.innerText = end.toFixed(1) + "s";
-            
-            // Autoplay (Muted needed for Chrome policy)
-            if (vid.paused && end > 2) { 
-                vid.play().catch(e => console.log("Autoplay blocked:", e));
-            }
+        const chunk = state.queue.shift();
+        try {
+            state.sourceBuffer.appendBuffer(chunk);
+            updateStats();
+        } catch (e) {
+            // log(`Buffer append error`);
         }
     }
 
     function updateStats() {
-        document.getElementById('peer-count').innerText = state.peers.length;
-        if (state.peers.length > 0 && state.role === 'host') {
-            document.getElementById('status-text').innerText = "Connected";
+        const vid = document.getElementById('main-display');
+        if (state.sourceBuffer && state.sourceBuffer.buffered.length) {
+            const end = state.sourceBuffer.buffered.end(state.sourceBuffer.buffered.length - 1);
+            const current = vid.currentTime;
+            const diff = end - current;
+
+            document.getElementById('buffer-stat').innerText = diff.toFixed(1);
+            
+            if (vid.paused && diff > 1) {
+                vid.play().catch(e => {});
+            }
+
+            const pct = Math.min(100, (diff / 30) * 100);
+            document.getElementById('buffer-bar').style.width = `${pct}%`;
         }
     }
+
 </script>
 </body>
 </html>
