@@ -28,11 +28,11 @@
         .log-info { color: var(--secondary); }
     </style>
 
-    <!-- FIX: Import Trystero as a Module and attach to Window -->
+    <!-- Import Trystero and attach to window -->
     <script type="module">
         import { joinRoom } from 'https://esm.sh/trystero@0.19.0/torrent';
-        window.joinRoom = joinRoom; 
-        console.log("Trystero Library Loaded");
+        window.joinRoom = joinRoom;
+        console.log("Trystero Loaded");
     </script>
 </head>
 <body>
@@ -129,11 +129,8 @@
 
     // --- INITIALIZATION ---
     async function initApp() {
-        if (!window.joinRoom) return alert("Library loading... please wait 2 seconds and try again.");
-        if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-            alert("Security Warning: WebRTC requires HTTPS or Localhost.");
-        }
-
+        if (!window.joinRoom) return alert("Library loading... wait 2s and try again.");
+        
         const roomName = document.getElementById('room-id').value;
         if (!roomName) return alert("Enter a room name");
 
@@ -148,11 +145,15 @@
 
         log(`Connecting to swarm: ${roomName}...`);
         
-        // FIX: Use the window.joinRoom that we attached in the module script
-        room = window.joinRoom({ appId: 'p2p-fixed-stream' }, roomName);
+        // Join Trystero Room
+        room = window.joinRoom({ appId: 'p2p-fixed-stream-v2' }, roomName);
         
-        [sendSignaling, getPeerId] = room.makeAction('signal');
+        // FIX: Extract send, getID, AND the Listener (onSignaling)
+        const [send, getID, onSignaling] = room.makeAction('signal');
+        sendSignaling = send;
+        getPeerId = getID;
         myId = getPeerId();
+        
         log(`My ID: ${myId}`);
 
         if (selectedRole === 'viewer') {
@@ -161,7 +162,9 @@
             await setupHost();
         }
 
-        room.onAction('signal', (data, peerId) => handleSignaling(data, peerId));
+        // FIX: Use the extracted listener, not room.onAction
+        onSignaling((data, peerId) => handleSignaling(data, peerId));
+
         room.onPeerJoin(peerId => {
             log(`Peer joined: ${peerId.substr(0,5)}`);
             if (selectedRole !== 'viewer') sendSignaling({ type: 'HOST_ANNOUNCE' }, peerId);
