@@ -3,86 +3,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P Streamer: Cam or File</title>
+    <title>Torrent P2P Streamer</title>
     
     <style>
-        :root { --bg: #121212; --panel: #1e1e1e; --primary: #bb86fc; --secondary: #03dac6; --text: #e0e0e0; }
+        :root { --bg: #0f0f13; --panel: #1e1e24; --primary: #ff3e00; --text: #ffffff; }
         body { background: var(--bg); color: var(--text); font-family: sans-serif; margin: 0; padding: 20px; text-align: center; }
         .container { max-width: 900px; margin: 0 auto; }
         .hidden { display: none !important; }
-        .panel { background: var(--panel); padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.6); margin-bottom: 20px; }
-        video { width: 100%; border-radius: 8px; background: #000; box-shadow: 0 0 15px rgba(0,0,0,0.5); }
+        .panel { background: var(--panel); padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin-bottom: 20px; }
+        
+        video { width: 100%; border-radius: 8px; background: #000; box-shadow: 0 0 20px rgba(255, 62, 0, 0.2); }
+        .overlay { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.8); padding: 8px 12px; border-radius: 6px; font-size: 0.85em; pointer-events: none; }
         .video-wrapper { position: relative; margin-top: 20px; }
-        .overlay { position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 6px; font-size: 0.85em; pointer-events: none; }
-        input[type="text"] { background: #2c2c2c; border: 1px solid #444; color: white; padding: 12px; border-radius: 6px; width: 250px; text-align: center; font-size: 1.1em; margin-bottom: 20px; }
-        .mode-toggle { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; }
-        button { padding: 12px 24px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; font-size: 1em; transition: 0.2s; }
-        button.primary { background: var(--primary); color: #000; }
-        button.primary:hover { filter: brightness(1.1); }
+
+        button { padding: 12px 24px; border-radius: 6px; font-weight: bold; cursor: pointer; border: none; font-size: 1em; margin: 5px; transition: 0.2s; }
+        button.primary { background: var(--primary); color: white; }
+        button.primary:hover { filter: brightness(1.2); }
         button.outline { background: transparent; border: 2px solid #444; color: #aaa; }
-        button.outline.active { border-color: var(--secondary); color: var(--secondary); background: rgba(3, 218, 198, 0.1); }
-        .file-drop-area { border: 2px dashed #444; padding: 20px; border-radius: 8px; margin: 15px 0; background: #181818; }
-        input[type="file"] { display: none; }
-        .file-btn { background: #333; color: white; padding: 8px 15px; border-radius: 4px; cursor: pointer; display: inline-block; }
-        #logs { font-family: monospace; font-size: 12px; color: #777; text-align: left; height: 120px; overflow-y: auto; background: #000; padding: 10px; border-radius: 6px; border: 1px solid #333; }
-        .log-info { color: var(--secondary); }
+        button.outline.active { border-color: var(--primary); color: var(--primary); }
+
+        input[type="text"] { background: #333; border: 1px solid #444; color: white; padding: 12px; width: 250px; border-radius: 6px; text-align: center; }
+        .file-box { border: 2px dashed #444; padding: 20px; margin: 20px 0; border-radius: 8px; }
+        
+        #logs { font-family: monospace; font-size: 11px; color: #666; text-align: left; height: 150px; overflow-y: auto; background: #000; padding: 10px; border: 1px solid #333; margin-top: 20px; }
+        .log-sys { color: #ff3e00; }
+        .log-info { color: #4caf50; }
     </style>
 
-    <!-- Import Trystero and attach to window -->
+    <!-- IMPORT TRYSTERO (TORRENT STRATEGY) VIA ESM.SH TO FIX BUNDLING BUGS -->
     <script type="module">
         import { joinRoom } from 'https://esm.sh/trystero@0.19.0/torrent';
         window.joinRoom = joinRoom;
-        console.log("Trystero Loaded");
+        console.log("Trystero (Torrent) Loaded");
+        document.getElementById('lib-status').innerText = "Library Ready";
+        document.getElementById('lib-status').style.color = "#4caf50";
     </script>
 </head>
 <body>
 
 <div class="container">
-    <h1>P2P Streamer</h1>
-    
-    <!-- STEP 1: SETUP -->
+    <h1>BitTorrent P2P Streamer</h1>
+    <div id="lib-status" style="font-size: 0.8em; color: #888; margin-bottom: 10px;">Loading Library...</div>
+
+    <!-- SETUP PANEL -->
     <div id="setup-panel" class="panel">
-        <input type="text" id="room-id" value="global-room" placeholder="Enter Room Name">
+        <input type="text" id="room-id" value="p2p-movie-night" placeholder="Room Name">
         
-        <div class="mode-toggle">
-            <button class="outline active" id="btn-view" onclick="setRole('viewer')">Join as Viewer</button>
-            <button class="outline" id="btn-host-cam" onclick="setRole('host-cam')">Host: Camera</button>
-            <button class="outline" id="btn-host-file" onclick="setRole('host-file')">Host: File</button>
+        <div style="margin: 20px 0;">
+            <button class="outline active" onclick="setRole('viewer')" id="btn-view">Viewer</button>
+            <button class="outline" onclick="setRole('host-cam')" id="btn-cam">Host: Camera</button>
+            <button class="outline" onclick="setRole('host-file')" id="btn-file">Host: File</button>
         </div>
 
-        <div id="controls-viewer">
-            <p style="color:#aaa">Connect to the room and wait for the host.</p>
-            <button class="primary" onclick="initApp()">Join Room</button>
+        <div id="file-area" class="file-box hidden">
+            <p>Select a video file to stream (Loops automatically)</p>
+            <input type="file" id="video-input" accept="video/*">
         </div>
 
-        <div id="controls-cam" class="hidden">
-            <p style="color:#aaa">Broadcast your webcam and microphone.</p>
-            <button class="primary" onclick="initApp()">Start Camera Stream</button>
-        </div>
-
-        <div id="controls-file" class="hidden">
-            <div class="file-drop-area">
-                <p id="file-name" style="margin-bottom:10px; color: #fff;">No file selected</p>
-                <label for="video-input" class="file-btn">Choose Video File</label>
-                <input type="file" id="video-input" accept="video/*, .mkv, .mp4, .webm">
-            </div>
-            <button class="primary" onclick="initApp()">Start File Stream</button>
-        </div>
+        <button class="primary" onclick="startApp()">Start Connection</button>
+        <p style="font-size:0.8em; color:#666;">Note: Torrent discovery takes 10-20 seconds.</p>
     </div>
 
-    <!-- STEP 2: ACTIVE STREAM -->
+    <!-- STREAM PANEL -->
     <div id="stream-panel" class="panel hidden">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <div id="status-badge" style="background: #333; color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 0.9em;">Initializing...</div>
-            <button onclick="location.reload()" style="padding: 5px 10px; font-size: 0.8em; background: #333; color: #fff;">Leave</button>
+        <div style="display:flex; justify-content:space-between;">
+            <span id="connection-badge" style="background:#333; padding:5px 10px; border-radius:4px; font-size:0.8em;">Waiting for swarm...</span>
+            <button onclick="location.reload()" style="padding:5px 10px; font-size:0.8em; background:#333; color:white;">Leave</button>
         </div>
 
         <div class="video-wrapper">
             <video id="main-video" autoplay playsinline controls></video>
             <div class="overlay">
                 <div>Role: <span id="role-display">-</span></div>
-                <div>Source: <span id="parent-display">Searching...</span></div>
-                <div>Peers: <span id="child-count">0</span>/<span id="max-children-display">2</span></div>
+                <div>Parent: <span id="parent-display">Searching...</span></div>
+                <div>Children: <span id="child-count">0</span>/2</div>
             </div>
         </div>
     </div>
@@ -91,230 +85,262 @@
 </div>
 
 <script>
-    // --- CONFIGURATION ---
-    const MAX_CHILDREN = 2; 
+    // --- CONFIG ---
+    const APP_ID = 'p2p-tree-stream-v5'; // Unique ID for this app mesh
+    const MAX_CHILDREN = 2; // Binary Tree
     const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
     // --- STATE ---
-    let selectedRole = 'viewer';
-    let room, sendSignaling, getPeerId;
-    let myId = null;
+    let role = 'viewer';
+    let room, sendSig, getPeerId, onSig; // Trystero handles
+    let myId;
     let myStream = null;
-    let parentPC = null;     
-    let childrenPCs = {};    
-    let networkTree = {}; 
+    let parentPC = null;
+    let childrenPCs = {}; // Map<childId, RTCPeerConnection>
+    let networkTree = {}; // Host only: Registry of who is connected to whom
 
-    // --- UI LOGIC ---
-    function setRole(role) {
-        selectedRole = role;
+    // --- UI HELPERS ---
+    function setRole(r) {
+        role = r;
         document.querySelectorAll('.outline').forEach(b => b.classList.remove('active'));
-        if(role === 'viewer') document.getElementById('btn-view').classList.add('active');
-        if(role === 'host-cam') document.getElementById('btn-host-cam').classList.add('active');
-        if(role === 'host-file') document.getElementById('btn-host-file').classList.add('active');
-
-        document.getElementById('controls-viewer').classList.add('hidden');
-        document.getElementById('controls-cam').classList.add('hidden');
-        document.getElementById('controls-file').classList.add('hidden');
-
-        if(role === 'viewer') document.getElementById('controls-viewer').classList.remove('hidden');
-        if(role === 'host-cam') document.getElementById('controls-cam').classList.remove('hidden');
-        if(role === 'host-file') document.getElementById('controls-file').classList.remove('hidden');
+        if(r === 'viewer') document.getElementById('btn-view').classList.add('active');
+        if(r === 'host-cam') document.getElementById('btn-cam').classList.add('active');
+        if(r === 'host-file') document.getElementById('btn-file').classList.add('active');
+        
+        document.getElementById('file-area').classList.toggle('hidden', r !== 'host-file');
     }
 
-    document.getElementById('video-input').addEventListener('change', function(e) {
-        const name = e.target.files[0] ? e.target.files[0].name : "No file selected";
-        document.getElementById('file-name').innerText = name;
-        document.getElementById('file-name').style.color = "#03dac6";
-    });
+    function log(msg, type='sys') {
+        const d = document.getElementById('logs');
+        d.innerHTML = `<div class="log-${type}">[${new Date().toLocaleTimeString()}] ${msg}</div>` + d.innerHTML;
+    }
 
-    // --- INITIALIZATION ---
-    async function initApp() {
-        if (!window.joinRoom) return alert("Library loading... wait 2s and try again.");
-        
+    // --- MAIN ENTRY POINT ---
+    async function startApp() {
+        if(!window.joinRoom) return alert("Wait for Trystero to load.");
         const roomName = document.getElementById('room-id').value;
-        if (!roomName) return alert("Enter a room name");
-
-        if (selectedRole === 'host-file') {
-            const files = document.getElementById('video-input').files;
-            if (files.length === 0) return alert("Please select a video file first.");
-        }
-
+        if(!roomName) return alert("Enter room name");
+        
+        // UI Switch
         document.getElementById('setup-panel').classList.add('hidden');
         document.getElementById('stream-panel').classList.remove('hidden');
-        document.getElementById('max-children-display').innerText = MAX_CHILDREN;
+        document.getElementById('role-display').innerText = role.toUpperCase();
 
-        log(`Connecting to swarm: ${roomName}...`);
+        // 1. Initialize Host Source (if Host)
+        if(role.startsWith('host')) {
+            await initHostMedia();
+            networkTree[myId] = { id: myId, tier: 0, children: 0, parentId: null };
+            document.getElementById('parent-display').innerText = "N/A (Root)";
+            document.getElementById('connection-badge').innerText = "Broadcasting (Waiting for peers)";
+            document.getElementById('connection-badge').style.background = "#ff3e00";
+        }
+
+        // 2. Join Trystero (Torrent)
+        log(`Joining Torrent Swarm: ${roomName}...`);
         
-        // Join Trystero Room
-        room = window.joinRoom({ appId: 'p2p-fixed-stream-v2' }, roomName);
-        
-        // FIX: Extract send, getID, AND the Listener (onSignaling)
-        const [send, getID, onSignaling] = room.makeAction('signal');
-        sendSignaling = send;
-        getPeerId = getID;
+        // Config for Torrent Strategy
+        const config = { appId: APP_ID }; 
+        room = window.joinRoom(config, roomName);
+
+        // 3. Setup Action Channel (Signaling)
+        const actions = room.makeAction('sig');
+        sendSig = actions[0];
+        getPeerId = actions[1];
+        onSig = actions[2];
         myId = getPeerId();
         
-        log(`My ID: ${myId}`);
+        log(`My Peer ID: ${myId}`);
 
-        if (selectedRole === 'viewer') {
-            setupViewer();
-        } else {
-            await setupHost();
-        }
-
-        // FIX: Use the extracted listener, not room.onAction
-        onSignaling((data, peerId) => handleSignaling(data, peerId));
-
+        // 4. Peer Lifecycle Listeners
         room.onPeerJoin(peerId => {
-            log(`Peer joined: ${peerId.substr(0,5)}`);
-            if (selectedRole !== 'viewer') sendSignaling({ type: 'HOST_ANNOUNCE' }, peerId);
+            log(`Peer Discovered: ${peerId.substr(0,4)}`, 'info');
+            if(role.startsWith('host')) {
+                // Host announces existence so Viewers know who to ask
+                sendSig({ type: 'HOST_HELLO' }, peerId);
+            }
         });
+
+        room.onPeerLeave(peerId => {
+            if(childrenPCs[peerId]) {
+                log(`Child ${peerId.substr(0,4)} left.`);
+                delete childrenPCs[peerId];
+                updateChildStats();
+                // If host, remove from tree (simplified)
+                if(networkTree[peerId]) delete networkTree[peerId];
+            }
+        });
+
+        // 5. Signaling Message Handler
+        onSig(async (data, senderId) => {
+            const isHost = role.startsWith('host');
+
+            // --- DISCOVERY PHASE ---
+            
+            // Viewer sees Host
+            if(!isHost && data.type === 'HOST_HELLO') {
+                log("Host found. Requesting entry...");
+                sendSig({ type: 'JOIN_REQUEST' }, senderId);
+            }
+
+            // Host receives Join Request -> Calculates Tree Position
+            if(isHost && data.type === 'JOIN_REQUEST') {
+                assignTreePosition(senderId);
+            }
+
+            // Viewer receives Assignment -> Connects to Parent
+            if(data.type === 'ASSIGN_PARENT') {
+                log(`Assigned to parent: ${data.parentId.substr(0,4)}`);
+                document.getElementById('parent-display').innerText = data.parentId.substr(0,4);
+                initiateWebRTC(data.parentId);
+            }
+
+            // --- WEBRTC SIGNALING PHASE ---
+            
+            if(data.type === 'OFFER') handleOffer(data.sdp, senderId);
+            if(data.type === 'ANSWER') handleAnswer(data.sdp, senderId);
+            if(data.type === 'ICE') handleIce(data.candidate, senderId);
+        });
+
+        // Viewer starts by announcing self (in case Host is already there)
+        if(!role.startsWith('host')) {
+            setTimeout(() => sendSig({ type: 'JOIN_REQUEST' }), 2000); // Wait bit for DHT
+        }
     }
 
-    // --- HOST SETUP ---
-    async function setupHost() {
-        const videoEl = document.getElementById('main-video');
-        document.getElementById('role-display').innerText = "HOST";
-        document.getElementById('parent-display').innerText = "N/A (Me)";
-        document.getElementById('status-badge').innerText = "Broadcasting";
-        document.getElementById('status-badge').style.background = "#bb86fc";
-
-        networkTree[myId] = { tier: 0, children: 0, id: myId };
-
-        if (selectedRole === 'host-cam') {
+    // --- HOST MEDIA SETUP ---
+    async function initHostMedia() {
+        const vid = document.getElementById('main-video');
+        
+        if(role === 'host-cam') {
             try {
                 myStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                videoEl.srcObject = myStream;
-                videoEl.muted = true; 
-                log("Camera stream started.");
-            } catch (e) {
-                alert("Camera Error: " + e.message);
-            }
+                vid.srcObject = myStream;
+                vid.muted = true; // Mute local
+            } catch(e) { alert("Camera error: " + e.message); }
         } else {
-            const file = document.getElementById('video-input').files[0];
-            const url = URL.createObjectURL(file);
-            videoEl.src = url;
-            videoEl.loop = true;
-            videoEl.muted = false; 
+            // File Mode
+            const fileInput = document.getElementById('video-input');
+            if(!fileInput.files.length) return alert("No file selected");
+            const url = URL.createObjectURL(fileInput.files[0]);
+            vid.src = url;
+            vid.loop = true;
+            vid.muted = false; // Host hears audio
+            await vid.play();
             
-            try {
-                await videoEl.play();
-                if (videoEl.captureStream) {
-                    myStream = videoEl.captureStream();
-                } else if (videoEl.mozCaptureStream) {
-                    myStream = videoEl.mozCaptureStream();
-                } else {
-                    alert("Browser doesn't support file streaming.");
-                    return;
-                }
-                log("File stream started.");
-            } catch (e) {
-                alert("Playback Error: " + e.message);
-            }
+            // Capture stream
+            if(vid.captureStream) myStream = vid.captureStream();
+            else if(vid.mozCaptureStream) myStream = vid.mozCaptureStream();
+            else return alert("Browser cannot capture file stream");
         }
     }
 
-    function setupViewer() {
-        document.getElementById('role-display').innerText = "VIEWER";
-        setTimeout(() => {
-            log("Sending join request...");
-            sendSignaling({ type: 'JOIN_REQUEST' }); 
-        }, 2000);
-    }
+    // --- HOST LOGIC: RECURSIVE ASSIGNMENT ---
+    function assignTreePosition(newPeerId) {
+        if(networkTree[newPeerId]) return; // Already known
 
-    // --- SIGNALING ---
-    async function handleSignaling(data, senderId) {
-        const isHost = selectedRole !== 'viewer';
-        if (isHost && data.type === 'JOIN_REQUEST') assignParentInTree(senderId);
-        if (!isHost && data.type === 'HOST_ANNOUNCE') sendSignaling({ type: 'JOIN_REQUEST' }, senderId);
-        if (data.type === 'ASSIGN_PARENT') {
-            const { parentId } = data;
-            log(`Assigned Parent: ${parentId.substr(0,5)}`);
-            document.getElementById('parent-display').innerText = parentId.substr(0,5) + "...";
-            connectToParent(parentId);
-        }
-        if (data.type === 'OFFER') handleOffer(data.sdp, senderId);
-        if (data.type === 'ANSWER') handleAnswer(data.sdp, senderId);
-        if (data.type === 'ICE') handleIce(data.candidate, senderId);
-    }
-
-    // --- TREE LOGIC ---
-    function assignParentInTree(newPeerId) {
-        if (networkTree[newPeerId]) return;
+        // Breadth-First Search to find open slot
         let queue = [myId];
         let assignedParent = null;
-        while (queue.length > 0) {
-            let candidateId = queue.shift();
-            let node = networkTree[candidateId];
-            if (node.children < MAX_CHILDREN) {
-                assignedParent = candidateId;
+
+        while(queue.length > 0) {
+            let id = queue.shift();
+            let node = networkTree[id];
+            
+            if(node.children < MAX_CHILDREN) {
+                assignedParent = id;
                 break;
             }
+            
+            // Add existing children to queue (Scan logic)
+            // In a real app, structure would be better. Here we scan values.
             Object.values(networkTree)
-                .filter(n => n.parentId === candidateId)
+                .filter(n => n.parentId === id)
                 .forEach(child => queue.push(child.id));
         }
-        if (!assignedParent) assignedParent = myId;
-        const parentTier = networkTree[assignedParent].tier;
-        networkTree[newPeerId] = { id: newPeerId, tier: parentTier + 1, children: 0, parentId: assignedParent };
+
+        if(!assignedParent) assignedParent = myId; // Fallback
+
+        // Update Registry
+        const tier = networkTree[assignedParent].tier + 1;
+        networkTree[newPeerId] = { id: newPeerId, tier: tier, children: 0, parentId: assignedParent };
         networkTree[assignedParent].children++;
-        sendSignaling({ type: 'ASSIGN_PARENT', parentId: assignedParent }, newPeerId);
+
+        // Instruct Viewer
+        sendSig({ type: 'ASSIGN_PARENT', parentId: assignedParent }, newPeerId);
     }
 
-    // --- WEBRTC ---
-    async function connectToParent(parentId) {
+    // --- WEBRTC: CONNECT UP (Child -> Parent) ---
+    async function initiateWebRTC(parentId) {
         parentPC = new RTCPeerConnection(RTC_CONFIG);
+        
+        // Receive Only
         parentPC.addTransceiver('video', { direction: 'recvonly' });
         parentPC.addTransceiver('audio', { direction: 'recvonly' });
-        parentPC.ontrack = (event) => {
-            log("Stream received!");
+
+        parentPC.ontrack = event => {
+            log("Stream Received!");
             const vid = document.getElementById('main-video');
             vid.srcObject = event.streams[0];
-            vid.muted = false;
-            myStream = event.streams[0];
-            document.getElementById('status-badge').innerText = "Live";
-            document.getElementById('status-badge').style.background = "#03dac6";
-            document.getElementById('status-badge').style.color = "#000";
+            myStream = event.streams[0]; // Save for relaying
+            document.getElementById('connection-badge').innerText = "Streaming Live";
+            document.getElementById('connection-badge').style.background = "#4caf50";
         };
+
         parentPC.onicecandidate = ev => {
-            if (ev.candidate) sendSignaling({ type: 'ICE', candidate: ev.candidate }, parentId);
+            if(ev.candidate) sendSig({ type: 'ICE', candidate: ev.candidate }, parentId);
         };
+
         const offer = await parentPC.createOffer();
         await parentPC.setLocalDescription(offer);
-        sendSignaling({ type: 'OFFER', sdp: offer }, parentId);
+        sendSig({ type: 'OFFER', sdp: offer }, parentId);
     }
 
+    // --- WEBRTC: CONNECT DOWN (Parent -> Child) ---
     async function handleOffer(sdp, childId) {
-        log(`Relaying to: ${childId.substr(0,5)}`);
+        log(`Relaying stream to child: ${childId.substr(0,4)}`);
+        
         const pc = new RTCPeerConnection(RTC_CONFIG);
         childrenPCs[childId] = pc;
-        updateStats();
-        if (myStream) myStream.getTracks().forEach(track => pc.addTrack(track, myStream));
+        updateChildStats();
+
+        // RELAY LOGIC: Add tracks from myStream to this new connection
+        if(myStream) {
+            myStream.getTracks().forEach(track => pc.addTrack(track, myStream));
+        }
+
         pc.onicecandidate = ev => {
-            if (ev.candidate) sendSignaling({ type: 'ICE', candidate: ev.candidate }, childId);
+            if(ev.candidate) sendSig({ type: 'ICE', candidate: ev.candidate }, childId);
         };
+
         pc.onconnectionstatechange = () => {
-            if (pc.connectionState === 'disconnected') {
+            if(pc.connectionState === 'disconnected') {
                 delete childrenPCs[childId];
-                updateStats();
+                updateChildStats();
             }
         };
+
         await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        sendSignaling({ type: 'ANSWER', sdp: answer }, childId);
+        sendSig({ type: 'ANSWER', sdp: answer }, childId);
     }
 
-    async function handleAnswer(sdp, senderId) { await parentPC.setRemoteDescription(new RTCSessionDescription(sdp)); }
+    async function handleAnswer(sdp, senderId) {
+        await parentPC.setRemoteDescription(new RTCSessionDescription(sdp));
+    }
+
     async function handleIce(candidate, senderId) {
-        if (parentPC && !childrenPCs[senderId]) await parentPC.addIceCandidate(new RTCIceCandidate(candidate));
-        else if (childrenPCs[senderId]) await childrenPCs[senderId].addIceCandidate(new RTCIceCandidate(candidate));
+        if(parentPC && !childrenPCs[senderId]) {
+            await parentPC.addIceCandidate(new RTCIceCandidate(candidate));
+        } else if(childrenPCs[senderId]) {
+            await childrenPCs[senderId].addIceCandidate(new RTCIceCandidate(candidate));
+        }
     }
-    function updateStats() { document.getElementById('child-count').innerText = Object.keys(childrenPCs).length; }
-    function log(msg) { 
-        const div = document.getElementById('logs');
-        div.innerHTML = `<div><span class="log-info">></span> ${msg}</div>` + div.innerHTML;
+
+    function updateChildStats() {
+        document.getElementById('child-count').innerText = Object.keys(childrenPCs).length;
     }
+
 </script>
 </body>
 </html>
