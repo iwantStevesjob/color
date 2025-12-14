@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Torrent Tree Streamer</title>
+    <title>cinema</title>
     <style>
         :root {
             --bg: #000;
@@ -476,6 +476,7 @@
 
                 // 1. Handle Metadata (Start)
                 if (typeof data === 'string') {
+                    log(`Rx Meta: ${data}`);
                     const msg = JSON.parse(data);
                     if (msg.type === 'meta') {
                         state.fileMeta = msg;
@@ -489,7 +490,7 @@
                     // Determine if we need to cache (for relay)
                     state.fileChunks.push(data);
 
-                    // Append to Buffer
+                    // Append to Buffer via Queue
                     appendToBuffer(data);
 
                     // Relay to Children
@@ -499,26 +500,48 @@
         }
 
         function initMediaSource() {
+            if (!state.fileMeta) return;
+
             const vid = document.getElementById('main-video');
-            if (MediaSource.isTypeSupported(state.fileMeta.mime)) {
+
+            // Polyfill/Fallback for MIME
+            let mime = state.fileMeta.mime;
+            if (!mime || mime === '') {
+                if (state.fileMeta.name.endsWith('.webm')) mime = 'video/webm; codecs="vp8, vorbis"';
+                else if (state.fileMeta.name.endsWith('.mp4')) mime = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
+                else mime = 'video/webm';
+                log(`Guessed MIME: ${mime}`);
+            }
+
+            if (MediaSource.isTypeSupported(mime)) {
                 state.mediaSource = new MediaSource();
                 vid.src = URL.createObjectURL(state.mediaSource);
 
                 state.mediaSource.addEventListener('sourceopen', () => {
+                    log("MSE Source Open");
                     try {
-                        state.sourceBuffer = state.mediaSource.addSourceBuffer(state.fileMeta.mime);
-                        state.sourceBuffer.addEventListener('updateend', () => processQueue());
+                        state.sourceBuffer = state.mediaSource.addSourceBuffer(mime);
+                        state.sourceBuffer.addEventListener('updateend', () => {
+                            // log("MSE Update End"); // Too noisy
+                            processQueue();
+                        });
 
                         document.getElementById('status').innerText = "Streaming (Buffered)";
                         document.getElementById('status').style.color = "var(--primary)";
 
                         processQueue();
                     } catch (e) {
-                        log("MSE Error: " + e);
+                        log(`MSE Error (addSourceBuffer): ${e.message}`);
+                        alert(`Video format error: ${e.message}. Try a .webm file.`);
                     }
                 });
+
+                state.mediaSource.addEventListener('sourceended', () => log("MSE Source Ended"));
+                state.mediaSource.addEventListener('sourceclose', () => log("MSE Source Closed"));
+
             } else {
-                alert("Browser doesn't support this file format for streaming. Try Chrome or a WebM/fMP4 file.");
+                log(`Browser doesn't support ${mime}`);
+                alert(`Browser doesn't support ${mime}. Try Chrome or a WebM file.`);
             }
         }
 
@@ -529,12 +552,23 @@
         }
 
         function processQueue() {
-            if (!state.sourceBuffer || state.sourceBuffer.updating || bufQueue.length === 0) return;
+            if (!state.sourceBuffer) return;
+            if (state.sourceBuffer.updating) return;
+            if (bufQueue.length === 0) return;
 
             try {
-                state.sourceBuffer.appendBuffer(bufQueue.shift());
+                const chunk = bufQueue.shift();
+                state.sourceBuffer.appendBuffer(chunk);
+
+                // Try playing if we have data
+                const vid = document.getElementById('main-video');
+                if (vid.paused && bufQueue.length < 50) { // arbitrary buffer check
+                    vid.play().catch(e => { });
+                }
             } catch (e) {
-                log(e);
+                log(`MSE Append Error: ${e.message}`);
+                // If quota exceeded, we might need to remove old buffer, 
+                // but for this simple demo, we just log it.
             }
         }
 
@@ -559,7 +593,7 @@
                 state.dataChannels[childId] = dc;
 
                 dc.onopen = () => {
-                    log(`DataChannel open for ${childId.substr(0, 4)}`);
+                    log(`DC Open. Sending ${state.fileChunks.length} chunks.`);
 
                     // 1. Send Meta
                     if (state.fileMeta) {
@@ -568,10 +602,12 @@
 
                     // 2. Send Cached Chunks (Catch up)
                     if (state.fileChunks.length > 0) {
-                        log(`Sending ${state.fileChunks.length} cached chunks to ${childId.substr(0, 4)}`);
-                        state.fileChunks.forEach(chunk => {
-                            if (dc.readyState === 'open') dc.send(chunk);
-                        });
+                        // Small delay to ensure meta arrives first
+                        setTimeout(() => {
+                            state.fileChunks.forEach(chunk => {
+                                if (dc.readyState === 'open') dc.send(chunk);
+                            });
+                        }, 50);
                     }
 
                     // 3. If Host, continue reading if not done
