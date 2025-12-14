@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cinema</title>
+    <title>Torrent Tree Streamer</title>
     <style>
         :root {
             --bg: #000;
@@ -144,7 +144,7 @@
 <body>
 
     <div class="container">
-        <h2 style="font-weight: 300;"> <span style="color:var(--primary)"></span> video</h2>
+        <h2 style="font-weight: 300;">P2P <span style="color:var(--primary)"></span> video</h2>
 
         <!-- SETUP -->
         <div id="setup-panel" class="panel">
@@ -669,42 +669,54 @@
             log("Starting file read sequence...");
 
             const file = state.fileObj;
-            const CHUNK_SIZE = 16 * 1024; // 16KB safe chunk
             let offset = 0;
+            const CHUNK_SIZE = 16 * 1024; // 16KB
+            const BUFFER_THRESHOLD = 64 * 1024; // 64KB limit before pausing
+
             const reader = new FileReader();
 
             reader.onload = e => {
                 const chunk = e.target.result;
-
-                // Cache
                 state.fileChunks.push(chunk);
-
-                // Broadcast
                 broadcastToChildren(chunk);
-                if (offset === 0) log(`First chunk read & sent. Size: ${chunk.byteLength}`);
 
                 offset += chunk.byteLength;
 
-                // Update UI occasionally
-                if (offset % (CHUNK_SIZE * 100) === 0) {
-                    // log(`Progress: ${Math.round((offset/file.size)*100)}%`);
-                }
-
-                // Loop with small delay to prevent freezing UI
                 if (offset < file.size) {
-                    setTimeout(() => {
-                        const slice = file.slice(offset, offset + CHUNK_SIZE);
-                        reader.readAsArrayBuffer(slice);
-                    }, 5);
+                    // Backpressure Check
+                    // We check if ANY child has a full buffer. 
+                    // In a real P2P mesh, this implementation limits speed to the slowest peer.
+                    const children = Object.values(state.dataChannels);
+                    const isCongested = children.some(dc => dc.bufferedAmount > BUFFER_THRESHOLD);
+
+                    if (isCongested) {
+                        // Wait for drainage
+                        // log("Network congested, pausing read...");
+                        const waitForDrain = () => {
+                            if (children.every(dc => dc.bufferedAmount <= BUFFER_THRESHOLD)) {
+                                readNextSlice();
+                            } else {
+                                setTimeout(waitForDrain, 50); // Polling (simpler than attaching generic events to map)
+                            }
+                        };
+                        setTimeout(waitForDrain, 50);
+                    } else {
+                        // Go fast
+                        setTimeout(readNextSlice, 0);
+                    }
                 } else {
                     log("File read complete. Total Chunks: " + state.fileChunks.length);
                     state.readingFile = false;
                 }
             };
 
-            // Start first chunk
-            const slice = file.slice(0, CHUNK_SIZE);
-            reader.readAsArrayBuffer(slice);
+            const readNextSlice = () => {
+                const slice = file.slice(offset, offset + CHUNK_SIZE);
+                reader.readAsArrayBuffer(slice);
+            };
+
+            // Start
+            readNextSlice();
         }
 
         function broadcastToChildren(data) {
@@ -718,11 +730,8 @@
                         console.error("Send error", e);
                         log("Send chunk error: " + e.message);
                     }
-                } else {
-                    // log("Skipping closed DC");
                 }
             });
-            // if(sentCount === 0) log("No open channels to broadcast to");
         }
 
         async function handleAnswer(sdp, pid) {
