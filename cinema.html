@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>P2P File Streamer (Final)</title>
+    <title>Crash-Proof P2P Streamer</title>
     <style>
-        body { background: #000; color: #fff; font-family: sans-serif; text-align: center; padding: 20px; }
+        body { background: #0a0a0a; color: #e0e0e0; font-family: monospace; text-align: center; margin: 0; padding: 20px; }
         .container { max-width: 800px; margin: 0 auto; background: #111; padding: 20px; border-radius: 8px; border: 1px solid #333; }
         .hidden { display: none !important; }
 
@@ -15,12 +15,16 @@
         .fill { height: 100%; background: #007bff; width: 0%; transition: width 0.2s; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; text-shadow: 0 1px 2px black; }
         .fill.done { background: #28a745; }
 
-        button { padding: 12px 20px; border-radius: 6px; cursor: pointer; border: none; font-weight: bold; margin: 5px; background: #444; color: white; }
-        button.primary { background: #007bff; }
+        button { padding: 12px 20px; border-radius: 4px; cursor: pointer; border: none; font-weight: bold; margin: 5px; background: #333; color: white; border: 1px solid #444; }
+        button.primary { background: #007bff; border-color: #0056b3; }
         button:hover { filter: brightness(1.2); }
-        input[type="text"] { padding: 10px; border-radius: 4px; border: none; text-align: center; }
+        
+        input[type="text"] { padding: 10px; border-radius: 4px; border: 1px solid #444; background: #222; color: white; text-align: center; }
 
-        #logs { font-family: monospace; font-size: 11px; color: #666; text-align: left; height: 80px; overflow-y: auto; margin-top: 20px; border-top: 1px solid #222; }
+        #logs { font-family: monospace; font-size: 11px; color: #666; text-align: left; height: 120px; overflow-y: auto; margin-top: 20px; border-top: 1px solid #222; padding-top: 10px; }
+        .log-warn { color: #ffc107; }
+        .log-err { color: #ff5555; }
+        .log-ok { color: #28a745; }
     </style>
     <script type="module">
         import { joinRoom } from 'https://esm.run/trystero/torrent';
@@ -30,7 +34,7 @@
 <body>
 
 <div class="container">
-    <h2>P2P <span style="color:#007bff">File</span> Streamer</h2>
+    <h2>P2P <span style="color:#28a745">Crash-Proof</span> Streamer</h2>
 
     <!-- SETUP -->
     <div id="setup">
@@ -56,10 +60,9 @@
             <span id="status">Waiting for host...</span>
             <span id="details">0 / 0 MB</span>
         </div>
-
-        <br>
-        <button id="try-play-btn" onclick="buildAndPlay()" style="display:none; width:100%;">
-            ▶ Try Playing Now (Preview)
+        
+        <button id="try-play-btn" onclick="buildAndPlay()" style="display:none; width:100%; margin-top:10px;">
+            ▶ Play Downloaded So Far
         </button>
     </div>
 
@@ -67,13 +70,15 @@
 </div>
 
 <script>
-    const CHUNK_SIZE = 64 * 1024; // 64KB
+    // 16KB is safer for avoiding queue fullness than 64KB
+    const CHUNK_SIZE = 16 * 1024; 
     let room, sendBin, onBin;
     let file;
     let chunks = [];
     let receivedBytes = 0;
     let fileMeta = { size: 0, type: 'video/mp4', name: '' };
     let isHost = false;
+    let isTransferring = false;
 
     // --- HOST ---
     async function startHost() {
@@ -83,15 +88,14 @@
         isHost = true;
         
         showPlayer();
-        log(`Host initialized. File: ${file.name} (${(file.size/1024/1024).toFixed(2)} MB)`);
+        log(`Host initialized. File: ${file.name}`);
         
-        // Host plays local file immediately
-        const vid = document.getElementById('vid');
-        vid.src = URL.createObjectURL(file);
+        // Host local preview
+        document.getElementById('vid').src = URL.createObjectURL(file);
         document.getElementById('status').innerText = "Hosting... Waiting for peers.";
         document.getElementById('bar').style.width = "100%";
         document.getElementById('bar').classList.add('done');
-        document.getElementById('bar').innerText = "HOSTING";
+        document.getElementById('bar').innerText = "HOST";
 
         initP2P();
     }
@@ -108,32 +112,22 @@
         document.getElementById('player').classList.remove('hidden');
     }
 
-    // --- P2P LOGIC ---
+    // --- P2P ---
     function initP2P() {
         if(!window.joinRoom) return alert("Library loading...");
         const roomName = document.getElementById('room').value;
         
         log(`Connecting to room: ${roomName}`);
-        room = window.joinRoom({ appId: 'p2p-final-v4' }, roomName);
+        room = window.joinRoom({ appId: 'p2p-robust-v5' }, roomName);
         
         const [send, getPid, onRecv] = room.makeAction('binary');
         sendBin = send;
         onBin = onRecv;
 
         room.onPeerJoin(peerId => {
-            log(`Peer joined: ${peerId.substr(0,4)}`);
-            if(isHost) {
-                // 1. Send Metadata FIRST
-                const meta = JSON.stringify({
-                    type: 'META',
-                    fileType: file.type || 'video/mp4',
-                    size: file.size,
-                    name: file.name
-                });
-                sendBin(new TextEncoder().encode(meta), peerId);
-
-                // 2. Send File
-                setTimeout(() => streamFile(peerId), 500);
+            log(`Peer joined: ${peerId.substr(0,4)}`, 'ok');
+            if(isHost && !isTransferring) {
+                startTransfer(peerId);
             }
         });
 
@@ -142,98 +136,122 @@
         });
     }
 
-    // --- VIEWER DATA HANDLING ---
+    // --- VIEWER HANDLER ---
     function handleData(data) {
-        // Check for Metadata (JSON)
+        // Metadata Check
         if(data.byteLength < 500) {
             try {
                 const txt = new TextDecoder().decode(data);
                 if(txt.includes('"type":"META"')) {
                     const meta = JSON.parse(txt);
                     fileMeta = meta;
-                    log(`Metadata: ${meta.name} | ${meta.fileType} | ${(meta.size/1024/1024).toFixed(2)} MB`);
-                    
-                    // Reset
                     chunks = [];
                     receivedBytes = 0;
-                    document.getElementById('status').innerText = "Receiving...";
-                    
-                    // Show "Try Play" button if file is large (allow user to attempt preview)
+                    log(`Metadata: ${meta.name} (${(meta.size/1024/1024).toFixed(2)} MB)`);
                     document.getElementById('try-play-btn').style.display = 'block';
                     return;
                 }
             } catch(e) {}
         }
 
-        // Binary Chunk
+        // Chunk Handling
         chunks.push(data);
         receivedBytes += data.byteLength;
 
-        // UI Updates
-        const pct = (receivedBytes / fileMeta.size) * 100;
-        document.getElementById('bar').style.width = pct + '%';
-        document.getElementById('bar').innerText = Math.floor(pct) + '%';
-        document.getElementById('details').innerText = `${(receivedBytes/1024/1024).toFixed(1)} / ${(fileMeta.size/1024/1024).toFixed(1)} MB`;
+        // UI Update (throttle slightly to save CPU)
+        if(chunks.length % 10 === 0 || receivedBytes >= fileMeta.size) {
+            const pct = (receivedBytes / fileMeta.size) * 100;
+            document.getElementById('bar').style.width = pct + '%';
+            document.getElementById('bar').innerText = Math.floor(pct) + '%';
+            document.getElementById('details').innerText = `${(receivedBytes/1024/1024).toFixed(1)} / ${(fileMeta.size/1024/1024).toFixed(1)} MB`;
+        }
 
-        // Completion Check
         if(receivedBytes >= fileMeta.size) {
-            log("Download Complete!");
-            document.getElementById('status').innerText = "Complete. Processing...";
+            log("Download Complete.", 'ok');
+            document.getElementById('status').innerText = "Complete.";
             document.getElementById('bar').classList.add('done');
-            document.getElementById('try-play-btn').style.display = 'none'; // Hide manual button
-            
-            buildAndPlay(true); // Auto-play
+            document.getElementById('try-play-btn').style.display = 'none';
+            buildAndPlay(true);
         }
     }
 
-    // --- BUILD BLOB & PLAY ---
-    function buildAndPlay(autoPlay = false) {
+    function buildAndPlay(auto = false) {
         if(chunks.length === 0) return;
-        
         const vid = document.getElementById('vid');
-        
-        // Save timestamp if we are updating an existing stream
         const currentTime = vid.currentTime;
         const wasPlaying = !vid.paused;
 
-        log(`Building video blob (${chunks.length} chunks)...`);
-        
-        // Create Blob with CORRECT MIME Type from Host
+        log(`Building blob (${chunks.length} chunks)...`);
         const blob = new Blob(chunks, { type: fileMeta.fileType });
-        const url = URL.createObjectURL(blob);
+        vid.src = URL.createObjectURL(blob);
         
-        vid.src = url;
-        
-        if(autoPlay) {
-            // Force play on completion
-            vid.muted = false; // Unmute
-            vid.play().catch(e => {
-                log("Auto-play blocked. Please click play on the video.");
-                vid.muted = true; // Try muted
+        if(auto) {
+            vid.muted = false;
+            vid.play().catch(() => {
+                vid.muted = true; 
                 vid.play();
+                log("Auto-played muted (browser policy). Click volume to unmute.", 'warn');
             });
         } else {
-            // Restore position if "Try Play" was clicked mid-stream
             vid.currentTime = currentTime;
             if(wasPlaying) vid.play();
         }
     }
 
-    // --- HOST STREAMING ---
-    function streamFile(targetId) {
+    // --- HOST TRANSFER LOGIC (THE FIX) ---
+    async function startTransfer(peerId) {
+        isTransferring = true;
+        
+        // 1. Send Metadata
+        const meta = JSON.stringify({ type: 'META', fileType: file.type || 'video/mp4', size: file.size, name: file.name });
+        trySend(new TextEncoder().encode(meta), peerId);
+
+        // 2. Stream File with Backpressure Logic
         let offset = 0;
         const reader = new FileReader();
 
-        reader.onload = e => {
+        reader.onload = async (e) => {
             const chunk = e.target.result;
-            sendBin(chunk, targetId);
+
+            // RETRY LOOP: This prevents the "Queue Full" crash
+            let sent = false;
+            let retryCount = 0;
+            
+            while(!sent) {
+                try {
+                    sendBin(chunk, peerId);
+                    sent = true;
+                } catch (err) {
+                    if (err.message && err.message.includes('queue is full')) {
+                        retryCount++;
+                        if(retryCount % 20 === 0) log("Network busy (backpressure)... slowing down.", 'warn');
+                        // Wait 50ms before retrying
+                        await new Promise(r => setTimeout(r, 50));
+                    } else {
+                        log("Critical Error: " + err.message, 'err');
+                        isTransferring = false;
+                        return; // Stop on fatal error
+                    }
+                }
+            }
+
+            // Chunk sent successfully
             offset += CHUNK_SIZE;
+            
+            // Progress UI
+            if (offset % (CHUNK_SIZE * 50) === 0) {
+                const pct = (offset / file.size) * 100;
+                document.getElementById('status').innerText = `Sending: ${pct.toFixed(1)}%`;
+            }
 
             if(offset < file.size) {
-                // 5ms delay to prevent buffer overflow
-                setTimeout(readNext, 5); 
+                // Adaptive Delay: If we had retries, wait longer to let network recover
+                const delay = retryCount > 0 ? 20 : 5;
+                setTimeout(readNext, delay);
             } else {
-                log("File sent successfully.");
+                log("File Sent Successfully.", 'ok');
+                document.getElementById('status').innerText = "Transfer Complete";
+                isTransferring = false;
             }
         };
 
@@ -242,12 +260,19 @@
             reader.readAsArrayBuffer(slice);
         };
 
+        // Start reading
         readNext();
+    }
+
+    // Helper wrapper for non-async sends (like metadata)
+    async function trySend(data, peerId) {
+        try { sendBin(data, peerId); } catch(e) { console.error("Meta send failed", e); }
     }
 
     function log(msg, type='') {
         const d = document.getElementById('logs');
-        d.innerHTML = `<div style="${type==='ok'?'color:#28a745':''}">> ${msg}</div>` + d.innerHTML;
+        d.innerHTML = `<div class="log-${type}">> ${msg}</div>` + d.innerHTML;
+        console.log(msg);
     }
 </script>
 </body>
