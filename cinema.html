@@ -196,34 +196,42 @@
     }
 
     // --- VIEWER LOGIC: MEDIA SOURCE EXTENSIONS (MSE) ---
+function initMSE() {
+    const vid = document.getElementById('video-player');
+    state.mediaSource = new MediaSource();
+    vid.src = URL.createObjectURL(state.mediaSource);
 
-    function initMSE() {
-        const vid = document.getElementById('video-player');
-        state.mediaSource = new MediaSource();
-        vid.src = URL.createObjectURL(state.mediaSource);
-
-        state.mediaSource.addEventListener('sourceopen', () => {
-            // Assume MP4 for this demo (most common). 
-            // If using WebM, change to 'video/webm; codecs="vp8, vorbis"'
-            const mime = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'; 
+    state.mediaSource.addEventListener('sourceopen', () => {
+        // Standard H.264 MP4 mime type
+        const mime = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"'; 
+        
+        try {
+            state.sourceBuffer = state.mediaSource.addSourceBuffer(mime);
             
-            try {
-                state.sourceBuffer = state.mediaSource.addSourceBuffer(mime);
-                state.sourceBuffer.addEventListener('updateend', processQueue);
-                document.getElementById('status-text').innerText = "Ready to Buffer";
-            } catch (e) {
-                alert("Codec Error: Browser didn't accept MP4 (avc1). Try using Chrome/Edge or a standard MP4 file.");
-            }
-        });
-    }
+            // FIX: Set mode to 'sequence' to handle raw file slices
+            state.sourceBuffer.mode = 'sequence'; 
 
-    function handleIncomingChunk(arrayBuffer) {
-        state.totalBytes += arrayBuffer.byteLength;
-        document.getElementById('dl-size').innerText = (state.totalBytes / 1024 / 1024).toFixed(1);
+            state.sourceBuffer.addEventListener('updateend', processQueue);
+            document.getElementById('status-text').innerText = "Ready to Buffer";
+        } catch (e) {
+            console.error(e);
+            alert("Codec Error: Try using a standard H.264 MP4 file.");
+        }
+    });
+}
+    function handleIncomingChunk(data) {
+    if (!data) return;
 
-        state.queue.push(arrayBuffer);
-        processQueue();
-    }
+    // FIX: Explicitly cast to Uint8Array. 
+    // This handles cases where Trystero returns a plain JS Array or an ArrayBuffer.
+    const chunk = new Uint8Array(data);
+
+    state.totalBytes += chunk.byteLength;
+    document.getElementById('dl-size').innerText = (state.totalBytes / 1024 / 1024).toFixed(1);
+
+    state.queue.push(chunk);
+    processQueue();
+}
 
     function processQueue() {
         if (state.sourceBuffer && !state.sourceBuffer.updating && state.queue.length > 0) {
