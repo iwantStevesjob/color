@@ -2,39 +2,131 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="description" content="WebRTC File Transfer via Trystero">
-    <meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1, maximum-scale=1">
-    <title>P2P File Transfer (BitTorrent Signaling)</title>
-    
-    <!-- CSS Styles -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>P2P File Transfer (Trystero BitTorrent)</title>
     <style>
-        body {
-            font-family: 'Roboto', sans-serif;
-            font-weight: 300;
-            margin: 0;
-            padding: 1em;
-            word-break: break-word;
-        }
-        div#container {
-            margin: 0 auto 0 auto;
-            max-width: 60em;
-            padding: 1em 1.5em 1.3em 1.5em;
-        }
-        h1 {
-            border-bottom: 1px solid #ccc;
-            font-family: 'Roboto', sans-serif;
-            font-weight: 500;
-            margin: 0 0 0.8em 0;
-            padding-bottom: 0.2em;
-        }
-        div.input {
-            margin: 0 0 1em 0;
-        }
+        body { font-family: 'Roboto', sans-serif; padding: 2em; background: #f9f9f9; }
+        #container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { border-bottom: 2px solid #eee; padding-bottom: 10px; font-size: 1.5rem; }
+        progress { width: 100%; height: 20px; margin: 10px 0; }
+        .status { font-weight: bold; margin: 15px 0; color: #d32f2f; }
+        .connected { color: #2e7d32; }
+        #download { display: none; background: #007bff; color: white; padding: 10px; text-decoration: none; border-radius: 4px; text-align: center; margin-top: 10px; }
+        input[type="file"] { margin: 20px 0; }
+    </style>
+</head>
+<body>
+
+<div id="container">
+    <h1>P2P File Transfer</h1>
+    <p>Open this page on two devices. Once they discover each other via BitTorrent trackers, the file input will enable.</p>
+    
+    <div id="connectionStatus" class="status">Initializing BitTorrent signaling...</div>
+
+    <input type="file" id="fileInput" disabled>
+
+    <div id="progressArea" style="display:none;">
+        <label id="progressLabel">Transfer Progress:</label>
+        <progress id="transferProgress" value="0" max="100"></progress>
+        <div id="speed">Speed: 0 KB/s</div>
+    </div>
+
+    <a id="download" href="#">Download Received File</a>
+</div>
+
+<!-- Use Script Type Module to support imports -->
+<script type="module">
+    // Import from ESM-compatible CDN
+    import { joinRoom } from 'https://esm.run/trystero/torrent';
+
+    const statusEl = document.getElementById('connectionStatus');
+    const fileInput = document.getElementById('fileInput');
+    const progressArea = document.getElementById('progressArea');
+    const progressBar = document.getElementById('transferProgress');
+    const progressLabel = document.getElementById('progressLabel');
+    const downloadBtn = document.getElementById('download');
+    const speedEl = document.getElementById('speed');
+
+    // Configuration
+    const config = { appId: 'my-unique-file-transfer-app-123' };
+    const room = joinRoom(config, 'global-file-room');
+
+    // Define the "file-transfer" action
+    // Trystero handles chunking and reassembly automatically for large data!
+    const [sendFile, getFile] = room.makeAction('file-transfer');
+
+    let startTime;
+
+    // --- RECEIVER LOGIC ---
+    getFile((data, peerId, metadata) => {
+        console.log('Receiving file:', metadata.name);
         
-        progress {
-            width: 100%;
-            margin-bottom: 10px;
+        // Convert the received ArrayBuffer/Uint8Array to a Blob
+        const blob = new Blob([data]);
+        const url = URL.createObjectURL(blob);
+        
+        downloadBtn.href = url;
+        downloadBtn.download = metadata.name;
+        downloadBtn.textContent = `Download "${metadata.name}" (${(metadata.size / 1024 / 1024).toFixed(2)} MB)`;
+        downloadBtn.style.display = 'block';
+        
+        statusEl.textContent = 'File received successfully!';
+        progressArea.style.display = 'none';
+    }, {
+        // This callback tracks the progress of the incoming file
+        onProgress: (progress) => {
+            progressArea.style.display = 'block';
+            progressLabel.textContent = "Receiving File...";
+            progressBar.value = progress * 100;
         }
+    });
+
+    // --- SENDER LOGIC ---
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        statusEl.textContent = `Sending ${file.name}...`;
+        progressArea.style.display = 'block';
+        progressLabel.textContent = "Sending File...";
+        startTime = Date.now();
+
+        // Trystero's makeAction sender accepts: (data, targetPeers, metadata, onProgress)
+        // We pass 'null' for targetPeers to send to everyone in the room.
+        await sendFile(file, null, { name: file.name, size: file.size }, (progress) => {
+            progressBar.value = progress * 100;
+            
+            // Basic speed calculation
+            const elapsed = (Date.now() - startTime) / 1000;
+            const sentBits = progress * file.size;
+            const kbps = (sentBits / 1024 / elapsed).toFixed(2);
+            speedEl.textContent = `Speed: ${kbps} KB/s`;
+        });
+
+        statusEl.textContent = 'File sent!';
+        fileInput.value = ''; // Reset
+    });
+
+    // --- ROOM EVENTS ---
+    room.onPeerJoin(peerId => {
+        console.log('Peer joined:', peerId);
+        statusEl.textContent = 'Peer Connected. Ready to transfer.';
+        statusEl.className = 'status connected';
+        fileInput.disabled = false;
+    });
+
+    room.onPeerLeave(peerId => {
+        console.log('Peer left:', peerId);
+        if (Object.keys(room.getPeers()).length === 0) {
+            statusEl.textContent = 'Waiting for peers...';
+            statusEl.className = 'status';
+            fileInput.disabled = true;
+        }
+    });
+</script>
+
+</body>
+</html>        }
         
         div.progress-label {
             margin-bottom: 5px;
