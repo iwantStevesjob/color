@@ -2,13 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="description" content="WebRTC File Transfer Sample">
+    <meta name="description" content="WebRTC File Transfer via Trystero">
     <meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1, maximum-scale=1">
-    <title>WebRTC Data Channel File Transfer</title>
-
+    <title>P2P File Transfer (BitTorrent Signaling)</title>
+    
     <!-- CSS Styles -->
     <style>
-        /* General Layout based on WebRTC samples main.css */
         body {
             font-family: 'Roboto', sans-serif;
             font-weight: 300;
@@ -32,7 +31,6 @@
             margin: 0 0 1em 0;
         }
         
-        /* Specific Styles for File Transfer */
         progress {
             width: 100%;
             margin-bottom: 10px;
@@ -46,6 +44,7 @@
         #status {
             color: #d32f2f;
             font-weight: bold;
+            display: block;
             margin-top: 10px;
         }
 
@@ -71,7 +70,6 @@
         }
 
         button:hover {
-            box-shadow: 0 5px 11px 0 rgba(0,0,0,.18), 0 4px 15px 0 rgba(0,0,0,.15);
             background-color: #c13e2c;
         }
 
@@ -83,16 +81,14 @@
         }
     </style>
 </head>
-
 <body>
 
 <div id="container">
-    <h1>WebRTC Data Channel File Transfer</h1>
-    <p>This page shows how to transfer a file via WebRTC datachannels. The file is split into chunks and transferred via the datachannel. The <code>RTCPeerConnection</code> objects (local and remote) are in the same page to demonstrate the logic without a server.</p>
+    <h1>P2P File Transfer</h1>
+    <p>Open this page on two different devices. Wait for them to connect, then choose a file.</p>
 
     <div class="input">
         <input type="file" id="fileInput" disabled>
-        <button id="abortButton" disabled>Abort Transfer</button>
     </div>
 
     <div class="progress-label">Send progress:</div>
@@ -103,32 +99,38 @@
 
     <div id="bitrate"></div>
     <a id="download"></a>
-    <span id="status"></span>
+    <span id="status">Initializing Trystero (BitTorrent)...</span>
 </div>
 
-<!-- WebRTC Adapter for cross-browser compatibility -->
-<script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+<!-- Import Trystero (BitTorrent version) -->
+<script src="https://unpkg.com/trystero/dist/trystero-torrent.min.js"></script>
 
 <!-- Main JavaScript Logic -->
 <script>
     'use strict';
 
-    let localConnection;
-    let remoteConnection;
-    let sendChannel;
-    let receiveChannel;
-    let fileReader;
+    // Trystero Configuration
+    // We use a fixed room ID so any two devices running this code will find each other
+    const roomConfig = { appId: 'trystero-file-transfer-demo' };
+    const roomName = 'transfer-room-v1';
     
+    let room;
+    let sendFileSignal;
+    let sendChunkSignal;
+    let peers = [];
+
+    // UI Elements
     const bitrateDiv = document.querySelector('div#bitrate');
     const fileInput = document.querySelector('input#fileInput');
-    const abortButton = document.querySelector('button#abortButton');
     const downloadAnchor = document.querySelector('a#download');
     const sendProgress = document.querySelector('progress#sendProgress');
     const receiveProgress = document.querySelector('progress#receiveProgress');
     const statusMessage = document.querySelector('span#status');
 
+    // Transfer State
     let receiveBuffer = [];
     let receivedSize = 0;
+    let incomingFileInfo = null;
 
     let bytesPrev = 0;
     let timestampPrev = 0;
@@ -136,250 +138,180 @@
     let statsInterval = null;
     let bitrateMax = 0;
 
-    // Standard chunk size for WebRTC is 16KB
+    // Standard chunk size
     const chunkSize = 16384; 
+    let fileReader;
 
-    fileInput.addEventListener('change', handleFileInputChange, false);
-    abortButton.addEventListener('click', () => {
-        if (fileReader && fileReader.readyState === 1) {
-            console.log('Abort read!');
-            fileReader.abort();
+    initTrystero();
+
+    function initTrystero() {
+        // 1. Join the room
+        room = Trystero.joinRoom(roomConfig, roomName);
+
+        // 2. Define Actions (Signals)
+        // Action to send file metadata (name, size, type)
+        const [sendMeta, getMeta] = room.makeAction('file-meta');
+        sendFileSignal = sendMeta;
+
+        // Action to send binary chunks
+        const [sendChunk, getChunk] = room.makeAction('file-chunk');
+        sendChunkSignal = sendChunk;
+
+        // 3. Handle Peer Connections
+        room.onPeerJoin(peerId => {
+            console.log(`Peer joined: ${peerId}`);
+            peers.push(peerId);
+            updateStatus();
+        });
+
+        room.onPeerLeave(peerId => {
+            console.log(`Peer left: ${peerId}`);
+            peers = peers.filter(p => p !== peerId);
+            updateStatus();
+        });
+
+        // 4. Handle Incoming Data (Receiver Logic)
+        getMeta((data, peerId) => {
+            console.log("Received Metadata:", data);
+            
+            // Prepare for new file
+            incomingFileInfo = data;
+            receiveBuffer = [];
+            receivedSize = 0;
+            bytesPrev = 0;
+            bitrateMax = 0;
+            
+            // Reset UI
+            receiveProgress.max = data.size;
+            receiveProgress.value = 0;
+            downloadAnchor.textContent = '';
+            downloadAnchor.removeAttribute('href');
+            
+            timestampStart = (new Date()).getTime();
+            timestampPrev = timestampStart;
+            statsInterval = setInterval(displayStats, 500);
+            
+            statusMessage.textContent = `Receiving ${data.name}...`;
+        });
+
+        getChunk((data, peerId) => {
+            // "data" is the binary chunk (Uint8Array or ArrayBuffer)
+            
+            // If data comes in as a raw array (Trystero sometimes unpacks ArrayBuffers to Arrays), fix it:
+            let chunk = data;
+            if (!(chunk instanceof Uint8Array) && !(chunk instanceof ArrayBuffer)) {
+                 chunk = new Uint8Array(Object.values(data));
+            }
+
+            receiveBuffer.push(chunk);
+            receivedSize += chunk.byteLength || chunk.length;
+            receiveProgress.value = receivedSize;
+
+            if (receivedSize >= incomingFileInfo.size) {
+                // Transfer Complete
+                const received = new Blob(receiveBuffer);
+                receiveBuffer = []; // clear memory
+
+                downloadAnchor.href = URL.createObjectURL(received);
+                downloadAnchor.download = incomingFileInfo.name;
+                downloadAnchor.textContent = `Click to download '${incomingFileInfo.name}' (${incomingFileInfo.size} bytes)`;
+                downloadAnchor.style.display = 'block';
+                statusMessage.textContent = 'Transfer Complete!';
+
+                if (statsInterval) {
+                    clearInterval(statsInterval);
+                    statsInterval = null;
+                    displayStats(); // Final stats
+                }
+            }
+        });
+    }
+
+    function updateStatus() {
+        if (peers.length > 0) {
+            statusMessage.textContent = `Connected to ${peers.length} peer(s). Ready to transfer.`;
+            statusMessage.style.color = 'green';
+            fileInput.disabled = false;
+        } else {
+            statusMessage.textContent = 'Waiting for another device to join...';
+            statusMessage.style.color = '#d32f2f';
+            fileInput.disabled = true;
         }
-    });
-
-    // Automatically create connection on load
-    createConnection();
-
-    async function createConnection() {
-        abortButton.disabled = true;
-        const configuration = null; // No STUN/TURN needed for local connection
-
-        // Create the local peer connection
-        localConnection = new RTCPeerConnection(configuration);
-
-        // Create the data channel on the local connection
-        sendChannel = localConnection.createDataChannel('sendDataChannel');
-        sendChannel.binaryType = 'arraybuffer';
-        sendChannel.onopen = onSendChannelStateChange;
-        sendChannel.onclose = onSendChannelStateChange;
-
-        // Create the remote peer connection
-        remoteConnection = new RTCPeerConnection(configuration);
-        
-        // Handle ICE candidates
-        localConnection.onicecandidate = e => {
-            onIceCandidate(localConnection, e);
-        };
-        remoteConnection.onicecandidate = e => {
-            onIceCandidate(remoteConnection, e);
-        };
-
-        // When remote receives a data channel
-        remoteConnection.ondatachannel = receiveChannelCallback;
-
-        // Exchange Offer/Answer
-        try {
-            const offer = await localConnection.createOffer();
-            await localConnection.setLocalDescription(offer);
-            await remoteConnection.setRemoteDescription(offer);
-
-            const answer = await remoteConnection.createAnswer();
-            await remoteConnection.setLocalDescription(answer);
-            await localConnection.setRemoteDescription(answer);
-        } catch (e) {
-            console.error('Connection failed:', e);
-        }
     }
 
-    function onIceCandidate(pc, event) {
-        getOtherPc(pc)
-            .addIceCandidate(event.candidate)
-            .then(
-                () => console.log('AddIceCandidate success'),
-                (err) => console.error('AddIceCandidate failed', err)
-            );
-    }
-
-    function getOtherPc(pc) {
-        return (pc === localConnection) ? remoteConnection : localConnection;
-    }
-
-    function sendData() {
+    // Sender Logic
+    fileInput.addEventListener('change', () => {
         const file = fileInput.files[0];
-        console.log(`File is ${[file.name, file.size, file.type, file.lastModified].join(' ')}`);
-
-        // Reset UI
-        statusMessage.textContent = '';
-        downloadAnchor.textContent = '';
-        if (file.size === 0) {
-            statusMessage.textContent = 'File is empty, please select a non-empty file';
-            closeDataChannels();
+        if (!file) return;
+        if (peers.length === 0) {
+            alert("No peers connected!");
             return;
         }
-        
+
+        console.log(`Sending file: ${file.name}`);
+        statusMessage.textContent = `Sending ${file.name}...`;
+
+        // 1. Send Metadata
+        sendFileSignal({
+            name: file.name,
+            size: file.size,
+            type: file.type
+        });
+
         sendProgress.max = file.size;
-        receiveProgress.max = file.size;
-        
-        fileReader = new FileReader();
+        sendProgress.value = 0;
+
+        // 2. Read and Send Chunks
         let offset = 0;
-        
+        fileReader = new FileReader();
+
         fileReader.addEventListener('error', error => console.error('Error reading file:', error));
-        fileReader.addEventListener('abort', event => console.log('File reading aborted:', event));
-        
         fileReader.addEventListener('load', e => {
             // Send the chunk
-            sendChannel.send(e.target.result);
-            offset += e.target.result.byteLength;
-            sendProgress.value = offset;
+            const arrayBuffer = e.target.result;
             
+            // Send to all peers
+            sendChunkSignal(arrayBuffer);
+            
+            offset += arrayBuffer.byteLength;
+            sendProgress.value = offset;
+
             if (offset < file.size) {
-                readSlice(offset);
+                // Read next slice
+                // Simple flow control: using setTimeout(0) to allow UI updates and prevent freezing
+                // Real WebRTC backpressure is handled internally by Trystero/Browser, 
+                // but flooding the loop can freeze the main thread.
+                setTimeout(() => readSlice(offset), 0);
+            } else {
+                statusMessage.textContent = 'File Sent!';
+                fileInput.value = ''; // Reset input
             }
         });
 
         const readSlice = o => {
-            const slice = file.slice(offset, o + chunkSize);
+            const slice = file.slice(o, o + chunkSize);
             fileReader.readAsArrayBuffer(slice);
         };
 
-        // Handle Backpressure (Flow Control)
-        // If the buffer is full, wait until it drains before reading/sending next chunk
-        const bufferHighThreshold = 65536; // 64KB
-        
-        const readSliceWrapper = (o) => {
-             if (sendChannel.bufferedAmount > bufferHighThreshold) {
-                 // Wait for the buffer to drain
-                 const onBufferedAmountLow = () => {
-                     sendChannel.removeEventListener('bufferedamountlow', onBufferedAmountLow);
-                     readSliceWrapper(o);
-                 };
-                 sendChannel.addEventListener('bufferedamountlow', onBufferedAmountLow);
-                 return;
-             }
-             const slice = file.slice(o, o + chunkSize);
-             fileReader.readAsArrayBuffer(slice);
-        };
-        
-        readSliceWrapper(0);
-    }
-
-    function handleFileInputChange() {
-        const file = fileInput.files[0];
-        if (!file) {
-            console.log('No file chosen');
-        } else {
-            sendData();
-        }
-    }
-
-    function receiveChannelCallback(event) {
-        console.log('Receive Channel Callback');
-        receiveChannel = event.channel;
-        receiveChannel.binaryType = 'arraybuffer';
-        receiveChannel.onmessage = onReceiveMessageCallback;
-        receiveChannel.onopen = onReceiveChannelStateChange;
-        receiveChannel.onclose = onReceiveChannelStateChange;
-
-        receivedSize = 0;
-        bitrateMax = 0;
-        downloadAnchor.textContent = '';
-        downloadAnchor.removeAttribute('download');
-        
-        if (downloadAnchor.href) {
-            URL.revokeObjectURL(downloadAnchor.href);
-            downloadAnchor.removeAttribute('href');
-        }
-    }
-
-    function onReceiveMessageCallback(event) {
-        receiveBuffer.push(event.data);
-        receivedSize += event.data.byteLength;
-
-        receiveProgress.value = receivedSize;
-
-        // Determine if transfer is complete
-        const file = fileInput.files[0];
-        if (receivedSize === file.size) {
-            const received = new Blob(receiveBuffer);
-            receiveBuffer = [];
-
-            downloadAnchor.href = URL.createObjectURL(received);
-            downloadAnchor.download = file.name;
-            downloadAnchor.textContent = `Click to download '${file.name}' (${file.size} bytes)`;
-            downloadAnchor.style.display = 'block';
-
-            // Calculate bitrate stats
-            const bitrate = Math.round(receivedSize * 8 / ((new Date()).getTime() - timestampStart));
-            bitrateDiv.innerHTML = `<strong>Average Bitrate:</strong> ${bitrate} kbits/sec (max: ${bitrateMax} kbits/sec)`;
-
-            if (statsInterval) {
-                clearInterval(statsInterval);
-                statsInterval = null;
-            }
-
-            closeDataChannels();
-        }
-    }
-
-    function onSendChannelStateChange() {
-        const readyState = sendChannel.readyState;
-        console.log('Send channel state is: ' + readyState);
-        if (readyState === 'open') {
-            fileInput.disabled = false;
-            fileInput.focus();
-        } else {
-            fileInput.disabled = true;
-            abortButton.disabled = true;
-        }
-    }
-
-    function onReceiveChannelStateChange() {
-        const readyState = receiveChannel.readyState;
-        console.log(`Receive channel state is: ${readyState}`);
-        if (readyState === 'open') {
-            timestampStart = (new Date()).getTime();
-            timestampPrev = timestampStart;
-            statsInterval = setInterval(displayStats, 500);
-            displayStats();
-        }
-    }
+        readSlice(0);
+    });
 
     function displayStats() {
-        if (remoteConnection && remoteConnection.iceConnectionState === 'connected') {
-            const currentTimestamp = (new Date()).getTime();
-            if (bytesPrev > 0) {
-                const bitRate = Math.round((receivedSize - bytesPrev) * 8 / (currentTimestamp - timestampPrev));
-                bitrateDiv.innerHTML = `<strong>Current Bitrate:</strong> ${bitRate} kbits/sec`;
-                
-                if (bitRate > bitrateMax) {
-                    bitrateMax = bitRate;
-                }
-            }
-            timestampPrev = currentTimestamp;
-            bytesPrev = receivedSize;
-        }
-    }
-    
-    function closeDataChannels() {
-        console.log('Closing data channels');
-        sendChannel.close();
-        console.log('Closed data channel with label: ' + sendChannel.label);
-        if (receiveChannel) {
-            receiveChannel.close();
-            console.log('Closed data channel with label: ' + receiveChannel.label);
-        }
-        localConnection.close();
-        remoteConnection.close();
-        localConnection = null;
-        remoteConnection = null;
-        console.log('Closed peer connections');
+        const currentTimestamp = (new Date()).getTime();
+        const duration = currentTimestamp - timestampPrev;
         
-        // Re-enable connection for next file? 
-        // In this demo logic, we must reload or re-call createConnection.
-        // For simplicity, we create a new connection immediately to allow another transfer.
-        setTimeout(createConnection, 500);
+        if (duration > 0 && receivedSize > 0) {
+            const bitRate = Math.round((receivedSize - bytesPrev) * 8 / duration);
+            bitrateDiv.innerHTML = `<strong>Current Speed:</strong> ${bitRate} kbits/sec`;
+            
+            if (bitRate > bitrateMax) {
+                bitrateMax = bitRate;
+            }
+        }
+        timestampPrev = currentTimestamp;
+        bytesPrev = receivedSize;
     }
-</script>
 
+</script>
 </body>
 </html>
