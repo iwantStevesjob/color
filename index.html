@@ -7,18 +7,32 @@
     <title>Color</title>
 
     <style>
-        /* --- CORE STYLES --- */
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #000;
-            font-family: 'Inter', sans-serif;
-            transition: background-color 0.1s linear;
-            user-select: none;
+        :root {
+            --bg-color: #000;
+            --text-color: #fff;
+            --ui-bg: rgba(255, 255, 255, 0.1);
+            --ui-border: rgba(255, 255, 255, 0.2);
+            --nav-color: white;
+            --tracker-bg: rgba(0, 0, 0, 0.75);
         }
 
         body.light-mode {
-            background-color: #f0f0f0;
+            --bg-color: #f0f0f0;
+            --text-color: #000;
+            --ui-bg: rgba(0, 0, 0, 0.1);
+            --ui-border: rgba(0, 0, 0, 0.2);
+            --nav-color: black;
+            --tracker-bg: transparent;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Inter', sans-serif;
+            transition: background-color 0.1s linear;
+            user-select: none;
         }
 
         canvas {
@@ -59,7 +73,7 @@
             opacity: 0;
             pointer-events: none;
             transition: opacity 1s ease;
-            color: white;
+            color: inherit;
         }
 
         #login-card.visible {
@@ -137,7 +151,6 @@
             gap: 30px;
             z-index: 150;
             transition: opacity 0.5s ease;
-            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.4), transparent);
             opacity: 0;
             pointer-events: none;
         }
@@ -160,7 +173,7 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            color: var(--nav-color, white);
+            color: var(--nav-color);
         }
 
         .nav-item:hover {
@@ -238,31 +251,29 @@
             color: #00e676;
         }
 
-        #debug-btn {
+        #debug-btn,
+        #freeze-btn {
             position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 8px 16px;
-            border-radius: 20px;
+            background: var(--ui-bg);
+            color: var(--text-color);
+            border: 1px solid var(--ui-border);
             cursor: pointer;
-            font-family: 'Menlo', monospace;
-            font-size: 0.8rem;
-            z-index: 10;
             backdrop-filter: blur(10px);
             transition: all 0.2s;
+            z-index: 160;
+        }
+
+        #debug-btn {
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-family: 'Menlo', monospace;
+            font-size: 0.8rem;
         }
 
         #debug-btn:hover {
             background: rgba(255, 255, 255, 0.2);
-        }
-
-        body.light-mode #debug-btn {
-            color: black;
-            border-color: rgba(0, 0, 0, 0.2);
-            background: rgba(0, 0, 0, 0.1);
         }
 
         #debug-btn.active {
@@ -333,6 +344,7 @@
             padding: 0 20px;
             font-family: -apple-system, system-ui, sans-serif;
             flex-shrink: 0;
+            color: #1a1a1a;
         }
 
         .status {
@@ -373,6 +385,7 @@
             background: #fff;
             color: #1a1a1a;
             font-family: 'Courier New', monospace;
+            overflow-anchor: none;
         }
 
         #display {
@@ -496,7 +509,6 @@
         }
 
         #freeze-btn {
-            position: absolute;
             top: 20px;
             left: 20px;
             width: 48px;
@@ -504,20 +516,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background: rgba(255, 255, 255, 0.1);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 50%;
-            cursor: pointer;
-            backdrop-filter: blur(10px);
-            transition: all 0.3s ease;
-            z-index: 10;
-        }
-
-        body.light-mode #freeze-btn {
-            background: rgba(0, 0, 0, 0.1);
-            color: #000;
-            border-color: rgba(0, 0, 0, 0.2);
         }
 
         #tracker {
@@ -528,8 +527,8 @@
             display: flex;
             gap: 20px;
             padding: 10px 25px;
-            background: rgba(0, 0, 0, 0.75);
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: var(--tracker-bg);
+            border: 1px solid var(--ui-border);
             border-radius: 50px;
             backdrop-filter: blur(10px);
             z-index: 10;
@@ -577,9 +576,10 @@
     <div id="hover-trigger"></div>
 
     <nav id="top-nav">
-        <div class="nav-item">Settings</div>
-        <div class="nav-item">Home</div>
-        <div class="nav-item logout" id="logout-btn">Logout ✕</div>
+        
+        <div class="nav-item">HOME</div>
+        <div class="nav-item">APPS</div>
+        <div class="nav-item">SETTINGS</div>
     </nav>
 
     <div id="login-card">
@@ -626,1124 +626,499 @@
         <div class="cone-data" id="data-2"></div>
     </div>
 
-    <!-- P2P APP SCRIPT -->
     <script type="module">
-
         import { joinRoom, selfId } from 'https://esm.run/trystero/torrent';
 
         class ColorDB {
-            constructor() {
-                console.log('[ColorDB] Constructor called - initializing database wrapper');
-                this.dbName = 'ColorDB';
-                this.dbVersion = 1;
-                this.db = null;
-            }
-
-            init() {
-                console.log('[ColorDB] init() called - opening IndexedDB...');
+            constructor() { this.name = 'color'; }
+            async _open(hex = null) {
                 return new Promise((resolve, reject) => {
-                    const request = indexedDB.open(this.dbName, this.dbVersion);
-                    request.onerror = (event) => {
-                        console.error('[ColorDB] ERROR opening IndexedDB:', event);
-                        reject(event);
+                    let req = indexedDB.open(this.name);
+                    req.onsuccess = (e) => {
+                        const db = e.target.result;
+                        if (hex && !db.objectStoreNames.contains(hex)) {
+                            const v = db.version + 1;
+                            db.close();
+                            const upg = indexedDB.open(this.name, v);
+                            upg.onupgradeneeded = (evt) => evt.target.result.createObjectStore(hex);
+                            upg.onsuccess = (evt) => resolve(evt.target.result);
+                            upg.onerror = reject;
+                        } else resolve(db);
                     };
-                    request.onsuccess = (event) => {
-                        this.db = event.target.result;
-                        console.log('[ColorDB] IndexedDB opened successfully');
-                        resolve(this.db);
-                    };
-                    request.onupgradeneeded = (event) => {
-                        console.log('[ColorDB] Upgrade needed - creating/updating schema...');
-                        const db = event.target.result;
-                        if (!db.objectStoreNames.contains('rooms')) {
-                            console.log('[ColorDB] Creating "rooms" object store');
-                            db.createObjectStore('rooms', { keyPath: 'hex' });
-                        }
-                    };
+                    req.onerror = reject;
                 });
             }
-
             async getRoom(hex) {
-                console.log(`[ColorDB] getRoom() called for hex: ${hex}`);
-                if (!this.db) {
-                    console.log('[ColorDB] DB not initialized, calling init()...');
-                    await this.init();
-                }
-                return new Promise(resolve => {
-                    const transaction = this.db.transaction(['rooms'], 'readonly');
-                    const store = transaction.objectStore('rooms');
-                    const req = store.get(hex);
+                const db = await this._open();
+                if (!db.objectStoreNames.contains(hex)) return null;
+                return new Promise(res => {
+                    const tx = db.transaction([hex], 'readonly').objectStore(hex);
+                    const req = tx.getAllKeys();
                     req.onsuccess = () => {
-                        console.log(`[ColorDB] getRoom() result for ${hex}:`, req.result ? 'FOUND' : 'NOT FOUND', req.result);
-                        resolve(req.result);
-                    };
-                    req.onerror = () => {
-                        console.error(`[ColorDB] getRoom() ERROR for ${hex}`);
-                        resolve(null);
-                    };
+                        const keys = req.result;
+                        if (!keys.length) { res(null); return; }
+                        tx.getAll().onsuccess = (e) => {
+                            const vals = e.target.result;
+                            const lookup = {};
+                            keys.forEach((k, i) => lookup[k] = vals[i]);
+                            const skeleton = lookup.__SKELETON__ || [];
+                            const content = {};
+                            skeleton.forEach(id => {
+                                if (lookup[id] !== undefined) content[id] = `<div id="${id}" class="editor-line">${lookup[id]}</div>`;
+                            });
+                            res({ hex, skeleton, content });
+                        }
+                    }
+                    req.onerror = () => res(null);
                 });
             }
-
             async saveRoom(hex, skeleton, content) {
-                console.log(`[ColorDB] saveRoom() called for hex: ${hex}, skeleton length: ${skeleton?.length}, content keys: ${Object.keys(content || {}).length}`);
-                if (!this.db) {
-                    console.log('[ColorDB] DB not initialized, calling init()...');
-                    await this.init();
-                }
-                return new Promise(resolve => {
-                    const transaction = this.db.transaction(['rooms'], 'readwrite');
-                    const store = transaction.objectStore('rooms');
-                    const data = {
-                        hex: hex,
-                        lastUpdated: Date.now(),
-                        skeleton: skeleton, // Array of IDs ordered
-                        content: content    // Map of ID -> HTML
-                    };
-                    store.put(data);
-                    transaction.oncomplete = () => {
-                        console.log(`[ColorDB] saveRoom() completed for ${hex}`);
-                        resolve();
-                    };
-                    transaction.onerror = () => {
-                        console.error(`[ColorDB] saveRoom() ERROR for ${hex}`);
-                        resolve();
-                    };
+                const db = await this._open(hex);
+                return new Promise(res => {
+                    const tx = db.transaction([hex], 'readwrite');
+                    const store = tx.objectStore(hex);
+                    store.clear();
+                    store.put(skeleton, '__SKELETON__');
+                    for (const [id, outer] of Object.entries(content)) {
+                        const inner = outer.substring(outer.indexOf('>') + 1, outer.lastIndexOf('<'));
+                        store.put(inner, id);
+                    }
+                    tx.oncomplete = () => res(true);
+                    tx.onerror = () => res(false);
                 });
             }
-
             async getAllRooms() {
-                console.log('[ColorDB] getAllRooms() called');
-                if (!this.db) {
-                    console.log('[ColorDB] DB not initialized, calling init()...');
-                    await this.init();
-                }
-                return new Promise(resolve => {
-                    const transaction = this.db.transaction(['rooms'], 'readonly');
-                    const store = transaction.objectStore('rooms');
-                    const req = store.getAll();
-                    req.onsuccess = () => {
-                        console.log(`[ColorDB] getAllRooms() found ${req.result?.length || 0} rooms`);
-                        resolve(req.result);
-                    };
-                    req.onerror = () => {
-                        console.error('[ColorDB] getAllRooms() ERROR');
-                        resolve([]);
-                    };
-                });
+                const db = await this._open();
+                return Array.from(db.objectStoreNames).map(hex => ({ hex }));
             }
+            init() { return this._open(); }
         }
-
-        // Export to window for sphere script
         window.ColorDB = ColorDB;
-
 
         class EditorApp {
             constructor() {
-                console.log('[EditorApp] ========== CONSTRUCTOR STARTED ==========');
-                console.log('[EditorApp] Initializing P2P Editor Application...');
-                this.STORAGE_KEY = 'p2p_editor_user_v1';
-                this.VISITED_KEY = 'p2p_visited_rooms_v1';
-
-                this.ui = {
-                    display: document.getElementById('display'),
-                    container: document.getElementById('chat-container'),
-                    minimap: document.getElementById('minimap'),
-                    peerCount: document.getElementById('peer-count'),
-                    dot: document.querySelector('.dot'),
-                    tools: document.getElementById('tools'),
-                    status: document.getElementById('room-status'),
-                    btn: document.getElementById('login-btn'),
-                    userBadge: document.getElementById('user-badge'),
-                    loginCard: document.getElementById('login-card'),
-                    dashboard: document.getElementById('dashboard-panel'),
-                    logoutBtn: document.getElementById('logout-btn'),
-                    hoverTrigger: document.getElementById('hover-trigger'),
-                    topNav: document.getElementById('top-nav')
-                };
-
-                // FIX 1: Initialize IDB Wrapper
-                console.log('[EditorApp] Initializing ColorDB...');
                 this.db = new ColorDB();
-                this.db.init().then(() => {
-                    console.log('[EditorApp] ColorDB initialized successfully');
-                }).catch(err => {
-                    console.error('[EditorApp] ColorDB initialization failed:', err);
-                });
+                this.db.init();
 
-                this.user = JSON.parse(localStorage.getItem(this.STORAGE_KEY)) || {
-                    id: 'user_' + Math.random().toString(36).substr(2, 9),
-                    color: '#000000'
-                };
-                console.log('[EditorApp] User loaded:', this.user);
-                this.visitedRooms = JSON.parse(localStorage.getItem(this.VISITED_KEY)) || [];
-                console.log(`[EditorApp] Visited rooms loaded: ${this.visitedRooms.length} rooms`);
+                this.ui = Object.fromEntries([
+                    'display', 'chat-container', 'minimap', 'peer-count', 'tools', 'room-status',
+                    'login-btn', 'user-badge', 'login-card', 'dashboard-panel', 'hover-trigger', 'top-nav'
+                ].map(id => [id.replace(/-./g, x => x[1].toUpperCase()), document.getElementById(id)]));
+                this.ui.dot = document.querySelector('.dot');
+
+                const savedColor = localStorage.getItem('lastSphereColor');
+                this.user = { id: 'user_' + this.makeId().replace('line-', ''), color: savedColor || '#ffffff' };
+                this.visitedRooms = [];
+                this.peerColors = {};
+                this.anonCounter = 1;
+
+                this.db.getAllRooms().then(rooms => {
+                        this.visitedRooms = rooms.map(r => 'doc-infinite-' + r.hex);
+                        if (!window.location.hash || window.location.hash.length < 2) {
+                            this.runSequencedScan();
+                        } else {
+                            this.tryAutoConnectFromHash();
+                        }
+                    });
 
                 this.room = null;
-                this.room = null;
-                // this.roomDB = null; // Removed GunDB ref
                 this.roomId = null;
                 this.actions = {};
                 this.activeLocks = {};
                 this.currentLineId = null;
                 this.isFresh = true;
-                this.hasAutoScrolled = false;
-                this.pendingRemoteData = null; // Store remote data for conflict resolution
-                this.statusTimeoutAttempts = 20; // Default to 20 (5 seconds)
+                this.saveTimeout = null;
+                this.statusTimeoutAttempts = 20;
                 this.lastLineCount = 0;
 
                 this.bindEvents();
                 this.setupGlobalExposure();
-                console.log('[EditorApp] Events bound and globals exposed');
 
                 if (!window.location.hash || window.location.hash.length < 2) {
-                    console.log('[EditorApp] No hash in URL, running sequenced scan');
-                    this.runSequencedScan();
-                } else {
-                    console.log(`[EditorApp] URL hash detected: ${window.location.hash}`);
-                    // AUTO-CONNECT: Try to load from local DB immediately
-                    this.tryAutoConnectFromHash();
+                    setTimeout(() => this.runSequencedScan(), 100);
                 }
+                else this.tryAutoConnectFromHash();
             }
 
-            async tryAutoConnectFromHash() {
-                const hex = window.location.hash.replace('#', '');
-                console.log(`[EditorApp] tryAutoConnectFromHash() for hex: ${hex}`);
+            makeId() { return 'line-' + Math.random().toString(36).substr(2, 9); }
+            tryAutoConnectFromHash() { if (window.location.hash.length > 1) this.connectAndPreview(window.location.hash, true); }
 
-                this.statusTimeoutAttempts = 20; // URL hash needs full 5s delay
-
-                this.roomId = 'doc-infinite-' + hex;
-                this.user.color = '#' + hex;
-                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.user));
-                this.ui.userBadge.style.backgroundColor = this.user.color;
-
-                // Check if we have local data for this color
-                const localData = await this.db.getRoom(hex);
-
-                if (localData && localData.skeleton && localData.skeleton.length > 0) {
-                    console.log(`[EditorApp] Found local data for ${hex} - ${localData.skeleton.length} lines`);
-                    console.log('[EditorApp] BYPASSING Initializing status - loading directly from local DB');
-
-                    // Load local data immediately
-                    await this.renderFromLocalDB();
-
-                    // Enter room UI immediately (skip login card entirely)
-                    this.enterRoomUI();
-
-                    // Join network in background - will handle conflicts
-                    this.joinNetworkWithConflictDetection();
-                } else {
-                    console.log(`[EditorApp] No local data for ${hex} - showing login card`);
-                    // No local data, show the normal login flow
-                    this.ui.loginCard.classList.add('visible');
-                    this.ui.status.innerText = "Checking Network...";
-
-                    // Start network connection
-                    this.joinNetwork(false);
-
-                    // Generate fresh content after delay if still empty
-                    setTimeout(async () => {
-                        if (!this.ui.display.querySelector('.editor-line')) {
-                            console.log('[EditorApp] No content after timeout, generating fresh');
-                            this.ui.display.innerHTML = this.generateFreshLines();
-                            this.isFresh = true;
-                            this.ui.status.innerText = "COLOR AVAILABLE";
-                        }
-                    }, 3000);
-                }
-            }
-
-            joinNetworkWithConflictDetection() {
-                console.log('[EditorApp] joinNetworkWithConflictDetection() - connecting in background');
-
-                try {
-                    this.room = joinRoom({
-                        appId: 'doc-infinite-v5-idb',
-                        trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io']
-                    }, this.roomId);
-                    console.log('[EditorApp] Background room created');
-                } catch (e) {
-                    console.error('[EditorApp] Failed to create background room:', e);
-                    return;
-                }
-
+            joinNetwork(mode = 'standard') {
+                try { this.room = joinRoom({ appId: 'doc-infinite-v5-idb', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId); } catch (e) { return; }
+                const actions = ['skeleton', 'fragment', 'lock', 'req', 'identity'];
                 const [sendSkeleton, getSkeleton] = this.room.makeAction('skeleton');
-                const [sendFragment, getFragment] = this.room.makeAction('fragment');
-                const [sendLock, getLock] = this.room.makeAction('lock');
-                const [reqSync, getReqSync] = this.room.makeAction('req');
+                this.actions = Object.assign({ sendSkeleton }, ...actions.slice(1).map(k => ({ [`send${k.charAt(0).toUpperCase() + k.slice(1)}`]: this.room.makeAction(k)[0] })));
+                const [_, getFragment] = this.room.makeAction('fragment');
+                const [__, getLock] = this.room.makeAction('lock');
+                const [___, getReqSync] = this.room.makeAction('req');
+                const [____, getIdentity] = this.room.makeAction('identity');
 
-                this.actions = { sendSkeleton, sendFragment, sendLock, reqSync };
+                this.actions.reqSync = this.room.makeAction('req')[0];
 
-                // Handle incoming skeleton - check for conflicts
+                getIdentity((data, pid) => this.handlePeerIdentity(data, pid));
+
                 getSkeleton((ids, peerId) => {
-                    console.log(`[EditorApp] RECEIVED skeleton from peer ${peerId}, ${ids?.length || 0} IDs`);
-
-                    // Get our current local IDs
-                    const myIds = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                    const myContent = this.ui.display.innerText.trim();
-
-                    // Check if this is significantly different (conflict)
-                    const idsDifferent = JSON.stringify(myIds.slice(0, 10)) !== JSON.stringify((ids || []).slice(0, 10));
-
-                    if (idsDifferent && myContent.length > 10) {
-                        console.log('[EditorApp] CONFLICT DETECTED - local data differs from remote');
-                        this.pendingRemoteData = { skeleton: ids, peerId };
-
-                        // Ask user what to do
-                        const syncWithPeers = confirm(
-                            `Other users are in this room with different content.\n\n` +
-                            `• Click OK to sync with them (your local changes may be overwritten)\n` +
-                            `• Click Cancel to stay offline with your local content`
-                        );
-
-                        if (syncWithPeers) {
-                            console.log('[EditorApp] User chose to sync with peers');
-                            this.handleRemoteSkeleton(ids);
-                            // Request full content
-                            this.actions.reqSync(null);
-                        } else {
-                            console.log('[EditorApp] User chose to stay offline');
-                            // Disconnect from room
-                            try { this.room.leave(); } catch (e) { }
-                            this.room = null;
-                            this.actions = {};
-                            this.ui.peerCount.innerText = "Offline (by choice)";
-                            this.ui.dot.classList.remove('on');
-                        }
-                    } else {
-                        // No significant conflict, merge normally
-                        this.handleRemoteSkeleton(ids);
-                    }
+                    if (mode === 'conflict' && ids) {
+                        const myIds = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
+                        if (JSON.stringify(myIds.slice(0, 10)) !== JSON.stringify(ids.slice(0, 10)) && this.ui.display.innerText.trim().length > 10) {
+                            if (confirm(`Remote content differs. Sync?`)) { this.handleRemoteSkeleton(ids); this.actions.reqSync(null); }
+                            else { this.room.leave(); this.room = null; this.actions = {}; this.ui.peerCount.innerText = "Offline (by choice)"; this.ui.dot.classList.remove('on'); }
+                        } else this.handleRemoteSkeleton(ids);
+                    } else this.handleRemoteSkeleton(ids);
                 });
 
-                getFragment((fragMap, peerId) => {
-                    console.log(`[EditorApp] RECEIVED fragments from peer ${peerId}, ${Object.keys(fragMap || {}).length} fragments`);
-                    this.handleRemoteFragments(fragMap);
-                });
-
-                getLock((data, pid) => {
-                    this.handleRemoteLock(data, pid);
-                });
-
+                getFragment((fragMap) => this.handleRemoteFragments(fragMap));
+                getLock((data, pid) => this.handleRemoteLock(data, pid));
                 getReqSync((_, pid) => {
-                    console.log(`[EditorApp] RECEIVED sync request from peer ${pid}`);
                     const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                    if (ids.length > 0) {
-                        this.actions.sendSkeleton(ids, pid);
-                        const allFragments = this.getAllFragments();
-                        if (Object.keys(allFragments).length > 0) {
-                            this.actions.sendFragment(allFragments, pid);
-                        }
-                    }
+                    if (ids.length) { this.actions.sendSkeleton(ids, pid); const frags = this.getFragments(false); if (Object.keys(frags).length) this.actions.sendFragment(frags, pid); }
                 });
 
-                this.room.onPeerJoin(id => {
-                    console.log(`[EditorApp] PEER JOINED: ${id}`);
-                    this.handlePeerJoin(id);
-                    this.updateStatus();
-                });
+                this.room.onPeerJoin(id => { this.handlePeerJoin(id); this.updateStatus(); });
+                this.room.onPeerLeave(() => { this.updateStatus(); this.reapplyVisualLocks(); });
 
-                this.room.onPeerLeave(id => {
-                    console.log(`[EditorApp] PEER LEFT: ${id}`);
-                    this.updateStatus();
-                    this.reapplyVisualLocks();
-                });
-
-                // Start status polling
                 let attempts = 0;
                 const poll = setInterval(() => {
-                    attempts++;
-                    if (!this.room) { clearInterval(poll); return; }
-                    const peers = Object.keys(this.room.getPeers()).length;
-                    this.updateStatus(peers, attempts);
-
-                    // Request sync early to detect conflicts
-                    if (attempts === 2 && peers > 0) {
-                        console.log('[EditorApp] Requesting sync to check for conflicts');
-                        this.actions.reqSync(null);
-                    }
-
-                    if (attempts > 60) clearInterval(poll);
+                    attempts++; if (!this.room) { clearInterval(poll); return; }
+                    this.updateStatus(Object.keys(this.room.getPeers()).length, attempts);
+                    if ((mode === 'conflict' && attempts === 2) || (this.ui.display.innerText.trim().length < 5 && attempts % 4 === 0)) this.actions.reqSync(null);
+                    if (attempts > 120) clearInterval(poll);
                 }, 250);
+                setTimeout(() => { if (this.room) this.actions.reqSync(null); }, 500);
             }
 
-            setupGlobalExposure() {
-                window.connectAndPreview = (hex, fromUrl) => this.connectAndPreview(hex, fromUrl);
-                window.enterRoomUI = () => this.enterRoomUI();
-            }
-
-            addVisited(r) {
-                if (r && !this.visitedRooms.includes(r)) {
-                    this.visitedRooms.push(r);
-                    localStorage.setItem(this.VISITED_KEY, JSON.stringify(this.visitedRooms));
-                }
-            }
+            setupGlobalExposure() { window.connectAndPreview = (hex, u) => this.connectAndPreview(hex, u); window.enterRoomUI = () => this.enterRoomUI(); }
 
             connectAndPreview(hex, fromUrl = false) {
-                console.log(`[EditorApp] connectAndPreview() called with hex: ${hex}, fromUrl: ${fromUrl}`);
-
-                // Set status timeout: 20 attempts (5s) for URL, 2 attempts (0.5s) for click
                 this.statusTimeoutAttempts = fromUrl ? 20 : 2;
-
                 const cleanHex = hex.replace('#', '');
                 this.roomId = 'doc-infinite-' + cleanHex;
                 this.user.color = '#' + cleanHex;
-                console.log(`[EditorApp] Room ID set to: ${this.roomId}`);
-                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.user));
-                try { localStorage.setItem("lastSphereColor", '#' + cleanHex); } catch (e) { }
                 this.ui.userBadge.style.backgroundColor = this.user.color;
 
-                // Clean up previous room if exists
-                if (this.room) {
-                    console.log('[EditorApp] Cleaning up previous room connection');
-                    try { this.room.leave(); } catch (e) { console.warn('[EditorApp] Error leaving room:', e); }
-                    this.room = null;
-                }
-                this.roomDB = null;
+                if (this.room) { try { this.room.leave(); } catch (e) { } this.room = null; }
 
-                // Check for local data first
-                this.db.getRoom(cleanHex).then(localData => {
-                    if (localData && localData.skeleton && localData.skeleton.length > 0) {
-                        console.log(`[EditorApp] Found local data for ${cleanHex} - loading directly`);
-                        this.ui.status.innerText = "Loading...";
-                        this.ui.btn.classList.remove('hidden');
-
-                        this.renderFromLocalDB().then(() => {
-                            console.log('[EditorApp] Local DB render complete');
-                            // Show login card briefly then user can click to enter
-                            this.ui.status.innerText = "READY";
-                            // Use conflict detection for network join
-                            this.joinNetworkWithConflictDetection();
+                this.db.getRoom(cleanHex).then(data => {
+                    if (data?.skeleton?.length) {
+                        this.ui.roomStatus.innerText = "Loading..."; this.ui.loginBtn.classList.remove('hidden');
+                        this.renderFromLocalDB(data).then(() => { 
+                            this.ui.roomStatus.innerText = "READY"; 
+                            // Note: we removed the immediate slide up here to let the zoom animation finish first
+                            this.joinNetwork('conflict'); 
                         });
                     } else {
-                        console.log(`[EditorApp] No local data for ${cleanHex}`);
-                        this.ui.status.innerText = "Checking Network...";
-                        this.ui.btn.classList.remove('hidden');
-
-                        this.joinNetwork(false);
-
-                        // Generate fresh if not loaded quickly
-                        setTimeout(async () => {
-                            console.log('[EditorApp] 3s timeout - checking if display has content...');
-                            if (!this.ui.display.querySelector('.editor-line')) {
-                                console.log('[EditorApp] No content found, generating fresh');
-                                this.ui.display.innerHTML = this.generateFreshLines();
-                                this.isFresh = true;
-                                this.ui.status.innerText = "COLOR AVAILABLE";
-                            }
-                        }, 3000);
+                        this.ui.roomStatus.innerText = "Checking Network..."; this.ui.loginBtn.classList.remove('hidden');
+                        this.joinNetwork('standard');
+                        setTimeout(() => { if (!this.ui.display.querySelector('.editor-line')) { this.ui.display.innerHTML = this.createLines(101); this.isFresh = true; this.ui.roomStatus.innerText = "COLOR AVAILABLE"; } }, 3000);
                     }
-                }).catch(err => {
-                    console.error('[EditorApp] Error checking local DB:', err);
-                    this.ui.status.innerText = "Checking Network...";
-                    this.ui.btn.classList.remove('hidden');
-                    this.joinNetwork(false);
                 });
             }
 
-            async renderFromLocalDB() {
-                console.log('[EditorApp] renderFromLocalDB() called');
-                const hex = this.user.color.replace('#', '');
-                console.log(`[EditorApp] Fetching room data for hex: ${hex}`);
-                const data = await this.db.getRoom(hex);
-                this.ui.display.innerHTML = '';
-
-                if (data && data.skeleton && data.skeleton.length > 0) {
-                    console.log(`[EditorApp] Found local data - skeleton length: ${data.skeleton.length}`);
-                    data.skeleton.forEach(id => {
-                        if (data.content && data.content[id]) {
-                            this.ui.display.insertAdjacentHTML('beforeend', data.content[id]);
-                        } else {
-                            const div = document.createElement('div');
-                            div.id = id;
-                            div.className = 'editor-line';
-                            div.innerHTML = '<br>';
-                            this.ui.display.appendChild(div);
-                        }
-                    });
-                    this.isFresh = false;
-                    console.log('[EditorApp] Rendered local content, isFresh = false');
-                } else {
-                    console.log('[EditorApp] No local data found, generating fresh lines');
-                    this.ui.display.innerHTML = this.generateFreshLines();
-                    this.isFresh = true;
-                }
+            async renderFromLocalDB(data) {
+                this.ui.display.innerHTML = data.skeleton.length ? data.skeleton.map(id => data.content[id] || `<div id="${id}" class="editor-line"><br></div>`).join('') : this.createLines(101);
+                this.isFresh = !data.skeleton.length;
                 this.ensureStructure();
-                console.log('[EditorApp] renderFromLocalDB() complete');
             }
 
-            joinNetwork(isBackground) {
-                console.log(`[EditorApp] joinNetwork() called, isBackground: ${isBackground}`);
-                console.log(`[EditorApp] Attempting to join room: ${this.roomId}`);
-                try {
-                    // Start Trystero
-                    console.log('[EditorApp] Creating Trystero room with trackers: wss://tracker.webtorrent.dev, wss://tracker.openwebrtc.io');
-                    this.room = joinRoom({ appId: 'doc-infinite-v5-idb', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId);
-                    console.log('[EditorApp] Trystero room created successfully');
-                } catch (e) {
-                    console.error('[EditorApp] ERROR creating Trystero room:', e);
-                    return;
+           enterRoomUI() {
+                if (this.ui.dashboardPanel.classList.contains('active')) return;
+                if (!this.visitedRooms.includes(this.roomId)) {
+                    this.visitedRooms.push(this.roomId);
+                    this.db._open(this.roomId.replace('doc-infinite-', '')); 
                 }
-
-                // Define Actions
-                console.log('[EditorApp] Setting up Trystero actions (skeleton, fragment, lock, req)');
-                const [sendSkeleton, getSkeleton] = this.room.makeAction('skeleton');
-                const [sendFragment, getFragment] = this.room.makeAction('fragment');
-                const [sendLock, getLock] = this.room.makeAction('lock');
-                const [reqSync, getReqSync] = this.room.makeAction('req');
-
-                this.actions = { sendSkeleton, sendFragment, sendLock, reqSync };
-                console.log('[EditorApp] Actions created and stored');
-
-                // Handlers
-                getSkeleton((ids, peerId) => {
-                    console.log(`[EditorApp] RECEIVED skeleton from peer ${peerId}, ${ids?.length || 0} IDs`);
-                    if (ids && ids.length > 0) {
-                        console.log(`[EditorApp] First 3 skeleton IDs received: ${ids.slice(0, 3).join(', ')}`);
-                    }
-                    this.handleRemoteSkeleton(ids);
-                });
-                getFragment((fragMap, peerId) => {
-                    const keys = Object.keys(fragMap || {});
-                    console.log(`[EditorApp] RECEIVED fragments from peer ${peerId}, ${keys.length} fragments`);
-                    if (keys.length > 0) {
-                        // Show sample of what was received
-                        const sampleId = keys[0];
-                        const sampleHtml = fragMap[sampleId];
-                        console.log(`[EditorApp] Sample fragment ID: ${sampleId}`);
-                        console.log(`[EditorApp] Sample fragment HTML length: ${sampleHtml?.length || 0} chars`);
-                    }
-                    this.handleRemoteFragments(fragMap);
-                });
-                getLock((data, pid) => {
-                    console.log(`[EditorApp] RECEIVED lock from peer ${pid}:`, data);
-                    this.handleRemoteLock(data, pid);
-                });
-
-                // Respond to Sync Requests
-                getReqSync((_, pid) => {
-                    console.log(`[EditorApp] RECEIVED sync request from peer ${pid}`);
-                    const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                    console.log(`[EditorApp] Responding with ${ids.length} skeleton IDs`);
-                    console.log(`[EditorApp] First 5 IDs: ${ids.slice(0, 5).join(', ')}`);
-                    if (ids.length > 0) {
-                        this.actions.sendSkeleton(ids, pid);
-                        console.log(`[EditorApp] SENT skeleton to peer ${pid}`);
-                        // Send ALL fragments for full sync
-                        const allFragments = this.getAllFragments();
-                        if (Object.keys(allFragments).length > 0) {
-                            this.actions.sendFragment(allFragments, pid);
-                            console.log(`[EditorApp] SENT ${Object.keys(allFragments).length} ALL fragments to peer ${pid}`);
-                        }
-                    } else {
-                        console.log(`[EditorApp] No skeleton IDs to send - display may be empty`);
-                    }
-                });
-
-                // Events
-                this.room.onPeerJoin(id => {
-                    console.log(`[EditorApp] PEER JOINED: ${id}`);
-                    this.handlePeerJoin(id);
-                    this.updateStatus();
-                });
-                this.room.onPeerLeave(id => {
-                    console.log(`[EditorApp] PEER LEFT: ${id}`);
-                    this.updateStatus();
-                    this.reapplyVisualLocks();
-                });
-
-                // Status Polling & Initial Sync Request
-                let attempts = 0;
-                let connected = false;
-                console.log('[EditorApp] Starting status polling loop');
-
-                // Immediately request sync in case peers are already there but silent
-                setTimeout(() => {
-                    if (this.room) {
-                        console.log('[EditorApp] Sending initial sync request (500ms delay)');
-                        this.actions.reqSync(null);
-                    }
-                }, 500);
-
-                const poll = setInterval(() => {
-                    attempts++;
-                    if (!this.room) {
-                        console.log('[EditorApp] Poll: Room no longer exists, clearing interval');
-                        clearInterval(poll);
-                        return;
-                    }
-
-                    const peers = Object.keys(this.room.getPeers()).length;
-                    if (peers > 0 && !connected) {
-                        console.log(`[EditorApp] Poll #${attempts}: First connection! Peers: ${peers}`);
-                        connected = true;
-                    }
-                    if (attempts % 10 === 0) {
-                        console.log(`[EditorApp] Poll #${attempts}: Peers: ${peers}, Connected: ${connected}`);
-                    }
-
-                    this.updateStatus(peers, attempts);
-
-                    // Periodically request sync if we look empty but peers exist
-                    if (peers > 0 && this.ui.display.innerText.trim().length < 5 && attempts % 4 === 0) {
-                        console.log(`[EditorApp] Poll #${attempts}: Display empty with peers, requesting sync`);
-                        this.actions.reqSync(null);
-                    }
-
-                    if (attempts > 120) {
-                        console.log('[EditorApp] Poll: Reached 120 attempts (~30s), stopping poll');
-                        clearInterval(poll);
-                    }
-                }, 250);
-            }
-
-            enterRoomUI() {
-                console.log('[EditorApp] enterRoomUI() called');
-                if (this.ui.dashboard.classList.contains('active')) {
-                    console.log('[EditorApp] Dashboard already active, returning');
-                    return;
-                }
-                this.addVisited(this.roomId);
-                console.log(`[EditorApp] Added ${this.roomId} to visited rooms`);
-                this.ui.btn.classList.add('hidden');
-                this.ui.loginCard.classList.remove('visible');
-                this.ui.dashboard.classList.add('active');
-                this.ui.hoverTrigger.style.display = 'block';
+                this.ui.loginBtn.classList.add('hidden'); this.ui.loginCard.classList.remove('visible');
+                
+                // 1. Slide up immediately
+                this.ui.dashboardPanel.classList.add('active'); 
+                this.ui.hoverTrigger.style.display = 'block'; 
                 this.ui.topNav.classList.add('active');
-                window.location.hash = this.roomId.replace('doc-infinite-', '');
-                console.log('[EditorApp] Dashboard UI activated');
 
-                const hasContent = this.ui.display.querySelector('.editor-line');
-                if (!hasContent) {
-                    console.log('[EditorApp] No content in display, generating fresh lines');
-                    this.ui.display.innerHTML = this.generateFreshLines();
-                    this.isFresh = true;
-                }
-                const isEmpty = this.ui.display.innerText.trim().length < 5;
-                console.log(`[EditorApp] Content state: hasContent=${!!hasContent}, isEmpty=${isEmpty}, isFresh=${this.isFresh}`);
-                if (this.isFresh || isEmpty) this.focusCenter();
-                else this.ui.display.focus();
-                console.log('[EditorApp] enterRoomUI() complete');
+                // 2. Delay ONLY the icon change
+                setTimeout(() => {
+                    document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+                }, 1000);
+
+                window.location.hash = this.roomId.replace('doc-infinite-', '');
+                if (!this.ui.display.querySelector('.editor-line')) { this.ui.display.innerHTML = this.createLines(101); this.isFresh = true; }
+                this.isFresh || this.ui.display.innerText.trim().length < 5 ? this.focusCenter() : this.ui.display.focus();
             }
 
             async runSequencedScan() {
-                console.log('[EditorApp] runSequencedScan() started');
-                const queue = [...this.visitedRooms];
-                console.log(`[EditorApp] Scanning ${queue.length} visited rooms for peer counts`);
-                for (const rId of queue) {
+                for (const rId of this.visitedRooms) {
                     if (!rId) continue;
                     try {
-                        console.log(`[EditorApp] Scanning room: ${rId}`);
                         const r = joinRoom({ appId: 'doc-infinite-v4', trackerUrls: ['wss://tracker.webtorrent.dev'] }, rId);
-                        await new Promise(res => {
-                            setTimeout(() => {
-                                let count = 0;
-                                try { count = Object.keys(r.getPeers()).length; } catch (e) { }
-                                console.log(`[EditorApp] Room ${rId}: ${count} peers found`);
-                                r.leave();
-                                const hex = rId.replace('doc-infinite-', '#');
-                                window.postMessage({ type: 'handle-ready', hex: hex, count: count }, '*');
-                                res();
-                            }, 1000);
-                        });
-                    } catch (e) { console.warn("[EditorApp] Scan error for room:", rId, e); }
+                        await new Promise(res => setTimeout(() => {
+                            window.postMessage({ type: 'handle-ready', hex: rId.replace('doc-infinite-', '#'), count: Object.keys(r.getPeers()).length }, '*'); r.leave(); res();
+                        }, 1000));
+                    } catch (e) { }
                 }
-                console.log('[EditorApp] runSequencedScan() complete');
             }
 
-            generateFreshLines() {
-                let html = '';
-                for (let i = 0; i < 101; i++) html += this.createLine();
-                return html;
-            }
-
-            createLine() { return `<div id="line-${Math.random().toString(36).substr(2, 9)}" class="editor-line"><br></div>`; }
+            createLines(count) { return Array.from({ length: count }, () => `<div id="${this.makeId()}" class="editor-line"><br></div>`).join(''); }
 
             focusCenter() {
                 let attempts = 0;
-                const focusInterval = setInterval(() => {
+                const i = setInterval(() => {
                     attempts++;
-                    const lines = this.ui.display.getElementsByClassName('editor-line');
-                    const middleLine = lines[50];
-                    if (middleLine) {
-                        middleLine.scrollIntoView({ block: 'center', behavior: 'auto' });
-                        const range = document.createRange();
-                        const sel = window.getSelection();
-                        range.selectNodeContents(middleLine);
-                        range.collapse(true);
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                        this.ui.display.focus();
-                        this.currentLineId = middleLine.id;
-                        if (document.activeElement === this.ui.display || attempts > 20) clearInterval(focusInterval);
-                    } else clearInterval(focusInterval);
+                    const mid = this.ui.display.children[50];
+                    if (mid) {
+                        mid.scrollIntoView({ block: 'center', behavior: 'auto' });
+                        const r = document.createRange(); const s = window.getSelection(); r.selectNodeContents(mid); r.collapse(true); s.removeAllRanges(); s.addRange(r);
+                        this.ui.display.focus(); this.currentLineId = mid.id;
+                        if (document.activeElement === this.ui.display || attempts > 20) clearInterval(i);
+                    } else clearInterval(i);
                 }, 50);
             }
 
             ensureStructure() {
                 Array.from(this.ui.display.children).forEach(child => {
-                    if (child.tagName !== 'DIV' || !child.id) child.outerHTML = `<div id="line-${Math.random().toString(36).substr(2, 9)}" class="editor-line">${child.innerHTML || '<br>'}</div>`;
+                    if (child.tagName !== 'DIV' || !child.id) child.outerHTML = `<div id="${this.makeId()}" class="editor-line">${child.innerHTML || '<br>'}</div>`;
                     if (!child.classList.contains('editor-line')) child.classList.add('editor-line');
                 });
             }
 
             checkBuffers() {
-                const scrollTop = this.ui.container.scrollTop;
-                const scrollHeight = this.ui.container.scrollHeight;
-                const clientHeight = this.ui.container.clientHeight;
-                let updated = false;
-                if (scrollTop < 100) {
-                    const oldHeight = scrollHeight;
-                    let html = '';
-                    for (let i = 0; i < 10; i++) html += this.createLine();
-                    this.ui.display.insertAdjacentHTML('afterbegin', html);
-                    if (scrollHeight > 0) this.ui.container.scrollTop = scrollTop + (this.ui.container.scrollHeight - oldHeight);
-                    updated = true;
-                }
-                if (scrollHeight - scrollTop - clientHeight < 100) {
-                    let html = '';
-                    for (let i = 0; i < 10; i++) html += this.createLine();
-                    this.ui.display.insertAdjacentHTML('beforeend', html);
-                    updated = true;
-                }
-                if (updated) {
-                    this.renderMinimap();
-                    this.broadcastSkeleton();
-                }
+                if (this.bufferCheckPending) return;
+                this.bufferCheckPending = true;
+                requestAnimationFrame(() => {
+                    this.bufferCheckPending = false;
+                    const c = this.ui.chatContainer;
+                    const { scrollTop: st, scrollHeight: sh, clientHeight: ch } = c;
+                    let upd = false;
+                    if (st < 100) { const oh = sh; this.ui.display.insertAdjacentHTML('afterbegin', this.createLines(10)); if (c.scrollHeight > 0) c.scrollTop = st + (c.scrollHeight - oh); upd = true; }
+                    if (sh - st - ch < 100) { this.ui.display.insertAdjacentHTML('beforeend', this.createLines(10)); upd = true; }
+
+                    const children = Array.from(this.ui.display.children);
+                    if (children.length > 150) {
+                        const lines = children;
+                        let firstC = -1, lastC = -1;
+                        for (let i = 0; i < lines.length; i++) { if (lines[i].textContent.trim()) { if (firstC === -1) firstC = i; lastC = i; } }
+
+                        const topE = c.scrollTop, botE = topE + ch;
+                        let firstV = -1, lastV = -1;
+                        for (let i = 0; i < lines.length; i++) {
+                            const t = lines[i].offsetTop, h = lines[i].offsetHeight;
+                            if (t + h > topE && t < botE) { if (firstV === -1) firstV = i; lastV = i; }
+                            else if (t > botE && firstV !== -1) break;
+                        }
+                        if (firstV === -1) { firstV = 0; lastV = lines.length - 1; }
+
+                        const B = 50;
+                        const kStart = Math.min(Math.max(0, firstV - B), firstC !== -1 ? Math.max(0, firstC - B) : Infinity);
+                        const kEnd = Math.max(Math.min(lines.length - 1, lastV + B), lastC !== -1 ? Math.min(lines.length - 1, lastC + B) : -Infinity);
+
+                        if (kStart > 0) {
+                            let remH = 0;
+                            for (let i = 0; i < kStart; i++) { remH += lines[i].offsetHeight; lines[i].remove(); }
+                            c.scrollTop = Math.max(0, c.scrollTop - remH);
+                            upd = true;
+                        }
+                        if (kEnd < lines.length - 1) {
+                            for (let i = kEnd + 1; i < lines.length; i++) lines[i].remove();
+                            upd = true;
+                        }
+                    }
+                    if (upd) { this.renderMinimap(); this.broadcastSkeleton(); }
+                });
             }
 
-            broadcastSkeleton() {
-                if (!this.room || !this.actions || !this.actions.sendSkeleton) return;
-                const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                console.log(`[EditorApp] Broadcasting skeleton update (${ids.length} lines)`);
-                this.actions.sendSkeleton(ids);
-            }
+            broadcastSkeleton() { if (this.room && this.actions.sendSkeleton) this.actions.sendSkeleton(Array.from(this.ui.display.children).map(el => el.id).filter(id => id)); }
 
-            async logout() {
-                console.log('[EditorApp] logout() called');
-
-                // Stop the landing loop immediately to prevent race condition where loop adds 'visible' class
+           async logout() {
                 if (window.resetSphereView) window.resetSphereView();
+                this.ui.dashboardPanel.classList.remove('active', 'revealed'); this.ui.loginCard.classList.remove('visible');
+                this.ui.loginBtn.classList.remove('hidden'); this.ui.hoverTrigger.style.display = 'none'; this.ui.topNav.classList.remove('active');
+                
+                // --- START EDIT: Revert to Lightbulb ---
+                document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
+                // --- END EDIT ---
 
-                this.ui.dashboard.classList.remove('active', 'revealed');
-                this.ui.loginCard.classList.remove('visible');
-                this.ui.btn.classList.remove('hidden');
-                this.ui.hoverTrigger.style.display = 'none';
-                this.ui.topNav.classList.remove('active');
-
-                window.location.hash = '';
-                if (this.room) {
-                    console.log('[EditorApp] Leaving current room');
-                    try { this.room.leave(); } catch (e) { console.warn('[EditorApp] Error leaving room:', e); }
-                    this.room = null;
-                }
-
-                this.ui.display.innerHTML = '';
-                this.ui.minimap.innerHTML = '';
-                this.activeLocks = {};
-                this.currentLineId = null;
-                this.isFresh = true;
-                this.ui.peerCount.innerText = "Disconnected";
-                this.ui.dot.classList.remove('on');
-                console.log('[EditorApp] State reset complete');
-
+                window.location.hash = ''; if (this.room) { try { this.room.leave(); } catch (e) { } this.room = null; }
+                this.ui.display.innerHTML = ''; this.ui.minimap.innerHTML = ''; this.activeLocks = {};
+                this.ui.peerCount.innerText = "Disconnected"; this.ui.dot.classList.remove('on');
                 if (window.updateVisitedFromDB) await window.updateVisitedFromDB();
             }
 
-            updateStatus(peerCountOverride = null, attempts = 0) {
-                if (!this.room) {
-                    console.log('[EditorApp] updateStatus() called but room is null');
-                    return;
-                }
-                const peers = peerCountOverride !== null ? peerCountOverride : Object.keys(this.room.getPeers()).length;
-
-                if (peers === 0) {
-                    // Don't give up too early
-                    if (attempts < this.statusTimeoutAttempts) {
-                        this.ui.status.innerText = "SEARCHING...";
-                        this.ui.peerCount.innerText = "Connecting...";
-                        if (attempts === 1) console.log('[EditorApp] Status: SEARCHING... (no peers yet)');
-                    } else {
-                        if (this.ui.status.innerText !== "COLOR AVAILABLE") {
-                            console.log(`[EditorApp] Status changed: COLOR AVAILABLE (after ${attempts} attempts, no peers found)`);
-                        }
-                        this.ui.status.innerText = "COLOR AVAILABLE";
-                        this.ui.peerCount.innerText = "Offline";
-                    }
-                    this.ui.dot.classList.remove('on');
-                } else {
-                    const newStatus = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
-                    if (this.ui.status.innerText !== newStatus) {
-                        console.log(`[EditorApp] Status changed: ${newStatus}`);
-                    }
-                    this.ui.status.innerText = newStatus;
-                    this.ui.peerCount.innerText = `${peers} visitors(s)`;
-                    this.ui.dot.classList.add('on');
-                }
+            updateStatus(peers = 0, attempts = 0) {
+                if (!this.room) return;
+                if (peers > 0) { this.ui.roomStatus.innerText = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`; this.ui.peerCount.innerText = `${peers} visitors(s)`; this.ui.dot.classList.add('on'); return; }
+                if (attempts < this.statusTimeoutAttempts) { this.ui.roomStatus.innerText = "SEARCHING..."; this.ui.peerCount.innerText = "Connecting..."; }
+                else { this.ui.roomStatus.innerText = "COLOR AVAILABLE"; this.ui.peerCount.innerText = "Offline"; }
+                this.ui.dot.classList.remove('on');
             }
 
-            getVisibleFragments() {
-                // Buffer of 500px as requested
-                const buffer = 500;
-                const container = this.ui.container;
-                const top = container.scrollTop - buffer;
-                const bottom = container.scrollTop + container.clientHeight + buffer;
-
-                const visible = {};
-                Array.from(this.ui.display.children).forEach(el => {
-                    if (el.offsetTop + el.offsetHeight > top && el.offsetTop < bottom) {
-                        visible[el.id] = el.outerHTML;
-                    }
-                });
-                return visible;
-            }
-
-            getAllFragments() {
-                // Get ALL fragments for full sync
-                const all = {};
-                Array.from(this.ui.display.children).forEach(el => {
-                    if (el.id) {
-                        all[el.id] = el.outerHTML;
-                    }
-                });
-                console.log(`[EditorApp] getAllFragments() returning ${Object.keys(all).length} fragments`);
-                return all;
+            getFragments(visibleOnly = false) {
+                const d = {}, top = this.ui.chatContainer.scrollTop - 500, bot = top + this.ui.chatContainer.clientHeight + 1000;
+                Array.from(this.ui.display.children).forEach(el => { if (el.id && (!visibleOnly || (el.offsetTop + el.offsetHeight > top && el.offsetTop < bot))) d[el.id] = el.outerHTML; });
+                return d;
             }
 
             async handleRemoteSkeleton(ids) {
-                console.log(`[EditorApp] handleRemoteSkeleton() processing ${ids?.length || 0} IDs`);
-                console.log(`[EditorApp] First 5 received IDs: ${ids?.slice(0, 5).join(', ')}`);
-
-                // Received a list of IDs. Reconstruct DOM order.
-                // We keep existing elements if they exist, create new ones if they don't.
-                // Order matches `ids` array.
-
-                const currentMap = {};
-                Array.from(this.ui.display.children).forEach(el => {
-                    if (el.id) currentMap[el.id] = el;
-                });
-                console.log(`[EditorApp] Current display has ${Object.keys(currentMap).length} elements`);
-
-                // Build new fragment with correct order
-                const fragment = document.createDocumentFragment();
-                let newCount = 0, existingCount = 0;
-                ids.forEach(id => {
-                    if (!id) return; // Skip empty IDs
-                    let el = currentMap[id];
-                    if (!el) {
-                        el = document.createElement('div');
-                        el.id = id;
-                        el.className = 'editor-line';
-                        el.innerHTML = '<br>'; // Placeholder until fragment arrives
-                        newCount++;
-                    } else {
-                        existingCount++;
-                    }
-                    fragment.appendChild(el);
-                    delete currentMap[id]; // Mark as used
-                });
-                console.log(`[EditorApp] Skeleton: ${existingCount} existing, ${newCount} new elements`);
-
-                // Remove anything not in the new skeleton
-                const removedCount = Object.keys(currentMap).length;
-                for (const id in currentMap) {
-                    currentMap[id].remove();
-                }
-                if (removedCount > 0) console.log(`[EditorApp] Removed ${removedCount} elements not in skeleton`);
-
-                // CRITICAL: Clear the display and add the new ordered content
-                this.ui.display.innerHTML = '';
-                this.ui.display.appendChild(fragment);
-                console.log(`[EditorApp] Skeleton applied to display. Final child count: ${this.ui.display.children.length}`);
-
-                // Save new structure
+                const map = Object.fromEntries(Array.from(this.ui.display.children).map(el => [el.id, el]));
+                this.ui.display.innerHTML = ids.map(id => map[id] ? map[id].outerHTML : `<div id="${id}" class="editor-line"><br></div>`).join('');
                 await this.triggerSave(null);
-                console.log('[EditorApp] handleRemoteSkeleton() complete');
             }
 
             async handleRemoteFragments(fragMap) {
-                console.log(`[EditorApp] handleRemoteFragments() processing ${Object.keys(fragMap || {}).length} fragments`);
-                let updatedCount = 0, skippedCount = 0, notFoundCount = 0;
-                // Apply content updates
+                const temp = document.createElement('div');
                 for (const [id, html] of Object.entries(fragMap)) {
-                    // html is outerHTML
-                    const tempDiv = document.createElement('div');
-                    tempDiv.innerHTML = html;
-                    const newEl = tempDiv.firstElementChild;
-                    if (!newEl) {
-                        console.log(`[EditorApp] Fragment ${id}: Failed to parse HTML`);
-                        skippedCount++;
-                        continue;
-                    }
-
-                    const el = document.getElementById(id);
-                    if (el) {
-                        // Always sync ownership attributes
-                        const newOwner = newEl.dataset.owner || '';
-                        const newColor = newEl.style.getPropertyValue('--owner-color');
-
-                        if (el.dataset.owner !== newOwner) {
-                            el.dataset.owner = newOwner;
-                            if (newColor) el.style.setProperty('--owner-color', newColor);
-                            else el.style.removeProperty('--owner-color');
-                        }
-
-                        // If I don't own it, update editable
-                        if (el.dataset.owner && el.dataset.owner !== this.user.id) {
-                            el.contentEditable = "false";
-                        } else {
-                            el.contentEditable = "true";
-                        }
-
-                        // Sync Content - update if different and I'm not actively editing this element
-                        const iAmEditing = document.activeElement === el;
-                        const contentDifferent = el.innerHTML !== newEl.innerHTML;
-
-                        if (contentDifferent && !iAmEditing) {
-                            console.log(`[EditorApp] Fragment ${id}: Updating content (was different)`);
-                            el.innerHTML = newEl.innerHTML;
-                            updatedCount++;
-                        } else if (contentDifferent && iAmEditing) {
-                            console.log(`[EditorApp] Fragment ${id}: Skipped - user is editing this element`);
-                            skippedCount++;
-                        }
-                    } else {
-                        console.log(`[EditorApp] Fragment target element not found: ${id}`);
-                        notFoundCount++;
+                    temp.innerHTML = html; const newEl = temp.firstElementChild, el = document.getElementById(id);
+                    if (newEl && el) {
+                        Object.assign(el.dataset, newEl.dataset);
+                        el.style.cssText = newEl.style.cssText;
+                        el.contentEditable = (el.dataset.owner && el.dataset.owner !== this.user.id) ? "false" : "true";
+                        if (el.innerHTML !== newEl.innerHTML && document.activeElement !== el) el.innerHTML = newEl.innerHTML;
                     }
                 }
-                console.log(`[EditorApp] Fragments: ${updatedCount} updated, ${skippedCount} skipped, ${notFoundCount} not found`);
                 await this.triggerSave(null);
-                console.log('[EditorApp] handleRemoteFragments() complete');
             }
 
             handlePeerJoin(id) {
-                console.log(`[EditorApp] handlePeerJoin() - sending state to new peer: ${id}`);
-                // When a peer joins, we immediately send them our state
-                // This covers the case where THEY join US.
-                // The 'reqSync' covers the case where WE join THEM.
                 const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                console.log(`[EditorApp] Sending ${ids.length} skeleton IDs to peer ${id}`);
-                console.log(`[EditorApp] First 5 IDs: ${ids.slice(0, 5).join(', ')}`);
-                if (ids.length > 0) {
-                    this.actions.sendSkeleton(ids, id);
-                    // Send ALL fragments, not just visible ones, for full sync
-                    const allFragments = this.getAllFragments();
-                    console.log(`[EditorApp] Sending ${Object.keys(allFragments).length} ALL fragments to peer ${id}`);
-                    if (Object.keys(allFragments).length > 0) {
-                        this.actions.sendFragment(allFragments, id);
-                    }
-                }
-                if (this.currentLineId && this.actions.sendLock) {
-                    console.log(`[EditorApp] Sending lock info for line ${this.currentLineId} to peer ${id}`);
-                    this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
-                }
+                if (ids.length) { this.actions.sendSkeleton(ids, id); const frags = this.getFragments(false); if (Object.keys(frags).length) this.actions.sendFragment(frags, id); }
+                if (this.currentLineId && this.actions.sendLock) this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
+                if (this.actions.sendIdentity) this.actions.sendIdentity({ color: this.user.color }, id);
             }
 
-            handleRemoteLock(data, pid) {
-                this.activeLocks[pid] = { lineId: data.lineId, ts: Date.now(), color: data.userColor };
-                this.reapplyVisualLocks();
+            handlePeerIdentity(data, pid) {
+                let color = data && data.color ? data.color : null;
+                if (!color || color === '#ffffff') {
+                    color = '#ffffff' + (this.anonCounter > 0 ? this.anonCounter : '');
+                    this.anonCounter++;
+                }
+                this.peerColors[pid] = color;
             }
+
+            handleRemoteLock(data, pid) { this.activeLocks[pid] = { lineId: data.lineId, ts: Date.now(), color: data.userColor }; this.reapplyVisualLocks(); }
 
             reapplyVisualLocks() {
                 document.querySelectorAll('.locked-line').forEach(el => {
-                    el.classList.remove('locked-line');
-                    el.style.removeProperty('--lock-color');
-                    el.querySelector('.locked-tag')?.remove();
-                    if (el.dataset.owner && el.dataset.owner !== this.user.id) el.contentEditable = "false";
-                    else el.contentEditable = "true";
+                    el.classList.remove('locked-line'); el.style.removeProperty('--lock-color'); el.querySelector('.locked-tag')?.remove();
+                    el.contentEditable = (el.dataset.owner && el.dataset.owner !== this.user.id) ? "false" : "true";
                 });
                 const now = Date.now();
                 for (const [pid, lock] of Object.entries(this.activeLocks)) {
                     if (now - lock.ts > 60000 || pid === selfId) continue;
                     const el = document.getElementById(lock.lineId);
-                    if (el) {
-                        el.classList.add('locked-line');
-                        el.style.setProperty('--lock-color', lock.color);
-                        el.contentEditable = "false";
-                        const tag = document.createElement('div');
-                        tag.className = 'locked-tag';
-                        tag.innerText = lock.color;
-                        el.appendChild(tag);
-                    }
+                    if (el) { el.classList.add('locked-line'); el.style.setProperty('--lock-color', lock.color); el.contentEditable = "false"; el.insertAdjacentHTML('beforeend', `<div class="locked-tag">${lock.color}</div>`); }
                 }
                 this.renderMinimap();
             }
 
             renderMinimap() {
-                this.ui.minimap.innerHTML = '';
-                const totalHeight = this.ui.container.scrollHeight;
-                const now = Date.now();
-                for (const [pid, lock] of Object.entries(this.activeLocks)) {
-                    if (now - lock.ts > 60000 || pid === selfId) continue;
+                const h = this.ui.chatContainer.scrollHeight, now = Date.now();
+                this.ui.minimap.innerHTML = Object.entries(this.activeLocks).filter(([pid, lock]) => now - lock.ts <= 60000 && pid !== selfId).map(([_, lock]) => {
                     const el = document.getElementById(lock.lineId);
-                    if (el) {
-                        const d = document.createElement('div');
-                        d.className = 'scroll-dot';
-                        d.style.backgroundColor = lock.color;
-                        d.style.top = ((el.offsetTop / totalHeight) * 100) + '%';
-                        d.onclick = () => el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-                        this.ui.minimap.appendChild(d);
-                    }
-                }
+                    return el ? `<div class="scroll-dot" style="background:${lock.color};top:${(el.offsetTop / h) * 100}%" onclick="document.getElementById('${lock.lineId}').scrollIntoView({block:'center',behavior:'smooth'})"></div>` : '';
+                }).join('');
             }
 
             async triggerSave(changedLineId = null) {
-                const currentHex = this.user.color.replace('#', '');
-
-                // 1. Snapshot current state
+                if (!this.ui.dashboardPanel.classList.contains('active')) return;
                 const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                const content = {};
-                // Use outerHTML to persist attributes
-                Array.from(this.ui.display.children).forEach(el => {
-                    if (el.id) content[el.id] = el.outerHTML;
-                });
-
-                // 2. Save to IDB
-                console.log(`[EditorApp] triggerSave() - saving ${ids.length} lines to IndexedDB for hex: ${currentHex}`);
-                await this.db.saveRoom(currentHex, ids, content);
-
-                // 3. Broadcast specific change if applicable
-                if (changedLineId && this.room && this.actions && this.actions.sendFragment) {
-                    const el = document.getElementById(changedLineId);
-                    if (el) {
-                        const fragmentData = { [changedLineId]: el.outerHTML };
-                        const contentPreview = el.innerText.substring(0, 50);
-                        console.log(`[EditorApp] Broadcasting fragment change for line: ${changedLineId}`);
-                        console.log(`[EditorApp] Content preview: "${contentPreview}..."`);
-                        console.log(`[EditorApp] Room exists: ${!!this.room}, Peers: ${this.room ? Object.keys(this.room.getPeers()).length : 0}`);
-                        this.actions.sendFragment(fragmentData);
-                    }
-                } else if (changedLineId) {
-                    console.log(`[EditorApp] triggerSave() - NOT broadcasting: room=${!!this.room}, actions=${!!this.actions}, sendFragment=${!!(this.actions?.sendFragment)}`);
-                }
+                await this.db.saveRoom(this.user.color.replace('#', ''), ids, Object.fromEntries(ids.map(id => [id, document.getElementById(id)?.outerHTML])));
+                if (changedLineId && this.room && this.actions.sendFragment) this.actions.sendFragment({ [changedLineId]: document.getElementById(changedLineId).outerHTML });
             }
 
             bindEvents() {
-                this.ui.container.addEventListener('scroll', () => this.checkBuffers());
+                 document.getElementById('freeze-btn').addEventListener('click', (e) => {
+                    if (this.ui.dashboardPanel.classList.contains('active')) {
+                        e.stopImmediatePropagation(); // <--- STOP the event here so toggleFreeze never runs
+                        this.logout();
+                    }
+                });
+
+                this.ui.chatContainer.addEventListener('scroll', () => this.checkBuffers());
                 window.addEventListener('resize', () => this.renderMinimap());
-                this.ui.logoutBtn.addEventListener('click', () => this.logout());
-                const revealNav = () => this.ui.dashboard.classList.add('revealed');
-                const hideNav = (e) => {
-                    const to = e.relatedTarget;
-                    if (to && (to.id === 'top-nav' || to.id === 'hover-trigger' || to.closest('#top-nav'))) return;
-                    this.ui.dashboard.classList.remove('revealed');
-                };
-                this.ui.hoverTrigger.addEventListener('mouseenter', revealNav);
-                this.ui.hoverTrigger.addEventListener('mouseleave', hideNav);
-                this.ui.topNav.addEventListener('mouseenter', revealNav);
-                this.ui.topNav.addEventListener('mouseleave', hideNav);
+                
+
+                // Mouse/Hover logic
+                const btn = document.getElementById('freeze-btn');
+                const isSafe = (t) => t?.closest?.('#top-nav') || t?.closest?.('#freeze-btn') || t === this.ui.hoverTrigger;
+
+                this.ui.hoverTrigger.addEventListener('mouseenter', () => this.ui.dashboardPanel.classList.add('revealed'));
+                this.ui.hoverTrigger.addEventListener('mouseleave', (e) => { if (!isSafe(e.relatedTarget)) this.ui.dashboardPanel.classList.remove('revealed'); });
+
+                this.ui.topNav.addEventListener('mouseenter', () => this.ui.dashboardPanel.classList.add('revealed'));
+                this.ui.topNav.addEventListener('mouseleave', (e) => { if (!isSafe(e.relatedTarget)) this.ui.dashboardPanel.classList.remove('revealed'); });
+
+                btn.addEventListener('mouseenter', () => this.ui.dashboardPanel.classList.add('revealed'));
+                btn.addEventListener('mouseleave', (e) => { if (!isSafe(e.relatedTarget)) this.ui.dashboardPanel.classList.remove('revealed'); });
+
                 this.ui.display.addEventListener('input', () => {
                     this.isFresh = false;
-
-                    // Check for structural changes (lines added/removed)
-                    if (this.ui.display.children.length !== this.lastLineCount) {
-                        this.lastLineCount = this.ui.display.children.length;
-                        this.broadcastSkeleton();
-                    }
-
-                    for (let child of this.ui.display.children) {
-                        if (!child.id || !child.classList.contains('editor-line')) {
-                            if (!child.id) child.id = 'line-' + Math.random().toString(36).substr(2, 9);
-                            child.classList.add('editor-line');
-                        }
-                    }
-                    const n = window.getSelection().anchorNode;
-                    const line = (n.nodeType === 3 ? n.parentNode : n).closest('.editor-line');
-                    let changedId = null;
-                    if (line) {
-                        line.dataset.owner = this.user.id;
-                        line.style.setProperty('--owner-color', this.user.color);
-                        line.contentEditable = "true";
-                        changedId = line.id;
-                    }
-                    this.triggerSave(changedId);
+                    if (this.ui.display.children.length !== this.lastLineCount) { this.lastLineCount = this.ui.display.children.length; this.broadcastSkeleton(); }
+                    for (let child of this.ui.display.children) if (!child.id || !child.classList.contains('editor-line')) { if (!child.id) child.id = this.makeId(); child.classList.add('editor-line'); }
+                    const n = window.getSelection().anchorNode, line = (n.nodeType === 3 ? n.parentNode : n).closest('.editor-line');
+                    if (line) { line.dataset.owner = this.user.id; line.style.setProperty('--owner-color', this.user.color); line.contentEditable = "true"; }
+                    clearTimeout(this.saveTimeout); this.saveTimeout = setTimeout(() => this.triggerSave(line?.id), 500);
                 });
+
                 document.addEventListener('selectionchange', () => {
-                    const sel = window.getSelection();
-                    if (!sel.rangeCount) return;
-                    const n = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentNode : sel.anchorNode;
-                    const line = n.closest('.editor-line');
+                    const s = window.getSelection(); if (!s.rangeCount) return;
+                    const line = (s.anchorNode.nodeType === 3 ? s.anchorNode.parentNode : s.anchorNode).closest('.editor-line');
                     if (line && line.id) {
-                        this.currentLineId = line.id;
-                        document.querySelectorAll('.my-line').forEach(e => e.classList.remove('my-line'));
-                        line.classList.add('my-line');
-                        this.ui.tools.classList.toggle('visible', sel.toString().length > 0);
+                        this.currentLineId = line.id; document.querySelectorAll('.my-line').forEach(e => e.classList.remove('my-line')); line.classList.add('my-line');
+                        this.ui.tools.classList.toggle('visible', s.toString().length > 0);
                         if (this.actions.sendLock) this.actions.sendLock({ lineId: line.id, userColor: this.user.color });
                     }
                 });
-                document.getElementById('btn-bold').onclick = () => document.execCommand('bold');
-                document.getElementById('btn-italic').onclick = () => document.execCommand('italic');
+                ['bold', 'italic'].forEach(c => document.getElementById('btn-' + c).onclick = () => document.execCommand(c));
                 document.getElementById('btn-link').onclick = () => { const u = prompt("URL:"); if (u) document.execCommand('createLink', false, u); };
-                this.ui.display.addEventListener('mouseover', (e) => {
-                    const line = e.target.closest('.editor-line');
-                    if (line && line.dataset.owner) {
-                        document.querySelectorAll(`.editor-line[data-owner="${line.dataset.owner}"]`).forEach(el => el.classList.add('group-hover'));
-                    }
-                });
-                this.ui.display.addEventListener('mouseout', () => document.querySelectorAll('.group-hover').forEach(el => el.classList.remove('group-hover')));
             }
         }
         new EditorApp();
     </script>
 
-    <!-- SPHERE LOGIC -->
-    <script>
+<script type="module">
         let storageScope = window.localStorage;
         document.getElementById('login-btn').addEventListener('click', async () => {
-            const currentHex = document.getElementById('color-hex').innerText;
-            try { storageScope.setItem("lastSphereColor", currentHex); } catch (e) { }
+            try { storageScope.setItem("lastSphereColor", document.getElementById('color-hex').innerText); } catch (e) { }
             if (window.enterRoomUI) window.enterRoomUI();
         });
 
-        const Vec3 = { create: (x = 0, y = 0, z = 0) => [x, y, z], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt(Math.pow(a[0] - b[0], 2) + Math.pow(a[1] - b[1], 2) + Math.pow(a[2] - b[2], 2)) };
-        const Mat4 = { perspective: (f, a, n, fr) => { const nf = 1 / (n - fr), f_t = 1 / Math.tan(f / 2); return [f_t / a, 0, 0, 0, 0, f_t, 0, 0, 0, 0, (fr + n) * nf, -1, 0, 0, 2 * fr * n * nf, 0] }, lookAt: (e, c, u) => { const z = Vec3.normalize(Vec3.sub(e, c)), x = Vec3.normalize(Vec3.cross(u, z)), y = Vec3.cross(z, x); return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -Vec3.dot(x, e), -Vec3.dot(y, e), -Vec3.dot(z, e), 1] }, multiply: (a, b) => { const o = new Float32Array(16); for (let i = 0; i < 4; i++)for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++)s += a[i + k * 4] * b[k + j * 4]; o[i + j * 4] = s } return o }, rotationX: r => [1, 0, 0, 0, 0, Math.cos(r), Math.sin(r), 0, 0, -Math.sin(r), Math.cos(r), 0, 0, 0, 0, 1], translation: v => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1], scale: v => [v[0], 0, 0, 0, 0, v[1], 0, 0, 0, 0, v[2], 0, 0, 0, 0, 1], rotationAxis: (a, r) => { const c = Math.cos(r), s = Math.sin(r), t = 1 - c, x = a[0], y = a[1], z = a[2]; return [t * x * x + c, t * x * y + z * s, t * x * z - y * s, 0, t * x * y - z * s, t * y * y + c, t * y * z + x * s, 0, t * x * z + y * s, t * y * z - x * s, t * z * z + c, 0, 0, 0, 0, 1] }, identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
-        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25 }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [] }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null };
+        const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) };
+        const Mat4 = {
+            perspective: (f, a, n, fr) => { const nf = 1 / (n - fr), f_t = 1 / Math.tan(f / 2); return [f_t / a, 0, 0, 0, 0, f_t, 0, 0, 0, 0, (fr + n) * nf, -1, 0, 0, 2 * fr * n * nf, 0] },
+            lookAt: (e, c, u) => { const z = Vec3.normalize(Vec3.sub(e, c)), x = Vec3.normalize(Vec3.cross(u, z)), y = Vec3.cross(z, x); return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -Vec3.dot(x, e), -Vec3.dot(y, e), -Vec3.dot(z, e), 1] },
+            multiply: (a, b) => [a[0] * b[0] + a[4] * b[1] + a[8] * b[2] + a[12] * b[3], a[1] * b[0] + a[5] * b[1] + a[9] * b[2] + a[13] * b[3], a[2] * b[0] + a[6] * b[1] + a[10] * b[2] + a[14] * b[3], a[3] * b[0] + a[7] * b[1] + a[11] * b[2] + a[15] * b[3], a[0] * b[4] + a[4] * b[5] + a[8] * b[6] + a[12] * b[7], a[1] * b[4] + a[5] * b[5] + a[9] * b[6] + a[13] * b[7], a[2] * b[4] + a[6] * b[5] + a[10] * b[6] + a[14] * b[7], a[3] * b[4] + a[7] * b[5] + a[11] * b[6] + a[15] * b[7], a[0] * b[8] + a[4] * b[9] + a[8] * b[10] + a[12] * b[11], a[1] * b[8] + a[5] * b[9] + a[9] * b[10] + a[13] * b[11], a[2] * b[8] + a[6] * b[9] + a[10] * b[10] + a[14] * b[11], a[3] * b[8] + a[7] * b[9] + a[11] * b[10] + a[15] * b[11], a[0] * b[12] + a[4] * b[13] + a[8] * b[14] + a[12] * b[15], a[1] * b[12] + a[5] * b[13] + a[9] * b[14] + a[13] * b[15], a[2] * b[12] + a[6] * b[13] + a[10] * b[14] + a[14] * b[15], a[3] * b[12] + a[7] * b[13] + a[11] * b[14] + a[15] * b[15]],
+            rotationX: r => [1, 0, 0, 0, 0, Math.cos(r), Math.sin(r), 0, 0, -Math.sin(r), Math.cos(r), 0, 0, 0, 0, 1],
+            translation: v => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1],
+            scale: v => [v[0], 0, 0, 0, 0, v[1], 0, 0, 0, 0, v[2], 0, 0, 0, 0, 1],
+            rotationAxis: (a, r) => { const c = Math.cos(r), s = Math.sin(r), t = 1 - c, x = a[0], y = a[1], z = a[2]; return [t * x * x + c, t * x * y + z * s, t * x * z - y * s, 0, t * x * y - z * s, t * y * y + c, t * y * z + x * s, 0, t * x * z + y * s, t * y * z - x * s, t * z * z + c, 0, 0, 0, 0, 1] },
+            identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        };
 
-        function rgbToHex(r, g, b) { const toHex = c => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, '0'); return '#' + toHex(r) + toHex(g) + toHex(b); }
-        function hexToRgbNormalized(hex) { hex = hex.replace(/^#/, ''); if (hex.length === 3) hex = hex.split('').map(x => x + x).join(''); const bigint = parseInt(hex, 16); return [(bigint >> 16 & 255) / 255, (bigint >> 8 & 255) / 255, (bigint & 255) / 255]; }
+        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [] }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) } };
+
+        function rgbToHex(r, g, b) { return '#' + [r, g, b].map(x => Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).padStart(2, '0')).join(''); }
+        function hexToRgbNormalized(hex) { const bigint = parseInt(hex.replace(/^#/, '').replace(/^([a-f\d])([a-f\d])([a-f\d])$/i, '$1$1$2$2$3$3'), 16); return [(bigint >> 16 & 255) / 255, (bigint >> 8 & 255) / 255, (bigint & 255) / 255]; }
 
         const sphereShaderWGSL = `struct Uniforms{mvp:mat4x4<f32>,model:mat4x4<f32>,normalMatrix:mat4x4<f32>,viewPos:vec3<f32>,l1:vec3<f32>,c1:vec3<f32>,l2:vec3<f32>,c2:vec3<f32>,l3:vec3<f32>,c3:vec3<f32>,debug:f32,};@group(0) @binding(0) var<uniform> u:Uniforms;struct VI{@location(0) p:vec3<f32>,@location(1) n:vec3<f32>};struct VO{@builtin(position) P:vec4<f32>,@location(0) vP:vec3<f32>,@location(1) vN:vec3<f32>};@vertex fn vs_main(i:VI)->VO{var o:VO;o.P=u.mvp*vec4<f32>(i.p,1.0);o.vP=(u.model*vec4<f32>(i.p,1.0)).xyz;o.vN=(u.normalMatrix*vec4<f32>(i.n,0.0)).xyz;return o;}fn ACES(x:vec3<f32>)->vec3<f32>{let a=2.51;let b=0.03;let c=2.43;let d=0.59;let e=0.14;return clamp((x*(a*x+b))/(x*(c*x+d)+e),vec3<f32>(0.0),vec3<f32>(1.0));}fn getI(lp:vec3<f32>,N:vec3<f32>,fp:vec3<f32>)->f32{let L=normalize(lp-fp);let distSq=dot(lp-fp,lp-fp);return pow(max(dot(N,L)+1.0,0.0)/2.0,2.5)*(1.0/(1.0+distSq*0.05));}@fragment fn fs_main(i:VO)->@location(0) vec4<f32>{let N=normalize(i.vN);if(u.debug > 0.5){let L1=normalize(u.l1-i.vP);let L2=normalize(u.l2-i.vP);let L3=normalize(u.l3-i.vP);if(dot(N,L1)>0.0 && dot(N,L2)>0.0 && dot(N,L3)>0.0){return vec4<f32>(1.0,0.0,0.0,1.0);}}let d1=getI(u.l1,N,i.vP);let d2=getI(u.l2,N,i.vP);let d3=getI(u.l3,N,i.vP);var l=(u.c1*d1)+(u.c2*d2)+(u.c3*d3);let ep=0.001;l=l+((u.c1+u.c2)*2.0*d1*d2/(d1+d2+ep)*1.8)+((u.c2+u.c3)*2.0*d2*d3/(d2+d3+ep)*1.8)+((u.c3+u.c1)*2.0*d3*d1/(d3+d1+ep)*1.8);let m=pow(min(d1,min(d2,d3)),6.0);l=l+(vec3<f32>(1.0)*m*80.0);l=max(l-vec3<f32>(0.01),vec3<f32>(0.0))*2.0;return vec4<f32>(pow(ACES(l),vec3<f32>(1.0/2.2)),1.0);}`;
         const coneShaderWGSL = `struct U{mvp:mat4x4<f32>,c:vec3<f32>};@group(0) @binding(0) var<uniform> u:U;@vertex fn vs_main(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32>{return u.mvp*vec4<f32>(p,1.0);}@fragment fn fs_main()->@location(0) vec4<f32>{return vec4<f32>(u.c,1.0);}`;
-
-        // FIX 2: Explicitly define default cone positions for consistent handle calculation
-        const defaultCones = [
-            { color: [1, 0, 0], pos: [0, .98, .69], active: true },
-            { color: [0, 1, 0], pos: [-.85, -.49, .69], active: true },
-            { color: [0, 0, 1], pos: [.85, -.49, .69], active: true }
-        ];
+        const defaultCones = [{ color: [1, 0, 0], pos: [0, .98, .69], active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], active: true }];
 
         function findPositionFromColor(targetHex) {
             const t = hexToRgbNormalized(targetHex); let bd = Infinity, bp = null;
-            for (let la = 0; la <= 60; la++) for (let lo = 0; lo <= 60; lo++) {
-                const th = la * Math.PI / 60, ph = lo * 2 * Math.PI / 60, pos = [Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)];
-                // FIX 2 CONTINUED: Pass defaultCones to ignore user distortions during calculation
+            for (let la = 0; la <= 30; la++) for (let lo = 0; lo <= 30; lo++) {
+                const th = la * Math.PI / 30, ph = lo * 2 * Math.PI / 30, pos = [Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)];
                 const c = getSurfaceColor(pos, pos, defaultCones), d = Math.sqrt((c[0] - t[0]) ** 2 + (c[1] - t[1]) ** 2 + (c[2] - t[2]) ** 2);
                 if (d < bd) { bd = d; bp = pos; }
+                if (d < 0.05) return bp;
             } return bp;
         }
 
         async function init() {
-            // FIX: Remove duplicates, ensure clean start
             state.canvas = document.getElementById('gpu-canvas');
             if (!navigator.gpu) return alert("WebGPU not supported!");
             const adapter = await navigator.gpu.requestAdapter(); state.device = await adapter.requestDevice();
             state.context = state.canvas.getContext('webgpu'); state.presentationFormat = navigator.gpu.getPreferredCanvasFormat();
             state.context.configure({ device: state.device, format: state.presentationFormat, alphaMode: 'premultiplied' });
 
-            const visited = JSON.parse(localStorage.getItem('p2p_visited_rooms_v1')) || [];
-            const validVisited = [];
-            visited.forEach(roomId => {
-                if (!roomId) return;
-                try {
-                    const hex = roomId.replace('doc-infinite-', '#');
-                    const pos = findPositionFromColor(hex);
-                    if (pos) validVisited.push(roomId);
-                } catch (e) { }
-            });
-            if (validVisited.length !== visited.length) localStorage.setItem('p2p_visited_rooms_v1', JSON.stringify(validVisited));
-
+            const rooms = await (new window.ColorDB()).getAllRooms();
+           
             state.historyHandles = [];
-
             await createAssets();
             window.addEventListener('resize', onResize); onResize();
             state.canvas.addEventListener('mousedown', onMouseDown); window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp);
@@ -1753,30 +1128,23 @@
             document.getElementById('freeze-btn').addEventListener('click', toggleFreeze);
 
             document.getElementById('debug-btn').onclick = function () {
-                state.debugMode = !state.debugMode;
-                this.classList.toggle('active', state.debugMode);
-                this.innerText = state.debugMode ? "DEBUG ON" : "DEBUG OFF";
-                document.getElementById('debug-panel').classList.toggle('visible', state.debugMode);
+                state.debugMode = !state.debugMode; this.classList.toggle('active', state.debugMode);
+                this.innerText = state.debugMode ? "DEBUG ON" : "DEBUG OFF"; document.getElementById('debug-panel').classList.toggle('visible', state.debugMode);
             };
+            document.getElementById('reset-btn').onclick = async () => { if (confirm("Permanently wipe all local data?")) { localStorage.clear(); try { const dbs = await window.indexedDB.databases(); for (const db of dbs) { await window.indexedDB.deleteDatabase(db.name); } } catch (e) { } window.location.reload(); } };
 
-            document.getElementById('reset-btn').onclick = async () => {
-                if (confirm("Permanently wipe all local data?")) {
-                    localStorage.clear();
-                    try {
-                        const dbs = await window.indexedDB.databases();
-                        for (const db of dbs) { await window.indexedDB.deleteDatabase(db.name); }
-                    } catch (e) { }
-                    window.location.reload();
-                }
-            };
-
-            state.uiCache = state.cones.map((c, i) => { const el = document.getElementById(`data-${i}`); if (el) { el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`; const titleEl = document.getElementById(`title-${i}`); titleEl.addEventListener('click', (e) => { if (document.body.classList.contains('light-mode')) return; e.stopPropagation(); state.cones[i].active = !state.cones[i].active; });['x', 'y', 'z'].forEach((axis, axIdx) => document.getElementById(`${axis}-${i}`).addEventListener('mousedown', (e) => { if (document.body.classList.contains('light-mode')) return; e.preventDefault(); e.stopPropagation(); state.valueScrub = { active: true, coneIndex: i, coordIndex: axIdx, startY: e.clientY }; })); return { title: titleEl, x: document.getElementById(`x-${i}`), y: document.getElementById(`y-${i}`), z: document.getElementById(`z-${i}`), lastPos: [null, null, null], lastActive: null }; } return null; });
+            state.cones.forEach((c, i) => {
+                const el = document.getElementById(`data-${i}`);
+                if (!el) return;
+                el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`;
+                const title = document.getElementById(`title-${i}`);
+                title.addEventListener('click', (e) => { if (!document.body.classList.contains('light-mode')) { e.stopPropagation(); state.cones[i].active = !state.cones[i].active; } });
+                ['x', 'y', 'z'].forEach((ax, idx) => document.getElementById(`${ax}-${i}`).addEventListener('mousedown', (e) => { if (!document.body.classList.contains('light-mode')) { e.preventDefault(); e.stopPropagation(); state.valueScrub = { active: true, coneIndex: i, coordIndex: idx, startY: e.clientY }; } }));
+                state.uiCache[i] = { title, x: document.getElementById(`x-${i}`), y: document.getElementById(`y-${i}`), z: document.getElementById(`z-${i}`), lastPos: [null, null, null], lastActive: null };
+            });
 
             setupColorTooltip();
-            if (window.location.hash && window.location.hash.length > 1) {
-                const matchPos = findPositionFromColor(window.location.hash);
-                if (matchPos) triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(window.location.hash), true);
-            }
+            if (window.location.hash && window.location.hash.length > 1) { const matchPos = findPositionFromColor(window.location.hash); if (matchPos) triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(window.location.hash), true); }
             requestAnimationFrame(loop);
         }
 
@@ -1791,10 +1159,7 @@
             state.pipelines.sphere = dev.createRenderPipeline({ layout: 'auto', vertex: { module: sm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }, { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x3' }] }] }, fragment: { module: sm, entryPoint: 'fs_main', targets: [{ format: state.presentationFormat }] }, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } });
             state.pipelines.cone = dev.createRenderPipeline({ layout: 'auto', vertex: { module: cm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] }, fragment: { module: cm, entryPoint: 'fs_main', targets: [{ format: state.presentationFormat }] }, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } });
             state.bindGroups.sphere = dev.createBindGroup({ layout: state.pipelines.sphere.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.sphereUniform } }] });
-
-            state.getBindGroupForHandle = (idx) => {
-                return dev.createBindGroup({ layout: state.pipelines.cone.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.coneUniform, offset: idx * 256, size: 80 } }] });
-            };
+            state.getBindGroupForHandle = (idx) => dev.createBindGroup({ layout: state.pipelines.cone.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.coneUniform, offset: idx * 256, size: 80 } }] });
             state.bindGroups.cones = [0, 1, 2, 3].map(i => state.getBindGroupForHandle(i));
         }
 
@@ -1806,24 +1171,7 @@
         function getTargetPos(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)); return Vec3.dot(p, p) <= 1 ? Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))) : Vec3.scale(Vec3.normalize(p), 1); }
         function calculateConePosition(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)), dist = Math.sqrt(Vec3.dot(p, p)), R = 1.2; if (dist <= R) return Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(R * R - Vec3.dot(p, p)))); const axis = Vec3.cross(Vec3.normalize(r.o), r.d); return Vec3.scale(transformPos(Vec3.normalize(r.o), Mat4.rotationAxis(Vec3.normalize(Vec3.len(axis) < .001 ? [1, 0, 0] : axis), Math.acos(R / Vec3.len(r.o)) + (dist - R))), R); }
         function transformPos(p, m) { return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]]; }
-
-        function projectToScreen(worldPos) {
-            const m = state.vpMatrix;
-            const x = worldPos[0], y = worldPos[1], z = worldPos[2];
-            const clipX = x * m[0] + y * m[4] + z * m[8] + m[12];
-            const clipY = x * m[1] + y * m[5] + z * m[9] + m[13];
-            const clipW = x * m[3] + y * m[7] + z * m[11] + m[15];
-
-            if (clipW <= 0) return null; // Behind camera
-
-            const ndcX = clipX / clipW;
-            const ndcY = clipY / clipW;
-
-            return {
-                x: (ndcX + 1) * state.canvas.width / 2,
-                y: (1 - ndcY) * state.canvas.height / 2
-            };
-        }
+        function projectToScreen(worldPos) { const m = state.vpMatrix, x = worldPos[0], y = worldPos[1], z = worldPos[2], clipX = x * m[0] + y * m[4] + z * m[8] + m[12], clipY = x * m[1] + y * m[5] + z * m[9] + m[13], clipW = x * m[3] + y * m[7] + z * m[11] + m[15]; if (clipW <= 0) return null; return { x: (clipX / clipW + 1) * state.canvas.width / 2, y: (1 - clipY / clipW) * state.canvas.height / 2 }; }
 
         function onMouseDown(e) {
             if (state.valueScrub.active) return;
@@ -1839,227 +1187,168 @@
             }
         }
         function onMouseMove(e) { state.mouse.x = e.clientX; state.mouse.y = e.clientY; }
-
-        function onMouseUp(e) {
-            state.mouse.down = false; state.handle.active = false; if (state.valueScrub.active) { state.valueScrub.active = false; return; }
-            const dist = Math.sqrt((e.clientX - state.clickData.startX) ** 2 + (e.clientY - state.clickData.startY) ** 2);
-            if (document.body.classList.contains('light-mode') && dist < 5 && Date.now() - state.clickData.startTime < 250) {
-                // 1. CHECK HANDLES WITH PROJECTION
+       function onMouseUp(e) {
+            state.mouse.down = false;
+            state.handle.active = false;
+            if (state.valueScrub.active) {
+                state.valueScrub.active = false;
+                return;
+            }
+            if (document.body.classList.contains('light-mode') && Math.sqrt((e.clientX - state.clickData.startX) ** 2 + (e.clientY - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) {
                 for (let h of state.historyHandles) {
-                    const worldPos = transformPos(h.pos, state.sphere.rotation);
-                    const screenPos = projectToScreen(worldPos);
-                    if (screenPos) {
-                        const dx = e.clientX - screenPos.x;
-                        const dy = e.clientY - screenPos.y;
-                        if (Math.sqrt(dx * dx + dy * dy) < 30) {
-                            triggerLanding(h.pos, worldPos, h.color, false);
-                            return;
-                        }
+                    const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
+                    if (sp && Math.sqrt((e.clientX - sp.x) ** 2 + (e.clientY - sp.y) ** 2) < 30) {
+                        try { localStorage.setItem("lastSphereColor", h.hex); } catch (e) { }
+                        triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true);
+                        return;
                     }
                 }
-                // 2. CHECK SPHERE SURFACE
-                const r = getMouseRay(e.clientX, e.clientY);
-                const tSphere = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d);
-                const pSphere = Vec3.add(r.o, Vec3.scale(r.d, tSphere));
-                if (Vec3.dot(pSphere, pSphere) <= 1) {
-                    const hp = Vec3.sub(pSphere, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(pSphere, pSphere))));
+                const r = getMouseRay(e.clientX, e.clientY),
+                    p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)));
+                if (Vec3.dot(p, p) <= 1) {
+                    const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p))));
                     triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false);
                 }
             }
         }
-        function getLuminance(r, g, b) { return 0.299 * r + 0.587 * g + 0.114 * b; }
+
         function triggerLanding(norm, pos, col, fromUrl = false) {
-            state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: true, targetDist: 1.25 }; state.handle.color = [...col]; state.hasRotated = true;
+            // Set shouldAutoEnter based on fromUrl (clicked handle or actual url visit)
+            state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: true, targetDist: 1.25, shouldAutoEnter: fromUrl }; state.handle.color = [...col]; state.hasRotated = true;
             const hex = rgbToHex(col[0], col[1], col[2]); document.getElementById('color-hex').innerText = hex.toUpperCase();
-            try { localStorage.setItem("lastSphereColor", hex); } catch (e) { } // FIX: Save on landing trigger too
-            const isLight = getLuminance(col[0], col[1], col[2]) > 0.5;
-            const textColor = isLight ? 'black' : 'white';
-            document.getElementById('login-card').style.color = textColor;
-            document.getElementById('top-nav').style.setProperty('--nav-color', textColor);
+            const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white';
+            document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor);
             const cam = Vec3.normalize(state.cameraPos), axis = Vec3.cross(norm, cam), dot = Vec3.dot(norm, cam);
             state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot)));
+            // Connect but don't force entry yet
             if (window.connectAndPreview) window.connectAndPreview(hex, fromUrl);
         }
+
         function toggleFreeze() {
-            const f = document.getElementById('flash-overlay');
-            const isFrozen = document.body.classList.toggle('light-mode');
+            // If the dashboard is active, this button belongs to the App class now. Do nothing here.
+            if (document.getElementById('dashboard-panel').classList.contains('active')) return;
+
+            const f = document.getElementById('flash-overlay'), isFrozen = document.body.classList.toggle('light-mode');
             state.landing = { active: false, showHandle: false };
-            document.getElementById('login-card').classList.remove('visible');
-            document.getElementById('dashboard-panel').classList.remove('active');
+            document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
             state.cameraPos = [0, 0, 4];
-            f.style.backgroundColor = isFrozen ? 'white' : 'black';
-            document.body.style.backgroundColor = '';
+            f.style.backgroundColor = isFrozen ? 'white' : 'black'; document.body.style.backgroundColor = '';
             f.classList.remove('active'); void f.offsetWidth; f.classList.add('active'); setTimeout(() => f.classList.remove('active'), 0);
         }
-
-        // FIX 2 CONTINUED: Update getSurfaceColor to accept optional cones override
+        
         function getSurfaceColor(p, n, cones = state.cones) {
-            const getI = (i) => { if (!cones[i].active) return 0; const L = Vec3.sub(cones[i].pos, p), d = Vec3.dot(L, L); return Math.pow(Math.max(Vec3.dot(n, Vec3.normalize(L)) + 1, 0) / 2, 2.5) * (1 / (1 + d * .05)); };
+            const getI = (i) => cones[i].active ? Math.pow(Math.max(Vec3.dot(n, Vec3.normalize(Vec3.sub(cones[i].pos, p))) + 1, 0) / 2, 2.5) * (1 / (1 + Vec3.dot(Vec3.sub(cones[i].pos, p), Vec3.sub(cones[i].pos, p)) * .05)) : 0;
             const d = [getI(0), getI(1), getI(2)], c = cones.map(x => x.color);
-            let l = Vec3.add(Vec3.add(Vec3.scale(c[0], d[0]), Vec3.scale(c[1], d[1])), Vec3.scale(c[2], d[2])), ep = 0.001;
-            l = Vec3.add(l, Vec3.add(Vec3.scale(Vec3.add(c[0], c[1]), 2 * d[0] * d[1] / (d[0] + d[1] + ep) * 1.8), Vec3.add(Vec3.scale(Vec3.add(c[1], c[2]), 2 * d[1] * d[2] / (d[1] + d[2] + ep) * 1.8), Vec3.scale(Vec3.add(c[2], c[0]), 2 * d[2] * d[0] / (d[2] + d[0] + ep) * 1.8))));
-            let m = Math.pow(Math.min(d[0], Math.min(d[1], d[2])), 6); l = Vec3.add(l, [m * 80, m * 80, m * 80]); l = Vec3.scale([Math.max(l[0] - .01, 0), Math.max(l[1] - .01, 0), Math.max(l[2] - .01, 0)], 2);
-            const r = (x) => (x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), co = [r(l[0]), r(l[1]), r(l[2])]; return [Math.pow(co[0], 1 / 2.2), Math.pow(co[1], 1 / 2.2), Math.pow(co[2], 1 / 2.2)];
+            let l = Vec3.add(Vec3.add(Vec3.scale(c[0], d[0]), Vec3.scale(c[1], d[1])), Vec3.scale(c[2], d[2])), m = Math.pow(Math.min(d[0], Math.min(d[1], d[2])), 6);
+            l = Vec3.add(l, Vec3.add(Vec3.scale(Vec3.add(c[0], c[1]), 2 * d[0] * d[1] / (d[0] + d[1] + .001) * 1.8), Vec3.add(Vec3.scale(Vec3.add(c[1], c[2]), 2 * d[1] * d[2] / (d[1] + d[2] + .001) * 1.8), Vec3.scale(Vec3.add(c[2], c[0]), 2 * d[2] * d[0] / (d[2] + d[0] + .001) * 1.8))));
+            l = Vec3.scale(Vec3.add(l, [m * 80, m * 80, m * 80]), 2);
+            const r = (x) => (x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14); return [Math.pow(r(Math.max(l[0] - .01, 0)), 1 / 2.2), Math.pow(r(Math.max(l[1] - .01, 0)), 1 / 2.2), Math.pow(r(Math.max(l[2] - .01, 0)), 1 / 2.2)];
         }
 
         function setupColorTooltip() {
             const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t);
             window.addEventListener('mousemove', e => {
-                if (!document.body.classList.contains('light-mode')) { t.style.display = 'none'; return; }
-                if (e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) { t.style.display = 'none'; return; }
-
-                // 1. CHECK HANDLES (Using Screen Projection)
+                if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) { t.style.display = 'none'; return; }
                 for (let h of state.historyHandles) {
-                    const worldPos = transformPos(h.pos, state.sphere.rotation);
-                    const screenPos = projectToScreen(worldPos);
-
-                    if (screenPos) {
-                        const dx = e.clientX - screenPos.x;
-                        const dy = e.clientY - screenPos.y;
-
-                        if (Math.sqrt(dx * dx + dy * dy) < 30) {
-                            const count = h.peerCount || 0;
-                            const meta = count > 0 ? `${count} PEER${count > 1 ? 'S' : ''} ONLINE` : "OFFLINE";
-                            const metaClass = count > 0 ? "meta online" : "meta";
-                            t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${metaClass}">${meta}</span>`;
-                            t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px';
-                            t.style.border = `1px solid ${h.hex}`;
-                            return;
-                        }
+                    const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
+                    if (sp && Math.sqrt((e.clientX - sp.x) ** 2 + (e.clientY - sp.y) ** 2) < 30) {
+                        t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`;
+                        t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return;
                     }
                 }
-
-                // 2. CHECK SPHERE
-                const r = getMouseRay(e.clientX, e.clientY), tV = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, tV));
-                if (Vec3.dot(p, p) > 1 || (tV - Math.sqrt(1 - Vec3.dot(p, p))) < 0) { t.style.display = 'none'; return; }
-                const h = Vec3.add(r.o, Vec3.scale(r.d, tV - Math.sqrt(1 - Vec3.dot(p, p)))), c = getSurfaceColor(h, Vec3.normalize(h));
-                const hex = rgbToHex(c[0], c[1], c[2]).toUpperCase();
-                t.innerHTML = `<span class="hex">${hex}</span>`;
-                t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px';
-                t.style.border = `1px solid ${hex}`;
+                const r = getMouseRay(e.clientX, e.clientY), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)));
+                if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return; }
+                const hex = rgbToHex(...getSurfaceColor(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))), Vec3.normalize(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p))))))).toUpperCase();
+                t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}`;
             });
         }
 
         window.resetSphereView = function () {
-            // 1. Stop any conflicting animations
+            const m = state.sphere.rotation, trace = m[0] + m[5] + m[10];
+            let angle = Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2))), axis = [1, 0, 0], diff = [m[6] - m[9], m[8] - m[2], m[1] - m[4]], sl = Math.sqrt(diff[0] ** 2 + diff[1] ** 2 + diff[2] ** 2);
+            if (sl > 0.001) axis = [diff[0] / sl, diff[1] / sl, diff[2] / sl];
+            state.returning = { active: true, progress: 0, baseRotation: m, rotationAxis: axis, rotationAngle: -angle, startDist: Vec3.len(state.cameraPos), targetDist: 4.0, coneStartPositions: state.cones.map(c => [...c.pos]) };
             state.landing.active = false;
-
-            // 2. Calculate the Axis and Angle to return to Identity
-            // We want to rotate FROM the current rotation (m) BACK to identity.
-            const m = state.sphere.rotation;
-            const trace = m[0] + m[5] + m[10];
-            let angle = Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2)));
-            let axis = [1, 0, 0];
-            const diff = [m[6] - m[9], m[8] - m[2], m[1] - m[4]];
-            const sinLen = Math.sqrt(diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]);
-            if (sinLen > 0.001) axis = [diff[0] / sinLen, diff[1] / sinLen, diff[2] / sinLen];
-
-            // 3. Start the Returning State
-            // Do NOT reset hasRotated yet, so background stays colored until end
-            state.returning = {
-                active: true,
-                progress: 0,
-                baseRotation: m,
-                rotationAxis: axis,
-                rotationAngle: -angle,
-                startDist: Vec3.len(state.cameraPos),
-                targetDist: 4.0,
-                coneStartPositions: state.cones.map(c => [...c.pos])
-            };
         };
 
         function loop(ts) {
             const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts;
-            const aspect = state.canvas.width / state.canvas.height, proj = Mat4.perspective(Math.PI / 4, aspect, .1, 100);
-            if (document.body.classList.contains('light-mode') && state.hasRotated) { const c = getSurfaceColor([0, 0, 1], [0, 0, 1]); document.body.style.backgroundColor = rgbToHex(c[0], c[1], c[2]); }
-            if (state.valueScrub.active) { const d = Math.abs(state.valueScrub.startY - state.mouse.y); if (d > 5) state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((d - 5) / 500, 3) * .05; }
+            if (document.body.classList.contains('light-mode') && state.hasRotated) document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1]));
+            if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05;
 
             if (state.landing.active) {
                 state.landing.progress = Math.min(state.landing.progress + dt * .5, 1);
-                if (state.landing.progress >= 1) { document.getElementById('login-card').classList.add('visible'); state.landing.showHandle = false; }
+                if (state.landing.progress >= 1) { 
+                    document.getElementById('login-card').classList.add('visible'); 
+                    state.landing.showHandle = false; 
+                    // Trigger UI slide up only when animation finishes if auto-enter is requested
+                    if (state.landing.shouldAutoEnter) {
+                        if (window.enterRoomUI) window.enterRoomUI();
+                        state.landing.shouldAutoEnter = false;
+                    }
+                }
                 const t = state.landing.progress, rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t);
-                state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation);
-                state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot));
+                state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot));
                 if (state.landing.showHandle) state.handle.pos = transformPos(state.landing.handleStartPos, rot);
                 state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t);
             }
-
             if (state.returning && state.returning.active) {
-                const speed = 1.5;
-                state.returning.progress = Math.min(state.returning.progress + dt * speed, 1);
-                const t = state.returning.progress;
-                const ease = 1 - Math.pow(1 - t, 3); // Cubic Ease Out
-
-                const rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease);
-                state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation);
-                state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease];
-                state.cones.forEach((c, i) => { c.pos = transformPos(state.returning.coneStartPositions[i], rot); });
-
+                state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1);
+                const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease);
+                state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease];
+                state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot));
                 if (t >= 1) {
-                    state.returning.active = false;
-                    state.hasRotated = false;
-                    state.sphere.rotation = Mat4.identity();
-                    state.cones = [
-                        { color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true },
-                        { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true },
-                        { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }
-                    ];
-                    state.cameraPos = [0, 0, 4];
-                    document.body.style.backgroundColor = '';
-                    document.getElementById('color-hex').innerText = "#FFFFFF";
-                    document.getElementById('login-card').style.color = '';
-                    document.getElementById('top-nav').style.removeProperty('--nav-color');
+                    state.returning.active = false; state.hasRotated = false; state.sphere.rotation = Mat4.identity();
+                    state.cones = [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }];
+                    state.cameraPos = [0, 0, 4]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = "#FFFFFF";
+                    document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color');
                 }
             }
 
-            const view = Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0]);
-            state.vpMatrix = Mat4.multiply(proj, view);
-            const vp = state.vpMatrix;
-            const tp = getTargetPos(state.mouse.x, state.mouse.y);
-
+            state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .1, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0]));
             if (!document.body.classList.contains('light-mode')) {
-                state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; } ['x', 'y', 'z'].forEach((axis, axIdx) => { const val = c.pos[axIdx]; if (Math.abs(val - cache.lastPos[axIdx]) > 0.005) { cache[axis].innerText = val.toFixed(2); cache.lastPos[axIdx] = val; } }); });
-            }
-
-            if (!document.body.classList.contains('light-mode')) {
+                state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx]; } }); });
                 if (state.mouse.down) {
+                    const tp = getTargetPos(state.mouse.x, state.mouse.y);
                     if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; });
                     if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np; }
                 } else state.draggedConeIndex = -1;
                 state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95); } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2); } });
             } else if (state.mouse.down && state.dragStart.active) {
                 state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
-                if (tp) { state.handle.pos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)), d = Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(d)); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); } }
+                const tp = getTargetPos(state.mouse.x, state.mouse.y);
+                if (tp) { state.handle.pos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); } }
             } else { state.dragStart.active = false; state.handle.active = false; }
 
             if (state.device && state.pipelines.sphere && state.msaaTexture) {
                 const enc = state.device.createCommandEncoder(), pass = enc.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'discard' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'discard' } });
-                const sd = new Float32Array(80); sd.set(Mat4.multiply(vp, state.sphere.rotation), 0); sd.set(state.sphere.rotation, 16); sd.set(state.sphere.rotation, 32); sd.set(state.cameraPos, 48);[0, 1, 2].forEach(i => { sd.set(state.cones[i].pos, 52 + i * 8); sd.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); });
-                sd[76] = state.debugMode ? 1.0 : 0.0;
-                state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, sd);
+                state.uniforms.sphere.set(Mat4.multiply(state.vpMatrix, state.sphere.rotation), 0); state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);
+                [0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); });
+                state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0;
+                state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere);
                 pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount);
+
+                pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16');
+
                 if (!document.body.classList.contains('light-mode')) {
-                    pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, state.buffers.coneVertex); pass.setIndexBuffer(state.buffers.coneIndex, 'uint16');
-                    state.cones.forEach((c, i) => { if (c.active) { let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity()); const cd = new Float32Array(20); cd.set(Mat4.multiply(vp, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); cd.set(c.color, 16); state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, cd); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount); } });
+                    state.cones.forEach((c, i) => {
+                        if (c.active) {
+                            let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity());
+                            state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set(c.color, 16);
+                            state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount);
+                        }
+                    });
                 } else {
-                    pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16');
-                    if (state.handle.active || state.landing.showHandle) {
-                        const hd = new Float32Array(20); hd.set(Mat4.multiply(vp, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); hd.set(state.handle.color, 16);
-                        state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, hd);
-                        pass.setBindGroup(0, state.getBindGroupForHandle(3));
-                        pass.drawIndexed(state.sphere.indexCount);
-                    }
                     let bindIdx = 4;
-                    state.historyHandles.forEach((h) => {
-                        const worldPos = transformPos(h.pos, state.sphere.rotation);
-                        if (worldPos[2] > -0.5) {
-                            const hd = new Float32Array(20);
-                            hd.set(Mat4.multiply(vp, Mat4.multiply(Mat4.translation(worldPos), Mat4.scale([.08, .08, .08]))), 0);
-                            hd.set(h.color, 16);
-                            state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, hd);
-                            pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx));
-                            pass.drawIndexed(state.sphere.indexCount);
-                            bindIdx++;
+                    if (state.handle.active || state.landing.showHandle) {
+                        state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set(state.handle.color, 16);
+                        state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount);
+                    }
+                    state.historyHandles.forEach(h => {
+                        const wp = transformPos(h.pos, state.sphere.rotation);
+                        if (wp[2] > -0.5) {
+                            state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set(h.color, 16);
+                            state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++;
                         }
                     });
                 }
@@ -2070,110 +1359,44 @@
         init();
 
         window.updateVisitedFromDB = async function () {
-            if (!window.ColorDB) return;
-            const db = new window.ColorDB();
-            const rooms = await db.getAllRooms();
-            if (rooms && rooms.length > 0) {
-                const ids = rooms.map(r => 'doc-infinite-' + r.hex);
-                localStorage.setItem('p2p_visited_rooms_v1', JSON.stringify(ids));
-
-                // Also update in-memory state so Sphere updates immediately
-                if (typeof state !== 'undefined' && state.historyHandles) {
-                    state.historyHandles = [];
-                    rooms.forEach(r => {
-                        const hex = '#' + r.hex;
-                        if (typeof findPositionFromColor === 'function') {
-                            const pos = findPositionFromColor(hex);
-                            if (pos) {
-                                state.historyHandles.push({
-                                    pos: Vec3.normalize(pos),
-                                    color: hexToRgbNormalized(hex),
-                                    hex: hex,
-                                    peerCount: 0
-                                });
-                            }
-                        }
-                    });
-                }
+            const rooms = await (new window.ColorDB()).getAllRooms();
+            state.historyHandles = [];
+            if (rooms?.length) {
+                rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }); });
             }
         };
 
-        window.addEventListener("message", (event) => {
-            if (event.data === "getSphereColor") {
-                let savedColor = storageScope.getItem("lastSphereColor");
-                if (!savedColor) savedColor = "#ff0000";
-                event.source.postMessage(savedColor, event.origin);
-            }
-            if (event.data && event.data.type === 'handle-ready') {
-                const hex = event.data.hex;
-                // FIX 2 CONTINUED: Pass defaultCones ensures handles are placed based on the "Platonic" sphere
-                const pos = findPositionFromColor(hex);
-
-                // Avoid duplicates
+        window.addEventListener("message", (e) => {
+            if (e.data === "getSphereColor") e.source.postMessage(storageScope.getItem("lastSphereColor") || "#ff0000", e.origin);
+            if (e.data?.type === 'handle-ready') {
+                const hex = e.data.hex, pos = findPositionFromColor(hex);
                 if (pos && !state.historyHandles.some(h => h.hex === hex)) {
-                    state.historyHandles.push({
-                        pos: Vec3.normalize(pos),
-                        color: hexToRgbNormalized(hex),
-                        hex: hex,
-                        peerCount: event.data.count
-                    });
-
-                    const d = document.getElementById('debug-rooms');
-                    const dItem = document.createElement('div');
-                    dItem.className = 'debug-room-item ' + (event.data.count > 0 ? 'active' : '');
-                    dItem.innerHTML = `<span>${hex}</span> <span class="count">${event.data.count} peer(s)</span>`;
-                    d.appendChild(dItem);
+                    state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: e.data.count });
+                    const d = document.createElement('div'); d.className = 'debug-room-item ' + (e.data.count > 0 ? 'active' : ''); d.innerHTML = `<span>${hex}</span> <span class="count">${e.data.count} peer(s)</span>`; document.getElementById('debug-rooms').appendChild(d);
                 }
             }
         });
 
         async function initStorageAccess() {
             if (window.self === window.top) return;
-
-            const attemptRetrieval = async (handle) => {
+            const access = async (h) => {
                 try {
-                    if (handle && handle.localStorage) storageScope = handle.localStorage;
-                    const color = storageScope.getItem("lastSphereColor");
-                    const overlay = document.getElementById('saa-overlay');
-                    if (color) {
-                        window.parent.postMessage(color, "*");
-                        if (overlay) {
-                            overlay.innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${color}</div>`;
-                            document.body.style.backgroundColor = color;
-                        }
-                    } else { if (overlay) overlay.remove(); }
-                } catch (e) { console.error("Error reading storage handle:", e); }
+                    if (h?.localStorage) storageScope = h.localStorage;
+                    const c = storageScope.getItem("lastSphereColor");
+                    if (c) { window.parent.postMessage(c, "*"); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${c}</div>`; document.body.style.backgroundColor = c; }
+                    else if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove();
+                } catch (e) { }
             };
-
-            const handleAccessRequest = async () => {
-                try { const handle = await document.requestStorageAccess({ localStorage: true }); await attemptRetrieval(handle); }
-                catch (err) { const overlay = document.getElementById('saa-overlay'); if (overlay) overlay.innerHTML = "Access Denied"; }
-            };
-
-            const showButton = () => {
-                if (document.getElementById('saa-overlay')) return;
-                const overlay = document.createElement('div');
-                overlay.id = 'saa-overlay';
-                Object.assign(overlay.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
-                const btn = document.createElement("button");
-                btn.innerText = "🔌 Connect to Sphere";
-                Object.assign(btn.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
-                overlay.appendChild(btn);
-                document.body.appendChild(overlay);
-                btn.addEventListener("click", handleAccessRequest);
-            };
-
             try {
-                const hasAccess = await document.hasStorageAccess();
-                if (hasAccess) {
-                    try { const handle = await document.requestStorageAccess({ localStorage: true }); await attemptRetrieval(handle); }
-                    catch (e) { await attemptRetrieval(null); }
-                } else { showButton(); }
-            } catch (e) { console.error("Storage Access API not supported", e); }
+                if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true })); } catch (e) { access(null); }
+                else {
+                    const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
+                    const b = document.createElement("button"); b.innerText = "🔌 Connect to Sphere"; Object.assign(b.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
+                    o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true })); } catch (e) { o.innerHTML = "Access Denied"; } };
+                }
+            } catch (e) { }
         }
-
         initStorageAccess();
     </script>
 </body>
-
 </html>
