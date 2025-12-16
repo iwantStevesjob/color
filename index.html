@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+\<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -1110,7 +1110,7 @@
             identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
         };
 
-        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [] }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) } };
+        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) } };
 
         function rgbToHex(r, g, b) { return '#' + [r, g, b].map(x => Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).padStart(2, '0')).join(''); }
         function hexToRgbNormalized(hex) { const bigint = parseInt(hex.replace(/^#/, '').replace(/^([a-f\d])([a-f\d])([a-f\d])$/i, '$1$1$2$2$3$3'), 16); return [(bigint >> 16 & 255) / 255, (bigint >> 8 & 255) / 255, (bigint & 255) / 255]; }
@@ -1213,18 +1213,20 @@
 
         function onMouseDown(e) {
             if (state.valueScrub.active) return;
-            state.mouse = { x: e.clientX, y: e.clientY, down: true };
-            state.clickData = { startX: e.clientX, startY: e.clientY, startTime: Date.now() };
+            const rect = state.canvas.getBoundingClientRect();
+            state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top, down: true };
+            state.clickData = { startX: state.mouse.x, startY: state.mouse.y, startTime: Date.now() };
             if (document.body.classList.contains('light-mode')) {
+                state.inertia.val = 0; 
                 const p = getTargetPos(state.mouse.x, state.mouse.y), r = getMouseRay(state.mouse.x, state.mouse.y);
                 if (Vec3.dot(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))), Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)))) <= 1) {
-                    state.dragStart = { active: true, mouseDir: Vec3.normalize(p), sphereRotation: [...state.sphere.rotation], conePositions: state.cones.map(c => [...c.pos]) };
+                    state.dragStart = { active: true, mouseDir: Vec3.normalize(p), sphereRotation: [...state.sphere.rotation], conePositions: state.cones.map(c => [...c.pos]), lastTrackPos: p };
                     state.handle = { active: true, pos: p, color: getSurfaceColor(p, Vec3.normalize(p)) };
                     state.hasRotated = true;
                 }
             }
         }
-        function onMouseMove(e) { state.mouse.x = e.clientX; state.mouse.y = e.clientY; }
+        function onMouseMove(e) { const r = state.canvas.getBoundingClientRect(); state.mouse.x = e.clientX - r.left; state.mouse.y = e.clientY - r.top; }
        function onMouseUp(e) {
             state.mouse.down = false;
             state.handle.active = false;
@@ -1232,20 +1234,24 @@
                 state.valueScrub.active = false;
                 return;
             }
-            if (document.body.classList.contains('light-mode') && Math.sqrt((e.clientX - state.clickData.startX) ** 2 + (e.clientY - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) {
-                for (let h of state.historyHandles) {
-                    const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
-                    if (sp && Math.sqrt((e.clientX - sp.x) ** 2 + (e.clientY - sp.y) ** 2) < 30) {
-                        try { localStorage.setItem("lastSphereColor", h.hex); } catch (e) { }
-                        triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true);
-                        return;
+            if (document.body.classList.contains('light-mode')) {
+                const rect = state.canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+                if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) {
+                    for (let h of state.historyHandles) {
+                        const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
+                        if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 30) {
+                            try { localStorage.setItem("lastSphereColor", h.hex); } catch (e) { }
+                            triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true);
+                            return;
+                        }
                     }
-                }
-                const r = getMouseRay(e.clientX, e.clientY),
-                    p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)));
-                if (Vec3.dot(p, p) <= 1) {
-                    const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p))));
-                    triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false);
+                    const r = getMouseRay(mx, my),
+                        p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)));
+                    if (Vec3.dot(p, p) <= 1) {
+                        const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p))));
+                        triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false);
+                    }
                 }
             }
         }
@@ -1289,14 +1295,15 @@
             const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t);
             window.addEventListener('mousemove', e => {
                 if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) { t.style.display = 'none'; return; }
+                const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
                 for (let h of state.historyHandles) {
                     const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
-                    if (sp && Math.sqrt((e.clientX - sp.x) ** 2 + (e.clientY - sp.y) ** 2) < 30) {
+                    if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 30) {
                         t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`;
                         t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return;
                     }
                 }
-                const r = getMouseRay(e.clientX, e.clientY), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)));
+                const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)));
                 if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return; }
                 const hex = rgbToHex(...getSurfaceColor(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))), Vec3.normalize(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p))))))).toUpperCase();
                 t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}`;
@@ -1356,8 +1363,25 @@
             } else if (state.mouse.down && state.dragStart.active) {
                 state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
                 const tp = getTargetPos(state.mouse.x, state.mouse.y);
-                if (tp) { state.handle.pos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); } }
-            } else { state.dragStart.active = false; state.handle.active = false; }
+                if (tp) { 
+                    state.handle.pos = tp; 
+                    if(state.dragStart.lastTrackPos) {
+                        const axis = Vec3.cross(state.dragStart.lastTrackPos, tp);
+                        state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1,0,0], val: Vec3.len(axis) };
+                    }
+                    state.dragStart.lastTrackPos = tp;
+
+                    const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); } 
+                }
+            } else { 
+                state.dragStart.active = false; state.handle.active = false; 
+                if (state.inertia.val > 0.0001) {
+                    const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val);
+                    state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation);
+                    state.cones.forEach(c => c.pos = transformPos(c.pos, r));
+                    state.inertia.val *= 0.95; // CHANGE THIS NUMBER to adjust stickiness
+                }
+            }
 
             if (state.device && state.pipelines.sphere && state.msaaTexture) {
                 const enc = state.device.createCommandEncoder(), pass = enc.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'discard' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'discard' } });
