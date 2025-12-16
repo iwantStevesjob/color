@@ -576,7 +576,7 @@
     <div id="hover-trigger"></div>
 
     <nav id="top-nav">
-        
+
         <div class="nav-item">HOME</div>
         <div class="nav-item">APPS</div>
         <div class="nav-item">SETTINGS</div>
@@ -713,13 +713,13 @@
                 this.anonCounter = 1;
 
                 this.db.getAllRooms().then(rooms => {
-                        this.visitedRooms = rooms.map(r => 'doc-infinite-' + r.hex);
-                        if (!window.location.hash || window.location.hash.length < 2) {
-                            this.runSequencedScan();
-                        } else {
-                            this.tryAutoConnectFromHash();
-                        }
-                    });
+                    this.visitedRooms = rooms.map(r => 'color-' + r.hex);
+                    if (!window.location.hash || window.location.hash.length < 2) {
+                        this.runSequencedScan();
+                    } else {
+                        this.tryAutoConnectFromHash();
+                    }
+                });
 
                 this.room = null;
                 this.roomId = null;
@@ -744,7 +744,7 @@
             tryAutoConnectFromHash() { if (window.location.hash.length > 1) this.connectAndPreview(window.location.hash, true); }
 
             joinNetwork(mode = 'standard') {
-                try { this.room = joinRoom({ appId: 'doc-infinite-v5-idb', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId); } catch (e) { return; }
+                try { this.room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,0.49,0.69b0.85,-0.49,0.69', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId); } catch (e) { return; }
                 const actions = ['skeleton', 'fragment', 'lock', 'req', 'identity'];
                 const [sendSkeleton, getSkeleton] = this.room.makeAction('skeleton');
                 this.actions = Object.assign({ sendSkeleton }, ...actions.slice(1).map(k => ({ [`send${k.charAt(0).toUpperCase() + k.slice(1)}`]: this.room.makeAction(k)[0] })));
@@ -792,7 +792,7 @@
             connectAndPreview(hex, fromUrl = false) {
                 this.statusTimeoutAttempts = fromUrl ? 20 : 2;
                 const cleanHex = hex.replace('#', '');
-                this.roomId = 'doc-infinite-' + cleanHex;
+                this.roomId = 'color-' + cleanHex;
                 this.user.color = '#' + cleanHex;
                 this.ui.userBadge.style.backgroundColor = this.user.color;
 
@@ -801,10 +801,10 @@
                 this.db.getRoom(cleanHex).then(data => {
                     if (data?.skeleton?.length) {
                         this.ui.roomStatus.innerText = "Loading..."; this.ui.loginBtn.classList.remove('hidden');
-                        this.renderFromLocalDB(data).then(() => { 
-                            this.ui.roomStatus.innerText = "READY"; 
+                        this.renderFromLocalDB(data).then(() => {
+                            this.ui.roomStatus.innerText = "READY";
                             // Note: we removed the immediate slide up here to let the zoom animation finish first
-                            this.joinNetwork('conflict'); 
+                            this.joinNetwork('conflict');
                         });
                     } else {
                         this.ui.roomStatus.innerText = "Checking Network..."; this.ui.loginBtn.classList.remove('hidden');
@@ -820,17 +820,17 @@
                 this.ensureStructure();
             }
 
-           enterRoomUI() {
+            enterRoomUI() {
                 if (this.ui.dashboardPanel.classList.contains('active')) return;
                 if (!this.visitedRooms.includes(this.roomId)) {
                     this.visitedRooms.push(this.roomId);
-                    this.db._open(this.roomId.replace('doc-infinite-', '')); 
+                    this.db._open(this.roomId.replace('color-', ''));
                 }
                 this.ui.loginBtn.classList.add('hidden'); this.ui.loginCard.classList.remove('visible');
-                
+
                 // 1. Slide up immediately
-                this.ui.dashboardPanel.classList.add('active'); 
-                this.ui.hoverTrigger.style.display = 'block'; 
+                this.ui.dashboardPanel.classList.add('active');
+                this.ui.hoverTrigger.style.display = 'block';
                 this.ui.topNav.classList.add('active');
 
                 // 2. Delay ONLY the icon change
@@ -838,7 +838,7 @@
                     document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
                 }, 1000);
 
-                window.location.hash = this.roomId.replace('doc-infinite-', '');
+                window.location.hash = this.roomId.replace('color-', '');
                 if (!this.ui.display.querySelector('.editor-line')) { this.ui.display.innerHTML = this.createLines(101); this.isFresh = true; }
                 this.isFresh || this.ui.display.innerText.trim().length < 5 ? this.focusCenter() : this.ui.display.focus();
             }
@@ -847,9 +847,9 @@
                 for (const rId of this.visitedRooms) {
                     if (!rId) continue;
                     try {
-                        const r = joinRoom({ appId: 'doc-infinite-v4', trackerUrls: ['wss://tracker.webtorrent.dev'] }, rId);
+                        const r = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,0.49,0.69b0.85,-0.49,0.69', trackerUrls: ['wss://tracker.webtorrent.dev'] }, rId);
                         await new Promise(res => setTimeout(() => {
-                            window.postMessage({ type: 'handle-ready', hex: rId.replace('doc-infinite-', '#'), count: Object.keys(r.getPeers()).length }, '*'); r.leave(); res();
+                            window.postMessage({ type: 'handle-ready', hex: rId.replace('color-', '#'), count: Object.keys(r.getPeers()).length }, '*'); r.leave(); res();
                         }, 1000));
                     } catch (e) { }
                 }
@@ -925,11 +925,11 @@
 
             broadcastSkeleton() { if (this.room && this.actions.sendSkeleton) this.actions.sendSkeleton(Array.from(this.ui.display.children).map(el => el.id).filter(id => id)); }
 
-           async logout() {
+            async logout() {
                 if (window.resetSphereView) window.resetSphereView();
                 this.ui.dashboardPanel.classList.remove('active', 'revealed'); this.ui.loginCard.classList.remove('visible');
                 this.ui.loginBtn.classList.remove('hidden'); this.ui.hoverTrigger.style.display = 'none'; this.ui.topNav.classList.remove('active');
-                
+
                 // --- START EDIT: Revert to Lightbulb ---
                 document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
                 // --- END EDIT ---
@@ -1022,7 +1022,7 @@
             }
 
             bindEvents() {
-                 document.getElementById('freeze-btn').addEventListener('click', (e) => {
+                document.getElementById('freeze-btn').addEventListener('click', (e) => {
                     if (this.ui.dashboardPanel.classList.contains('active')) {
                         e.stopImmediatePropagation(); // <--- STOP the event here so toggleFreeze never runs
                         this.logout();
@@ -1031,7 +1031,7 @@
 
                 this.ui.chatContainer.addEventListener('scroll', () => this.checkBuffers());
                 window.addEventListener('resize', () => this.renderMinimap());
-                
+
 
                 // Mouse/Hover logic
                 const btn = document.getElementById('freeze-btn');
@@ -1071,7 +1071,7 @@
         new EditorApp();
     </script>
 
-<script type="module">
+    <script type="module">
         let storageScope = window.localStorage;
         document.getElementById('login-btn').addEventListener('click', async () => {
             try { storageScope.setItem("lastSphereColor", document.getElementById('color-hex').innerText); } catch (e) { }
@@ -1117,7 +1117,7 @@
             state.context.configure({ device: state.device, format: state.presentationFormat, alphaMode: 'premultiplied' });
 
             const rooms = await (new window.ColorDB()).getAllRooms();
-           
+
             state.historyHandles = [];
             await createAssets();
             window.addEventListener('resize', onResize); onResize();
@@ -1187,7 +1187,7 @@
             }
         }
         function onMouseMove(e) { state.mouse.x = e.clientX; state.mouse.y = e.clientY; }
-       function onMouseUp(e) {
+        function onMouseUp(e) {
             state.mouse.down = false;
             state.handle.active = false;
             if (state.valueScrub.active) {
@@ -1235,7 +1235,7 @@
             f.style.backgroundColor = isFrozen ? 'white' : 'black'; document.body.style.backgroundColor = '';
             f.classList.remove('active'); void f.offsetWidth; f.classList.add('active'); setTimeout(() => f.classList.remove('active'), 0);
         }
-        
+
         function getSurfaceColor(p, n, cones = state.cones) {
             const getI = (i) => cones[i].active ? Math.pow(Math.max(Vec3.dot(n, Vec3.normalize(Vec3.sub(cones[i].pos, p))) + 1, 0) / 2, 2.5) * (1 / (1 + Vec3.dot(Vec3.sub(cones[i].pos, p), Vec3.sub(cones[i].pos, p)) * .05)) : 0;
             const d = [getI(0), getI(1), getI(2)], c = cones.map(x => x.color);
@@ -1278,9 +1278,9 @@
 
             if (state.landing.active) {
                 state.landing.progress = Math.min(state.landing.progress + dt * .5, 1);
-                if (state.landing.progress >= 1) { 
-                    document.getElementById('login-card').classList.add('visible'); 
-                    state.landing.showHandle = false; 
+                if (state.landing.progress >= 1) {
+                    document.getElementById('login-card').classList.add('visible');
+                    state.landing.showHandle = false;
                     // Trigger UI slide up only when animation finishes if auto-enter is requested
                     if (state.landing.shouldAutoEnter) {
                         if (window.enterRoomUI) window.enterRoomUI();
@@ -1399,4 +1399,5 @@
         initStorageAccess();
     </script>
 </body>
+
 </html>
