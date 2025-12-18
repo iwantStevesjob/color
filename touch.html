@@ -2,325 +2,296 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bio-Telemetry: Advanced Attestation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bio-Attestation Lab</title>
     <style>
         :root {
-            --bg: #050508;
-            --card: #0f172a;
+            --bg: #0f172a;
+            --card: #1e293b;
             --accent: #38bdf8;
-            --danger: #ef4444;
-            --success: #22c55e;
-            --text: #f8fafc;
+            --danger: #f43f5e;
+            --success: #10b981;
+            --text: #f1f5f9;
         }
 
         body {
-            font-family: 'Monaco', 'Consolas', monospace;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg);
             color: var(--text);
             margin: 0;
+            padding: 20px;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
-            min-height: 100vh;
-            padding: 10px;
         }
 
-        .terminal {
-            background-color: var(--card);
-            border: 1px solid #334155;
-            border-radius: 12px;
+        .container {
             width: 100%;
-            max-width: 480px;
-            overflow: hidden;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            max-width: 400px;
+            background: var(--card);
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
         }
 
-        .header {
-            background: #1e293b;
-            padding: 12px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #334155;
-        }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h1 { font-size: 1.2rem; margin: 0; color: var(--accent); }
+        .header p { font-size: 0.8rem; color: #94a3b8; }
 
-        .content { padding: 20px; }
-
-        .viz-box {
-            background: rgba(0,0,0,0.4);
-            height: 120px;
-            margin: 10px 0;
-            border-radius: 8px;
+        .viz-container {
+            background: #000;
+            border-radius: 12px;
+            margin-bottom: 12px;
             position: relative;
-            border: 1px solid #1e293b;
+            height: 100px;
+            border: 1px solid #334155;
+            overflow: hidden;
         }
 
-        canvas { width: 100%; height: 100%; }
+        canvas { width: 100%; height: 100%; display: block; }
 
-        .status-badge {
-            font-size: 0.7rem;
-            padding: 4px 8px;
-            border-radius: 4px;
-            background: #334155;
+        .label {
+            position: absolute;
+            top: 5px;
+            left: 8px;
+            font-size: 10px;
+            color: #64748b;
+            font-weight: bold;
             text-transform: uppercase;
         }
 
-        .metric-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.8rem;
-            margin: 8px 0;
-            color: #94a3b8;
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
         }
 
-        .metric-val { color: var(--accent); }
+        .stat-item {
+            background: rgba(0,0,0,0.2);
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-val { display: block; font-weight: bold; font-size: 1rem; }
+        .stat-lbl { font-size: 0.6rem; color: #64748b; text-transform: uppercase; }
 
         .btn {
-            background: var(--accent);
-            color: #000;
-            border: none;
-            padding: 15px;
             width: 100%;
-            font-weight: bold;
-            border-radius: 8px;
+            padding: 16px;
+            border-radius: 12px;
+            border: none;
+            background: var(--accent);
+            color: #0f172a;
+            font-weight: 800;
+            font-size: 1rem;
             cursor: pointer;
-            margin-top: 20px;
-            transition: opacity 0.2s;
+            transition: transform 0.1s;
+            touch-action: manipulation;
         }
 
-        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { background: #475569; cursor: not-allowed; }
 
-        #log {
-            font-size: 0.7rem;
-            color: #64748b;
-            height: 60px;
-            overflow-y: auto;
+        #verdict-box {
             margin-top: 15px;
-            border-top: 1px solid #1e293b;
-            padding-top: 10px;
-        }
-
-        .alert {
-            padding: 10px;
-            border-radius: 6px;
-            margin-bottom: 15px;
-            font-size: 0.8rem;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            text-align: center;
             display: none;
         }
     </style>
 </head>
 <body>
 
-<div class="terminal">
+<div class="container">
     <div class="header">
-        <span>SECURITY_PROTOCOL_v4.2</span>
-        <span id="shield-status" class="status-badge">Standby</span>
+        <h1>Hardware Attestation</h1>
+        <p>Analyzing microscopic clock jitter & recoil</p>
     </div>
-    
-    <div class="content">
-        <div id="alert-box" class="alert"></div>
 
-        <div class="metric-row">
-            <span>CHALLENGE TYPE:</span>
-            <span class="metric-val">Vibrational Nonce</span>
-        </div>
-
-        <div class="viz-box">
-            <canvas id="bcgCanvas"></canvas>
-            <div style="position:absolute; top:5px; left:10px; font-size:10px; color:#555;">HEART RECOIL (BCG)</div>
-        </div>
-
-        <div class="viz-box">
-            <canvas id="jitterCanvas"></canvas>
-            <div style="position:absolute; top:5px; left:10px; font-size:10px; color:#555;">TIMING JITTER (HARDWARE ATTESTATION)</div>
-        </div>
-
-        <div class="stats">
-            <div class="metric-row">
-                <span>TIMING ENTROPY:</span>
-                <span id="val-entropy" class="metric-val">0.00ms</span>
-            </div>
-            <div class="metric-row">
-                <span>REPLAY GUARD:</span>
-                <span id="val-replay" class="metric-val">Inactive</span>
-            </div>
-            <div class="metric-row">
-                <span>HEART RATE:</span>
-                <span id="val-bpm" class="metric-val">-- BPM</span>
-            </div>
-        </div>
-
-        <button id="start-btn" class="btn" onclick="initializeAuth()">AUTHORIZE DEVICE</button>
-        
-        <div id="log">Initializing sensors...</div>
+    <div class="viz-container">
+        <span class="label">Signal Entropy (Tremor)</span>
+        <canvas id="tremorCanvas"></canvas>
     </div>
+
+    <div class="viz-container">
+        <span class="label">Heartbeat Magnifier (BCG)</span>
+        <canvas id="heartCanvas"></canvas>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-item">
+            <span id="stat-jitter" class="stat-val">--</span>
+            <span class="stat-lbl">Clock Jitter</span>
+        </div>
+        <div class="stat-item">
+            <span id="stat-bpm" class="stat-val">--</span>
+            <span class="stat-lbl">Est. Heart Rate</span>
+        </div>
+    </div>
+
+    <button id="mainBtn" class="btn" onclick="requestAccess()">START SCAN</button>
+
+    <div id="verdict-box"></div>
 </div>
 
 <script>
-    const appConfig = {
-        duration: 8000,
-        challengePattern: [200, 100, 400], // Vibration pattern in ms
-    };
+    let isRecording = false;
+    let events = [];
+    let lastTime = 0;
+    const duration = 6000;
 
-    let recording = false;
-    let data = [];
-    let lastEventTime = null;
-    let jitterLogs = [];
+    const tCanvas = document.getElementById('tremorCanvas');
+    const hCanvas = document.getElementById('heartCanvas');
+    const tCtx = tCanvas.getContext('2d');
+    const hCtx = hCanvas.getContext('2d');
 
-    const bcgCanvas = document.getElementById('bcgCanvas');
-    const jitterCanvas = document.getElementById('jitterCanvas');
-    const bCtx = bcgCanvas.getContext('2d');
-    const jCtx = jitterCanvas.getContext('2d');
-
-    function log(msg) {
-        const l = document.getElementById('log');
-        l.innerHTML = `> ${msg}<br>${l.innerHTML}`;
+    // Handle high DPI displays
+    function setupCanvas(canvas) {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
     }
 
-    async function initializeAuth() {
-        if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    setupCanvas(tCanvas);
+    setupCanvas(hCanvas);
+
+    async function requestAccess() {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
             try {
-                const res = await DeviceMotionEvent.requestPermission();
-                if (res !== 'granted') return;
-            } catch (e) { log("Permission Denied"); return; }
+                const permission = await DeviceMotionEvent.requestPermission();
+                if (permission !== 'granted') {
+                    alert('Sensor access denied.');
+                    return;
+                }
+            } catch (e) {
+                console.error(e);
+            }
         }
-
-        startScan();
+        startApp();
     }
 
-    function startScan() {
-        recording = true;
-        data = [];
-        jitterLogs = [];
-        lastEventTime = performance.now();
+    function startApp() {
+        isRecording = true;
+        events = [];
+        lastTime = performance.now();
         
-        document.getElementById('start-btn').disabled = true;
-        document.getElementById('shield-status').innerText = "Scanning";
-        document.getElementById('shield-status').style.background = "#eab308";
-        
-        // Start the Vibration Challenge (The "Nonce")
-        // This embeds a unique physical signal into the stream
-        if ("vibrate" in navigator) {
-            log("Sending physical challenge...");
-            navigator.vibrate(appConfig.challengePattern);
-        }
+        const btn = document.getElementById('mainBtn');
+        btn.disabled = true;
+        btn.innerText = "CAPTURING...";
 
-        window.addEventListener('devicemotion', onMotion);
+        document.getElementById('verdict-box').style.display = 'none';
+
+        window.addEventListener('devicemotion', handleMotion);
         
-        setTimeout(stopScan, appConfig.duration);
-        requestAnimationFrame(draw);
+        requestAnimationFrame(renderLoop);
+        setTimeout(finishScan, duration);
     }
 
-    function onMotion(e) {
-        if (!recording) return;
-        
+    function handleMotion(e) {
+        if (!isRecording) return;
         const now = performance.now();
-        const delta = now - lastEventTime;
-        lastEventTime = now;
+        const dt = now - lastTime;
+        lastTime = now;
 
-        const acc = e.accelerationIncludingGravity;
-        if (!acc) return;
-
-        data.push({ t: now, x: acc.x, y: acc.y, z: acc.z, dt: delta });
-        
-        // Track the timing jitter specifically
-        if (jitterLogs.length > 100) jitterLogs.shift();
-        jitterLogs.push(delta);
+        const acc = e.accelerationIncludingGravity || {x:0, y:0, z:0};
+        events.push({
+            t: now,
+            dt: dt,
+            x: acc.x || 0,
+            y: acc.y || 0,
+            z: acc.z || 0
+        });
     }
 
-    function stopScan() {
-        recording = false;
-        window.removeEventListener('devicemotion', onMotion);
-        document.getElementById('start-btn').disabled = false;
-        analyze();
+    function renderLoop() {
+        if (!isRecording) return;
+
+        // Draw Tremor (High Pass)
+        drawGraph(tCtx, tCanvas, events.slice(-100), (d) => d.x * 20, '#38bdf8');
+        
+        // Draw Heartbeat (Low Pass + Magnified)
+        const heartData = events.slice(-100);
+        const meanZ = heartData.reduce((a, b) => a + b.z, 0) / (heartData.length || 1);
+        drawGraph(hCtx, hCanvas, heartData, (d) => (d.z - meanZ) * 400, '#f43f5e');
+
+        requestAnimationFrame(renderLoop);
     }
 
-    function analyze() {
-        log("Analyzing entropy...");
+    function drawGraph(ctx, canvas, data, mapFn, color) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (data.length < 2) return;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+
+        const spacing = canvas.width / (data.length - 1);
+        data.forEach((d, i) => {
+            const x = i * spacing;
+            const y = (canvas.height / 2) - mapFn(d);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+    }
+
+    function finishScan() {
+        isRecording = false;
+        window.removeEventListener('devicemotion', handleMotion);
         
-        // 1. Jitter Detection
-        // Real hardware has variance. Bots are "perfect".
-        const deltas = data.map(d => d.dt).filter(d => d > 0);
+        const btn = document.getElementById('mainBtn');
+        btn.disabled = false;
+        btn.innerText = "RE-SCAN";
+
+        processResults();
+    }
+
+    function processResults() {
+        if (events.length < 50) {
+            showVerdict("INSUFFICIENT DATA", "Please ensure you are on a mobile device.", "var(--danger)");
+            return;
+        }
+
+        // 1. Clock Jitter Attestation
+        const deltas = events.slice(10).map(e => e.dt);
         const avg = deltas.reduce((a,b) => a+b, 0) / deltas.length;
-        const variance = deltas.reduce((a,b) => a + Math.pow(b-avg, 2), 0) / deltas.length;
-        const jitter = Math.sqrt(variance);
+        const jitter = Math.sqrt(deltas.reduce((a,b) => a + Math.pow(b-avg, 2), 0) / deltas.length);
         
-        document.getElementById('val-entropy').innerText = jitter.toFixed(4) + "ms";
+        document.getElementById('stat-jitter').innerText = jitter.toFixed(3) + "ms";
 
-        // 2. Replay/Pattern Detection
-        // We look for the vibration pattern spikes in the Z-axis
-        let challengeMet = false;
-        const spikes = data.filter(d => Math.abs(d.z) > 15).length;
-        if (spikes > 10) challengeMet = true; 
-        
-        document.getElementById('val-replay').innerText = challengeMet ? "Verified" : "Failed";
-
-        // 3. Heart Rate Extraction
-        const zData = data.map(d => d.z);
-        const bpm = estimateBPM(zData);
-        document.getElementById('val-bpm').innerText = bpm > 0 ? bpm + " BPM" : "Unstable";
-
-        // Verdict
-        const status = document.getElementById('shield-status');
-        const alertBox = document.getElementById('alert-box');
-        alertBox.style.display = "block";
-
-        if (jitter < 0.001) {
-            status.innerText = "REJECTED";
-            status.style.background = var(--danger);
-            alertBox.innerText = "CRITICAL: Clock-perfect timing detected. Virtual injector blocked.";
-            alertBox.style.background = "rgba(239, 68, 68, 0.2)";
-        } else if (!challengeMet) {
-            status.innerText = "FAILED";
-            alertBox.innerText = "FAILED: Device did not respond to physical challenge. Possible replay attack.";
-        } else {
-            status.innerText = "SECURE";
-            status.style.background = "#22c55e";
-            alertBox.innerText = "SUCCESS: Hardware attestation and biometric signature verified.";
-            alertBox.style.background = "rgba(34, 197, 94, 0.2)";
-        }
-    }
-
-    function estimateBPM(zs) {
-        if (zs.length < 100) return 0;
-        // Simple peak counting for demo
+        // 2. Heart Rate Estimate (BPM)
+        const zData = events.map(e => e.z);
+        const meanZ = zData.reduce((a,b) => a+b)/zData.length;
         let peaks = 0;
-        const mean = zs.reduce((a,b) => a+b)/zs.length;
-        for(let i=1; i<zs.length-1; i++) {
-            if (zs[i] > mean + 0.1 && zs[i] > zs[i-1] && zs[i] > zs[i+1]) peaks++;
+        for(let i=2; i<zData.length-2; i++) {
+            if (zData[i] > zData[i-1] && zData[i] > zData[i+1] && zData[i] > meanZ + 0.05) peaks++;
         }
-        return Math.round((peaks / (appConfig.duration/1000)) * 60 / 2.5);
+        const bpm = Math.round((peaks / (duration/1000)) * 60 / 2);
+        document.getElementById('stat-bpm').innerText = (bpm > 45 && bpm < 120) ? bpm : "--";
+
+        // Logic check
+        const verdictBox = document.getElementById('verdict-box');
+        if (jitter < 0.05) {
+            showVerdict("BOT DETECTED", "Signal timing is too perfect. Hardware clock variance missing.", "var(--danger)");
+        } else if (jitter > 10) {
+            showVerdict("STABILITY ERROR", "Environment too noisy or browser throttling detected.", "orange");
+        } else {
+            showVerdict("HUMAN VERIFIED", "Unique hardware clock jitter and micro-tremors detected.", "var(--success)");
+        }
     }
 
-    function draw() {
-        if (!recording) return;
-
-        // Draw Jitter Graph
-        jCtx.clearRect(0,0,jitterCanvas.width, jitterCanvas.height);
-        jCtx.strokeStyle = '#38bdf8';
-        jCtx.beginPath();
-        jitterLogs.forEach((v, i) => {
-            const x = (i / jitterLogs.length) * jitterCanvas.width;
-            const y = (jitterCanvas.height / 2) - (v - 16.6) * 10; // Center at 60fps (16.6ms)
-            if (i === 0) jCtx.moveTo(x, y); else jCtx.lineTo(x, y);
-        });
-        jCtx.stroke();
-
-        // Draw BCG Graph
-        bCtx.clearRect(0,0,bcgCanvas.width, bcgCanvas.height);
-        bCtx.strokeStyle = '#ef4444';
-        bCtx.beginPath();
-        const slice = data.slice(-100);
-        const mean = slice.length ? slice.reduce((a,b)=>a+b.z,0)/slice.length : 0;
-        slice.forEach((v, i) => {
-            const x = (i / 100) * bcgCanvas.width;
-            const y = (bcgCanvas.height/2) - (v.z - mean) * 200;
-            if (i === 0) bCtx.moveTo(x, y); else bCtx.lineTo(x, y);
-        });
-        bCtx.stroke();
-
-        requestAnimationFrame(draw);
+    function showVerdict(title, desc, color) {
+        const box = document.getElementById('verdict-box');
+        box.style.display = 'block';
+        box.style.background = color + "22";
+        box.style.border = "1px solid " + color;
+        box.innerHTML = `<strong style="color:${color}">${title}</strong><br><span style="color:#94a3b8; font-size:0.75rem">${desc}</span>`;
     }
 </script>
 
