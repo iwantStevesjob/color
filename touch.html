@@ -3,90 +3,383 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pressure Sensitive Touch</title>
+    <title>Accelerometer Turing Test</title>
     <style>
-        canvas {
-            display: block;
-            margin: 0;
-            padding: 0;
-            width: 100vw;
-            height: 100vh;
-            background-color: #ffffff;
-            touch-action: none; /* Prevent default gestures */
+        :root {
+            --bg: #1a1a2e;
+            --card: #16213e;
+            --primary: #0f3460;
+            --accent: #e94560;
+            --text: #e0e0e0;
+            --success: #4cc9f0;
         }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .container {
+            background-color: var(--card);
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            max-width: 400px;
+            width: 100%;
+        }
+
+        h1 { margin-top: 0; font-size: 1.5rem; color: var(--accent); }
+        p { color: #a0a0a0; font-size: 0.9rem; margin-bottom: 20px; }
+
+        .meter-container {
+            width: 100%;
+            height: 200px;
+            background: #0f1526;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 20px;
+            border: 1px solid #333;
+        }
+
+        /* The live graph line */
+        #graph-line {
+            stroke: var(--success);
+            stroke-width: 2;
+            fill: none;
+        }
+
+        .btn {
+            background-color: var(--accent);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1rem;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+            width: 100%;
+            font-weight: bold;
+        }
+
+        .btn:active { transform: scale(0.98); }
+        .btn:disabled { background-color: #555; opacity: 0.7; cursor: not-allowed; }
+
+        #status {
+            margin-top: 15px;
+            font-weight: bold;
+            min-height: 20px;
+        }
+
+        .result-box {
+            margin-top: 20px;
+            text-align: left;
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 8px;
+            display: none; /* Hidden by default */
+        }
+
+        .result-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            border-bottom: 1px solid #333;
+            padding-bottom: 4px;
+        }
+        
+        .verdict {
+            font-size: 1.5rem;
+            text-align: center;
+            margin: 15px 0;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .human-verdict { color: #4cc9f0; text-shadow: 0 0 10px rgba(76,201,240,0.5); }
+        .bot-verdict { color: #e94560; text-shadow: 0 0 10px rgba(233,69,96,0.5); }
+
+        /* Progress Bar */
+        .progress-bar {
+            width: 0%;
+            height: 4px;
+            background-color: var(--accent);
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            transition: width 0.1s linear;
+        }
+
+        .info-icon { font-size: 0.8rem; color: #666; display: block; margin-top: 5px;}
     </style>
 </head>
 <body>
-    <canvas id="touchCanvas"></canvas>
-    <script>
-        const canvas = document.getElementById('touchCanvas');
-        const ctx = canvas.getContext('2d');
-        let touches = [];
 
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+    <div class="container">
+        <h1>Bio-Telemetry Captcha</h1>
+        <p>Hold your phone in one hand. Do not place it on a table. We will scan your micro-movements.</p>
 
-        // Handle touch events
-        canvas.addEventListener('pointerdown', handlePointerEvent);
-        canvas.addEventListener('pointermove', handlePointerEvent);
-        canvas.addEventListener('pointerup', removePointerEvent);
-        canvas.addEventListener('pointercancel', removePointerEvent);
+        <div class="meter-container">
+            <svg width="100%" height="100%" preserveAspectRatio="none">
+                <!-- Center line -->
+                <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#333" stroke-width="1" stroke-dasharray="4" />
+                <path id="graph-line" d="" />
+            </svg>
+            <div id="progress" class="progress-bar"></div>
+        </div>
+
+        <div id="status">Ready</div>
+        <button id="start-btn" class="btn" onclick="startTest()">Start Calibration (10s)</button>
+
+        <div id="result-area" class="result-box">
+            <div id="verdict-display" class="verdict"></div>
+            <div class="result-row">
+                <span>Avg Tremor Freq:</span>
+                <span id="res-freq">--</span>
+            </div>
+            <div class="result-row">
+                <span>Instability (Jerk):</span>
+                <span id="res-jerk">--</span>
+            </div>
+            <div class="result-row">
+                <span>Entropy (Chaos):</span>
+                <span id="res-entropy">--</span>
+            </div>
+            <p id="explanation" style="margin-top:10px; line-height: 1.4; color: #ccc;"></p>
+        </div>
+        <span class="info-icon" id="sensor-debug"></span>
+    </div>
+
+<script>
+    let rawData = [];
+    let isRecording = false;
+    let startTime = null;
+    const DURATION = 10000; // 10 seconds
+    const SAMPLE_RATE_TARGET = 60; // 60Hz
+
+    // UI Elements
+    const btn = document.getElementById('start-btn');
+    const status = document.getElementById('status');
+    const graphLine = document.getElementById('graph-line');
+    const progressBar = document.getElementById('progress');
+    const resultArea = document.getElementById('result-area');
+    const sensorDebug = document.getElementById('sensor-debug');
+
+    async function startTest() {
+        // Reset state
+        rawData = [];
+        resultArea.style.display = 'none';
+        btn.disabled = true;
         
-        function handlePointerEvent(event) {
-            const touch = touches.find(t => t.id === event.pointerId);
-            if (touch) {
-                touch.x = event.clientX;
-                touch.y = event.clientY;
-                touch.pressure = event.pressure || 1;
-            } else {
-                touches.push({ id: event.pointerId, x: event.clientX, y: event.clientY, pressure: event.pressure || 1 });
+        // Request Permissions (iOS 13+ requirement)
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            try {
+                const permissionState = await DeviceMotionEvent.requestPermission();
+                if (permissionState === 'granted') {
+                    beginRecording();
+                } else {
+                    status.textContent = "Permission Denied. Cannot scan.";
+                    btn.disabled = false;
+                }
+            } catch (error) {
+                console.error(error);
+                status.textContent = "Error requesting sensor access.";
+                btn.disabled = false;
             }
-            drawTouches();
+        } else {
+            // Non-iOS 13+ devices
+            beginRecording();
+        }
+    }
+
+    function beginRecording() {
+        window.addEventListener('devicemotion', handleMotion);
+        isRecording = true;
+        startTime = Date.now();
+        status.textContent = "Scanning hand tremors...";
+        
+        // Loop for UI updates and timer check
+        requestAnimationFrame(updateLoop);
+    }
+
+    function handleMotion(event) {
+        if (!isRecording) return;
+
+        // Get acceleration including gravity (needed to detect tilt shifts)
+        // If accelIncludingGravity is null (some desktops), fallback to accel
+        const acc = event.accelerationIncludingGravity || event.acceleration;
+
+        if (!acc || acc.x === null) {
+            sensorDebug.textContent = "No accelerometer data received.";
+            return;
         }
 
-        function removePointerEvent(event) {
-            touches = touches.filter(t => t.id !== event.pointerId);
-            drawTouches();
-        }
-
-        function drawTouches() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            touches.forEach(touch => {
-                const { x, y, pressure } = touch;
-                const baseRadius = 20;
-                const glowRadius = pressure * 100;
-
-                // Draw the black dot at the touch point
-                ctx.fillStyle = '#000000';
-                ctx.beginPath();
-                ctx.arc(x, y, baseRadius, 0, 2 * Math.PI);
-                ctx.fill();
-
-                // Draw the glow effect
-                const gradient = ctx.createRadialGradient(x, y, baseRadius, x, y, glowRadius);
-                gradient.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
-                gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-                ctx.fillStyle = gradient;
-                ctx.beginPath();
-                ctx.arc(x, y, glowRadius, 0, 2 * Math.PI);
-                ctx.fill();
-            });
-        }
-
-        // Optimize performance with requestAnimationFrame
-        function drawLoop() {
-            requestAnimationFrame(drawLoop);
-            drawTouches();
-        }
-        drawLoop();
-
-        // Adjust the canvas size on window resize
-        window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            drawTouches();
+        // Store data: Time, X, Y, Z
+        rawData.push({
+            t: Date.now(),
+            x: acc.x,
+            y: acc.y,
+            z: acc.z
         });
-    </script>
+    }
+
+    function updateLoop() {
+        if (!isRecording) return;
+
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / DURATION, 1);
+        
+        // Update Progress Bar
+        progressBar.style.width = (progress * 100) + "%";
+        status.textContent = `Scanning... ${(10 - elapsed/1000).toFixed(1)}s`;
+
+        // Update Live Graph (Visualizing Z-axis jitter mostly)
+        drawGraph();
+
+        if (elapsed < DURATION) {
+            requestAnimationFrame(updateLoop);
+        } else {
+            finishTest();
+        }
+    }
+
+    function drawGraph() {
+        if (rawData.length < 2) return;
+        
+        // Take last 50 points for the visual
+        const slice = rawData.slice(-100);
+        const width = 100; // Percentage
+        
+        // Simple normalization for visualization
+        // Map Z accel (approx 9.8) to center of SVG
+        const points = slice.map((pt, i) => {
+            const x = (i / (slice.length - 1)) * 100; // 0 to 100%
+            // Zoom in on the noise: (Value - 9.8) * Scale + Offset
+            // We use X axis for visualization as it varies nicely in hand
+            const val = pt.x; 
+            const y = 50 - (val * 5); // Scale factor 5
+            return `${x},${y}`;
+        }).join(" ");
+
+        graphLine.setAttribute("d", `M ${points}`);
+    }
+
+    function finishTest() {
+        isRecording = false;
+        window.removeEventListener('devicemotion', handleMotion);
+        btn.disabled = false;
+        btn.textContent = "Retake Test";
+        status.textContent = "Analysis Complete";
+        
+        analyzeData();
+    }
+
+    function analyzeData() {
+        if (rawData.length < 10) {
+            showResult("BOT", "No sensor data detected. Are you on a desktop?", {}, "error");
+            return;
+        }
+
+        // 1. Calculate Mean and Standard Deviation (Instability)
+        const axes = ['x', 'y', 'z'];
+        let stats = {};
+        
+        axes.forEach(axis => {
+            const values = rawData.map(d => d[axis]);
+            const mean = values.reduce((a, b) => a + b) / values.length;
+            const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
+            stats[axis] = { mean, sd: Math.sqrt(variance) };
+        });
+
+        // Combined Instability (Vector magnitude of SDs)
+        const instability = Math.sqrt(Math.pow(stats.x.sd, 2) + Math.pow(stats.y.sd, 2) + Math.pow(stats.z.sd, 2));
+
+        // 2. Tremor Frequency Analysis (Zero Crossing Rate approximation)
+        // High pass filter: Remove gravity/tilt (DC offset) to see just the shakes
+        // We do this by subtracting the smoothed moving average
+        const xVals = rawData.map(d => d.x);
+        let crossings = 0;
+        const meanX = stats.x.mean;
+        
+        for (let i = 1; i < xVals.length; i++) {
+            // If signal crosses the mean line
+            if ((xVals[i] > meanX && xVals[i-1] <= meanX) || (xVals[i] < meanX && xVals[i-1] >= meanX)) {
+                crossings++;
+            }
+        }
+        
+        // Estimate Frequency: (Crossings / 2) / Time
+        const durationSec = DURATION / 1000;
+        const freq = (crossings / 2) / durationSec;
+
+        // 3. Logic / Heuristics
+        // Human Hand Tremor: Usually 6Hz - 12Hz.
+        // Human SD: Usually 0.1 to 0.5 (holding still).
+        // Table/Bot SD: < 0.05.
+        // Walking/Shaking SD: > 1.5.
+
+        let type = "UNKNOWN";
+        let reason = "";
+        let resultClass = "";
+
+        // Heuristic 1: Is it suspiciously stable?
+        if (instability < 0.04) {
+            type = "ROBOT / INANIMATE";
+            reason = "Your device is too stable. It is likely sitting on a table or is a software emulator. Humans have a heartbeat that shakes the hand.";
+            resultClass = "bot-verdict";
+        } 
+        // Heuristic 2: Is it too chaotic?
+        else if (instability > 3.0) {
+            type = "UNKNOWN / ACTION";
+            reason = "Too much movement. We can't distinguish intentional shaking from a robot scrambling data.";
+            resultClass = "bot-verdict";
+        }
+        // Heuristic 3: The "Sweet Spot"
+        else {
+            type = "HUMAN";
+            reason = `We detected micro-tremors at ${freq.toFixed(1)}Hz. This frequency range (known as physiologic tremor) is characteristic of the human nervous system firing to maintain muscle position against gravity.`;
+            resultClass = "human-verdict";
+        }
+
+        showResult(type, reason, { freq, instability }, resultClass);
+    }
+
+    function showResult(type, reason, metrics, cssClass) {
+        const verdict = document.getElementById('verdict-display');
+        const resFreq = document.getElementById('res-freq');
+        const resJerk = document.getElementById('res-jerk');
+        const resEntropy = document.getElementById('res-entropy');
+        const explanation = document.getElementById('explanation');
+
+        resultArea.style.display = 'block';
+        verdict.textContent = type;
+        verdict.className = "verdict " + cssClass;
+        
+        if (metrics.freq) {
+            resFreq.textContent = `${metrics.freq.toFixed(1)} Hz`;
+            resJerk.textContent = metrics.instability.toFixed(4) + " m/s²";
+            // Entropy is just a fancy label for how unpredictable the movement was (using SD here for simplicity)
+            resEntropy.textContent = metrics.instability > 0.1 ? "High (Organic)" : "Low (Mechanical)";
+        } else {
+            resFreq.textContent = "--";
+            resJerk.textContent = "--";
+            resEntropy.textContent = "--";
+        }
+
+        explanation.textContent = reason;
+    }
+</script>
+
 </body>
 </html>
+
