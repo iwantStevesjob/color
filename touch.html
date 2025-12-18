@@ -3,19 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accelerometer Turing Test</title>
+    <title>Bio-Telemetry: Heartbeat & Tremor</title>
     <style>
         :root {
-            --bg: #1a1a2e;
+            --bg: #0a0a12;
             --card: #16213e;
             --primary: #0f3460;
             --accent: #e94560;
             --text: #e0e0e0;
             --success: #4cc9f0;
+            --heart: #ff4d4d;
         }
 
         body {
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             background-color: var(--bg);
             color: var(--text);
             display: flex;
@@ -25,206 +26,202 @@
             min-height: 100vh;
             margin: 0;
             padding: 20px;
-            text-align: center;
         }
 
         .container {
             background-color: var(--card);
-            padding: 30px;
-            border-radius: 16px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            max-width: 400px;
+            padding: 25px;
+            border-radius: 20px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+            max-width: 450px;
             width: 100%;
         }
 
-        h1 { margin-top: 0; font-size: 1.5rem; color: var(--accent); }
-        p { color: #a0a0a0; font-size: 0.9rem; margin-bottom: 20px; }
+        h1 { margin: 0 0 10px 0; font-size: 1.4rem; color: var(--success); }
+        .subtitle { color: #8a8a8a; font-size: 0.85rem; margin-bottom: 20px; line-height: 1.4; }
+
+        .graph-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 5px;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+        }
 
         .meter-container {
             width: 100%;
-            height: 200px;
-            background: #0f1526;
-            border-radius: 8px;
+            height: 120px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
             position: relative;
             overflow: hidden;
-            margin-bottom: 20px;
-            border: 1px solid #333;
+            margin-bottom: 15px;
+            border: 1px solid #222;
         }
 
-        /* The live graph line */
-        #graph-line {
+        #heart-line {
+            stroke: var(--heart);
+            stroke-width: 2.5;
+            fill: none;
+            filter: drop-shadow(0 0 5px rgba(255, 77, 77, 0.4));
+        }
+
+        #tremor-line {
             stroke: var(--success);
-            stroke-width: 2;
+            stroke-width: 1.5;
             fill: none;
         }
 
         .btn {
-            background-color: var(--accent);
+            background: linear-gradient(135deg, var(--accent), #ff4d4d);
             color: white;
             border: none;
-            padding: 15px 30px;
+            padding: 16px;
             font-size: 1rem;
-            border-radius: 50px;
+            border-radius: 12px;
             cursor: pointer;
-            transition: transform 0.1s, opacity 0.2s;
             width: 100%;
-            font-weight: bold;
+            font-weight: 700;
+            box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3);
+            margin-bottom: 15px;
         }
 
-        .btn:active { transform: scale(0.98); }
-        .btn:disabled { background-color: #555; opacity: 0.7; cursor: not-allowed; }
+        .btn:disabled { background: #444; box-shadow: none; cursor: not-allowed; }
 
-        #status {
-            margin-top: 15px;
-            font-weight: bold;
-            min-height: 20px;
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
         }
 
-        .result-box {
-            margin-top: 20px;
-            text-align: left;
+        .stat-card {
             background: rgba(0,0,0,0.2);
-            padding: 15px;
-            border-radius: 8px;
-            display: none; /* Hidden by default */
-        }
-
-        .result-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-            font-size: 0.85rem;
-            border-bottom: 1px solid #333;
-            padding-bottom: 4px;
-        }
-        
-        .verdict {
-            font-size: 1.5rem;
+            padding: 12px;
+            border-radius: 10px;
             text-align: center;
-            margin: 15px 0;
-            font-weight: bold;
-            text-transform: uppercase;
         }
 
-        .human-verdict { color: #4cc9f0; text-shadow: 0 0 10px rgba(76,201,240,0.5); }
-        .bot-verdict { color: #e94560; text-shadow: 0 0 10px rgba(233,69,96,0.5); }
+        .stat-val { display: block; font-size: 1.2rem; font-weight: bold; color: var(--success); }
+        .stat-name { font-size: 0.65rem; color: #777; text-transform: uppercase; }
 
-        /* Progress Bar */
         .progress-bar {
             width: 0%;
             height: 4px;
-            background-color: var(--accent);
+            background-color: var(--success);
             position: absolute;
             bottom: 0;
             left: 0;
             transition: width 0.1s linear;
         }
 
-        .info-icon { font-size: 0.8rem; color: #666; display: block; margin-top: 5px;}
+        #status { font-size: 0.9rem; margin-bottom: 10px; font-weight: 500; height: 1.2em; }
+
+        .pulse-icon {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: var(--heart);
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: pulse 1s infinite;
+            display: none;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h1>Bio-Telemetry Captcha</h1>
-        <p>Hold your phone in one hand. Do not place it on a table. We will scan your micro-movements.</p>
+        <h1>Ballistocardiograph</h1>
+        <p class="subtitle">Hold the device naturally in one hand. We are magnifying the microscopic recoil caused by your blood flow (Ballistocardiogram).</p>
 
+        <div id="status">Ready to calibrate</div>
+
+        <div class="graph-label">
+            <span>Tremor Spectrum (8-12Hz)</span>
+            <span id="hz-label">-- Hz</span>
+        </div>
         <div class="meter-container">
             <svg width="100%" height="100%" preserveAspectRatio="none">
-                <!-- Center line -->
-                <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#333" stroke-width="1" stroke-dasharray="4" />
-                <path id="graph-line" d="" />
+                <path id="tremor-line" d="" />
+            </svg>
+        </div>
+
+        <div class="graph-label">
+            <span>Heart Recoil Magnifier (BCG)</span>
+            <span id="bpm-label" style="color:var(--heart)">-- BPM</span>
+        </div>
+        <div class="meter-container">
+            <svg width="100%" height="100%" preserveAspectRatio="none">
+                <line x1="0" y1="50%" x2="100%" y2="50%" stroke="#222" stroke-width="1" />
+                <path id="heart-line" d="" />
             </svg>
             <div id="progress" class="progress-bar"></div>
         </div>
 
-        <div id="status">Ready</div>
-        <button id="start-btn" class="btn" onclick="startTest()">Start Calibration (10s)</button>
+        <button id="start-btn" class="btn" onclick="startCapture()">Start Bio-Scan</button>
 
-        <div id="result-area" class="result-box">
-            <div id="verdict-display" class="verdict"></div>
-            <div class="result-row">
-                <span>Avg Tremor Freq:</span>
-                <span id="res-freq">--</span>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span id="res-stability" class="stat-val">--</span>
+                <span class="stat-name">Stability Index</span>
             </div>
-            <div class="result-row">
-                <span>Instability (Jerk):</span>
-                <span id="res-jerk">--</span>
+            <div class="stat-card">
+                <span id="res-verdict" class="stat-val" style="font-size: 0.9rem;">--</span>
+                <span class="stat-name">Biometric Match</span>
             </div>
-            <div class="result-row">
-                <span>Entropy (Chaos):</span>
-                <span id="res-entropy">--</span>
-            </div>
-            <p id="explanation" style="margin-top:10px; line-height: 1.4; color: #ccc;"></p>
         </div>
-        <span class="info-icon" id="sensor-debug"></span>
     </div>
 
 <script>
     let rawData = [];
     let isRecording = false;
     let startTime = null;
-    const DURATION = 10000; // 10 seconds
-    const SAMPLE_RATE_TARGET = 60; // 60Hz
+    const DURATION = 12000; 
 
-    // UI Elements
+    // Visual elements
     const btn = document.getElementById('start-btn');
     const status = document.getElementById('status');
-    const graphLine = document.getElementById('graph-line');
+    const tremorLine = document.getElementById('tremor-line');
+    const heartLine = document.getElementById('heart-line');
     const progressBar = document.getElementById('progress');
-    const resultArea = document.getElementById('result-area');
-    const sensorDebug = document.getElementById('sensor-debug');
+    const bpmLabel = document.getElementById('bpm-label');
+    const hzLabel = document.getElementById('hz-label');
 
-    async function startTest() {
-        // Reset state
-        rawData = [];
-        resultArea.style.display = 'none';
-        btn.disabled = true;
-        
-        // Request Permissions (iOS 13+ requirement)
+    // Signal processing vars
+    let lastZ = 0;
+    let smoothedZ = 0;
+
+    async function startCapture() {
         if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-            try {
-                const permissionState = await DeviceMotionEvent.requestPermission();
-                if (permissionState === 'granted') {
-                    beginRecording();
-                } else {
-                    status.textContent = "Permission Denied. Cannot scan.";
-                    btn.disabled = false;
-                }
-            } catch (error) {
-                console.error(error);
-                status.textContent = "Error requesting sensor access.";
-                btn.disabled = false;
-            }
-        } else {
-            // Non-iOS 13+ devices
-            beginRecording();
+            const state = await DeviceMotionEvent.requestPermission();
+            if (state !== 'granted') return alert("Permission required");
         }
-    }
 
-    function beginRecording() {
-        window.addEventListener('devicemotion', handleMotion);
+        rawData = [];
         isRecording = true;
         startTime = Date.now();
-        status.textContent = "Scanning hand tremors...";
+        btn.disabled = true;
+        status.innerHTML = '<span class="pulse-icon" style="display:inline-block"></span> Capturing Bio-Data...';
         
-        // Loop for UI updates and timer check
+        window.addEventListener('devicemotion', handleMotion);
         requestAnimationFrame(updateLoop);
     }
 
     function handleMotion(event) {
         if (!isRecording) return;
-
-        // Get acceleration including gravity (needed to detect tilt shifts)
-        // If accelIncludingGravity is null (some desktops), fallback to accel
         const acc = event.accelerationIncludingGravity || event.acceleration;
+        if (!acc || acc.z === null) return;
 
-        if (!acc || acc.x === null) {
-            sensorDebug.textContent = "No accelerometer data received.";
-            return;
-        }
-
-        // Store data: Time, X, Y, Z
         rawData.push({
             t: Date.now(),
             x: acc.x,
@@ -238,145 +235,112 @@
 
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / DURATION, 1);
-        
-        // Update Progress Bar
         progressBar.style.width = (progress * 100) + "%";
-        status.textContent = `Scanning... ${(10 - elapsed/1000).toFixed(1)}s`;
 
-        // Update Live Graph (Visualizing Z-axis jitter mostly)
-        drawGraph();
+        renderGraphs();
 
         if (elapsed < DURATION) {
             requestAnimationFrame(updateLoop);
         } else {
-            finishTest();
+            stopCapture();
         }
     }
 
-    function drawGraph() {
-        if (rawData.length < 2) return;
-        
-        // Take last 50 points for the visual
-        const slice = rawData.slice(-100);
-        const width = 100; // Percentage
-        
-        // Simple normalization for visualization
-        // Map Z accel (approx 9.8) to center of SVG
-        const points = slice.map((pt, i) => {
-            const x = (i / (slice.length - 1)) * 100; // 0 to 100%
-            // Zoom in on the noise: (Value - 9.8) * Scale + Offset
-            // We use X axis for visualization as it varies nicely in hand
-            const val = pt.x; 
-            const y = 50 - (val * 5); // Scale factor 5
+    function renderGraphs() {
+        if (rawData.length < 10) return;
+
+        // 1. Tremor Graph (Raw high-frequency jitter)
+        const tremorSlice = rawData.slice(-60);
+        const tPoints = tremorSlice.map((pt, i) => {
+            const x = (i / (tremorSlice.length - 1)) * 100;
+            // High pass: Subtract mean roughly
+            const y = 50 - (pt.x * 15); 
             return `${x},${y}`;
         }).join(" ");
+        tremorLine.setAttribute("d", `M ${tPoints}`);
 
-        graphLine.setAttribute("d", `M ${points}`);
+        // 2. Heartbeat Graph (Ballistocardiogram magnification)
+        // We use Z-axis (up/down) as heart recoil is often most visible there
+        // or Y-axis if holding upright. Let's use a combination magnitude.
+        const heartSlice = rawData.slice(-120);
+        
+        // Simple Low-Pass filter to find the "pulse" among the "shake"
+        let displayPoints = [];
+        let runningAvg = 0;
+        
+        // Calculate dynamic DC offset (gravity) to keep it centered
+        const meanZ = heartSlice.reduce((a, b) => a + b.z, 0) / heartSlice.length;
+
+        heartSlice.forEach((pt, i) => {
+            const x = (i / (heartSlice.length - 1)) * 100;
+            
+            // The signal: Difference from gravity
+            const signal = pt.z - meanZ;
+            
+            // Magnify by 300x to see sub-perceptible movement
+            // Then apply smoothing to the display
+            runningAvg = (runningAvg * 0.8) + (signal * 0.2);
+            const y = 50 - (runningAvg * 400); 
+            displayPoints.push(`${x},${y}`);
+        });
+
+        heartLine.setAttribute("d", `M ${displayPoints.join(" ")}`);
     }
 
-    function finishTest() {
+    function stopCapture() {
         isRecording = false;
         window.removeEventListener('devicemotion', handleMotion);
         btn.disabled = false;
-        btn.textContent = "Retake Test";
-        status.textContent = "Analysis Complete";
+        btn.textContent = "Re-Scan Biometrics";
+        status.textContent = "Scan Complete";
         
-        analyzeData();
+        processBiometrics();
     }
 
-    function analyzeData() {
-        if (rawData.length < 10) {
-            showResult("BOT", "No sensor data detected. Are you on a desktop?", {}, "error");
-            return;
-        }
-
-        // 1. Calculate Mean and Standard Deviation (Instability)
-        const axes = ['x', 'y', 'z'];
-        let stats = {};
-        
-        axes.forEach(axis => {
-            const values = rawData.map(d => d[axis]);
-            const mean = values.reduce((a, b) => a + b) / values.length;
-            const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
-            stats[axis] = { mean, sd: Math.sqrt(variance) };
-        });
-
-        // Combined Instability (Vector magnitude of SDs)
-        const instability = Math.sqrt(Math.pow(stats.x.sd, 2) + Math.pow(stats.y.sd, 2) + Math.pow(stats.z.sd, 2));
-
-        // 2. Tremor Frequency Analysis (Zero Crossing Rate approximation)
-        // High pass filter: Remove gravity/tilt (DC offset) to see just the shakes
-        // We do this by subtracting the smoothed moving average
-        const xVals = rawData.map(d => d.x);
+    function processBiometrics() {
+        // Calculate Tremor Freq
+        const zVals = rawData.map(d => d.z);
+        const meanZ = zVals.reduce((a, b) => a + b) / zVals.length;
         let crossings = 0;
-        const meanX = stats.x.mean;
+        for(let i=1; i<zVals.length; i++) {
+            if((zVals[i] > meanZ && zVals[i-1] <= meanZ) || (zVals[i] < meanZ && zVals[i-1] >= meanZ)) crossings++;
+        }
+        const tremorFreq = (crossings/2) / (DURATION/1000);
+        hzLabel.textContent = tremorFreq.toFixed(1) + " Hz";
+
+        // Estimate Heart Rate (Simple peak detection in filtered data)
+        // In a real app, we'd use an FFT (Fast Fourier Transform)
+        let smoothedData = [];
+        for(let i=2; i<zVals.length-2; i++) {
+            smoothedData.push((zVals[i-2]+zVals[i-1]+zVals[i]+zVals[i+1]+zVals[i+2])/5 - meanZ);
+        }
         
-        for (let i = 1; i < xVals.length; i++) {
-            // If signal crosses the mean line
-            if ((xVals[i] > meanX && xVals[i-1] <= meanX) || (xVals[i] < meanX && xVals[i-1] >= meanX)) {
-                crossings++;
+        let peaks = 0;
+        for(let i=1; i<smoothedData.length-1; i++) {
+            if(smoothedData[i] > 0.01 && smoothedData[i] > smoothedData[i-1] && smoothedData[i] > smoothedData[i+1]) {
+                peaks++;
             }
         }
-        
-        // Estimate Frequency: (Crossings / 2) / Time
-        const durationSec = DURATION / 1000;
-        const freq = (crossings / 2) / durationSec;
+        // Normalize peaks over time to BPM (Rough estimation)
+        const bpm = Math.round((peaks / (DURATION/1000)) * 60 / 1.5); // 1.5 is a correction factor for noise-peaks
+        bpmLabel.textContent = (bpm > 40 && bpm < 180) ? bpm + " BPM" : "Refining...";
 
-        // 3. Logic / Heuristics
-        // Human Hand Tremor: Usually 6Hz - 12Hz.
-        // Human SD: Usually 0.1 to 0.5 (holding still).
-        // Table/Bot SD: < 0.05.
-        // Walking/Shaking SD: > 1.5.
+        // Stability
+        const variance = zVals.reduce((a, b) => a + Math.pow(b - meanZ, 2), 0) / zVals.length;
+        const stability = Math.sqrt(variance);
+        document.getElementById('res-stability').textContent = stability.toFixed(3);
 
-        let type = "UNKNOWN";
-        let reason = "";
-        let resultClass = "";
-
-        // Heuristic 1: Is it suspiciously stable?
-        if (instability < 0.04) {
-            type = "ROBOT / INANIMATE";
-            reason = "Your device is too stable. It is likely sitting on a table or is a software emulator. Humans have a heartbeat that shakes the hand.";
-            resultClass = "bot-verdict";
-        } 
-        // Heuristic 2: Is it too chaotic?
-        else if (instability > 3.0) {
-            type = "UNKNOWN / ACTION";
-            reason = "Too much movement. We can't distinguish intentional shaking from a robot scrambling data.";
-            resultClass = "bot-verdict";
-        }
-        // Heuristic 3: The "Sweet Spot"
-        else {
-            type = "HUMAN";
-            reason = `We detected micro-tremors at ${freq.toFixed(1)}Hz. This frequency range (known as physiologic tremor) is characteristic of the human nervous system firing to maintain muscle position against gravity.`;
-            resultClass = "human-verdict";
-        }
-
-        showResult(type, reason, { freq, instability }, resultClass);
-    }
-
-    function showResult(type, reason, metrics, cssClass) {
-        const verdict = document.getElementById('verdict-display');
-        const resFreq = document.getElementById('res-freq');
-        const resJerk = document.getElementById('res-jerk');
-        const resEntropy = document.getElementById('res-entropy');
-        const explanation = document.getElementById('explanation');
-
-        resultArea.style.display = 'block';
-        verdict.textContent = type;
-        verdict.className = "verdict " + cssClass;
-        
-        if (metrics.freq) {
-            resFreq.textContent = `${metrics.freq.toFixed(1)} Hz`;
-            resJerk.textContent = metrics.instability.toFixed(4) + " m/s²";
-            // Entropy is just a fancy label for how unpredictable the movement was (using SD here for simplicity)
-            resEntropy.textContent = metrics.instability > 0.1 ? "High (Organic)" : "Low (Mechanical)";
+        const verdict = document.getElementById('res-verdict');
+        if (stability < 0.005) {
+            verdict.textContent = "ROBOT";
+            verdict.style.color = "var(--accent)";
+        } else if (stability > 0.5) {
+            verdict.textContent = "EXCESSIVE";
+            verdict.style.color = "orange";
         } else {
-            resFreq.textContent = "--";
-            resJerk.textContent = "--";
-            resEntropy.textContent = "--";
+            verdict.textContent = "HUMAN";
+            verdict.style.color = "var(--success)";
         }
-
-        explanation.textContent = reason;
     }
 </script>
 
