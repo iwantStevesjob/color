@@ -34,7 +34,7 @@ class ColorLogSDK {
         return new Promise((resolve) => {
             const iframe = document.createElement('iframe');
             iframe.style.display = 'none';
-            iframe.src = `${this.providerOrigin}?check=1`;
+            iframe.src = `${this.providerOrigin}`;
             document.body.appendChild(iframe);
 
             const timeout = setTimeout(() => {
