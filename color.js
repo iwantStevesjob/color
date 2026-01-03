@@ -33,14 +33,19 @@ class ColorLogSDK {
     checkAuth() {
         return new Promise((resolve) => {
             const iframe = document.createElement('iframe');
-            iframe.style.display = 'none';
+            // Use 0-size instead of display:none to ensure script execution in strict environments
+            iframe.style.position = 'absolute';
+            iframe.style.width = '0';
+            iframe.style.height = '0';
+            iframe.style.border = 'none';
+            iframe.allow = "storage-access";
             iframe.src = `${this.providerOrigin}`;
             document.body.appendChild(iframe);
 
             const timeout = setTimeout(() => {
                 document.body.removeChild(iframe);
                 resolve(null);
-            }, 3000);
+            }, 5000);
 
             this.callbacks['COLOR_CHECK_RESULT'] = (data) => {
                 clearTimeout(timeout);
@@ -87,7 +92,16 @@ class ColorLogSDK {
     _handleMessage(event) {
         if (event.origin !== this.providerOrigin) return; // Security check
 
-        const { type, ...data } = event.data;
+        let type, data;
+
+        if (typeof event.data === 'string' && event.data.startsWith('#')) {
+            // Legacy Emulation: Provider sent raw color string
+            type = 'COLOR_CHECK_RESULT';
+            data = { color: event.data };
+        } else {
+            // Standard JSON Protocol
+            ({ type, ...data } = event.data);
+        }
         if (this.callbacks[type]) {
             this.callbacks[type](data);
         }
