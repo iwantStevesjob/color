@@ -14,8 +14,6 @@
             --ui-border: rgba(255, 255, 255, 0.2);
             --nav-color: white;
             --tracker-bg: rgba(0, 0, 0, 0.75);
-
-            /* Dimensions for alignment */
             --nav-height: 90px;
             --sub-nav-height: 150px;
             --sliver-height: 10px;
@@ -49,6 +47,8 @@
             display: block;
             width: 100%;
             height: 100%;
+            touch-action: none;
+            /* Important for touch events */
         }
 
         #flash-overlay {
@@ -69,7 +69,6 @@
             transition: none;
         }
 
-        /* --- LOGIN CARD --- */
         #login-card {
             position: fixed;
             top: 50%;
@@ -141,7 +140,6 @@
             display: none;
         }
 
-        /* --- HOVER TRIGGER (The Sliver) --- */
         #hover-trigger {
             position: fixed;
             top: 0;
@@ -152,9 +150,6 @@
             display: none;
         }
 
-        /* --- NAVIGATIONS --- */
-
-        /* 1. TOP NAV (Main) - Z: 150 */
         #top-nav {
             position: fixed;
             top: 0;
@@ -167,11 +162,9 @@
             gap: 30px;
             z-index: 150;
             opacity: 0;
-            /* Hidden by default, even after login */
             pointer-events: none;
         }
 
-        /* Only visible when dashboard slides down */
         #top-nav.visible {
             opacity: 1;
             pointer-events: auto;
@@ -204,14 +197,13 @@
             border-bottom-color: var(--nav-color);
         }
 
-        /* 2. SUB NAV LAYER - Z: 140 */
         #sub-nav-layer {
             position: fixed;
             top: var(--nav-height);
             left: 0;
             width: 100%;
             height: var(--sub-nav-height);
-            z-index: 201;
+            z-index: 140;
             pointer-events: none;
         }
 
@@ -233,8 +225,6 @@
         .sub-header.active {
             opacity: 1;
             pointer-events: auto;
-            transition: opacity 0.4s ease 0.2s;
-
         }
 
         .page-title {
@@ -243,7 +233,6 @@
             margin: 0 0 15px 0;
             letter-spacing: -1px;
             color: var(--text-color);
-            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
         }
 
         .tabs-row {
@@ -251,16 +240,12 @@
             gap: 2px;
             width: 100%;
             overflow-x: auto;
-            /* Hide Scrollbar */
             scrollbar-width: none;
-            /* Firefox */
             -ms-overflow-style: none;
-            /* IE 10+ */
         }
 
         .tabs-row::-webkit-scrollbar {
             display: none;
-            /* Chrome/Safari */
         }
 
         .sub-tab {
@@ -290,42 +275,40 @@
             cursor: default;
         }
 
-        /* --- DASHBOARD (Content Area) - Z: 200 --- */
         #dashboard-panel {
             position: fixed;
             bottom: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            /* Full height */
             background-color: white;
-            /* Opaque background hides nav */
             z-index: 200;
             transform: translateY(100%);
             transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-            box-shadow: 0 -20px 50px rgba(0, 0, 0, 0.2);
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            will-change: transform;
         }
 
-        /* 1. Logged In (Show Sliver) */
         #dashboard-panel.active {
             transform: translateY(var(--sliver-height));
         }
 
-        /* 2. Hover/Interaction (Reveal Main Nav) */
         #dashboard-panel.active.revealed {
             transform: translateY(var(--nav-height));
         }
 
-        /* 3. Sub-Nav Active (Reveal Sub Nav) */
         #dashboard-panel.active.step-down {
-            /* Exact math: 90px + 150px = 240px */
             transform: translateY(calc(var(--nav-height) + var(--sub-nav-height)));
         }
 
-        /* Content Views inside Dashboard */
+        /* Peek Mode logic */
+        #dashboard-panel.active.peek-mode {
+            transform: translateY(calc(100% - 50px));
+            /* Leaves header visible */
+        }
+
         .content-view {
             flex: 1;
             display: none;
@@ -365,7 +348,6 @@
             }
         }
 
-        /* --- TOOLS & BUTTONS (Z: 180) --- */
         #tools {
             position: fixed;
             bottom: 30px;
@@ -441,7 +423,6 @@
             border-radius: 50%;
         }
 
-        /* DEBUG PANEL */
         #debug-panel {
             position: fixed;
             top: 70px;
@@ -500,7 +481,6 @@
             background: #900;
         }
 
-        /* TOOLTIP */
         .sphere-tooltip {
             position: absolute;
             display: none;
@@ -539,7 +519,6 @@
             font-weight: bold;
         }
 
-        /* CHAT UI */
         #chat-header {
             height: 50px;
             display: flex;
@@ -549,6 +528,8 @@
             font-family: -apple-system, system-ui, sans-serif;
             flex-shrink: 0;
             color: #1a1a1a;
+            cursor: ns-resize;
+            /* Indicating it can be dragged/clicked */
         }
 
         .status {
@@ -557,6 +538,14 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 10px;
+            transition: background 0.2s;
+        }
+
+        .status:hover {
+            background: #eee;
         }
 
         .dot {
@@ -616,12 +605,11 @@
         }
 
         .locked-line {
-            background-color: rgba(0, 0, 0, 0);
-            border-left-width: 3px !important;
-            border-left-color: var(--lock-color) !important;
+            position: relative;
         }
 
-        .locked-tag {
+        .locked-line::before {
+            content: attr(data-lock-owner);
             position: absolute;
             left: 0;
             top: 0;
@@ -641,20 +629,20 @@
             border-radius: 2px 0 0 2px;
             pointer-events: auto;
             transition: width 0.3s, opacity 0.1s;
+            z-index: 10;
         }
 
-        .locked-line:hover .locked-tag {
+        .locked-line:hover::before {
             width: 20px;
             opacity: 1;
             color: transparent;
         }
 
-        .locked-line .locked-tag:hover {
+        .locked-line::before:hover {
             width: 60px !important;
             padding: 0 6px;
             color: #fff !important;
             z-index: 999;
-            color: 0.4s ease-in;
         }
 
         #minimap {
@@ -731,7 +719,6 @@
         @media (max-width: 768px) {
             .sub-header {
                 padding-right: 0 !important;
-                /* Keep left padding, clear right */
             }
 
             #tracker {
@@ -748,25 +735,42 @@
                 border-bottom: 1px solid rgba(255, 255, 255, 0.2);
                 padding-right: 0 !important;
                 padding-bottom: 8px;
-                width: 100%;
-                justify-content: space-between;
             }
 
             .cone-data:last-child {
                 border-bottom: none;
             }
-        }
 
-        .dummy-content {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            color: #333;
-            font-weight: 900;
-            font-size: 3rem;
-            letter-spacing: -1px;
+            /* Embed Mode Styles */
+            body.embed-mode #top-nav,
+            body.embed-mode #sub-nav-layer,
+            body.embed-mode #dashboard-panel,
+            body.embed-mode #tracker,
+            body.embed-mode #hover-trigger,
+            body.embed-mode #tools,
+            body.embed-mode #debug-btn,
+            body.embed-mode #freeze-btn {
+                display: none !important;
+                pointer-events: none !important;
+            }
+
+            body.embed-mode #login-card {
+                opacity: 1;
+                visibility: visible;
+                pointer-events: auto;
+            }
+
+            .dummy-content {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                color: #333;
+                font-weight: 900;
+                font-size: 3rem;
+                letter-spacing: -1px;
+            }
         }
     </style>
 </head>
@@ -796,18 +800,15 @@
         <div id="debug-rooms"></div>
     </div>
 
-    <!-- SUB NAV LAYER (Fixed Z: 140) -->
     <div id="sub-nav-layer">
-        <!-- APPS HEADER -->
         <div id="header-apps" class="sub-header">
             <h1 class="page-title">APPS</h1>
             <div class="tabs-row">
                 <div class="sub-tab active" data-tab="discover" data-group="apps">DISCOVER</div>
                 <div class="sub-tab" data-tab="installed" data-group="apps">INSTALLED</div>
-                <div class="sub-tab" data-tab="updates" data-group="apps">UPDATES</div>
+                <div class="sub-tab" data-tab="store" data-group="apps">STORE</div>
             </div>
         </div>
-        <!-- SETTINGS HEADER -->
         <div id="header-settings" class="sub-header">
             <h1 class="page-title">SETTINGS</h1>
             <div class="tabs-row">
@@ -819,22 +820,18 @@
         </div>
     </div>
 
-    <!-- DASHBOARD PANEL (Content Z: 200) -->
     <div id="dashboard-panel">
-
-        <!-- HOME VIEW -->
         <div id="view-home" class="content-view active">
             <div id="chat-header">
                 <div><span id="user-badge" title="Your Color"></span></div>
-                <div class="status"><span class="dot"></span><span id="peer-count">Disconnected</span></div>
+                <div class="status" id="status-toggle"><span class="dot"></span><span
+                        id="peer-count">Disconnected</span></div>
             </div>
             <div id="chat-container">
                 <div id="display" contenteditable="true" spellcheck="false"></div>
             </div>
             <div id="minimap"></div>
         </div>
-
-        <!-- APPS VIEW -->
         <div id="view-apps" class="content-view">
             <div id="tab-discover" class="apps-pane active">
                 <h2>Discover Apps</h2>
@@ -850,8 +847,6 @@
                 <p>Everything is up to date.</p>
             </div>
         </div>
-
-        <!-- SETTINGS VIEW -->
         <div id="view-settings" class="content-view">
             <div id="tab-general" class="settings-pane active">
                 <h2>General Settings</h2>
@@ -870,7 +865,6 @@
                 <p>View underlying structure.</p>
             </div>
         </div>
-
     </div>
 
     <div id="tools">
@@ -900,13 +894,24 @@
             async _open(hex = null) {
                 return new Promise((resolve, reject) => {
                     let req = indexedDB.open(this.name);
+
+                    req.onupgradeneeded = (e) => {
+                        // Initial setup if needed
+                    };
+
                     req.onsuccess = (e) => {
                         const db = e.target.result;
                         if (hex && !db.objectStoreNames.contains(hex)) {
                             const v = db.version + 1;
                             db.close();
                             const upg = indexedDB.open(this.name, v);
-                            upg.onupgradeneeded = (evt) => evt.target.result.createObjectStore(hex);
+                            upg.onupgradeneeded = (evt) => {
+                                const d = evt.target.result;
+                                if (!d.objectStoreNames.contains(hex)) {
+                                    const store = d.createObjectStore(hex);
+                                    store.createIndex('owner', 'owner', { unique: false });
+                                }
+                            };
                             upg.onsuccess = (evt) => resolve(evt.target.result);
                             upg.onerror = reject;
                         } else resolve(db);
@@ -914,49 +919,80 @@
                     req.onerror = reject;
                 });
             }
-            async getRoom(hex) {
-                const db = await this._open();
-                if (!db.objectStoreNames.contains(hex)) return null;
-                return new Promise(res => {
-                    const tx = db.transaction([hex], 'readonly').objectStore(hex);
-                    const req = tx.getAllKeys();
-                    req.onsuccess = () => {
-                        const keys = req.result;
-                        if (!keys.length) { res(null); return; }
-                        tx.getAll().onsuccess = (e) => {
-                            const vals = e.target.result;
-                            const lookup = {};
-                            keys.forEach((k, i) => lookup[k] = vals[i]);
-                            const skeleton = lookup.__SKELETON__ || [];
-                            const content = {};
-                            skeleton.forEach(id => {
-                                if (lookup[id] !== undefined) content[id] = `<div id="${id}" class="editor-line">${lookup[id]}</div>`;
-                            });
-                            res({ hex, skeleton, content });
-                        }
-                    }
-                    req.onerror = () => res(null);
-                });
-            }
-            async saveRoom(hex, skeleton, content) {
+
+            async saveLine(hex, index, content, ownerHex) {
                 const db = await this._open(hex);
                 return new Promise(res => {
                     const tx = db.transaction([hex], 'readwrite');
                     const store = tx.objectStore(hex);
-                    store.clear();
-                    store.put(skeleton, '__SKELETON__');
-                    for (const [id, outer] of Object.entries(content)) {
-                        const inner = outer.substring(outer.indexOf('>') + 1, outer.lastIndexOf('<'));
-                        store.put(inner, id);
-                    }
-                    tx.oncomplete = () => res(true);
-                    tx.onerror = () => res(false);
+                    store.put(parseInt(index), "cursor");
+                    const data = { content: content, owner: ownerHex, updated: Date.now() };
+                    if (!content || content.trim() === '') { store.delete(parseInt(index)); } else { store.put(data, parseInt(index)); }
+                    tx.oncomplete = () => res(true); tx.onerror = () => res(false);
                 });
             }
+
+            async getCursor(hex) {
+                const db = await this._open(hex);
+                if (!db.objectStoreNames.contains(hex)) return 0;
+                return new Promise(res => {
+                    const tx = db.transaction([hex], 'readonly').objectStore(hex);
+                    const req = tx.get("cursor");
+                    req.onsuccess = () => res(req.result || 0);
+                    req.onerror = () => res(0);
+                });
+            }
+
+            async getRange(hex, min, max) {
+                const db = await this._open(hex);
+                if (!db.objectStoreNames.contains(hex)) return {};
+                return new Promise(res => {
+                    const tx = db.transaction([hex], 'readonly').objectStore(hex);
+                    const range = IDBKeyRange.bound(min, max);
+                    const req = tx.openCursor(range);
+                    const result = {};
+                    req.onsuccess = (e) => {
+                        const cursor = e.target.result;
+                        if (cursor) { result[cursor.key] = cursor.value; cursor.continue(); } else { res(result); }
+                    };
+                    req.onerror = () => res({});
+                });
+            }
+
+            async getSpecific(hex, keys) {
+                const db = await this._open(hex);
+                if (!db.objectStoreNames.contains(hex)) return {};
+                return new Promise(res => {
+                    const tx = db.transaction([hex], 'readonly').objectStore(hex);
+                    const results = {};
+                    let pending = keys.length;
+                    if (pending === 0) return res({});
+                    keys.forEach(k => {
+                        const idx = parseInt(k.replace(hex, ''), 10);
+                        if (isNaN(idx)) { pending--; return; }
+                        const req = tx.get(idx);
+                        req.onsuccess = () => { if (req.result) results[idx] = req.result; pending--; if (pending === 0) res(results); }
+                        req.onerror = () => { pending--; if (pending === 0) res(results); }
+                    });
+                });
+            }
+
             async getAllRooms() {
                 const db = await this._open();
                 return Array.from(db.objectStoreNames).map(hex => ({ hex }));
             }
+
+            async saveSignature(hex, signature) {
+                const db = await this._open(hex);
+                return new Promise(res => {
+                    const tx = db.transaction([hex], 'readwrite');
+                    const store = tx.objectStore(hex);
+                    store.put({ ...signature, created: Date.now() }, 'signature');
+                    tx.oncomplete = () => res(true);
+                    tx.onerror = () => res(false);
+                });
+            }
+
             init() { return this._open(); }
         }
         window.ColorDB = ColorDB;
@@ -972,11 +1008,19 @@
                 ].map(id => [id.replace(/-./g, x => x[1].toUpperCase()), document.getElementById(id)]));
                 this.ui.dot = document.querySelector('.dot');
 
-                const savedColor = localStorage.getItem('lastSphereColor');
-                this.user = { id: 'user_' + this.makeId().replace('line-', ''), color: savedColor || '#ffffff' };
+                let savedColor = localStorage.getItem('lastSphereColor');
+                if (!savedColor) {
+                    savedColor = '#ffffff';
+                    localStorage.setItem('lastSphereColor', savedColor);
+                }
+
+                const cleanUserHex = savedColor.replace('#', '');
+                this.user = { id: 'user_' + cleanUserHex, color: savedColor };
+
                 this.visitedRooms = [];
                 this.peerColors = {};
                 this.anonCounter = 1;
+                this.latestKey = null;
 
                 this.db.getAllRooms().then(rooms => {
                     this.visitedRooms = rooms.map(r => 'color-' + r.hex);
@@ -997,6 +1041,9 @@
                 this.statusTimeoutAttempts = 20;
                 this.lastLineCount = 0;
 
+                // Peek mode tracking
+                this.peeking = false;
+
                 this.bindEvents();
                 this.setupGlobalExposure();
 
@@ -1007,40 +1054,60 @@
                 }
             }
 
-            makeId() { return 'line-' + Math.random().toString(36).substr(2, 9); }
+            makeId(index) { const roomHex = this.roomId ? this.roomId.replace('color-', '') : 'null'; return roomHex + index; }
+
+            parseId(id) {
+                if (!id) return null;
+                const roomHex = this.roomId.replace('color-', '');
+                if (id.startsWith(roomHex)) {
+                    const idxStr = id.slice(roomHex.length);
+                    const idx = parseInt(idxStr, 10);
+                    if (!isNaN(idx)) return { index: idx, owner: roomHex };
+                }
+                return null;
+            }
+
+            reconstructLine(id, content, ownerHex) {
+                const myHex = this.user.color.replace('#', '');
+                const effectiveOwner = ownerHex || this.roomId.replace('color-', '');
+                const isEmpty = !content || content === '<br>' || content.trim() === '';
+                const amOwner = (effectiveOwner === myHex);
+                const isEditable = (isEmpty || amOwner) ? 'true' : 'false';
+                return `<div id="${id}" class="editor-line" contenteditable="${isEditable}">${content || '<br>'}</div>`;
+            }
+
+            createRow(index) { return this.reconstructLine(this.makeId(index), null, null); }
             tryAutoConnectFromHash() { if (window.location.hash.length > 1) this.connectAndPreview(window.location.hash, true); }
 
             joinNetwork(mode = 'standard') {
                 try { this.room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId); } catch (e) { return; }
-                const actions = ['skeleton', 'fragment', 'lock', 'req', 'identity'];
-                const [sendSkeleton, getSkeleton] = this.room.makeAction('skeleton');
-                this.actions = Object.assign({ sendSkeleton }, ...actions.slice(1).map(k => ({ [`send${k.charAt(0).toUpperCase() + k.slice(1)}`]: this.room.makeAction(k)[0] })));
-                const [_, getFragment] = this.room.makeAction('fragment');
-                const [__, getLock] = this.room.makeAction('lock');
-                const [___, getReqSync] = this.room.makeAction('req');
-                const [____, getIdentity] = this.room.makeAction('identity');
+                const actions = ['fragment', 'lock', 'req', 'identity'];
+                this.actions = Object.assign({}, ...actions.map(k => ({ [`send${k.charAt(0).toUpperCase() + k.slice(1)}`]: this.room.makeAction(k)[0] })));
+                const [getFragment] = this.room.makeAction('fragment').slice(1);
+                const [getLock] = this.room.makeAction('lock').slice(1);
+                const [getReqSync] = this.room.makeAction('req').slice(1);
+                const [getIdentity] = this.room.makeAction('identity').slice(1);
 
                 this.actions.reqSync = this.room.makeAction('req')[0];
-
                 getIdentity((data, pid) => this.handlePeerIdentity(data, pid));
-
-                getSkeleton((ids, peerId) => {
-                    if (mode === 'conflict' && ids) {
-                        const myIds = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                        if (JSON.stringify(myIds.slice(0, 10)) !== JSON.stringify(ids.slice(0, 10)) && this.ui.display.innerText.trim().length > 10) {
-                            if (confirm(`Remote content differs. Sync?`)) { this.handleRemoteSkeleton(ids); this.actions.reqSync(null); }
-                            else { this.room.leave(); this.room = null; this.actions = {}; this.ui.peerCount.innerText = "Offline (by choice)"; this.ui.dot.classList.remove('on'); }
-                        } else this.handleRemoteSkeleton(ids);
-                    } else this.handleRemoteSkeleton(ids);
-                });
-
                 getFragment((fragMap) => this.handleRemoteFragments(fragMap));
                 getLock((data, pid) => this.handleRemoteLock(data, pid));
-                getReqSync((_, pid) => {
-                    const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                    if (ids.length) { this.actions.sendSkeleton(ids, pid); const frags = this.getFragments(false); if (Object.keys(frags).length) this.actions.sendFragment(frags, pid); }
-                });
+                getReqSync(async (reqKeys, pid) => {
+                    if (reqKeys && Array.isArray(reqKeys)) {
+                        const roomHex = this.roomId.replace('color-', '');
+                        const payload = {};
+                        const indices = reqKeys.map(k => parseInt(k.replace(roomHex, ''), 10)).filter(n => !isNaN(n));
+                        if (indices.length > 0) {
+                            const dbData = await this.db.getSpecific(roomHex, reqKeys);
+                            Object.assign(payload, dbData);
+                        }
+                        if (Object.keys(payload).length) this.actions.sendFragment(payload, pid);
 
+                    } else {
+                        const frags = this.getFragments(false);
+                        if (Object.keys(frags).length) this.actions.sendFragment(frags, pid);
+                    }
+                });
                 this.room.onPeerJoin(id => { this.handlePeerJoin(id); this.updateStatus(); });
                 this.room.onPeerLeave(() => { this.updateStatus(); this.reapplyVisualLocks(); });
 
@@ -1048,7 +1115,6 @@
                 const poll = setInterval(() => {
                     attempts++; if (!this.room) { clearInterval(poll); return; }
                     this.updateStatus(Object.keys(this.room.getPeers()).length, attempts);
-                    if ((mode === 'conflict' && attempts === 2) || (this.ui.display.innerText.trim().length < 5 && attempts % 4 === 0)) this.actions.reqSync(null);
                     if (attempts > 120) clearInterval(poll);
                 }, 250);
                 setTimeout(() => { if (this.room) this.actions.reqSync(null); }, 500);
@@ -1056,60 +1122,112 @@
 
             setupGlobalExposure() { window.connectAndPreview = (hex, u) => this.connectAndPreview(hex, u); window.enterRoomUI = () => this.enterRoomUI(); }
 
-            connectAndPreview(hex, fromUrl = false) {
+            async connectAndPreview(hex, fromUrl = false) {
                 this.statusTimeoutAttempts = fromUrl ? 20 : 2;
-                const cleanHex = hex.replace('#', '');
+                const cleanHex = hex.replace('#', '').toLowerCase();
                 this.roomId = 'color-' + cleanHex;
-                this.user.color = '#' + cleanHex;
+
+                this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff';
                 this.ui.userBadge.style.backgroundColor = this.user.color;
+                this.user.id = 'user_' + this.user.color.replace('#', '');
 
                 if (this.room) { try { this.room.leave(); } catch (e) { } this.room = null; }
 
-                this.db.getRoom(cleanHex).then(data => {
-                    if (data?.skeleton?.length) {
-                        this.ui.roomStatus.innerText = "Loading..."; this.ui.loginBtn.classList.remove('hidden');
-                        this.renderFromLocalDB(data).then(() => {
-                            this.ui.roomStatus.innerText = "READY";
-                            this.joinNetwork('conflict');
-                        });
-                    } else {
-                        this.ui.roomStatus.innerText = "Checking Network..."; this.ui.loginBtn.classList.remove('hidden');
-                        this.joinNetwork('standard');
-                        setTimeout(() => { if (!this.ui.display.querySelector('.editor-line')) { this.ui.display.innerHTML = this.createLines(101); this.isFresh = true; this.ui.roomStatus.innerText = "COLOR AVAILABLE"; } }, 3000);
+                const db = await this.db._open();
+                const exists = db.objectStoreNames.contains(cleanHex);
+
+                this.ui.loginBtn.classList.remove('hidden');
+
+                if (exists) {
+                    this.ui.roomStatus.innerText = "Loading...";
+                    const centerIndex = await this.db.getCursor(cleanHex);
+                    const data = await this.db.getRange(cleanHex, centerIndex - 50, centerIndex + 50);
+                    await this.renderFromLocalDB(data, centerIndex);
+                    this.ui.roomStatus.innerText = "READY";
+                    if (fromUrl && window.state?.landing) {
+                        window.state.landing.shouldAutoEnter = true;
+                        if (window.state.landing.progress >= 1 && window.enterRoomUI) {
+                            window.enterRoomUI();
+                        }
                     }
-                });
-            }
-
-            async renderFromLocalDB(data) {
-                this.ui.display.innerHTML = data.skeleton.length ? data.skeleton.map(id => data.content[id] || `<div id="${id}" class="editor-line"><br></div>`).join('') : this.createLines(101);
-                this.isFresh = !data.skeleton.length;
-                this.ensureStructure();
-            }
-
-            enterRoomUI() {
-                if (this.ui.dashboardPanel.classList.contains('active')) return;
-                if (!this.visitedRooms.includes(this.roomId)) {
-                    this.visitedRooms.push(this.roomId);
-                    this.db._open(this.roomId.replace('color-', ''));
+                    this.joinNetwork('conflict');
+                } else {
+                    this.ui.roomStatus.innerText = "Checking Network...";
+                    this.joinNetwork('standard');
+                    setTimeout(() => {
+                        if (!this.ui.display.querySelector('.editor-line')) {
+                            this.renderInitialState({}, 0);
+                            if (this.ui.loginBtn.innerText !== "JOIN") this.ui.roomStatus.innerText = "COLOR AVAILABLE";
+                        }
+                    }, 3000);
                 }
+            }
+
+            async renderFromLocalDB(data, centerIndex) {
+                this.renderInitialState(data, centerIndex);
+                this.isFresh = false;
+            }
+
+            renderInitialState(data = {}, centerIndex = 0) {
+                let html = '';
+                const roomHex = this.roomId.replace('color-', '');
+                for (let i = centerIndex - 50; i <= centerIndex + 50; i++) {
+                    const row = data[i];
+                    const content = row ? row.content : null;
+                    const owner = row ? row.owner : roomHex;
+                    const domId = roomHex + i;
+                    html += this.reconstructLine(domId, content, owner);
+                }
+                this.ui.display.innerHTML = html;
+                setTimeout(() => this.focusLine(centerIndex), 0);
+            }
+
+
+            async enterRoomUI() {
+                if (window.state) { window.state.landing.active = false; window.state.landing.showHandle = false; }
+                if (this.ui.dashboardPanel.classList.contains('active')) return;
+
+                const roomHex = this.roomId.replace('color-', '');
+
+                // 1. UPDATE VISUALS FIRST (Instant feedback)
+                if (this.ui.loginBtn.innerText === "LOGIN") {
+                    this.user.color = '#' + roomHex;
+                    this.ui.userBadge.style.backgroundColor = this.user.color;
+                    localStorage.setItem('lastSphereColor', this.user.color);
+                    this.user.id = 'user_' + this.user.color.replace('#', '');
+                }
+
                 this.ui.loginBtn.classList.add('hidden');
                 this.ui.loginCard.classList.remove('visible');
-
-                this.ui.loginCard.classList.remove('visible'); // Hide login card
-
-                // Immediate Slide up
                 this.ui.dashboardPanel.classList.add('active');
+                this.triggerSave(null);
                 this.ui.hoverTrigger.style.display = 'block';
-                // Note: We don't add .visible to top-nav here, it waits for hover/reveal
 
-                // Delayed Icon Switch
+                // 2. DO DATABASE WORK AFTER UI IS UPDATED
+                if (window.state && window.state.interactionSignature) {
+                    // We don't strictly need to await this for the UI to continue
+                    this.db.saveSignature(roomHex, window.state.interactionSignature);
+                }
+
+                if (!this.visitedRooms.includes(this.roomId)) {
+                    this.visitedRooms.push(this.roomId);
+                    this.db._open(roomHex);
+                }
+
                 setTimeout(() => {
                     document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
                 }, 300);
 
-                window.location.hash = this.roomId.replace('color-', '');
-                if (!this.ui.display.querySelector('.editor-line')) { this.ui.display.innerHTML = this.createLines(101); this.isFresh = true; }
-                this.isFresh || this.ui.display.innerText.trim().length < 5 ? this.focusCenter() : this.ui.display.focus();
+                window.location.hash = roomHex;
+
+                if (!this.ui.display.querySelector('.editor-line')) {
+                    this.ui.display.innerHTML = this.createLines(101);
+                    this.isFresh = true;
+                } else {
+                    this.db.getCursor(roomHex).then(idx => {
+                        this.focusLine(idx);
+                    });
+                }
             }
 
             async runSequencedScan() {
@@ -1124,147 +1242,232 @@
                 }
             }
 
+            createLines(count) {
+                let html = '';
+                for (let i = 0; i < count; i++) {
+                    html += this.createRow(i);
+                }
+                return html;
+            }
 
-
-            createLines(count) { return Array.from({ length: count }, () => `<div id="${this.makeId()}" class="editor-line"><br></div>`).join(''); }
-
-            focusCenter() {
+            focusLine(index) {
                 let attempts = 0;
                 const i = setInterval(() => {
                     attempts++;
-                    const mid = this.ui.display.children[50];
-                    if (mid) {
-                        mid.scrollIntoView({ block: 'center', behavior: 'auto' });
-                        const r = document.createRange(); const s = window.getSelection(); r.selectNodeContents(mid); r.collapse(true); s.removeAllRanges(); s.addRange(r);
-                        this.ui.display.focus(); this.currentLineId = mid.id;
+                    const roomHex = this.roomId.replace('color-', '');
+                    let target = document.getElementById(roomHex + index);
+                    if (target) {
+                        target.scrollIntoView({ block: 'center', behavior: 'auto' });
+                        const r = document.createRange(); const s = window.getSelection(); r.selectNodeContents(target); r.collapse(true); s.removeAllRanges(); s.addRange(r);
+                        this.ui.display.focus(); this.currentLineId = target.id;
                         if (document.activeElement === this.ui.display || attempts > 20) clearInterval(i);
-                    } else clearInterval(i);
+                    } else if (attempts > 20) clearInterval(i);
                 }, 50);
             }
 
-            ensureStructure() {
-                Array.from(this.ui.display.children).forEach(child => {
-                    if (child.tagName !== 'DIV' || !child.id) child.outerHTML = `<div id="${this.makeId()}" class="editor-line">${child.innerHTML || '<br>'}</div>`;
-                    if (!child.classList.contains('editor-line')) child.classList.add('editor-line');
-                });
-            }
+            focusCenter() { this.focusLine(0); }
 
             checkBuffers() {
                 if (this.bufferCheckPending) return;
                 this.bufferCheckPending = true;
-                requestAnimationFrame(() => {
-                    this.bufferCheckPending = false;
+                requestAnimationFrame(async () => {
                     const c = this.ui.chatContainer;
                     const { scrollTop: st, scrollHeight: sh, clientHeight: ch } = c;
-                    let upd = false;
-                    if (st < 100) { const oh = sh; this.ui.display.insertAdjacentHTML('afterbegin', this.createLines(10)); if (c.scrollHeight > 0) c.scrollTop = st + (c.scrollHeight - oh); upd = true; }
-                    if (sh - st - ch < 100) { this.ui.display.insertAdjacentHTML('beforeend', this.createLines(10)); upd = true; }
+                    const children = this.ui.display.children;
+                    if (children.length === 0) { this.bufferCheckPending = false; return; }
 
-                    const children = Array.from(this.ui.display.children);
-                    if (children.length > 150) {
-                        const lines = children;
-                        let firstC = -1, lastC = -1;
-                        for (let i = 0; i < lines.length; i++) { if (lines[i].textContent.trim()) { if (firstC === -1) firstC = i; lastC = i; } }
+                    const firstEl = children[0];
+                    const lastEl = children[children.length - 1];
+                    const firstMeta = this.parseId(firstEl.id);
+                    const lastMeta = this.parseId(lastEl.id);
 
-                        const topE = c.scrollTop, botE = topE + ch;
-                        let firstV = -1, lastV = -1;
-                        for (let i = 0; i < lines.length; i++) {
-                            const t = lines[i].offsetTop, h = lines[i].offsetHeight;
-                            if (t + h > topE && t < botE) { if (firstV === -1) firstV = i; lastV = i; }
-                            else if (t > botE && firstV !== -1) break;
+                    if (!firstMeta || !lastMeta) { this.bufferCheckPending = false; return; }
+
+                    const firstIndex = firstMeta.index;
+                    const lastIndex = lastMeta.index;
+                    const dbName = this.roomId.replace('color-', '');
+                    const roomHex = dbName;
+
+                    if (st < 100) {
+                        const oh = sh;
+                        const start = firstIndex - 10;
+                        const end = firstIndex - 1;
+                        const dbData = await this.db.getRange(dbName, start, end);
+                        let html = '';
+                        for (let i = start; i <= end; i++) {
+                            const row = dbData[i];
+                            const content = row ? row.content : null;
+                            const owner = row ? row.owner : null;
+                            html += this.reconstructLine(roomHex + i, content, owner);
                         }
-                        if (firstV === -1) { firstV = 0; lastV = lines.length - 1; }
-
-                        const B = 50;
-                        const kStart = Math.min(Math.max(0, firstV - B), firstC !== -1 ? Math.max(0, firstC - B) : Infinity);
-                        const kEnd = Math.max(Math.min(lines.length - 1, lastV + B), lastC !== -1 ? Math.min(lines.length - 1, lastC + B) : -Infinity);
-
-                        if (kStart > 0) {
-                            let remH = 0;
-                            for (let i = 0; i < kStart; i++) { remH += lines[i].offsetHeight; lines[i].remove(); }
-                            c.scrollTop = Math.max(0, c.scrollTop - remH);
-                            upd = true;
-                        }
-                        if (kEnd < lines.length - 1) {
-                            for (let i = kEnd + 1; i < lines.length; i++) lines[i].remove();
-                            upd = true;
+                        this.ui.display.insertAdjacentHTML('afterbegin', html);
+                        if (c.scrollHeight > 0) c.scrollTop = st + (c.scrollHeight - oh);
+                        if (this.room) {
+                            const missing = [];
+                            for (let i = start; i <= end; i++) { if (!dbData[i]) missing.push(roomHex + i); }
+                            if (missing.length) this.actions.sendReq(missing);
                         }
                     }
-                    if (upd) { this.renderMinimap(); this.broadcastSkeleton(); }
+
+                    if (sh - st - ch < 100) {
+                        const start = lastIndex + 1;
+                        const end = lastIndex + 10;
+                        const dbData = await this.db.getRange(dbName, start, end);
+                        let html = '';
+                        for (let i = start; i <= end; i++) {
+                            const row = dbData[i];
+                            const content = row ? row.content : null;
+                            const owner = row ? row.owner : null;
+                            html += this.reconstructLine(roomHex + i, content, owner);
+                        }
+                        this.ui.display.insertAdjacentHTML('beforeend', html);
+                        if (this.room) {
+                            const missing = [];
+                            for (let i = start; i <= end; i++) { if (!dbData[i]) missing.push(roomHex + i); }
+                            if (missing.length) this.actions.sendReq(missing);
+                        }
+                    }
+
+                    if (children.length > 200) {
+                        if (children.length > 250) {
+                            if (st > sh / 2) { for (let i = 0; i < 50; i++) children[0].remove(); }
+                            else { for (let i = 0; i < 50; i++) children[children.length - 1].remove(); }
+                        }
+                    }
+                    this.bufferCheckPending = false;
                 });
             }
 
-            broadcastSkeleton() { if (this.room && this.actions.sendSkeleton) this.actions.sendSkeleton(Array.from(this.ui.display.children).map(el => el.id).filter(id => id)); }
-
             async logout() {
                 if (window.resetSphereView) window.resetSphereView();
-
-                // Hide Dashboard and all sub-states
-                this.ui.dashboardPanel.classList.remove('active', 'revealed', 'step-down');
-
-                // HIDE Login Card and Navigation immediately
+                this.ui.dashboardPanel.classList.remove('active', 'revealed', 'step-down', 'peek-mode');
+                this.ui.dashboardPanel.style.transform = '';
+                this.peeking = false;
+                if (window.state && window.state.peeking) {
+                    window.state.peeking.active = false;
+                    window.state.peeking.value = 0;
+                }
                 this.ui.loginCard.classList.remove('visible');
                 this.ui.topNav.classList.remove('visible');
                 this.ui.subNavLayer.classList.remove('visible');
-
                 document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
-
                 this.ui.hoverTrigger.style.display = 'none';
                 this.ui.loginBtn.classList.remove('hidden');
-
-                // Revert Icon
                 document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
-
-                // Cleanup
                 history.pushState("", document.title, window.location.pathname + window.location.search);
-
-
                 if (this.room) { try { this.room.leave(); } catch (e) { } this.room = null; }
                 this.ui.display.innerHTML = '';
                 this.ui.minimap.innerHTML = '';
                 this.activeLocks = {};
                 this.ui.peerCount.innerText = "Disconnected";
                 this.ui.dot.classList.remove('on');
+                this.latestKey = null;
                 if (window.updateVisitedFromDB) await window.updateVisitedFromDB();
             }
 
             updateStatus(peers = 0, attempts = 0) {
                 if (!this.room) return;
-                if (peers > 0) { this.ui.roomStatus.innerText = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`; this.ui.peerCount.innerText = `${peers} visitors(s)`; this.ui.dot.classList.add('on'); return; }
-                if (attempts < this.statusTimeoutAttempts) { this.ui.roomStatus.innerText = "SEARCHING..."; this.ui.peerCount.innerText = "Connecting..."; }
-                else { this.ui.roomStatus.innerText = "COLOR AVAILABLE"; this.ui.peerCount.innerText = "Offline"; }
+                if (peers > 0) {
+                    this.ui.loginBtn.innerHTML = "<span>JOIN</span>";
+                    this.ui.loginBtn.classList.remove('hidden');
+                    this.ui.roomStatus.innerText = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
+                    this.ui.peerCount.innerText = `${peers} visitors(s)`;
+                    this.ui.dot.classList.add('on');
+                    return;
+                } else {
+                    if (this.ui.roomStatus.innerText !== "READY") this.ui.loginBtn.innerText = "LOGIN";
+                }
+                if (attempts < this.statusTimeoutAttempts) {
+                    this.ui.roomStatus.innerText = "SEARCHING...";
+                    this.ui.peerCount.innerText = "Connecting...";
+                } else {
+                    this.ui.roomStatus.innerText = "COLOR AVAILABLE";
+                    this.ui.peerCount.innerText = "Offline";
+                    if (this.ui.loginBtn.innerText !== "JOIN") this.ui.loginBtn.innerHTML = "<span>LOGIN</span>";
+                }
                 this.ui.dot.classList.remove('on');
             }
 
             getFragments(visibleOnly = false) {
                 const d = {}, top = this.ui.chatContainer.scrollTop - 500, bot = top + this.ui.chatContainer.clientHeight + 1000;
-                Array.from(this.ui.display.children).forEach(el => { if (el.id && (!visibleOnly || (el.offsetTop + el.offsetHeight > top && el.offsetTop < bot))) d[el.id] = el.outerHTML; });
+                const roomHex = this.roomId.replace('color-', '');
+                Array.from(this.ui.display.children).forEach(el => {
+                    if (el.id && (!visibleOnly || (el.offsetTop + el.offsetHeight > top && el.offsetTop < bot))) {
+                        const meta = this.parseId(el.id);
+                        if (meta) {
+                            d[meta.index] = {
+                                content: el.innerHTML,
+                                owner: el.getAttribute('data-lock-owner') || roomHex
+                            };
+                        }
+                    }
+                });
                 return d;
             }
 
-            async handleRemoteSkeleton(ids) {
-                const map = Object.fromEntries(Array.from(this.ui.display.children).map(el => [el.id, el]));
-                this.ui.display.innerHTML = ids.map(id => map[id] ? map[id].outerHTML : `<div id="${id}" class="editor-line"><br></div>`).join('');
-                await this.triggerSave(null);
+            sanitize(str) {
+                const temp = document.createElement('div');
+                temp.innerHTML = str;
+                const allowed = ['B', 'I', 'U', 'A', 'BR', 'DIV', 'SPAN'];
+                function clean(node) {
+                    if (node.nodeType === 1) {
+                        if (!allowed.includes(node.tagName)) {
+                            const text = document.createTextNode(node.innerText);
+                            node.parentNode.replaceChild(text, node);
+                        } else {
+                            Array.from(node.attributes).forEach(attr => {
+                                if (attr.name.startsWith('on') || attr.name === 'style') {
+                                    node.removeAttribute(attr.name);
+                                }
+                                if (node.tagName === 'A' && attr.name === 'href') {
+                                    if (attr.value.startsWith('javascript:')) node.removeAttribute('href');
+                                }
+                            });
+                            Array.from(node.childNodes).forEach(clean);
+                        }
+                    }
+                }
+                clean(temp);
+                return temp.innerHTML;
             }
 
             async handleRemoteFragments(fragMap) {
-                const temp = document.createElement('div');
-                for (const [id, html] of Object.entries(fragMap)) {
-                    temp.innerHTML = html; const newEl = temp.firstElementChild, el = document.getElementById(id);
-                    if (newEl && el) {
-                        Object.assign(el.dataset, newEl.dataset);
-                        el.style.cssText = newEl.style.cssText;
-                        el.contentEditable = (el.dataset.owner && el.dataset.owner !== this.user.id) ? "false" : "true";
-                        if (el.innerHTML !== newEl.innerHTML && document.activeElement !== el) el.innerHTML = newEl.innerHTML;
+                const roomHex = this.roomId.replace('color-', '');
+                for (const [indexStr, data] of Object.entries(fragMap)) {
+                    const index = parseInt(indexStr, 10);
+                    const domId = roomHex + index;
+                    const newContent = (typeof data === 'string') ? data : data.content;
+                    const newOwner = data.owner || roomHex;
+                    let el = document.getElementById(domId);
+                    if (document.activeElement === el) continue;
+                    if (!el) {
+                        const temp = document.createElement('div');
+                        temp.innerHTML = this.reconstructLine(domId, newContent, newOwner);
+                        const newEl = temp.firstElementChild;
+                        const children = Array.from(this.ui.display.children);
+                        let ref = null;
+                        for (let i = 0; i < children.length; i++) {
+                            const cMeta = this.parseId(children[i].id);
+                            if (cMeta && cMeta.index > index) { ref = children[i]; break; }
+                        }
+                        this.ui.display.insertBefore(newEl, ref);
+                        el = newEl;
                     }
+                    if (el) {
+                        if (el.innerHTML !== newContent) el.innerHTML = this.sanitize(newContent || '<br>');
+                        const myHex = this.user.color.replace('#', '');
+                        const isEmpty = !newContent || newContent.trim() === '';
+                        const amOwner = (newOwner === myHex);
+                        el.contentEditable = (isEmpty || amOwner) ? 'true' : 'false';
+                    }
+                    await this.db.saveLine(roomHex, index, newContent, newOwner);
                 }
-                await this.triggerSave(null);
             }
 
             handlePeerJoin(id) {
-                const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                if (ids.length) { this.actions.sendSkeleton(ids, id); const frags = this.getFragments(false); if (Object.keys(frags).length) this.actions.sendFragment(frags, id); }
+                if (this.isFresh) return;
+                const frags = this.getFragments(true);
+                if (Object.keys(frags).length) this.actions.sendFragment(frags, id);
                 if (this.currentLineId && this.actions.sendLock) this.actions.sendLock({ lineId: this.currentLineId, userColor: this.user.color }, id);
                 if (this.actions.sendIdentity) this.actions.sendIdentity({ color: this.user.color }, id);
             }
@@ -1282,18 +1485,23 @@
 
             reapplyVisualLocks() {
                 document.querySelectorAll('.locked-line').forEach(el => {
-                    el.classList.remove('locked-line'); el.style.removeProperty('--lock-color'); el.querySelector('.locked-tag')?.remove();
-                    el.contentEditable = (el.dataset.owner && el.dataset.owner !== this.user.id) ? "false" : "true";
+                    el.classList.remove('locked-line');
+                    el.style.removeProperty('--lock-color');
+                    el.removeAttribute('data-lock-owner');
                 });
                 const now = Date.now();
                 for (const [pid, lock] of Object.entries(this.activeLocks)) {
                     if (now - lock.ts > 60000 || pid === selfId) continue;
                     const el = document.getElementById(lock.lineId);
-                    if (el) { el.classList.add('locked-line'); el.style.setProperty('--lock-color', lock.color); el.contentEditable = "false"; el.insertAdjacentHTML('beforeend', `<div class="locked-tag">${lock.color}</div>`); }
+                    if (el) {
+                        el.classList.add('locked-line');
+                        el.style.setProperty('--lock-color', lock.color);
+                        el.contentEditable = "false";
+                        el.setAttribute('data-lock-owner', lock.color);
+                    }
                 }
                 this.renderMinimap();
             }
-
             renderMinimap() {
                 const h = this.ui.chatContainer.scrollHeight, now = Date.now();
                 this.ui.minimap.innerHTML = Object.entries(this.activeLocks).filter(([pid, lock]) => now - lock.ts <= 60000 && pid !== selfId).map(([_, lock]) => {
@@ -1304,39 +1512,83 @@
 
             async triggerSave(changedLineId = null) {
                 if (!this.ui.dashboardPanel.classList.contains('active')) return;
-                const ids = Array.from(this.ui.display.children).map(el => el.id).filter(id => id);
-                await this.db.saveRoom(this.user.color.replace('#', ''), ids, Object.fromEntries(ids.map(id => [id, document.getElementById(id)?.outerHTML])));
-                if (changedLineId && this.room && this.actions.sendFragment) this.actions.sendFragment({ [changedLineId]: document.getElementById(changedLineId).outerHTML });
+                const dbName = this.roomId.replace('color-', '');
+                const getLineIndex = (domId) => { const meta = this.parseId(domId); return meta ? meta.index : null; }
+                if (changedLineId) {
+                    const el = document.getElementById(changedLineId);
+                    const index = getLineIndex(changedLineId);
+                    if (index === null) return;
+                    const content = el.innerText.trim().length > 0 ? el.innerHTML : null;
+                    const owner = this.user.color.replace('#', '');
+                    await this.db.saveLine(dbName, index, content, owner);
+                    if (this.room && this.actions.sendFragment) {
+                        this.actions.sendFragment({ [index]: { content: content, owner: owner, updated: Date.now() } });
+                    }
+                }
+            }
+
+            togglePeek() {
+                if (!this.ui.dashboardPanel.classList.contains('active')) return;
+
+                this.peeking = !this.peeking;
+                if (this.peeking) {
+                    this.ui.dashboardPanel.classList.add('peek-mode');
+                    // Update WebGPU state
+                    if (window.state && window.state.peeking) {
+                        window.state.peeking.active = true;
+
+                        // Animate value
+                        const start = window.state.peeking.value;
+                        const animate = (t) => {
+                            if (!window.state.peeking.active) return;
+                            const step = 0.02; // Reduced speed for smoother easing
+                            if (window.state.peeking.value < 1.0) {
+                                window.state.peeking.value = Math.min(1.0, window.state.peeking.value + step);
+                                requestAnimationFrame(animate);
+                            }
+                        };
+                        animate();
+                    }
+                } else {
+                    this.ui.dashboardPanel.classList.remove('peek-mode');
+                    if (window.state && window.state.peeking) {
+                        const animate = (t) => {
+                            const step = 0.02; // Reduced speed for smoother easing
+                            if (window.state.peeking.value > 0) {
+                                window.state.peeking.value = Math.max(0.0, window.state.peeking.value - step);
+                                requestAnimationFrame(animate);
+                            } else {
+                                window.state.peeking.active = false;
+                            }
+                        };
+                        animate();
+                    }
+                }
             }
 
             bindEvents() {
                 this.ui.chatContainer.addEventListener('scroll', () => this.checkBuffers());
                 window.addEventListener('resize', () => this.renderMinimap());
 
-                // --- NAVIGATION LOGIC ---
+                // Toggle Peek on Status Click
+                document.getElementById('status-toggle').addEventListener('click', (e) => {
+                    this.togglePeek();
+                });
+
                 document.querySelectorAll('.nav-item').forEach(item => {
                     item.addEventListener('click', () => {
                         const targetId = item.getAttribute('data-target');
                         if (!targetId) return;
-
-                        // Switch Active Nav
                         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                         item.classList.add('active');
-
-                        // Switch Content View
                         document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'));
                         document.getElementById('view-' + targetId).classList.add('active');
-
-                        // Handle Dashboard Sliding Logic
                         if (targetId === 'home') {
                             this.ui.dashboardPanel.classList.remove('step-down');
-                            this.ui.dashboardPanel.classList.add('revealed'); // Stay partially revealing nav
+                            this.ui.dashboardPanel.classList.add('revealed');
                             document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
                         } else {
-                            // Apps or Settings -> Slide Down Further
                             this.ui.dashboardPanel.classList.add('step-down');
-
-                            // Switch Sub-Header
                             document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
                             const subHeader = document.getElementById('header-' + targetId);
                             if (subHeader) subHeader.classList.add('active');
@@ -1344,17 +1596,12 @@
                     });
                 });
 
-                // --- SUB-TABS LOGIC (GENERIC) ---
                 document.querySelectorAll('.sub-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
                         const group = tab.getAttribute('data-group');
                         const target = tab.getAttribute('data-tab');
-
-                        // Handle Tab styling in this group
                         document.querySelectorAll(`.sub-tab[data-group="${group}"]`).forEach(t => t.classList.remove('active'));
                         tab.classList.add('active');
-
-                        // Handle content switching
                         const activeView = document.querySelector(`.content-view.active`);
                         if (activeView) {
                             activeView.querySelectorAll('.settings-pane, .apps-pane').forEach(pane => pane.classList.remove('active'));
@@ -1364,34 +1611,23 @@
                     });
                 });
 
-                // --- PROXIMITY EFFECT (Desktop) ---
                 window.addEventListener('mousemove', (e) => {
-                    // Only run if logged in and menu is NOT currently open
                     if (!this.ui.dashboardPanel.classList.contains('active') ||
                         this.ui.dashboardPanel.classList.contains('revealed') ||
-                        this.ui.dashboardPanel.classList.contains('step-down')) {
-                        this.ui.dashboardPanel.style.transform = '';
+                        this.ui.dashboardPanel.classList.contains('step-down') ||
+                        this.ui.dashboardPanel.classList.contains('peek-mode')) {
+                        if (!this.peeking) this.ui.dashboardPanel.style.transform = '';
                         return;
                     }
-
                     const sliverSize = 10;
-                    const buffer = 23; // Increased buffer
-                    const maxGrowth = 23; // Maximum pixels it can grow before snapping
-
+                    const buffer = 23;
+                    const maxGrowth = 23;
                     if (e.clientY < sliverSize + buffer) {
-                        // Calculate distance from the original sliver edge
                         const dist = Math.max(0, e.clientY - sliverSize);
-
-                        // Calculate progress (0 = far away, 1 = touching sliver)
                         const progress = 1 - (dist / buffer);
-
-                        // Apply Ease-In (Quadratic): Starts slow, grows fast as you get closer
                         const ease = progress * progress;
-
                         const growth = maxGrowth * ease;
                         const currentVisualHeight = sliverSize + growth;
-
-                        // Check if cursor is inside the NEW grown height
                         if (e.clientY <= currentVisualHeight) {
                             this.ui.dashboardPanel.classList.add('revealed');
                             this.ui.topNav.classList.add('visible');
@@ -1403,26 +1639,122 @@
                         this.ui.dashboardPanel.style.transform = '';
                     }
                 });
-                // --- SWIPE DOWN REVEAL (Mobile) ---
+
                 let touchStartY = 0;
+                let isDraggingPanel = false;
 
                 window.addEventListener('touchstart', (e) => {
                     touchStartY = e.touches[0].clientY;
-                }, { passive: true });
-
-                window.addEventListener('touchmove', (e) => {
-                    if (!this.ui.dashboardPanel.classList.contains('active')) return;
-
-                    const currentY = e.touches[0].clientY;
-
-                    // If swipe started in top 15% of screen and moved down > 30px
-                    if (touchStartY < window.innerHeight * 0.15 && (currentY - touchStartY > 30)) {
-                        this.ui.dashboardPanel.classList.add('revealed');
-                        this.ui.topNav.classList.add('visible');
+                    // Check if we are at top of list
+                    const isAtTop = this.ui.chatContainer.scrollTop === 0;
+                    if (this.ui.dashboardPanel.classList.contains('active') && isAtTop) {
+                        // Allow potential drag if near header
+                        if (touchStartY < 150 || this.peeking) {
+                            isDraggingPanel = true;
+                        }
                     }
                 }, { passive: true });
 
-                // Logout Logic
+                window.addEventListener('touchmove', (e) => {
+                    if (!this.ui.dashboardPanel.classList.contains('active') || !isDraggingPanel) return;
+
+                    const currentY = e.touches[0].clientY;
+                    const delta = currentY - touchStartY;
+
+                    if (delta > 0) {
+                        // Dragging Down
+                        // Prevent default scroll if we are handling UI transform
+                        if (this.ui.dashboardPanel.classList.contains('peek-mode') || !this.peeking) {
+                            const navHeight = 90;
+                            const maxDrag = window.innerHeight - 50;
+
+                            // Calculate offset
+                            let offset = delta;
+                            if (this.peeking) {
+                                // Already down
+                            } else {
+                                // Normal state, dragging down
+                                if (offset > 0) {
+                                    this.ui.dashboardPanel.style.transform = `translateY(${offset}px)`;
+
+                                    // Calculate peek progress for sphere
+                                    if (offset > navHeight) {
+                                        const range = maxDrag - navHeight;
+                                        const prog = Math.min(1, (offset - navHeight) / range);
+                                        if (window.state && window.state.peeking) {
+                                            window.state.peeking.active = true;
+                                            window.state.peeking.value = prog;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Dragging Up
+                        if (this.peeking) {
+                            const maxDrag = window.innerHeight - 50;
+                            // visual offset from bottom
+                            const realY = maxDrag + delta; // delta is negative
+                            this.ui.dashboardPanel.style.transform = `translateY(${realY}px)`;
+
+                            const range = maxDrag - 90;
+                            const prog = Math.max(0, (realY - 90) / range);
+                            if (window.state && window.state.peeking) {
+                                window.state.peeking.active = true;
+                                window.state.peeking.value = prog;
+                            }
+                        }
+                    }
+                }, { passive: true });
+
+                window.addEventListener('touchend', (e) => {
+                    if (!isDraggingPanel) return;
+                    isDraggingPanel = false;
+
+                    // Snap logic
+                    const threshold = window.innerHeight * 0.3;
+                    const transform = this.ui.dashboardPanel.style.transform;
+                    let currentY = 0;
+                    if (transform && transform.indexOf('translateY') !== -1) {
+                        currentY = parseInt(transform.replace(/[^\d.]/g, ''), 10);
+                    }
+
+                    // Reset inline style to let CSS class take over
+                    this.ui.dashboardPanel.style.transform = '';
+
+                    if (this.peeking) {
+                        // Was peeking. If dragged up significantly, go full screen
+                        if (currentY < window.innerHeight * 0.7) {
+                            // Restore full screen
+                            this.peeking = false;
+                            this.ui.dashboardPanel.classList.remove('peek-mode');
+                            this.updatePeekState(0);
+                        } else {
+                            // Stay peeking
+                            this.ui.dashboardPanel.classList.add('peek-mode');
+                            this.updatePeekState(1);
+                        }
+                    } else {
+                        // Was full screen. If dragged down enough, go peek
+                        if (currentY > threshold) {
+                            this.peeking = true;
+                            this.ui.dashboardPanel.classList.add('peek-mode');
+                            this.updatePeekState(1);
+                        } else {
+                            this.peeking = false;
+                            this.ui.dashboardPanel.classList.remove('peek-mode');
+                            this.updatePeekState(0);
+                        }
+                    }
+
+                    // Reveal nav logic from original code
+                    const lastY = e.changedTouches[0].clientY;
+                    if (touchStartY < window.innerHeight * 0.15 && (lastY - touchStartY > 30) && !this.peeking) {
+                        this.ui.dashboardPanel.classList.add('revealed');
+                        this.ui.topNav.classList.add('visible');
+                    }
+                });
+
                 document.getElementById('freeze-btn').addEventListener('click', (e) => {
                     if (this.ui.dashboardPanel.classList.contains('active')) {
                         e.stopImmediatePropagation();
@@ -1430,7 +1762,6 @@
                     }
                 });
 
-                // Hover Logic
                 const btn = document.getElementById('freeze-btn');
                 const isSafe = (t) => t?.closest?.('#top-nav') || t?.closest?.('#freeze-btn') || t === this.ui.hoverTrigger || t?.closest?.('#sub-nav-layer');
 
@@ -1438,15 +1769,12 @@
                     this.ui.dashboardPanel.classList.add('revealed');
                     this.ui.topNav.classList.add('visible');
                 });
-
-                // Only un-reveal if we aren't in 'step-down' mode (Apps/Settings open)
                 this.ui.hoverTrigger.addEventListener('mouseleave', (e) => {
                     if (!isSafe(e.relatedTarget) && !this.ui.dashboardPanel.classList.contains('step-down')) {
                         this.ui.dashboardPanel.classList.remove('revealed');
                         this.ui.topNav.classList.remove('visible');
                     }
                 });
-
                 this.ui.topNav.addEventListener('mouseenter', () => {
                     this.ui.dashboardPanel.classList.add('revealed');
                     this.ui.topNav.classList.add('visible');
@@ -1457,10 +1785,7 @@
                         this.ui.topNav.classList.remove('visible');
                     }
                 });
-
-                btn.addEventListener('mouseenter', () => {
-                    this.ui.dashboardPanel.classList.add('revealed');
-                });
+                btn.addEventListener('mouseenter', () => { this.ui.dashboardPanel.classList.add('revealed'); });
                 btn.addEventListener('mouseleave', (e) => {
                     if (!isSafe(e.relatedTarget) && !this.ui.dashboardPanel.classList.contains('step-down')) {
                         this.ui.dashboardPanel.classList.remove('revealed');
@@ -1470,11 +1795,47 @@
 
                 this.ui.display.addEventListener('input', () => {
                     this.isFresh = false;
-                    if (this.ui.display.children.length !== this.lastLineCount) { this.lastLineCount = this.ui.display.children.length; this.broadcastSkeleton(); }
-                    for (let child of this.ui.display.children) if (!child.id || !child.classList.contains('editor-line')) { if (!child.id) child.id = this.makeId(); child.classList.add('editor-line'); }
                     const n = window.getSelection().anchorNode, line = (n.nodeType === 3 ? n.parentNode : n).closest('.editor-line');
-                    if (line) { line.dataset.owner = this.user.id; line.style.setProperty('--owner-color', this.user.color); line.contentEditable = "true"; }
-                    clearTimeout(this.saveTimeout); this.saveTimeout = setTimeout(() => this.triggerSave(line?.id), 500);
+                    if (line) {
+                        clearTimeout(this.saveTimeout); this.saveTimeout = setTimeout(() => this.triggerSave(line?.id), 500);
+                    }
+                });
+
+                this.ui.display.addEventListener('keydown', (e) => {
+                    if (e.key === 'Backspace') {
+                        const sel = window.getSelection();
+                        if (sel.rangeCount) {
+                            const range = sel.getRangeAt(0);
+                            const anchor = sel.anchorNode;
+                            const currentLine = (anchor.nodeType === 3 ? anchor.parentNode : anchor).closest('.editor-line');
+                            if (currentLine) {
+                                const isAtStart = range.collapsed && range.startOffset === 0 &&
+                                    (anchor === currentLine || anchor === currentLine.firstChild);
+                                if (isAtStart) {
+                                    const prevLine = currentLine.previousElementSibling;
+                                    if (prevLine && prevLine.isContentEditable === false) {
+                                        e.preventDefault();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const sel = window.getSelection();
+                        if (sel.rangeCount) {
+                            const range = sel.getRangeAt(0);
+                            const br = document.createElement('br');
+                            range.deleteContents();
+                            range.insertNode(br);
+                            range.setStartAfter(br);
+                            range.setEndAfter(br);
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                        }
+                    }
                 });
 
                 document.addEventListener('selectionchange', () => {
@@ -1489,15 +1850,66 @@
                 ['bold', 'italic'].forEach(c => document.getElementById('btn-' + c).onclick = () => document.execCommand(c));
                 document.getElementById('btn-link').onclick = () => { const u = prompt("URL:"); if (u) document.execCommand('createLink', false, u); };
             }
+
+            updatePeekState(val) {
+                if (window.state && window.state.peeking) {
+                    window.state.peeking.active = val > 0;
+                    window.state.peeking.value = val;
+                }
+            }
         }
+
         window.app = new EditorApp();
     </script>
 
+    <script src="https://unpkg.com/trystero/dist/trystero.min.js"></script>
     <script type="module">
         let storageScope = window.localStorage;
+
+        // --- AUTH & EMBED LOGIC ---
+        const urlParams = new URLSearchParams(window.location.search);
+        const hashParams = new URLSearchParams(window.location.hash.slice(1)); // Remove #
+
+        // 1. Silent Check Mode
+        if (urlParams.get('check') === '1') {
+            try {
+                const lastColor = storageScope.getItem("lastSphereColor");
+                window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: lastColor }, '*');
+            } catch (e) {
+                window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: null }, '*');
+            }
+            // Stop rendering to save resources
+            throw new Error("Silent Check Complete - Stopping Execution");
+        }
+
+        // 2. Embed Mode
+        let isEmbedMode = window.location.hash.includes('embed');
+        let ownerHex = null;
+        if (isEmbedMode) {
+            document.body.classList.add('embed-mode');
+            // Parse owner from hash string manually if URLSearchParams fails for hash
+            const hash = window.location.hash;
+            const ownerMatch = hash.match(/owner=([a-fA-F0-9]+)/);
+            if (ownerMatch) {
+                ownerHex = '#' + ownerMatch[1];
+            }
+        }
+
         document.getElementById('login-btn').addEventListener('click', async () => {
-            try { storageScope.setItem("lastSphereColor", document.getElementById('color-hex').innerText); } catch (e) { }
-            if (window.enterRoomUI) window.enterRoomUI();
+            if (document.getElementById('login-btn').innerText === 'LOGIN') {
+                try {
+                    const color = document.getElementById('color-hex').innerText;
+                    storageScope.setItem("lastSphereColor", color);
+
+                    if (isEmbedMode) {
+                        try {
+                            window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
+                        } catch (e) { }
+                        return;
+                    }
+                } catch (e) { }
+            }
+            if (!isEmbedMode && window.enterRoomUI) window.enterRoomUI();
         });
 
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) };
@@ -1512,13 +1924,33 @@
             identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
         };
 
-        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) } };
+        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathStartPos: null, interactionSignature: { type: 'click', path: [] } };
+        window.state = state;
 
         function rgbToHex(r, g, b) { return '#' + [r, g, b].map(x => Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).padStart(2, '0')).join(''); }
         function hexToRgbNormalized(hex) { const bigint = parseInt(hex.replace(/^#/, '').replace(/^([a-f\d])([a-f\d])([a-f\d])$/i, '$1$1$2$2$3$3'), 16); return [(bigint >> 16 & 255) / 255, (bigint >> 8 & 255) / 255, (bigint & 255) / 255]; }
 
-        const sphereShaderWGSL = `struct Uniforms{mvp:mat4x4<f32>,model:mat4x4<f32>,normalMatrix:mat4x4<f32>,viewPos:vec3<f32>,l1:vec3<f32>,c1:vec3<f32>,l2:vec3<f32>,c2:vec3<f32>,l3:vec3<f32>,c3:vec3<f32>,debug:f32,};@group(0) @binding(0) var<uniform> u:Uniforms;struct VI{@location(0) p:vec3<f32>,@location(1) n:vec3<f32>};struct VO{@builtin(position) P:vec4<f32>,@location(0) vP:vec3<f32>,@location(1) vN:vec3<f32>};@vertex fn vs_main(i:VI)->VO{var o:VO;o.P=u.mvp*vec4<f32>(i.p,1.0);o.vP=(u.model*vec4<f32>(i.p,1.0)).xyz;o.vN=(u.normalMatrix*vec4<f32>(i.n,0.0)).xyz;return o;}fn ACES(x:vec3<f32>)->vec3<f32>{let a=2.51;let b=0.03;let c=2.43;let d=0.59;let e=0.14;return clamp((x*(a*x+b))/(x*(c*x+d)+e),vec3<f32>(0.0),vec3<f32>(1.0));}fn getI(lp:vec3<f32>,N:vec3<f32>,fp:vec3<f32>)->f32{let L=normalize(lp-fp);let distSq=dot(lp-fp,lp-fp);return pow(max(dot(N,L)+1.0,0.0)/2.0,2.5)*(1.0/(1.0+distSq*0.05));}@fragment fn fs_main(i:VO)->@location(0) vec4<f32>{let N=normalize(i.vN);if(u.debug > 0.5){let L1=normalize(u.l1-i.vP);let L2=normalize(u.l2-i.vP);let L3=normalize(u.l3-i.vP);if(dot(N,L1)>0.0 && dot(N,L2)>0.0 && dot(N,L3)>0.0){return vec4<f32>(1.0,0.0,0.0,1.0);}}let d1=getI(u.l1,N,i.vP);let d2=getI(u.l2,N,i.vP);let d3=getI(u.l3,N,i.vP);var l=(u.c1*d1)+(u.c2*d2)+(u.c3*d3);let ep=0.001;l=l+((u.c1+u.c2)*2.0*d1*d2/(d1+d2+ep)*1.8)+((u.c2+u.c3)*2.0*d2*d3/(d2+d3+ep)*1.8)+((u.c3+u.c1)*2.0*d3*d1/(d3+d1+ep)*1.8);let m=pow(min(d1,min(d2,d3)),6.0);l=l+(vec3<f32>(1.0)*m*80.0);l=max(l-vec3<f32>(0.01),vec3<f32>(0.0))*2.0;return vec4<f32>(pow(ACES(l),vec3<f32>(1.0/2.2)),1.0);}`;
-        const coneShaderWGSL = `struct U{mvp:mat4x4<f32>,c:vec3<f32>};@group(0) @binding(0) var<uniform> u:U;@vertex fn vs_main(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32>{return u.mvp*vec4<f32>(p,1.0);}@fragment fn fs_main()->@location(0) vec4<f32>{return vec4<f32>(u.c,1.0);}`;
+        const gradientShaderWGSL = `
+struct Uniforms {
+    mvp: mat4x4<f32>,
+    model: mat4x4<f32>,
+    normalMatrix: mat4x4<f32>,
+    viewPos: vec3<f32>,
+    l1: vec3<f32>, c1: vec3<f32>,
+    l2: vec3<f32>, c2: vec3<f32>,
+    l3: vec3<f32>, c3: vec3<f32>,
+    debug: f32,
+};
+@group(0) @binding(0) var<uniform> u: Uniforms;
+struct VI { @location(0) p: vec3<f32>, @location(1) n: vec3<f32> };
+struct VO { @builtin(position) P: vec4<f32>, @location(0) vP: vec3<f32>, @location(1) vN: vec3<f32> };
+@vertex fn vs_main(i: VI) -> VO { var o: VO; o.P = u.mvp * vec4<f32>(i.p, 1.0); o.vP = (u.model * vec4<f32>(i.p, 1.0)).xyz; o.vN = (u.normalMatrix * vec4<f32>(i.n, 0.0)).xyz; return o; }
+fn Contrast(x: vec3<f32>) -> vec3<f32> { return x * x * (3.0 - 2.0 * x); }
+fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp - fp, lp - fp); let L = normalize(lp - fp); let wrap = max(dot(N, L) + 1.0, 0.0) / 2.0; let spread = pow(wrap, 1.25); return spread * (1.0 / (1.0 + distSq * 0.05)); }
+@fragment fn fs_main(i: VO) -> @location(0) vec4<f32> { let N = normalize(i.vN); let raw_d1 = getI(u.l1, N, i.vP); let raw_d2 = getI(u.l2, N, i.vP); let raw_d3 = getI(u.l3, N, i.vP); let d1 = raw_d1 * max(u.c1.r, max(u.c1.g, u.c1.b)); let d2 = raw_d2 * max(u.c2.r, max(u.c2.g, u.c2.b)); let d3 = raw_d3 * max(u.c3.r, max(u.c3.g, u.c3.b)); var l = (u.c1 * d1) + (u.c2 * d2) + (u.c3 * d3); let ep = 0.001; l = l + ((u.c1 + u.c2) * 2.0 * d1 * d2 / (d1 + d2 + ep)); l = l + ((u.c2 + u.c3) * 2.0 * d2 * d3 / (d2 + d3 + ep)); l = l + ((u.c3 + u.c1) * 2.0 * d3 * d1 / (d3 + d1 + ep)); let min_i = min(d1, min(d2, d3)); let max_i = max(d1, max(d2, d3)); let mask_base = smoothstep(0.15, 0.40, min_i); let variance = max_i - min_i; let roundness = exp(-variance * 10.0); let final_mask = mask_base * roundness; l = mix(l, vec3(1.0), final_mask); l = l * 1.2; let contrasty = Contrast(clamp(l, vec3(0.0), vec3(1.0))); return vec4<f32>(contrasty, 1.0); }
+`;
+        const solidShaderWGSL = `struct U{mvp:mat4x4<f32>,c:vec4<f32>};@group(0) @binding(0) var<uniform> u:U;@vertex fn vs_main(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32>{return u.mvp*vec4<f32>(p,1.0);}@fragment fn fs_main()->@location(0) vec4<f32>{return u.c;}`;
+
         const defaultCones = [{ color: [1, 0, 0], pos: [0, .98, .69], active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], active: true }];
 
         function findPositionFromColor(targetHex) {
@@ -1555,9 +1987,40 @@
             };
             document.getElementById('reset-btn').onclick = async () => { if (confirm("Permanently wipe all local data?")) { localStorage.clear(); try { const dbs = await window.indexedDB.databases(); for (const db of dbs) { await window.indexedDB.deleteDatabase(db.name); } } catch (e) { } window.location.reload(); } };
 
+            // Initialize Store Owner Logic if not in embed mode
+            if (!isEmbedMode && localStorage.getItem('lastSphereColor')) {
+                setupStoreOwner(localStorage.getItem('lastSphereColor'));
+            }
+
+            // Inject Owner Cone if in Embed Mode
+            if (isEmbedMode && ownerHex) {
+                const ownerPos = findPositionFromColor(ownerHex) || [0, 0.5, 0]; // Fallback pos
+                const ownerColor = hexToRgbNormalized(ownerHex);
+
+                // Add fixed cone for Owner
+                state.cones.push({
+                    color: ownerColor,
+                    pos: ownerPos,
+                    vel: [0, 0, 0],
+                    name: "STORE",
+                    cssColor: ownerHex,
+                    active: true,
+                    isOwner: true
+                });
+
+                // Override default cones if desired, or keep them? 
+                // User said "only modified to allow the 'Store Owner' color to be injected"
+                // We keep defaults for variety? Or replace them? 
+                // "The full WebGPU engine must be preserved... adding Store Owner color... as a fixed point"
+                // We'll keep defaults + Owner.
+            }
+
             state.cones.forEach((c, i) => {
+                // If it's the owner cone, skipped UI generation or specialized it?
+                // Existing code generates UI based on index.
                 const el = document.getElementById(`data-${i}`);
-                if (!el) return;
+                if (!el) return; // Original code only has 3 slots in HTML (data-0, data-1, data-2). New cone won't have UI, which is good.
+
                 el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`;
                 const title = document.getElementById(`title-${i}`);
                 title.addEventListener('click', (e) => { if (!document.body.classList.contains('light-mode')) { e.stopPropagation(); state.cones[i].active = !state.cones[i].active; } });
@@ -1577,17 +2040,85 @@
             state.buffers.sphereUniform = dev.createBuffer({ size: 320, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
             state.buffers.coneUniform = dev.createBuffer({ size: 65536, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-            const sm = dev.createShaderModule({ code: sphereShaderWGSL }), cm = dev.createShaderModule({ code: coneShaderWGSL });
+            const sm = dev.createShaderModule({ code: gradientShaderWGSL }), cm = dev.createShaderModule({ code: solidShaderWGSL });
             state.pipelines.sphere = dev.createRenderPipeline({ layout: 'auto', vertex: { module: sm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }, { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x3' }] }] }, fragment: { module: sm, entryPoint: 'fs_main', targets: [{ format: state.presentationFormat }] }, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } });
-            state.pipelines.cone = dev.createRenderPipeline({ layout: 'auto', vertex: { module: cm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] }, fragment: { module: cm, entryPoint: 'fs_main', targets: [{ format: state.presentationFormat }] }, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } });
+            state.pipelines.cone = dev.createRenderPipeline({
+                layout: 'auto',
+                vertex: { module: cm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] },
+                fragment: {
+                    module: cm,
+                    entryPoint: 'fs_main',
+                    targets: [{
+                        format: state.presentationFormat
+                    }]
+                },
+                primitive: { cullMode: 'back' },
+                depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' },
+                multisample: { count: 4 }
+            });
             state.bindGroups.sphere = dev.createBindGroup({ layout: state.pipelines.sphere.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.sphereUniform } }] });
             state.getBindGroupForHandle = (idx) => dev.createBindGroup({ layout: state.pipelines.cone.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.coneUniform, offset: idx * 256, size: 80 } }] });
-            state.bindGroups.cones = [0, 1, 2, 3].map(i => state.getBindGroupForHandle(i));
+            // Update to map all cones, including potential dynamic ones
+            state.bindGroups.cones = state.cones.map((_, i) => state.getBindGroupForHandle(i));
         }
 
         function createBuffer(dev, data, usage) { const buf = dev.createBuffer({ size: data.byteLength, usage: usage | GPUBufferUsage.COPY_DST, mappedAtCreation: true }); (data instanceof Float32Array ? new Float32Array(buf.getMappedRange()) : new Uint16Array(buf.getMappedRange())).set(data); buf.unmap(); return buf; }
         function createSphere(r, latB, longB) { const p = [], n = [], idx = []; for (let la = 0; la <= latB; la++) for (let lo = 0; lo <= longB; lo++) { const th = la * Math.PI / latB, ph = lo * 2 * Math.PI / longB, x = Math.cos(ph) * Math.sin(th), y = Math.cos(th), z = Math.sin(ph) * Math.sin(th); n.push(x, y, z); p.push(r * x, r * y, r * z); } for (let la = 0; la < latB; la++) for (let lo = 0; lo < longB; lo++) { const f = (la * (longB + 1)) + lo, s = f + longB + 1; idx.push(f, f + 1, s, s, f + 1, s + 1); } return { p: new Float32Array(p), n: new Float32Array(n), i: new Uint16Array(idx) }; }
         function createCone(r, h, s) { const p = [0, h, 0], n = [0, 1, 0], idx = []; for (let i = 0; i <= s; i++) { const th = i * 2 * Math.PI / s, x = r * Math.cos(th), z = r * Math.sin(th); p.push(x, 0, z); const nv = Vec3.normalize([x, .5, z]); n.push(nv[0], nv[1], nv[2]); } p.push(0, 0, 0); n.push(0, -1, 0); const bc = p.length / 3 - 1; for (let i = 1; i <= s; i++) idx.push(0, i, i + 1, bc, i + 1, i); return { p: new Float32Array(p), n: new Float32Array(n), i: new Uint16Array(idx) }; }
+
+        // Create ribbon geometry from path points (adapted from old path_to_mesh)
+        function pathToVertices(pathPoints, sphereRotation) {
+            if (pathPoints.length < 2) return null;
+
+            const WIDTH = 0.015; // Half-width of the ribbon
+            const PROTRUDE = 1.02; // Slightly above sphere surface
+
+            // Transform path from local to world space
+            const path = pathPoints.map(p => {
+                const wp = transformPos(p, sphereRotation);
+                return Vec3.scale(Vec3.normalize(wp), PROTRUDE);
+            });
+
+            // Calculate tangent vectors at each point
+            const tangents = [];
+            for (let i = 0; i < path.length; i++) {
+                let dir;
+                if (i === 0) {
+                    dir = Vec3.sub(path[1], path[0]);
+                } else if (i === path.length - 1) {
+                    dir = Vec3.sub(path[i], path[i - 1]);
+                } else {
+                    dir = Vec3.sub(path[i + 1], path[i - 1]);
+                }
+                // Tangent is perpendicular to both direction and radial vector
+                const radial = Vec3.normalize(path[i]);
+                let tangent = Vec3.cross(dir, radial);
+                const tLen = Vec3.len(tangent);
+                if (tLen < 0.001) {
+                    // Fallback for degenerate case
+                    tangent = Vec3.cross(dir, [0, 1, 0]);
+                    if (Vec3.len(tangent) < 0.001) tangent = Vec3.cross(dir, [1, 0, 0]);
+                }
+                tangents.push(Vec3.scale(Vec3.normalize(tangent), WIDTH));
+            }
+
+            // Create triangle vertices for the ribbon (4 triangles per segment)
+            const vertices = [];
+            for (let i = 1; i < path.length; i++) {
+                const p0 = path[i - 1], p1 = path[i];
+                const t0 = tangents[i - 1], t1 = tangents[i];
+
+                // Four corners of the ribbon segment
+                const v0p = Vec3.add(p0, t0), v0m = Vec3.sub(p0, t0);
+                const v1p = Vec3.add(p1, t1), v1m = Vec3.sub(p1, t1);
+
+                // Top face (2 triangles)
+                vertices.push(...v1p, ...v1m, ...v0m);
+                vertices.push(...v1p, ...v0m, ...v0p);
+            }
+
+            return new Float32Array(vertices);
+        }
 
         function onResize() {
             if (!state.device) return;
@@ -1598,13 +2129,9 @@
             if (state.depthTexture) state.depthTexture.destroy();
             state.msaaTexture = state.device.createTexture({ size: [w, h], sampleCount: 4, format: state.presentationFormat, usage: GPUTextureUsage.RENDER_ATTACHMENT });
             state.depthTexture = state.device.createTexture({ size: [w, h], sampleCount: 4, format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT });
-
             const aspect = w / h;
             const newZ = aspect < 1 ? 3.5 / aspect : 4;
-
-            if (!state.landing.active && (!state.returning || !state.returning.active)) {
-                state.cameraPos = [0, 0, newZ];
-            }
+            if (!state.landing.active && (!state.returning || !state.returning.active)) { state.cameraPos = [0, 0, newZ]; }
             if (state.returning) state.returning.targetDist = newZ;
         }
 
@@ -1615,14 +2142,20 @@
         function projectToScreen(worldPos) { const m = state.vpMatrix, x = worldPos[0], y = worldPos[1], z = worldPos[2], clipX = x * m[0] + y * m[4] + z * m[8] + m[12], clipY = x * m[1] + y * m[5] + z * m[9] + m[13], clipW = x * m[3] + y * m[7] + z * m[11] + m[15]; if (clipW <= 0) return null; return { x: (clipX / clipW + 1) * state.canvas.width / 2, y: (1 - clipY / clipW) * state.canvas.height / 2 }; }
 
         function onMouseDown(e) {
+            if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav')) return;
+
             if (state.valueScrub.active) return;
             const rect = state.canvas.getBoundingClientRect();
             state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top, down: true };
             state.clickData = { startX: state.mouse.x, startY: state.mouse.y, startTime: Date.now() };
+
+            // Reset signature for new interaction
+            state.interactionSignature = { type: 'click', path: [] };
+            state.pathPoints = [];
+            state.pathStartPos = null;
+
             if (document.body.classList.contains('light-mode')) {
                 state.inertia.val = 0;
-
-                // Check if clicking existing handle to prevent duplicate visual
                 let clickedExisting = false;
                 for (let h of state.historyHandles) {
                     const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
@@ -1632,27 +2165,155 @@
                     }
                 }
 
-                const p = getTargetPos(state.mouse.x, state.mouse.y), r = getMouseRay(state.mouse.x, state.mouse.y);
-                if (Vec3.dot(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))), Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)))) <= 1) {
-                    state.dragStart = { active: true, mouseDir: Vec3.normalize(p), sphereRotation: [...state.sphere.rotation], conePositions: state.cones.map(c => [...c.pos]), lastTrackPos: p };
-                    if (!clickedExisting) {
-                        state.handle = { active: true, pos: p, color: getSurfaceColor(p, Vec3.normalize(p)) };
-                    }
-                    state.hasRotated = true;
+                const p = getTargetPos(state.mouse.x, state.mouse.y);
+                const r = getMouseRay(state.mouse.x, state.mouse.y);
+                const hit = Vec3.dot(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))), Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)))) <= 1;
+
+                if (hit) {
+                    // Start ON sphere -> Zoom Mode
+                    state.interaction = {
+                        mode: 'zoom',
+                        hasTouchedSphere: true,
+                        startZ: state.cameraPos[2],
+                        startMouse: { x: state.mouse.x, y: state.mouse.y }
+                    };
+                    // Initialize path from current center position in LOCAL sphere coordinates
+                    const m = state.sphere.rotation;
+                    const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]]); // [0,0,1] * R^T
+                    const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100];
+                    state.pathPoints = [rounded];
+                    state.interactionSignature.path = [rounded];
+                    startDragLogic(p, clickedExisting);
+                } else {
+                    // Start OFF sphere -> Wait Mode
+                    state.interaction = { mode: 'waiting', hasTouchedSphere: false };
+                    state.handle.active = false;
+                    state.dragStart.active = false;
                 }
+
+                state.hasRotated = true;
             }
         }
-        function onMouseMove(e) { const r = state.canvas.getBoundingClientRect(); state.mouse.x = e.clientX - r.left; state.mouse.y = e.clientY - r.top; }
+
+        function startDragLogic(p, clickedExisting) {
+            state.dragStart = {
+                active: true,
+                mouseDir: Vec3.normalize(p),
+                sphereRotation: [...state.sphere.rotation],
+                conePositions: state.cones.map(c => [...c.pos]),
+                lastTrackPos: p
+            };
+            if (!clickedExisting) {
+                state.handle = {
+                    active: true,
+                    pos: p,
+                    color: getSurfaceColor(p, Vec3.normalize(p))
+                };
+            }
+        }
+
+        function onMouseMove(e) {
+            const r = state.canvas.getBoundingClientRect();
+            state.mouse.x = e.clientX - r.left;
+            state.mouse.y = e.clientY - r.top;
+
+            // Wait Mode Logic: Check if finger crossed onto sphere
+            if (state.mouse.down && state.interaction && state.interaction.mode === 'waiting') {
+                const ray = getMouseRay(state.mouse.x, state.mouse.y);
+                const closest = Vec3.add(ray.o, Vec3.scale(ray.d, Vec3.dot(Vec3.sub([0, 0, 0], ray.o), ray.d)));
+                const onSphere = Vec3.dot(closest, closest) <= 1;
+
+                if (onSphere) {
+                    const p = getTargetPos(state.mouse.x, state.mouse.y);
+                    state.interaction.mode = 'normal';
+                    state.interaction.hasTouchedSphere = true;
+                    state.interactionSignature.type = 'drag';
+                    // Initialize path from current center position in LOCAL sphere coordinates
+                    const m = state.sphere.rotation;
+                    const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]]); // [0,0,1] * R^T
+                    const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100];
+                    state.pathPoints = [rounded];
+                    state.interactionSignature.path = [rounded];
+                    startDragLogic(p, false);
+                }
+            }
+
+            // Track path during drag - record CENTER of view in local sphere coordinates
+            // The center (what camera sees) changes as sphere rotates - this is what sets background color
+            if (state.mouse.down && state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active) {
+                // The center in WORLD space is always [0, 0, 1] (pointing at camera)
+                // To get the LOCAL sphere coordinate, apply inverse rotation (transpose for orthogonal)
+                const m = state.sphere.rotation;
+                // Center point [0, 0, 1] transformed by inverse rotation
+                const localCenterPos = [m[2], m[6], m[10]]; // Third column of rotation matrix transposed = [0,0,1] * R^T
+
+                // Only add point if it moved enough from last point (avoid cluttering with tiny movements)
+                const lastPoint = state.pathPoints[state.pathPoints.length - 1];
+                if (!lastPoint || Vec3.dist(localCenterPos, lastPoint) > 0.01) {
+                    const normalized = Vec3.normalize(localCenterPos);
+                    const rounded = [Math.round(normalized[0] * 100) / 100, Math.round(normalized[1] * 100) / 100, Math.round(normalized[2] * 100) / 100];
+                    state.pathPoints.push(rounded);
+                    state.interactionSignature.type = 'drag';
+                    state.interactionSignature.path.push(rounded);
+                }
+                // Limit path size
+                if (state.pathPoints.length > 500) state.pathPoints.shift();
+                if (state.interactionSignature.path.length > 500) state.interactionSignature.path.shift();
+            }
+        }
+
         function onMouseUp(e) {
+            if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav')) return;
+
             state.mouse.down = false;
             state.handle.active = false;
+
+            // Check if we were dragging - trigger landing at current visual center
+            const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag';
+
+            state.interaction = { mode: 'none', hasTouchedSphere: false };
+
             if (state.valueScrub.active) {
                 state.valueScrub.active = false;
                 return;
             }
+
             if (document.body.classList.contains('light-mode')) {
                 const rect = state.canvas.getBoundingClientRect();
                 const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+                // If we were dragging, just zoom in without rotating - keep current sphere orientation
+                if (wasDragging) {
+                    // Get color at the current CENTER of view
+                    // Use state.cones (which have been rotated) to match the background color calculation
+                    const col = getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones);
+                    const hex = rgbToHex(col[0], col[1], col[2]);
+
+                    // Set up landing but with ZERO rotation (keep current orientation)
+                    state.landing = {
+                        active: true, progress: 0, baseRotation: [...state.sphere.rotation],
+                        startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]),
+                        handleStartPos: [0, 0, 1], showHandle: false,
+                        targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))),
+                        shouldAutoEnter: false, fromUrl: false,
+                        rotationAxis: [1, 0, 0], rotationAngle: 0 // No rotation!
+                    };
+                    state.handle.color = [...col];
+                    state.hasRotated = true;
+                    document.getElementById('color-hex').innerText = hex.toUpperCase();
+                    const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white';
+                    document.getElementById('login-card').style.color = textColor;
+                    document.getElementById('top-nav').style.setProperty('--nav-color', textColor);
+                    if (window.connectAndPreview) window.connectAndPreview(hex, false);
+
+                    // Keep path for a moment then clear
+                    setTimeout(() => {
+                        state.pathPoints = [];
+                        state.pathStartPos = null;
+                    }, 500);
+                    return;
+                }
+
                 if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) {
                     for (let h of state.historyHandles) {
                         const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
@@ -1670,75 +2331,39 @@
                     }
                 }
             }
+
+            // Clear path on mouse up
+            state.pathPoints = [];
+            state.pathStartPos = null;
         }
 
         function triggerLanding(norm, pos, col, fromUrl = false) {
             state.landing = {
-                active: true,
-                progress: 0,
-                baseRotation: [...state.sphere.rotation],
-                startDist: Vec3.len(state.cameraPos),
-                coneStartPositions: state.cones.map(c => [...c.pos]),
-                handleStartPos: [...pos],
-                // FIXED: If it is 'fromUrl' (an existing handle), we do NOT show the temporary handle.
-                // If it is new (fromUrl is false), we DO show it.
-                showHandle: !fromUrl,
-                // Refined Zoom: Closer on desktop (wide aspect) to ensure handle fills ~25% of view perceptually
+                active: true, progress: 0, baseRotation: [...state.sphere.rotation],
+                startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]),
+                handleStartPos: [...pos], showHandle: !fromUrl,
                 targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))),
-                shouldAutoEnter: fromUrl
+                shouldAutoEnter: false, fromUrl: fromUrl
             };
-
-            // Velocity-Based Inertia Init
-            // The handle is moving from its start position toward the center during zoom.
-            // When zoom completes, we continue that motion with velocity + friction.
             const startWorldPos = transformPos(pos, state.landing.baseRotation);
-
-            state.landing.offset = [0, 0]; // Current position offset from center
-
+            state.landing.offset = [0, 0];
             state.handle.color = [...col];
             state.hasRotated = true;
-
             const hex = rgbToHex(col[0], col[1], col[2]);
             document.getElementById('color-hex').innerText = hex.toUpperCase();
-
             const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white';
             document.getElementById('login-card').style.color = textColor;
             document.getElementById('top-nav').style.setProperty('--nav-color', textColor);
-
-            const cam = Vec3.normalize(state.cameraPos),
-                axis = Vec3.cross(norm, cam),
-                dot = Vec3.dot(norm, cam);
+            const cam = Vec3.normalize(state.cameraPos), axis = Vec3.cross(norm, cam), dot = Vec3.dot(norm, cam);
             state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis);
             state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot)));
-
-            // NOW calculate velocity using rotationAngle for SPEED (how fast the animation was moving)
-            // The zoom animation uses t² easing, so at t=1, the angular velocity is 2 * rotationAngle
-            // This means the end speed is proportional to rotationAngle, not raw position distance
-            const speedScale = 0.1; // Tune this for how much "kick" the inertia gets
-            const endAngularSpeed = state.landing.rotationAngle * 2; // Derivative of t² at t=1
-
-            // Direction: from start position toward center (normalized)
-            const dirX = -startWorldPos[0];
-            const dirY = startWorldPos[1];
-            const dirLen = Math.sqrt(dirX * dirX + dirY * dirY);
-
-            let vx = 0, vy = 0;
-            if (dirLen > 0.001) {
-                vx = (dirX / dirLen) * endAngularSpeed * speedScale;
-                vy = (dirY / dirLen) * endAngularSpeed * speedScale;
-            }
-            state.landing.velocity = [vx, vy];
-
             if (window.connectAndPreview) window.connectAndPreview(hex, fromUrl);
+
         }
-        function getResponsiveZ() {
-            const aspect = state.canvas.width / state.canvas.height;
-            return aspect < 1 ? 3.5 / aspect : 4;
-        }
+        function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4; }
 
         function toggleFreeze() {
             if (document.getElementById('dashboard-panel').classList.contains('active')) return;
-
             const f = document.getElementById('flash-overlay'), isFrozen = document.body.classList.toggle('light-mode');
             state.landing = { active: false, showHandle: false };
             document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
@@ -1746,28 +2371,53 @@
             f.style.backgroundColor = isFrozen ? 'white' : 'black'; document.body.style.backgroundColor = '';
             f.classList.remove('active'); void f.offsetWidth; f.classList.add('active'); setTimeout(() => f.classList.remove('active'), 0);
         }
-
         function getSurfaceColor(p, n, cones = state.cones) {
-            const getI = (i) => cones[i].active ? Math.pow(Math.max(Vec3.dot(n, Vec3.normalize(Vec3.sub(cones[i].pos, p))) + 1, 0) / 2, 2.5) * (1 / (1 + Vec3.dot(Vec3.sub(cones[i].pos, p), Vec3.sub(cones[i].pos, p)) * .05)) : 0;
-            const d = [getI(0), getI(1), getI(2)], c = cones.map(x => x.color);
-            let l = Vec3.add(Vec3.add(Vec3.scale(c[0], d[0]), Vec3.scale(c[1], d[1])), Vec3.scale(c[2], d[2])), m = Math.pow(Math.min(d[0], Math.min(d[1], d[2])), 6);
-            l = Vec3.add(l, Vec3.add(Vec3.scale(Vec3.add(c[0], c[1]), 2 * d[0] * d[1] / (d[0] + d[1] + .001) * 1.8), Vec3.add(Vec3.scale(Vec3.add(c[1], c[2]), 2 * d[1] * d[2] / (d[1] + d[2] + .001) * 1.8), Vec3.scale(Vec3.add(c[2], c[0]), 2 * d[2] * d[0] / (d[2] + d[0] + .001) * 1.8))));
-            l = Vec3.scale(Vec3.add(l, [m * 80, m * 80, m * 80]), 2);
-            const r = (x) => (x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14); return [Math.pow(r(Math.max(l[0] - .01, 0)), 1 / 2.2), Math.pow(r(Math.max(l[1] - .01, 0)), 1 / 2.2), Math.pow(r(Math.max(l[2] - .01, 0)), 1 / 2.2)];
+            const getI = (i) => {
+                if (!cones[i].active) return 0;
+                const diff = Vec3.sub(cones[i].pos, p);
+                const distSq = Vec3.dot(diff, diff);
+                const L = Vec3.normalize(diff);
+                const wrap = Math.max(Vec3.dot(n, L) + 1.0, 0.0) / 2.0;
+                const spread = Math.pow(wrap, 1.25);
+                return spread * (1.0 / (1.0 + distSq * 0.05));
+            };
+            const d = [getI(0), getI(1), getI(2)];
+            const c = cones.map(x => x.color);
+            let l = Vec3.add(Vec3.add(Vec3.scale(c[0], d[0]), Vec3.scale(c[1], d[1])), Vec3.scale(c[2], d[2]));
+            const boost = (i, j) => {
+                const sumD = d[i] + d[j] + 0.001;
+                const factor = (2.0 * d[i] * d[j] / sumD);
+                return Vec3.scale(Vec3.add(c[i], c[j]), factor);
+            };
+            l = Vec3.add(l, boost(0, 1));
+            l = Vec3.add(l, boost(1, 2));
+            l = Vec3.add(l, boost(2, 0));
+            const minD = Math.min(d[0], Math.min(d[1], d[2]));
+            const maxD = Math.max(d[0], Math.max(d[1], d[2]));
+            let t = (minD - 0.15) / (0.40 - 0.15);
+            t = Math.max(0.0, Math.min(1.0, t));
+            const maskBase = t * t * (3.0 - 2.0 * t);
+            const variance = maxD - minD;
+            const roundness = Math.exp(-variance * 10.0);
+            const finalMask = maskBase * roundness;
+            const whiteTarget = [1.0, 1.0, 1.0];
+            l = [l[0] * (1.0 - finalMask) + whiteTarget[0] * finalMask, l[1] * (1.0 - finalMask) + whiteTarget[1] * finalMask, l[2] * (1.0 - finalMask) + whiteTarget[2] * finalMask];
+            l = l.map(x => x * 1.2);
+            return l.map(x => {
+                const val = Math.min(Math.max(x, 0), 1);
+                return val * val * (3.0 - 2.0 * val);
+            });
         }
+
 
         function setupColorTooltip() {
             const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t);
             window.addEventListener('mousemove', e => {
                 if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) { t.style.display = 'none'; return; }
                 const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
-
-                // Hide tooltip when hovering over the large zoomed-in handle
                 if (state.landing.showHandle && state.handle.pos) {
                     const handleScreen = projectToScreen(state.handle.pos);
-                    if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) {
-                        t.style.display = 'none'; return;
-                    }
+                    if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return; }
                 }
                 for (let h of state.historyHandles) {
                     const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
@@ -1788,188 +2438,94 @@
             let angle = Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2))), axis = [1, 0, 0], diff = [m[6] - m[9], m[8] - m[2], m[1] - m[4]], sl = Math.sqrt(diff[0] ** 2 + diff[1] ** 2 + diff[2] ** 2);
             if (sl > 0.001) axis = [diff[0] / sl, diff[1] / sl, diff[2] / sl];
             state.returning = { active: true, progress: 0, baseRotation: m, rotationAxis: axis, rotationAngle: -angle, startDist: Vec3.len(state.cameraPos), targetDist: getResponsiveZ(), coneStartPositions: state.cones.map(c => [...c.pos]) };
-            state.landing.active = false;
-            state.landing.showHandle = false;
+            state.landing.active = false; state.landing.showHandle = false;
         };
 
         function loop(ts) {
             const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts;
-            if (document.body.classList.contains('light-mode') && state.hasRotated) document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1]));
-            if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05;
+
+            if (document.body.classList.contains('light-mode') && state.hasRotated) {
+                document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1]));
+            }
+            if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) {
+                state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05;
+            }
+
+            // --- ZOOM INTERACTION LOGIC ---
+            // Zoom based on path length - longer path = more zoom
+            let manualCameraZ = null;
+            if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') {
+                // Calculate total path length on sphere surface
+                let pathLength = 0;
+                for (let i = 1; i < state.pathPoints.length; i++) {
+                    pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]);
+                }
+
+                // Normalize: ~3.14 (half circumference) = full zoom
+                const zoomProgress = Math.min(1, pathLength / Math.PI);
+                const startZ = state.interaction.startZ;
+                const targetZ = 1.25;
+
+                manualCameraZ = startZ - (startZ - targetZ) * zoomProgress;
+                state.cameraPos = [0, 0, manualCameraZ];
+            }
 
             if (state.landing.active) {
                 state.landing.progress = Math.min(state.landing.progress + dt * .5, 1);
-                if (state.landing.progress >= 1) {
-                    document.getElementById('login-card').classList.add('visible');
+                const t = state.landing.progress;
+                if (t >= 1) {
+                    const card = document.getElementById('login-card');
+                    if (!card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = ''; }
                     if (state.landing.shouldAutoEnter) {
                         if (window.enterRoomUI) window.enterRoomUI();
                         state.landing.shouldAutoEnter = false;
                     }
                 }
-                const t = state.landing.progress, rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t);
-                let finalRot = rot;
-
-                if (state.landing.showHandle) {
-                    if (t >= 1) {
-                        state.landing.floatAlpha = Math.min((state.landing.floatAlpha || 0) + dt * 2, 1);
-                        const a = state.landing.floatAlpha;
-                        const time = ts / 1000;
-
-                        // 1. Calculate the "Rigid" position
-                        const basePos = transformPos(state.landing.handleStartPos, rot);
-
-                        // --- VELOCITY-BASED PHYSICS WITH INERTIA ---
-                        // Uses velocity + friction for natural coasting motion.
-                        // Rubber-band springs at edges pull back gently, not hard bounces.
-
-                        let offset = state.landing.offset || [0, 0];
-                        let vel = state.landing.velocity || [0, 0];
-
-                        // Breathing Force (Gentle continuous force, not instant position change)
-                        const breathFreq = 0.3;
-                        const breathAmp = 0.02; // Force amplitude
-                        const breathForceX = Math.cos(time * 0.25) * breathAmp * 0.3;
-                        const breathForceY = Math.sin(time * breathFreq) * breathAmp;
-
-                        // Mouse Influence: Attract when near center, Repel toward opposite corner when near edge
-                        const rect = state.canvas.getBoundingClientRect();
-                        const mx = ((state.mouse.x / rect.width) - 0.5) * 2;  // -1 to 1, left to right
-                        const my = ((state.mouse.y / rect.height) - 0.5) * 2; // -1 to 1, top to bottom
-
-                        // Check if mouse is on canvas
-                        const mouseOnCanvas = state.mouse.x >= 0 && state.mouse.x <= rect.width &&
-                            state.mouse.y >= 0 && state.mouse.y <= rect.height;
-
-                        let mouseForceX = 0, mouseForceY = 0;
-
-                        if (mouseOnCanvas) {
-                            // Distance from center (0 at center, 1 at edge/corner)
-                            const distFromCenter = Math.sqrt(mx * mx + my * my);
-
-                            // Blend: at center (dist=0) -> attract (factor = 1)
-                            //        at edge (dist=1)   -> repel (factor = -1)
-                            const attractRepelFactor = 1 - distFromCenter * 2; // 1 at center, -1 at edge
-
-                            const mouseForceStrength = 0.08;
-                            // When attractRepelFactor > 0: attract toward mouse (force in same direction as mouse)
-                            // When attractRepelFactor < 0: repel away from mouse (force in opposite direction)
-                            mouseForceX = mx * mouseForceStrength * attractRepelFactor;
-                            mouseForceY = my * mouseForceStrength * attractRepelFactor; // Same formula as X
-                        } else {
-                            // Mouse off canvas: attract handle toward center, but repel when close to center
-                            const handleDistFromCenter = Math.sqrt(offset[0] * offset[0] + offset[1] * offset[1]);
-                            const centerRepelZone = 0.05; // When handle is within this distance of center, repel outward
-
-                            if (handleDistFromCenter < centerRepelZone && handleDistFromCenter > 0.001) {
-                                // Repel from center - push outward
-                                const repelStrength = 0.1 * (1 - handleDistFromCenter / centerRepelZone);
-                                mouseForceX = (offset[0] / handleDistFromCenter) * repelStrength;
-                                mouseForceY = (offset[1] / handleDistFromCenter) * repelStrength;
-                            } else if (handleDistFromCenter >= centerRepelZone) {
-                                // Attract toward center
-                                const attractStrength = 0.03;
-                                mouseForceX = -offset[0] * attractStrength;
-                                mouseForceY = -offset[1] * attractStrength;
-                            }
-                        }
-
-                        // Rubber-Band Spring Force at Edges
-                        // The further past the limit, the stronger the pull back.
-                        // Uses a smooth spring: force = -k * (offset - limit) when past limit
-                        const softLimit = 0.1; // Where spring starts engaging (reduced for tighter bounds)
-                        const springK = 8.0; // Spring stiffness (increased for stronger rubber band)
-                        let springForceX = 0, springForceY = 0;
-
-                        if (offset[0] > softLimit) {
-                            springForceX = -(offset[0] - softLimit) * springK;
-                        } else if (offset[0] < -softLimit) {
-                            springForceX = -(offset[0] + softLimit) * springK;
-                        }
-                        if (offset[1] > softLimit) {
-                            springForceY = -(offset[1] - softLimit) * springK;
-                        } else if (offset[1] < -softLimit) {
-                            springForceY = -(offset[1] + softLimit) * springK;
-                        }
-
-                        // Sum all forces
-                        const totalForceX = breathForceX + mouseForceX + springForceX;
-                        const totalForceY = breathForceY + mouseForceY + springForceY;
-
-                        // Apply forces to velocity (F = ma, assuming m=1)
-                        vel[0] += totalForceX * dt;
-                        vel[1] += totalForceY * dt;
-
-                        // Friction: exponential decay for smooth slowdown
-                        const friction = Math.pow(0.3, dt); // Lower = more friction (0.3 = heavy molasses)
-                        vel[0] *= friction;
-                        vel[1] *= friction;
-
-                        // Integrate velocity to position
-                        offset[0] += vel[0] * dt;
-                        offset[1] += vel[1] * dt;
-
-                        // Update state
-                        state.landing.offset = offset;
-                        state.landing.velocity = vel;
-
-                        const finalX = offset[0];
-                        const finalY = offset[1];
-
-                        // Compute Rotation
-                        const floatRotX = Mat4.rotationAxis([0, 1, 0], finalX * a);
-                        const floatRotY = Mat4.rotationAxis([1, 0, 0], finalY * a);
-                        const floatRot = Mat4.multiply(floatRotX, floatRotY);
-
-                        // The actual position of the floating handle
-                        const handlePos = transformPos(basePos, floatRot); // Apply float rotation to the rigid point
-
-                        // Tether Sphere Rotation
-                        const bNorm = Vec3.normalize(basePos);
-                        const hNorm = Vec3.normalize(handlePos);
-                        const tetherAxis = Vec3.cross(bNorm, hNorm);
-                        // Clamp dot product to -1..1 to avoid NaN errors
-                        const tetherAngle = Math.acos(Math.min(1, Math.max(-1, Vec3.dot(bNorm, hNorm))));
-
-                        let tetherRot = Mat4.identity();
-                        if (Vec3.len(tetherAxis) > 0.001) {
-                            tetherRot = Mat4.rotationAxis(Vec3.normalize(tetherAxis), tetherAngle);
-                        }
-
-                        // Apply the tether rotation to the base rotation
-                        finalRot = Mat4.multiply(tetherRot, rot);
-
-                        // Output for Handle Visual
-                        state.landing.computedHandlePos = handlePos;
-                    }
-                }
-
-                state.sphere.rotation = Mat4.multiply(finalRot, state.landing.baseRotation);
-                state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], finalRot));
-
-                if (state.landing.showHandle && state.landing.computedHandlePos) {
-                    state.handle.pos = state.landing.computedHandlePos;
-                } else if (state.landing.showHandle) {
-                    state.handle.pos = transformPos(state.landing.handleStartPos, finalRot);
-                }
-
+                const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t);
+                if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false; }
+                state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation);
+                state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot));
                 state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t);
             }
             if (state.returning && state.returning.active) {
                 state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1);
                 const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease);
-                state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease];
+                state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation);
+                state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease];
                 state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot));
                 if (t >= 1) {
                     state.returning.active = false; state.hasRotated = false; state.sphere.rotation = Mat4.identity();
-                    state.cones = [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }];
-                    state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = "#FFFFFF";
+                    state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] }));
+                    state.cameraPos = [0, 0, getResponsiveZ()];
+                    document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = "#FFFFFF";
                     document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color');
+                    document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '';
+                }
+            }
+
+            let renderBackgroundLayer = false;
+            let bgCameraPos = [0, 0, 0];
+
+            if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0)) {
+                const zoomedInZ = state.landing.targetDist || 1.25;
+                const zoomedOutZ = state.landing.startDist || 4.0;
+                const t = state.peeking.value;
+                const ease = t * t * (3 - 2 * t);
+                const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease;
+                state.cameraPos = [0, 0, currentZ];
+                if (t > 0.01) {
+                    renderBackgroundLayer = true;
+                    bgCameraPos = [0, 0, zoomedInZ];
                 }
             }
 
             state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0]));
             if (!document.body.classList.contains('light-mode')) {
-                state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx]; } }); });
+                state.cones.forEach((c, i) => {
+                    const cache = state.uiCache[i]; if (!cache) return;
+                    if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; }
+                    ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx]; } });
+                });
                 if (state.mouse.down) {
                     const tp = getTargetPos(state.mouse.x, state.mouse.y);
                     if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; });
@@ -1977,61 +2533,92 @@
                 } else state.draggedConeIndex = -1;
                 state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95); } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2); } });
             } else if (state.mouse.down && state.dragStart.active) {
-                state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
+                state.landing.active = false; state.landing.showHandle = false;
+                document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
                 const tp = getTargetPos(state.mouse.x, state.mouse.y);
                 if (tp) {
                     state.handle.pos = tp;
-                    if (state.dragStart.lastTrackPos) {
-                        const axis = Vec3.cross(state.dragStart.lastTrackPos, tp);
-                        state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) };
-                    }
+                    if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) }; }
                     state.dragStart.lastTrackPos = tp;
-
-                    const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); }
+                    const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp));
+                    if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); }
                 }
             } else {
                 state.dragStart.active = false; state.handle.active = false;
-                if (state.inertia.val > 0.0001) {
-                    const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val);
-                    state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation);
-                    state.cones.forEach(c => c.pos = transformPos(c.pos, r));
-                    state.inertia.val *= 0.95; // CHANGE THIS NUMBER to adjust stickiness
-                }
+                if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95; }
             }
 
             if (state.device && state.pipelines.sphere && state.msaaTexture) {
-                const enc = state.device.createCommandEncoder(), pass = enc.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'discard' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'discard' } });
-                state.uniforms.sphere.set(Mat4.multiply(state.vpMatrix, state.sphere.rotation), 0); state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);
-                [0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); });
-                state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0;
-                state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere);
-                pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount);
-
-                pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16');
-
-                if (!document.body.classList.contains('light-mode')) {
-                    state.cones.forEach((c, i) => {
-                        if (c.active) {
-                            let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity());
-                            state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set(c.color, 16);
-                            state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount);
-                        }
+                const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => {
+                    state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0);
+                    state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);
+                    [0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); });
+                    state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0;
+                    state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere);
+                    const pass = encoder.beginRenderPass({
+                        colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }],
+                        depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp }
                     });
-                } else {
-                    let bindIdx = 4;
-                    if (state.handle.active || state.landing.showHandle) {
-                        state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set(state.handle.color, 16);
-                        state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount);
+                    pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount);
+                    return pass;
+                };
+
+                const drawCones = (pass) => {
+                    pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16');
+                    if (!document.body.classList.contains('light-mode')) {
+                        state.cones.forEach((c, i) => {
+                            if (c.active) {
+                                let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity());
+                                state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set([...c.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount);
+                            }
+                        });
+                    } else {
+                        let bindIdx = 4;
+                        if (state.handle.active || state.landing.showHandle) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...state.handle.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount); }
+                        state.historyHandles.forEach(h => { const wp = transformPos(h.pos, state.sphere.rotation); if (wp[2] > -0.5) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...h.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++; } });
+
+
+                        // Draw white path line on sphere surface during drag
+                        if (state.pathPoints.length > 1 && (state.dragStart.active || state.landing.active)) {
+                            const pathVerts = pathToVertices(state.pathPoints, state.sphere.rotation);
+                            if (pathVerts && pathVerts.length > 0) {
+                                // Create or update dynamic path buffer
+                                if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) {
+                                    if (state.buffers.pathVertex) state.buffers.pathVertex.destroy();
+                                    state.buffers.pathVertex = state.device.createBuffer({
+                                        size: Math.max(pathVerts.byteLength, 1024 * 12), // Pre-allocate space
+                                        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+                                    });
+                                }
+                                state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts);
+
+                                // Use identity model matrix and white color
+                                state.uniforms.cone.set(state.vpMatrix, 0);
+                                state.uniforms.cone.set([1, 1, 1, 1], 16); // White color
+                                state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone);
+
+                                pass.setPipeline(state.pipelines.cone);
+                                pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx));
+                                pass.setVertexBuffer(0, state.buffers.pathVertex);
+                                pass.draw(pathVerts.length / 3); // Draw as triangles
+                            }
+                        }
                     }
-                    state.historyHandles.forEach(h => {
-                        const wp = transformPos(h.pos, state.sphere.rotation);
-                        if (wp[2] > -0.5) {
-                            state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set(h.color, 16);
-                            state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++;
-                        }
-                    });
+                };
+
+                if (renderBackgroundLayer) {
+                    const bgEncoder = state.device.createCommandEncoder();
+                    const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0]));
+                    const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard');
+                    bgPass.end(); state.device.queue.submit([bgEncoder.finish()]);
+                    const fgEncoder = state.device.createCommandEncoder();
+                    const fgPass = drawSphere(fgEncoder, state.vpMatrix, 'load', 'discard');
+                    drawCones(fgPass); fgPass.end(); state.device.queue.submit([fgEncoder.finish()]);
+                } else {
+                    const encoder = state.device.createCommandEncoder();
+                    const pass = drawSphere(encoder, state.vpMatrix, 'clear', 'discard');
+                    drawCones(pass); pass.end(); state.device.queue.submit([encoder.finish()]);
                 }
-                pass.end(); state.device.queue.submit([enc.finish()]);
             }
             requestAnimationFrame(loop);
         }
@@ -2040,9 +2627,7 @@
         window.updateVisitedFromDB = async function () {
             const rooms = await (new window.ColorDB()).getAllRooms();
             state.historyHandles = [];
-            if (rooms?.length) {
-                rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }); });
-            }
+            if (rooms?.length) { rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }); }); }
         };
 
         window.addEventListener("message", (e) => {
@@ -2055,6 +2640,53 @@
                 }
             }
         });
+
+        // === ColorLog SDK Provider Integration ===
+        (function initSDKProvider() {
+            const params = new URLSearchParams(window.location.search);
+            const hash = window.location.hash;
+
+            // Mode 1: Silent Auth Check (?check=1)
+            if (params.get('check') === '1') {
+                const color = storageScope?.getItem?.("lastSphereColor") || localStorage.getItem("lastSphereColor");
+                if (window.parent !== window) {
+                    window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: color || null }, '*');
+                }
+                return; // Don't initialize full UI for silent check
+            }
+
+            // Mode 2: Embed Mode (#embed&owner=XXXXXX)
+            if (hash.includes('embed')) {
+                document.body.classList.add('embed-mode');
+                const ownerMatch = hash.match(/owner=([A-Fa-f0-9]{6})/);
+                const ownerHex = ownerMatch ? '#' + ownerMatch[1] : null;
+
+                // Store owner hex for potential use (e.g., fixed point on sphere)
+                if (ownerHex) {
+                    window.embedOwnerHex = ownerHex;
+                    console.log('[SDK] Embed mode with owner:', ownerHex);
+                }
+
+                // Override login button to post message to parent instead of normal flow
+                const loginBtn = document.getElementById('login-btn');
+                if (loginBtn) {
+                    loginBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const color = storageScope?.getItem?.("lastSphereColor") || localStorage.getItem("lastSphereColor");
+                        if (color && window.parent !== window) {
+                            window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
+                        }
+                    });
+                }
+
+                // Also send LOGIN_SUCCESS when user completes color selection (login flow)
+                window.notifyEmbedLogin = function (color) {
+                    if (window.parent !== window) {
+                        window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
+                    }
+                };
+            }
+        })();
 
         async function initStorageAccess() {
             if (window.self === window.top) return;
@@ -2076,6 +2708,67 @@
             } catch (e) { }
         }
         initStorageAccess();
+    </script>
+    <script>
+        // Store Owner Logic outside module (or inside if we move it, but keeping it simple)
+        // Accessing Trystero from global scope
+        function setupStoreOwner(ownerColor) {
+            const cleanColor = ownerColor.replace('#', '');
+            console.log("Setting up Store Owner P2P for", cleanColor);
+
+            // Create Store UI Container if not exists (in apps pane)
+            // We need to find where to inject it. relying on dynamic creation.
+            const storeTab = document.querySelector('[data-tab="store"]');
+            if (storeTab) {
+                storeTab.addEventListener('click', () => {
+                    // Check if we have the pane
+                    let pane = document.getElementById('tab-store');
+                    if (!pane) {
+                        // Find active content view or append to a container?
+                        // For now, we'll wait for user to implement full UI or just log.
+                    }
+                });
+            }
+
+            if (window.trystero) {
+                const { joinRoom } = window.trystero;
+                const config = { appId: 'colorlog-store' };
+                const room = joinRoom(config, 'store-' + cleanColor);
+                const [sendLogin, getLogin] = room.makeAction('customer_login');
+
+                getLogin((data, peerId) => {
+                    console.log("CUSTOMER LOGIN:", data);
+                    // Update UI
+                    // Create a notification or update list
+                    showVisitor(data);
+                });
+            }
+        }
+
+        function showVisitor(data) {
+            // Find or create visitor list
+            let list = document.getElementById('visitor-list');
+            if (!list) {
+                // Try to inject into dashboard
+                const container = document.getElementById('debug-panel'); // Reusing debug panel for visibility in demo
+                if (container) {
+                    list = document.createElement('div');
+                    list.id = 'visitor-list';
+                    list.style.marginTop = '20px';
+                    list.style.borderTop = '1px solid #444';
+                    list.innerHTML = '<h4>Active Store Visitors</h4>';
+                    container.appendChild(list);
+                    container.classList.add('visible'); // Show it
+                }
+            }
+            if (list) {
+                const item = document.createElement('div');
+                item.style.padding = '5px 0';
+                item.style.borderBottom = '1px solid #333';
+                item.innerHTML = `<span style="color:${data.color}">●</span> ${data.color} <br><small>${data.lookingAt}</small>`;
+                list.insertBefore(item, list.children[1]); // Insert after header
+            }
+        }
     </script>
 </body>
 
