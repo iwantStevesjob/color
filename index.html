@@ -3,6 +3,103 @@
 
 <head>
     <meta charset="UTF-8">
+    <script>
+        // === ColorLog SDK Provider Integration & Storage Access (MOVED TO TOP) ===
+        // This runs immediately to support fast silent authentication checks.
+        (async function initStorageAccess() {
+            let storageScope = window.localStorage;
+            const isEmbedMode = window.location.hash.includes('embed');
+            const isSilentCheck = (window.parent !== window) && !isEmbedMode; // Implicit Silent Check
+
+            if (isEmbedMode) {
+                document.documentElement.classList.add('embed-mode'); // Use documentElement to avoid flicker
+            }
+
+            const handleAccess = async (h) => {
+                try {
+                    if (h?.localStorage) storageScope = h.localStorage;
+                    const color = storageScope.getItem("lastSphereColor");
+
+                    // Always broadcast color if we have it and we are in an iframe
+                    // This satisfies "Silent Check" AND "Embed Pre-Auth"
+                    if (window.parent !== window) {
+                        // Send both types to cover all SDK versions/listeners
+                        window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: color || null }, '*');
+                        if (color) window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
+                    }
+
+                    if (color) {
+                        // Apply background immediately to avoid white flash
+                        document.documentElement.style.backgroundColor = color;
+                    }
+
+                    // SAA Overlay Logic (Only for visual embed/top level if needed)
+                    // If silent check failed to get storage (no color), we just sent null above.
+                    // If we need to PROMPT for access, we only do it if NOT silent check.
+                    if (!color && !isSilentCheck && window.parent !== window) {
+                        // Show SAA Overlay Button
+                        if (!document.getElementById('saa-overlay')) {
+                            const o = document.createElement('div'); o.id = 'saa-overlay';
+                            Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
+                            const b = document.createElement("button"); b.innerText = "🔌 Connect to Sphere";
+                            Object.assign(b.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
+                            o.appendChild(b); document.body.appendChild(o);
+                            b.onclick = async () => {
+                                try {
+                                    handleAccess(await document.requestStorageAccess({ localStorage: true }));
+                                } catch (e) { o.innerHTML = "Access Denied"; }
+                            };
+                        }
+                    } else if (document.getElementById('saa-overlay') && color) {
+                        document.getElementById('saa-overlay').remove();
+                    }
+
+                } catch (e) {
+                    if (window.parent !== window) window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: null }, '*');
+                }
+            };
+
+            // Execution
+            if (window.self === window.top) return; // Top level usually has access
+
+            try {
+                // If we have access, use it immediately
+                if (await document.hasStorageAccess()) {
+                    try { handleAccess(await document.requestStorageAccess({ localStorage: true })); } catch (e) { handleAccess(null); }
+                } else {
+                    // No access yet
+                    if (isSilentCheck) {
+                        handleAccess(null); // Fail silent check gracefully (SDK will prompt login)
+                    } else {
+                        handleAccess(null); // Will trigger SAA button logic above
+                    }
+                }
+            } catch (e) { handleAccess(null); }
+
+            // Embed Mode: Handle Owner & Login Override (Keep this logic accessible or exposed)
+            if (isEmbedMode) {
+                window.addEventListener('DOMContentLoaded', () => {
+                    // Defer button overriding to DOMContentLoaded
+                    const ownerMatch = window.location.hash.match(/owner=([A-Fa-f0-9]{6})/);
+                    if (ownerMatch) window.embedOwnerHex = '#' + ownerMatch[1];
+                    const loginBtn = document.getElementById('login-btn');
+                    if (loginBtn) {
+                        const newBtn = loginBtn.cloneNode(true);
+                        loginBtn.parentNode.replaceChild(newBtn, loginBtn);
+                        newBtn.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            const color = storageScope?.getItem?.("lastSphereColor") || localStorage.getItem("lastSphereColor");
+                            if (color && window.parent !== window) window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
+                        });
+                    }
+                });
+                window.notifyEmbedLogin = function (color) {
+                    if (window.parent !== window) window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
+                }
+            }
+
+        })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Color</title>
 
@@ -1871,16 +1968,10 @@
         const hashParams = new URLSearchParams(window.location.hash.slice(1)); // Remove #
 
         // 1. Silent Check Mode
-        if (urlParams.get('check') === '1') {
-            try {
-                const lastColor = storageScope.getItem("lastSphereColor");
-                window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: lastColor }, '*');
-            } catch (e) {
-                window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: null }, '*');
-            }
-            // Stop rendering to save resources
-            throw new Error("Silent Check Complete - Stopping Execution");
-        }
+        // We now handle implicit checks via initStorageAccess at the top (see head script), 
+        // effectively deprecating explicit ?check=1 logic in this block.
+        // However, we must ensure we don't throw errors if parameters are missing.
+
 
         // 2. Embed Mode
         let isEmbedMode = window.location.hash.includes('embed');
@@ -2623,10 +2714,10 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             requestAnimationFrame(loop);
         }
 
-        // Only run the heavy 3D app if we represent a full user session, NOT a background check
-        if (new URLSearchParams(window.location.search).get('check') !== '1') {
-            init();
-        }
+        // Only run the heavy 3D app if we represent a full user session
+        // If we are in an iframe, we typically still run unless explicitly stopped?
+        // User requested "Use the index.html file", implying standard behavior.
+        init();
 
         window.updateVisitedFromDB = async function () {
             const rooms = await (new window.ColorDB()).getAllRooms();
@@ -2645,116 +2736,7 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             }
         });
 
-        // === ColorLog SDK Provider Integration & Storage Access ===
-        async function initStorageAccess() {
-            const params = new URLSearchParams(window.location.search);
-            const isSilentCheck = params.get('check') === '1';
-            const isEmbedMode = window.location.hash.includes('embed');
 
-            if (isEmbedMode) {
-                document.body.classList.add('embed-mode');
-                // Embed mode logic handled in event listeners
-            }
-
-            // Helper to access storage and respond to SDK
-            const handleAccess = async (h) => {
-                try {
-                    if (h?.localStorage) storageScope = h.localStorage;
-                    const color = storageScope.getItem("lastSphereColor");
-
-                    if (isSilentCheck) {
-                        // Correctly format message for SDK
-                        if (window.parent !== window) {
-                            window.parent.postMessage({
-                                type: 'COLOR_CHECK_RESULT',
-                                color: color || null
-                            }, '*');
-                        }
-                        return; // Stop here for silent check
-                    }
-
-                    // Normal or Embed Mode flow
-                    if (color) {
-                        if (document.getElementById('saa-overlay')) {
-                            document.getElementById('saa-overlay').innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${color}</div>`;
-                        }
-                        document.body.style.backgroundColor = color;
-                    } else if (document.getElementById('saa-overlay')) {
-                        document.getElementById('saa-overlay').remove();
-                    }
-
-                } catch (e) {
-                    if (isSilentCheck && window.parent !== window) {
-                        window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: null }, '*');
-                    }
-                }
-            };
-
-            // Embed Mode: Handle Owner & Login Override
-            if (isEmbedMode) {
-                const ownerMatch = window.location.hash.match(/owner=([A-Fa-f0-9]{6})/);
-                if (ownerMatch) {
-                    window.embedOwnerHex = '#' + ownerMatch[1];
-                    console.log('[SDK] Embed mode with owner:', window.embedOwnerHex);
-                }
-
-                // Override Login Button for Embed Mode
-                const loginBtn = document.getElementById('login-btn');
-                if (loginBtn) {
-                    // Remove old listeners by cloning
-                    const newBtn = loginBtn.cloneNode(true);
-                    loginBtn.parentNode.replaceChild(newBtn, loginBtn);
-
-                    newBtn.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        const color = storageScope?.getItem?.("lastSphereColor") || localStorage.getItem("lastSphereColor");
-                        if (color && window.parent !== window) {
-                            window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
-                        }
-                    });
-                }
-
-                // Helper for other login triggers
-                window.notifyEmbedLogin = function (color) {
-                    if (window.parent !== window) {
-                        window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
-                    }
-                };
-            }
-
-            // SAA / Storage Request Logic
-            if (window.self === window.top && !isSilentCheck) return; // Top level doesn't need this unless testing
-
-            try {
-                if (await document.hasStorageAccess()) {
-                    try {
-                        handleAccess(await document.requestStorageAccess({ localStorage: true }));
-                    } catch (e) {
-                        handleAccess(null);
-                    }
-                } else {
-                    if (isSilentCheck) {
-                        // Cannot show overlay in silent check, must fail gracefully
-                        handleAccess(null);
-                    } else {
-                        // Show Overlay for SAA
-                        const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
-                        const b = document.createElement("button"); b.innerText = "🔌 Connect to Sphere"; Object.assign(b.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
-                        o.appendChild(b); document.body.appendChild(o);
-                        b.onclick = async () => {
-                            try {
-                                handleAccess(await document.requestStorageAccess({ localStorage: true }));
-                            } catch (e) {
-                                o.innerHTML = "Access Denied";
-                            }
-                        };
-                    }
-                }
-            } catch (e) {
-                handleAccess(null);
-            }
-        }
-        initStorageAccess();
     </script>
     <script>
         // Store Owner Logic outside module (or inside if we move it, but keeping it simple)
