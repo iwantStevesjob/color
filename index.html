@@ -63,15 +63,24 @@
             if (window.self === window.top) return; // Top level usually has access
 
             try {
-                // If we have access, use it immediately
+                // If we have access, try to use it directly first
                 if (await document.hasStorageAccess()) {
-                    try { handleAccess(await document.requestStorageAccess({ localStorage: true })); } catch (e) { handleAccess(null); }
+                    // Optimistic attempt
+                    try {
+                        // Check if we can actually read
+                        let _unused = window.localStorage.length;
+                        handleAccess(document);
+                        return;
+                    } catch (err) {
+                        // Access failed despite hasStorageAccess=true (e.g. Safari quirk), so try Requesting
+                        try { handleAccess(await document.requestStorageAccess({ localStorage: true })); } catch (e) { handleAccess(null); }
+                    }
                 } else {
                     // No access yet
                     if (isSilentCheck) {
-                        handleAccess(null); // Fail silent check gracefully (SDK will prompt login)
+                        handleAccess(null); // Fail silent check gracefully
                     } else {
-                        handleAccess(null); // Will trigger SAA button logic above
+                        handleAccess(null); // Trigger SAA
                     }
                 }
             } catch (e) { handleAccess(null); }
