@@ -3,112 +3,6 @@
 
 <head>
     <meta charset="UTF-8">
-    <script>
-        // === ColorLog SDK Provider Integration & Storage Access (MOVED TO TOP) ===
-        // This runs immediately to support fast silent authentication checks.
-        (async function initStorageAccess() {
-            let storageScope = window.localStorage;
-            const isEmbedMode = window.location.hash.includes('embed');
-            const isSilentCheck = (window.parent !== window) && !isEmbedMode; // Implicit Silent Check
-
-            if (isEmbedMode) {
-                document.documentElement.classList.add('embed-mode'); // Use documentElement to avoid flicker
-            }
-
-            const handleAccess = async (h) => {
-                try {
-                    if (h?.localStorage) storageScope = h.localStorage;
-                    const color = storageScope.getItem("lastSphereColor");
-
-                    // Always broadcast color if we have it and we are in an iframe
-                    // This satisfies "Silent Check" AND "Embed Pre-Auth"
-                    if (window.parent !== window) {
-                        // Send both types to cover all SDK versions/listeners
-                        window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: color || null }, '*');
-                        if (color) window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
-                    }
-
-                    if (color) {
-                        // Apply background immediately to avoid white flash
-                        document.documentElement.style.backgroundColor = color;
-                    }
-
-                    // SAA Overlay Logic (Only for visual embed/top level if needed)
-                    // If silent check failed to get storage (no color), we just sent null above.
-                    // If we need to PROMPT for access, we only do it if NOT silent check.
-                    if (!color && !isSilentCheck && window.parent !== window) {
-                        // Show SAA Overlay Button
-                        if (!document.getElementById('saa-overlay')) {
-                            const o = document.createElement('div'); o.id = 'saa-overlay';
-                            Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
-                            const b = document.createElement("button"); b.innerText = "🔌 Connect to Sphere";
-                            Object.assign(b.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
-                            o.appendChild(b); document.body.appendChild(o);
-                            b.onclick = async () => {
-                                try {
-                                    handleAccess(await document.requestStorageAccess({ localStorage: true }));
-                                } catch (e) { o.innerHTML = "Access Denied"; }
-                            };
-                        }
-                    } else if (document.getElementById('saa-overlay') && color) {
-                        document.getElementById('saa-overlay').remove();
-                    }
-
-                } catch (e) {
-                    if (window.parent !== window) window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: null }, '*');
-                }
-            };
-
-            // Execution
-            if (window.self === window.top) return; // Top level usually has access
-
-            try {
-                // If we have access, try to use it directly first
-                if (await document.hasStorageAccess()) {
-                    // Optimistic attempt
-                    try {
-                        // Check if we can actually read
-                        let _unused = window.localStorage.length;
-                        handleAccess(document);
-                        return;
-                    } catch (err) {
-                        // Access failed despite hasStorageAccess=true (e.g. Safari quirk), so try Requesting
-                        try { handleAccess(await document.requestStorageAccess({ localStorage: true })); } catch (e) { handleAccess(null); }
-                    }
-                } else {
-                    // No access yet
-                    if (isSilentCheck) {
-                        handleAccess(null); // Fail silent check gracefully
-                    } else {
-                        handleAccess(null); // Trigger SAA
-                    }
-                }
-            } catch (e) { handleAccess(null); }
-
-            // Embed Mode: Handle Owner & Login Override (Keep this logic accessible or exposed)
-            if (isEmbedMode) {
-                window.addEventListener('DOMContentLoaded', () => {
-                    // Defer button overriding to DOMContentLoaded
-                    const ownerMatch = window.location.hash.match(/owner=([A-Fa-f0-9]{6})/);
-                    if (ownerMatch) window.embedOwnerHex = '#' + ownerMatch[1];
-                    const loginBtn = document.getElementById('login-btn');
-                    if (loginBtn) {
-                        const newBtn = loginBtn.cloneNode(true);
-                        loginBtn.parentNode.replaceChild(newBtn, loginBtn);
-                        newBtn.addEventListener('click', (e) => {
-                            e.preventDefault();
-                            const color = storageScope?.getItem?.("lastSphereColor") || localStorage.getItem("lastSphereColor");
-                            if (color && window.parent !== window) window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
-                        });
-                    }
-                });
-                window.notifyEmbedLogin = function (color) {
-                    if (window.parent !== window) window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
-                }
-            }
-
-        })();
-    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Color</title>
 
@@ -841,42 +735,25 @@
                 border-bottom: 1px solid rgba(255, 255, 255, 0.2);
                 padding-right: 0 !important;
                 padding-bottom: 8px;
+                width: 100%;
+                justify-content: space-between;
             }
 
             .cone-data:last-child {
                 border-bottom: none;
             }
+        }
 
-            /* Embed Mode Styles */
-            body.embed-mode #top-nav,
-            body.embed-mode #sub-nav-layer,
-            body.embed-mode #dashboard-panel,
-            body.embed-mode #tracker,
-            body.embed-mode #hover-trigger,
-            body.embed-mode #tools,
-            body.embed-mode #debug-btn,
-            body.embed-mode #freeze-btn {
-                display: none !important;
-                pointer-events: none !important;
-            }
-
-            body.embed-mode #login-card {
-                opacity: 1;
-                visibility: visible;
-                pointer-events: auto;
-            }
-
-            .dummy-content {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                height: 100%;
-                color: #333;
-                font-weight: 900;
-                font-size: 3rem;
-                letter-spacing: -1px;
-            }
+        .dummy-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #333;
+            font-weight: 900;
+            font-size: 3rem;
+            letter-spacing: -1px;
         }
     </style>
 </head>
@@ -912,7 +789,7 @@
             <div class="tabs-row">
                 <div class="sub-tab active" data-tab="discover" data-group="apps">DISCOVER</div>
                 <div class="sub-tab" data-tab="installed" data-group="apps">INSTALLED</div>
-                <div class="sub-tab" data-tab="store" data-group="apps">STORE</div>
+                <div class="sub-tab" data-tab="updates" data-group="apps">UPDATES</div>
             </div>
         </div>
         <div id="header-settings" class="sub-header">
@@ -1968,48 +1845,15 @@
         window.app = new EditorApp();
     </script>
 
-    <script src="https://unpkg.com/trystero/dist/trystero.min.js"></script>
     <script type="module">
         let storageScope = window.localStorage;
-
-        // --- AUTH & EMBED LOGIC ---
-        const urlParams = new URLSearchParams(window.location.search);
-        const hashParams = new URLSearchParams(window.location.hash.slice(1)); // Remove #
-
-        // 1. Silent Check Mode
-        // We now handle implicit checks via initStorageAccess at the top (see head script), 
-        // effectively deprecating explicit ?check=1 logic in this block.
-        // However, we must ensure we don't throw errors if parameters are missing.
-
-
-        // 2. Embed Mode
-        let isEmbedMode = window.location.hash.includes('embed');
-        let ownerHex = null;
-        if (isEmbedMode) {
-            document.body.classList.add('embed-mode');
-            // Parse owner from hash string manually if URLSearchParams fails for hash
-            const hash = window.location.hash;
-            const ownerMatch = hash.match(/owner=([a-fA-F0-9]+)/);
-            if (ownerMatch) {
-                ownerHex = '#' + ownerMatch[1];
-            }
-        }
-
         document.getElementById('login-btn').addEventListener('click', async () => {
             if (document.getElementById('login-btn').innerText === 'LOGIN') {
                 try {
-                    const color = document.getElementById('color-hex').innerText;
-                    storageScope.setItem("lastSphereColor", color);
-
-                    if (isEmbedMode) {
-                        try {
-                            window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
-                        } catch (e) { }
-                        return;
-                    }
+                    storageScope.setItem("lastSphereColor", document.getElementById('color-hex').innerText);
                 } catch (e) { }
             }
-            if (!isEmbedMode && window.enterRoomUI) window.enterRoomUI();
+            if (window.enterRoomUI) window.enterRoomUI();
         });
 
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) };
@@ -2087,40 +1931,9 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             };
             document.getElementById('reset-btn').onclick = async () => { if (confirm("Permanently wipe all local data?")) { localStorage.clear(); try { const dbs = await window.indexedDB.databases(); for (const db of dbs) { await window.indexedDB.deleteDatabase(db.name); } } catch (e) { } window.location.reload(); } };
 
-            // Initialize Store Owner Logic if not in embed mode
-            if (!isEmbedMode && localStorage.getItem('lastSphereColor')) {
-                setupStoreOwner(localStorage.getItem('lastSphereColor'));
-            }
-
-            // Inject Owner Cone if in Embed Mode
-            if (isEmbedMode && ownerHex) {
-                const ownerPos = findPositionFromColor(ownerHex) || [0, 0.5, 0]; // Fallback pos
-                const ownerColor = hexToRgbNormalized(ownerHex);
-
-                // Add fixed cone for Owner
-                state.cones.push({
-                    color: ownerColor,
-                    pos: ownerPos,
-                    vel: [0, 0, 0],
-                    name: "STORE",
-                    cssColor: ownerHex,
-                    active: true,
-                    isOwner: true
-                });
-
-                // Override default cones if desired, or keep them? 
-                // User said "only modified to allow the 'Store Owner' color to be injected"
-                // We keep defaults for variety? Or replace them? 
-                // "The full WebGPU engine must be preserved... adding Store Owner color... as a fixed point"
-                // We'll keep defaults + Owner.
-            }
-
             state.cones.forEach((c, i) => {
-                // If it's the owner cone, skipped UI generation or specialized it?
-                // Existing code generates UI based on index.
                 const el = document.getElementById(`data-${i}`);
-                if (!el) return; // Original code only has 3 slots in HTML (data-0, data-1, data-2). New cone won't have UI, which is good.
-
+                if (!el) return;
                 el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`;
                 const title = document.getElementById(`title-${i}`);
                 title.addEventListener('click', (e) => { if (!document.body.classList.contains('light-mode')) { e.stopPropagation(); state.cones[i].active = !state.cones[i].active; } });
@@ -2158,8 +1971,7 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             });
             state.bindGroups.sphere = dev.createBindGroup({ layout: state.pipelines.sphere.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.sphereUniform } }] });
             state.getBindGroupForHandle = (idx) => dev.createBindGroup({ layout: state.pipelines.cone.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.coneUniform, offset: idx * 256, size: 80 } }] });
-            // Update to map all cones, including potential dynamic ones
-            state.bindGroups.cones = state.cones.map((_, i) => state.getBindGroupForHandle(i));
+            state.bindGroups.cones = [0, 1, 2, 3].map(i => state.getBindGroupForHandle(i));
         }
 
         function createBuffer(dev, data, usage) { const buf = dev.createBuffer({ size: data.byteLength, usage: usage | GPUBufferUsage.COPY_DST, mappedAtCreation: true }); (data instanceof Float32Array ? new Float32Array(buf.getMappedRange()) : new Uint16Array(buf.getMappedRange())).set(data); buf.unmap(); return buf; }
@@ -2722,10 +2534,6 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             }
             requestAnimationFrame(loop);
         }
-
-        // Only run the heavy 3D app if we represent a full user session
-        // If we are in an iframe, we typically still run unless explicitly stopped?
-        // User requested "Use the index.html file", implying standard behavior.
         init();
 
         window.updateVisitedFromDB = async function () {
@@ -2745,68 +2553,26 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             }
         });
 
-
-    </script>
-    <script>
-        // Store Owner Logic outside module (or inside if we move it, but keeping it simple)
-        // Accessing Trystero from global scope
-        function setupStoreOwner(ownerColor) {
-            const cleanColor = ownerColor.replace('#', '');
-            console.log("Setting up Store Owner P2P for", cleanColor);
-
-            // Create Store UI Container if not exists (in apps pane)
-            // We need to find where to inject it. relying on dynamic creation.
-            const storeTab = document.querySelector('[data-tab="store"]');
-            if (storeTab) {
-                storeTab.addEventListener('click', () => {
-                    // Check if we have the pane
-                    let pane = document.getElementById('tab-store');
-                    if (!pane) {
-                        // Find active content view or append to a container?
-                        // For now, we'll wait for user to implement full UI or just log.
-                    }
-                });
-            }
-
-            if (window.trystero) {
-                const { joinRoom } = window.trystero;
-                const config = { appId: 'colorlog-store' };
-                const room = joinRoom(config, 'store-' + cleanColor);
-                const [sendLogin, getLogin] = room.makeAction('customer_login');
-
-                getLogin((data, peerId) => {
-                    console.log("CUSTOMER LOGIN:", data);
-                    // Update UI
-                    // Create a notification or update list
-                    showVisitor(data);
-                });
-            }
-        }
-
-        function showVisitor(data) {
-            // Find or create visitor list
-            let list = document.getElementById('visitor-list');
-            if (!list) {
-                // Try to inject into dashboard
-                const container = document.getElementById('debug-panel'); // Reusing debug panel for visibility in demo
-                if (container) {
-                    list = document.createElement('div');
-                    list.id = 'visitor-list';
-                    list.style.marginTop = '20px';
-                    list.style.borderTop = '1px solid #444';
-                    list.innerHTML = '<h4>Active Store Visitors</h4>';
-                    container.appendChild(list);
-                    container.classList.add('visible'); // Show it
+        async function initStorageAccess() {
+            if (window.self === window.top) return;
+            const access = async (h) => {
+                try {
+                    if (h?.localStorage) storageScope = h.localStorage;
+                    const c = storageScope.getItem("lastSphereColor");
+                    if (c) { window.parent.postMessage(c, "*"); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${c}</div>`; document.body.style.backgroundColor = c; }
+                    else if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove();
+                } catch (e) { }
+            };
+            try {
+                if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true })); } catch (e) { access(null); }
+                else {
+                    const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
+                    const b = document.createElement("button"); b.innerText = "🔌 Connect to Sphere"; Object.assign(b.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
+                    o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true })); } catch (e) { o.innerHTML = "Access Denied"; } };
                 }
-            }
-            if (list) {
-                const item = document.createElement('div');
-                item.style.padding = '5px 0';
-                item.style.borderBottom = '1px solid #333';
-                item.innerHTML = `<span style="color:${data.color}">●</span> ${data.color} <br><small>${data.lookingAt}</small>`;
-                list.insertBefore(item, list.children[1]); // Insert after header
-            }
+            } catch (e) { }
         }
+        initStorageAccess();
     </script>
 </body>
 
