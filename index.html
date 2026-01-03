@@ -2641,36 +2641,67 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             }
         });
 
-        // === ColorLog SDK Provider Integration ===
-        (function initSDKProvider() {
+        // === ColorLog SDK Provider Integration & Storage Access ===
+        async function initStorageAccess() {
             const params = new URLSearchParams(window.location.search);
-            const hash = window.location.hash;
+            const isSilentCheck = params.get('check') === '1';
+            const isEmbedMode = window.location.hash.includes('embed');
 
-            // Mode 1: Silent Auth Check (?check=1)
-            if (params.get('check') === '1') {
-                const color = storageScope?.getItem?.("lastSphereColor") || localStorage.getItem("lastSphereColor");
-                if (window.parent !== window) {
-                    window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: color || null }, '*');
-                }
-                return; // Don't initialize full UI for silent check
+            if (isEmbedMode) {
+                document.body.classList.add('embed-mode');
+                // Embed mode logic handled in event listeners
             }
 
-            // Mode 2: Embed Mode (#embed&owner=XXXXXX)
-            if (hash.includes('embed')) {
-                document.body.classList.add('embed-mode');
-                const ownerMatch = hash.match(/owner=([A-Fa-f0-9]{6})/);
-                const ownerHex = ownerMatch ? '#' + ownerMatch[1] : null;
+            // Helper to access storage and respond to SDK
+            const handleAccess = async (h) => {
+                try {
+                    if (h?.localStorage) storageScope = h.localStorage;
+                    const color = storageScope.getItem("lastSphereColor");
 
-                // Store owner hex for potential use (e.g., fixed point on sphere)
-                if (ownerHex) {
-                    window.embedOwnerHex = ownerHex;
-                    console.log('[SDK] Embed mode with owner:', ownerHex);
+                    if (isSilentCheck) {
+                        // Correctly format message for SDK
+                        if (window.parent !== window) {
+                            window.parent.postMessage({
+                                type: 'COLOR_CHECK_RESULT',
+                                color: color || null
+                            }, '*');
+                        }
+                        return; // Stop here for silent check
+                    }
+
+                    // Normal or Embed Mode flow
+                    if (color) {
+                        if (document.getElementById('saa-overlay')) {
+                            document.getElementById('saa-overlay').innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${color}</div>`;
+                        }
+                        document.body.style.backgroundColor = color;
+                    } else if (document.getElementById('saa-overlay')) {
+                        document.getElementById('saa-overlay').remove();
+                    }
+
+                } catch (e) {
+                    if (isSilentCheck && window.parent !== window) {
+                        window.parent.postMessage({ type: 'COLOR_CHECK_RESULT', color: null }, '*');
+                    }
+                }
+            };
+
+            // Embed Mode: Handle Owner & Login Override
+            if (isEmbedMode) {
+                const ownerMatch = window.location.hash.match(/owner=([A-Fa-f0-9]{6})/);
+                if (ownerMatch) {
+                    window.embedOwnerHex = '#' + ownerMatch[1];
+                    console.log('[SDK] Embed mode with owner:', window.embedOwnerHex);
                 }
 
-                // Override login button to post message to parent instead of normal flow
+                // Override Login Button for Embed Mode
                 const loginBtn = document.getElementById('login-btn');
                 if (loginBtn) {
-                    loginBtn.addEventListener('click', (e) => {
+                    // Remove old listeners by cloning
+                    const newBtn = loginBtn.cloneNode(true);
+                    loginBtn.parentNode.replaceChild(newBtn, loginBtn);
+
+                    newBtn.addEventListener('click', (e) => {
                         e.preventDefault();
                         const color = storageScope?.getItem?.("lastSphereColor") || localStorage.getItem("lastSphereColor");
                         if (color && window.parent !== window) {
@@ -2679,33 +2710,45 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
                     });
                 }
 
-                // Also send LOGIN_SUCCESS when user completes color selection (login flow)
+                // Helper for other login triggers
                 window.notifyEmbedLogin = function (color) {
                     if (window.parent !== window) {
                         window.parent.postMessage({ type: 'LOGIN_SUCCESS', color: color }, '*');
                     }
                 };
             }
-        })();
 
-        async function initStorageAccess() {
-            if (window.self === window.top) return;
-            const access = async (h) => {
-                try {
-                    if (h?.localStorage) storageScope = h.localStorage;
-                    const c = storageScope.getItem("lastSphereColor");
-                    if (c) { window.parent.postMessage(c, "*"); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${c}</div>`; document.body.style.backgroundColor = c; }
-                    else if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove();
-                } catch (e) { }
-            };
+            // SAA / Storage Request Logic
+            if (window.self === window.top && !isSilentCheck) return; // Top level doesn't need this unless testing
+
             try {
-                if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true })); } catch (e) { access(null); }
-                else {
-                    const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
-                    const b = document.createElement("button"); b.innerText = "🔌 Connect to Sphere"; Object.assign(b.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
-                    o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true })); } catch (e) { o.innerHTML = "Access Denied"; } };
+                if (await document.hasStorageAccess()) {
+                    try {
+                        handleAccess(await document.requestStorageAccess({ localStorage: true }));
+                    } catch (e) {
+                        handleAccess(null);
+                    }
+                } else {
+                    if (isSilentCheck) {
+                        // Cannot show overlay in silent check, must fail gracefully
+                        handleAccess(null);
+                    } else {
+                        // Show Overlay for SAA
+                        const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' });
+                        const b = document.createElement("button"); b.innerText = "🔌 Connect to Sphere"; Object.assign(b.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" });
+                        o.appendChild(b); document.body.appendChild(o);
+                        b.onclick = async () => {
+                            try {
+                                handleAccess(await document.requestStorageAccess({ localStorage: true }));
+                            } catch (e) {
+                                o.innerHTML = "Access Denied";
+                            }
+                        };
+                    }
                 }
-            } catch (e) { }
+            } catch (e) {
+                handleAccess(null);
+            }
         }
         initStorageAccess();
     </script>
