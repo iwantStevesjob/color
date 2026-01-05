@@ -1,149 +1,47 @@
-/**
- * ColorLog SDK (color.js)
- * Bridges third-party sites with the ColorLog Identity Provider.
- */
-class ColorLogSDK {
-    constructor() {
-        this.providerOrigin = 'https://www.colorlog.in'; // Default
-        this.ownerHex = null;
-        this.callbacks = {};
-        this.p2pRoom = null;
-        this.identity = null;
-    }
+window.Color = {
+    init: async function (config = {}) {
+        const { appId = 'red_tshirt_v2_secure', roomId = 'main_hall', action = 'store_ops' } = config;
 
-    /**
-     * Initialize the SDK
-     * @param {Object} config - { ownerHex, providerUrl? }
-     */
-    init(config) {
-        this.ownerHex = config.ownerHex;
-        if (config.providerUrl) this.providerOrigin = config.providerUrl;
-
-        window.addEventListener('message', (e) => this._handleMessage(e));
-
-        // Initialize Trystero or P2P equivalent here if needed, 
-        // but typically we wait for authentication to broadcast.
-        console.log('ColorLog SDK Initialized for Owner:', this.ownerHex);
-    }
-
-    /**
-     * Check for silent authentication (existing session)
-     * @returns {Promise<string|null>} Resolves with color hex if logged in, null otherwise
-     */
-    checkAuth() {
-        return new Promise((resolve) => {
-            const iframe = document.createElement('iframe');
-            // Use 0-size instead of display:none to ensure script execution in strict environments
-            iframe.style.position = 'absolute';
-            iframe.style.width = '0';
-            iframe.style.height = '0';
-            iframe.style.border = 'none';
-            iframe.allow = "storage-access";
-            iframe.src = `${this.providerOrigin}`;
-            document.body.appendChild(iframe);
-
-            const timeout = setTimeout(() => {
-                document.body.removeChild(iframe);
-                resolve(null);
-            }, 5000);
-
-            this.callbacks['COLOR_CHECK_RESULT'] = (data) => {
-                clearTimeout(timeout);
-                document.body.removeChild(iframe);
-                if (data.color) {
-                    this.identity = data.color;
-                    this._connectToStoreP2P();
-                    resolve(data.color);
-                } else {
-                    resolve(null);
-                }
-            };
-        });
-    }
-
-    /**
-     * Trigger visual 3D Login
-     * @param {string} containerId - Element ID to mount the login frame
-     */
-    requestLogin(containerId) {
-        const container = document.getElementById(containerId);
-        if (!container) throw new Error(`Container ${containerId} not found`);
-
-        container.innerHTML = '';
+        // Inject Iframe
         const iframe = document.createElement('iframe');
-        iframe.src = `${this.providerOrigin}#embed&owner=${this.ownerHex.replace('#', '')}`;
-        iframe.style.width = '100%';
-        iframe.style.height = '100%';
-        iframe.style.border = 'none';
-        // WebGPU runs in the iframe's own context, no special permissions needed
-        container.appendChild(iframe);
+        iframe.id = 'color-widget';
+        iframe.src = 'https://colorlog.in';
+        iframe.allow = 'storage-access';
 
-        return new Promise((resolve) => {
-            this.callbacks['LOGIN_SUCCESS'] = (data) => {
-                this.identity = data.color;
-                this._connectToStoreP2P();
-                resolve(data.color);
-                // Optional: Remove iframe or keep it for customization?
-                // For now, we leave it as user might want to customize.
-            };
+        // Basic styles to ensure visibility if not styled by host
+        if (!document.getElementById('color-widget-styles')) {
+            const style = document.createElement('style');
+            style.id = 'color-widget-styles';
+            style.textContent = `
+                 #color-widget {
+                     width: 320px;
+                     height: 160px;
+                     border: 2px solid #000;
+                     border-radius: 12px;
+                     background: white;
+                     display: block;
+                     margin: 20px auto; 
+                 }
+                 .hidden { display: none !important; }
+             `;
+            document.head.appendChild(style);
+        }
+
+        document.body.appendChild(iframe);
+
+        // Listen for Color Messages
+        window.addEventListener('message', (event) => {
+            if (event.origin !== "https://colorlog.in") return;
+            if (typeof event.data === 'string' && event.data.startsWith('#')) {
+                document.body.style.backgroundColor = event.data;
+            }
         });
+
+        // Initialize Trystero
+        const { joinRoom } = await import('https://cdn.jsdelivr.net/npm/trystero@0.16.0/+esm');
+        const room = joinRoom({ appId }, roomId);
+        const [send, get] = room.makeAction(action);
+
+        return { room, send, get, iframe };
     }
-
-    _handleMessage(event) {
-        if (event.origin !== this.providerOrigin) return; // Security check
-
-        let type, data;
-
-        if (typeof event.data === 'string' && event.data.startsWith('#')) {
-            // Legacy Emulation: Provider sent raw color string
-            type = 'COLOR_CHECK_RESULT';
-            data = { color: event.data };
-        } else {
-            // Standard JSON Protocol
-            ({ type, ...data } = event.data);
-        }
-        if (this.callbacks[type]) {
-            this.callbacks[type](data);
-        }
-    }
-
-    async _connectToStoreP2P() {
-        if (!this.identity || !this.ownerHex) return;
-
-        console.log(`Joining P2P Room: store-${this.ownerHex.replace('#', '')} as ${this.identity}`);
-
-        // Dynamic import of Trystero (served by provider or bundled?)
-        // Assuming Trystero is available globally or we load it. 
-        // For this implementation, we'll try to load it from CDN if not present.
-        if (!window.trystero) {
-            await this._loadScript('https://cdn.jsdelivr.net/npm/trystero@0.16.0/dist/trystero-torrent.min.js');
-        }
-
-        const config = { appId: 'colorlog-store' };
-        this.p2pRoom = window.trystero.joinRoom(config, `store-${this.ownerHex.replace('#', '')}`);
-
-        const [sendLogin, getLogin] = this.p2pRoom.makeAction('customer_login');
-
-        // Broadcast presence
-        // We defer slightly to ensure connection
-        setTimeout(() => {
-            sendLogin({
-                color: this.identity,
-                timestamp: Date.now(),
-                lookingAt: window.location.href
-            });
-        }, 1000);
-    }
-
-    _loadScript(src) {
-        return new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = src;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
-    }
-}
-
-window.ColorSDK = new ColorLogSDK();
+};
