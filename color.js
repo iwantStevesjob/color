@@ -75,6 +75,11 @@ window.Color = {
                         pendingGetCallbacks.forEach(cb => get(cb));
                         pendingGetCallbacks = [];
                     }
+
+                    if (window._colorPendingRoomCallbacks && window._colorPendingRoomCallbacks.length > 0) {
+                        window._colorPendingRoomCallbacks.forEach(cb => cb(room));
+                        window._colorPendingRoomCallbacks = [];
+                    }
                 }
             }
 
@@ -88,11 +93,28 @@ window.Color = {
         return {
             iframe,
             send: (data) => { if (send) send(data); },
-            get: (cb) => {
-                if (get) get(cb);
-                else pendingGetCallbacks.push(cb);
-            },
-            get room() { return room; }
+            get room() {
+                if (room) return room;
+                return {
+                    onPeerJoin: (cb) => {
+                        // If we already have a room, just forward (shouldn't happen due to if above, but safely)
+                        if (room) return room.onPeerJoin(cb);
+
+                        // Otherwise queue it
+                        // We'll hijack the get callback to also check for room readiness if we want,
+                        // or just add a specific queue for room actions.
+                        // Let's reuse pendingGetCallbacks or create a new one.
+                        // Ideally we need a pendingRoomCallbacks list.
+                        if (!window._colorPendingRoomCallbacks) window._colorPendingRoomCallbacks = [];
+                        window._colorPendingRoomCallbacks.push((r) => r.onPeerJoin(cb));
+                    },
+                    onPeerLeave: (cb) => {
+                        if (room) return room.onPeerLeave(cb);
+                        if (!window._colorPendingRoomCallbacks) window._colorPendingRoomCallbacks = [];
+                        window._colorPendingRoomCallbacks.push((r) => r.onPeerLeave(cb));
+                    }
+                };
+            }
         };
     }
 };
