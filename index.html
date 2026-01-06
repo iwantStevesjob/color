@@ -2392,7 +2392,6 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
                         if (window.enterRoomUI) window.enterRoomUI();
                         state.landing.shouldAutoEnter = false;
                     }
-                    window.parent.postMessage({ type: 'zoom-finished' }, '*');
                 }
                 const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t);
                 if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false; }
@@ -2556,12 +2555,49 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
 
         async function initStorageAccess() {
             if (window.self === window.top) return;
+
+            // Function to trigger zoom animation and notify parent when done
+            const triggerZoomToColor = (hexColor) => {
+                const matchPos = findPositionFromColor(hexColor);
+                if (matchPos) {
+                    // Switch to light mode for zoomed-in sphere view
+                    if (!document.body.classList.contains('light-mode')) {
+                        document.body.classList.add('light-mode');
+                    }
+
+                    // Trigger the landing animation
+                    triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true);
+
+                    // Watch for animation completion and send zoom-done
+                    const checkLandingComplete = () => {
+                        if (state.landing.progress >= 1) {
+                            // Animation complete, send zoom-done to parent
+                            window.parent.postMessage({ type: 'zoom-done', color: hexColor }, "*");
+                        } else if (state.landing.active) {
+                            requestAnimationFrame(checkLandingComplete);
+                        }
+                    };
+                    requestAnimationFrame(checkLandingComplete);
+                }
+            };
+
             const access = async (h) => {
                 try {
                     if (h?.localStorage) storageScope = h.localStorage;
                     const c = storageScope.getItem("lastSphereColor");
-                    if (c) { window.parent.postMessage(c, "*"); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').innerHTML = `<div style="font-family:sans-serif; color:green; font-weight:bold; text-align:center;">Synced: ${c}</div>`; document.body.style.backgroundColor = c; }
-                    else if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove();
+                    if (c) {
+                        // Send color immediately for background styling
+                        window.parent.postMessage(c, "*");
+                        if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove();
+                        document.body.style.backgroundColor = c;
+
+                        // Trigger the zoom animation
+                        triggerZoomToColor(c);
+                    } else {
+                        // No color stored - notify parent so it doesn't show product
+                        window.parent.postMessage({ type: 'no-color' }, "*");
+                        if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove();
+                    }
                 } catch (e) { }
             };
             try {
