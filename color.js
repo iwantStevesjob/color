@@ -10,7 +10,7 @@ window.Color = {
 
         // User requested: "the room id should be the hex code"
         // So we use roomId directly. default is #ffffff.
-        const RoomId = "color-" + hex;
+        const RoomId = "color-" + color;
 
         // Inject Iframe
         const iframe = document.createElement('iframe');
@@ -60,3 +60,4 @@ window.Color = {
         return { room, send, get, iframe };
     }
 };
+
