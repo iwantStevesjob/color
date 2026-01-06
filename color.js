@@ -93,6 +93,10 @@ window.Color = {
         return {
             iframe,
             send: (data) => { if (send) send(data); },
+            get: (cb) => {
+                if (get) get(cb);
+                else pendingGetCallbacks.push(cb);
+            },
             get room() {
                 if (room) return room;
                 return {
