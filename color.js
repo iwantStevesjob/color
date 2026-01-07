@@ -7,8 +7,8 @@ window.Color = {
             targetDiv
         } = config;
 
-        // Room ID
-        const RoomId = "color-" + color;
+        // Store Owner Room ID
+        const storeRoomId = "color-" + color;
 
         // Trystero P2P connection module
         const Trystero = await import('https://cdn.jsdelivr.net/npm/trystero@0.16.0/+esm');
@@ -43,7 +43,7 @@ window.Color = {
                     width: 100vw;
                     height: 100vh;
                     border: none;
-                    z-index: 1;
+                    z-index: 9999;
                     background: transparent;
                 }
                 .hidden { display: none !important; }
@@ -64,8 +64,8 @@ window.Color = {
 
                 // Trigger P2P Connection to Store Owner's Room
                 if (!room) {
-                    console.log("Connecting to Room:", RoomId);
-                    room = Trystero.joinRoom({ appId: planet }, RoomId);
+                    console.log("Connecting to Store Room:", storeRoomId);
+                    room = Trystero.joinRoom({ appId: planet }, storeRoomId);
                     const actions = room.makeAction(action);
                     send = actions[0];
                     get = actions[1];
@@ -74,11 +74,6 @@ window.Color = {
                     if (pendingGetCallbacks.length > 0) {
                         pendingGetCallbacks.forEach(cb => get(cb));
                         pendingGetCallbacks = [];
-                    }
-
-                    if (window._colorPendingRoomCallbacks && window._colorPendingRoomCallbacks.length > 0) {
-                        window._colorPendingRoomCallbacks.forEach(cb => cb(room));
-                        window._colorPendingRoomCallbacks = [];
                     }
                 }
             }
@@ -97,28 +92,7 @@ window.Color = {
                 if (get) get(cb);
                 else pendingGetCallbacks.push(cb);
             },
-            get room() {
-                if (room) return room;
-                return {
-                    onPeerJoin: (cb) => {
-                        // If we already have a room, just forward (shouldn't happen due to if above, but safely)
-                        if (room) return room.onPeerJoin(cb);
-
-                        // Otherwise queue it
-                        // We'll hijack the get callback to also check for room readiness if we want,
-                        // or just add a specific queue for room actions.
-                        // Let's reuse pendingGetCallbacks or create a new one.
-                        // Ideally we need a pendingRoomCallbacks list.
-                        if (!window._colorPendingRoomCallbacks) window._colorPendingRoomCallbacks = [];
-                        window._colorPendingRoomCallbacks.push((r) => r.onPeerJoin(cb));
-                    },
-                    onPeerLeave: (cb) => {
-                        if (room) return room.onPeerLeave(cb);
-                        if (!window._colorPendingRoomCallbacks) window._colorPendingRoomCallbacks = [];
-                        window._colorPendingRoomCallbacks.push((r) => r.onPeerLeave(cb));
-                    }
-                };
-            }
+            get room() { return room; }
         };
     }
 };
