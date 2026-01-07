@@ -2272,9 +2272,6 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot)));
             if (window.connectAndPreview) window.connectAndPreview(hex, fromUrl);
 
-            // Notify parent of color selection (supports re-login flow)
-            if (window.parent !== window) window.parent.postMessage(hex, '*');
-
             // UI Refinement: Swap freeze button to X with delay
             setTimeout(() => {
                 const btn = document.getElementById('freeze-btn');
@@ -2289,28 +2286,17 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
 
         function toggleFreeze() {
             if (document.getElementById('dashboard-panel').classList.contains('active')) return;
-
-            // FIX: If we are in landing mode (zoomed in), this button acts as "Back/Reset"
-            if (state.landing && state.landing.active) {
-                state.landing = { active: false, showHandle: false };
-                document.getElementById('login-card').classList.remove('visible');
-                state.cameraPos = [0, 0, getResponsiveZ()];
-
-                // Send signal to parent to hide product card
-                window.parent.postMessage({ type: 'cancel-color' }, '*');
-
-                // Restore Lightbulb icon
-                const btn = document.getElementById('freeze-btn');
-                btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
-                btn.style.opacity = '1';
-                return; // Early return to AVOID toggling dark mode
-            }
-
             const f = document.getElementById('flash-overlay'), isFrozen = document.body.classList.toggle('light-mode');
-
-            // ... (rest of dark mode toggle logic if needed, but since we returned above, this only runs for light/dark toggle)
+            state.landing = { active: false, showHandle: false };
+            document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
+            state.cameraPos = [0, 0, getResponsiveZ()];
             f.style.backgroundColor = isFrozen ? 'white' : 'black'; document.body.style.backgroundColor = '';
             f.classList.remove('active'); void f.offsetWidth; f.classList.add('active'); setTimeout(() => f.classList.remove('active'), 0);
+
+            // Restore Lightbulb icon
+            const btn = document.getElementById('freeze-btn');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
+            btn.style.opacity = '1';
         }
         function getSurfaceColor(p, n, cones = state.cones) {
             const getI = (i) => {
@@ -2394,6 +2380,7 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
 
             // --- ZOOM INTERACTION LOGIC ---
             // Zoom based on path length - longer path = more zoom
+            let manualCameraZ = null;
             if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') {
                 // Calculate total path length on sphere surface
                 let pathLength = 0;
@@ -2406,7 +2393,7 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
                 const startZ = state.interaction.startZ;
                 const targetZ = 1.25;
 
-                var manualCameraZ = startZ - (startZ - targetZ) * zoomProgress;
+                manualCameraZ = startZ - (startZ - targetZ) * zoomProgress;
                 state.cameraPos = [0, 0, manualCameraZ];
             }
 
@@ -2421,151 +2408,144 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
                         state.landing.shouldAutoEnter = false;
                     }
                 }
-
                 const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t);
-                if (state.landing.showHandle) {
-                    state.handle.pos = transformPos(state.landing.handleStartPos, rot);
-                    if (t >= 1) {
-                        state.landing.showHandle = false;
-                        state.handle.pos = [0, 0, 0]; // Move to center/hide effectively
-                    }
-                }
+                if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false; }
                 state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation);
                 state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot));
                 state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t);
             }
-        }
-        if (state.returning && state.returning.active) {
-            state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1);
-            const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease);
-            state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation);
-            state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease];
-            state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot));
-            if (t >= 1) {
-                state.returning.active = false; state.hasRotated = false; state.sphere.rotation = Mat4.identity();
-                state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] }));
-                state.cameraPos = [0, 0, getResponsiveZ()];
-                document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = "#FFFFFF";
-                document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color');
-                document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '';
+            if (state.returning && state.returning.active) {
+                state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1);
+                const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease);
+                state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation);
+                state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease];
+                state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot));
+                if (t >= 1) {
+                    state.returning.active = false; state.hasRotated = false; state.sphere.rotation = Mat4.identity();
+                    state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] }));
+                    state.cameraPos = [0, 0, getResponsiveZ()];
+                    document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = "#FFFFFF";
+                    document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color');
+                    document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '';
+                }
             }
-        }
 
-        let renderBackgroundLayer = false;
-        let bgCameraPos = [0, 0, 0];
+            let renderBackgroundLayer = false;
+            let bgCameraPos = [0, 0, 0];
 
-        if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0)) {
-            const zoomedInZ = state.landing.targetDist || 1.25;
-            const zoomedOutZ = state.landing.startDist || 4.0;
-            const t = state.peeking.value;
-            const ease = t * t * (3 - 2 * t);
-            const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease;
-            state.cameraPos = [0, 0, currentZ];
-            if (t > 0.01) {
-                renderBackgroundLayer = true;
-                bgCameraPos = [0, 0, zoomedInZ];
+            if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0)) {
+                const zoomedInZ = state.landing.targetDist || 1.25;
+                const zoomedOutZ = state.landing.startDist || 4.0;
+                const t = state.peeking.value;
+                const ease = t * t * (3 - 2 * t);
+                const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease;
+                state.cameraPos = [0, 0, currentZ];
+                if (t > 0.01) {
+                    renderBackgroundLayer = true;
+                    bgCameraPos = [0, 0, zoomedInZ];
+                }
             }
-        }
 
-        state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0]));
-        if (!document.body.classList.contains('light-mode')) {
-            state.cones.forEach((c, i) => {
-                const cache = state.uiCache[i]; if (!cache) return;
-                if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; }
-                ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx]; } });
-            });
-            if (state.mouse.down) {
-                const tp = getTargetPos(state.mouse.x, state.mouse.y);
-                if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; });
-                if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np; }
-            } else state.draggedConeIndex = -1;
-            state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95); } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2); } });
-        } else if (state.mouse.down && state.dragStart.active) {
-            state.landing.active = false; state.landing.showHandle = false;
-            document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
-            const tp = getTargetPos(state.mouse.x, state.mouse.y);
-            if (tp) {
-                state.handle.pos = tp;
-                if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) }; }
-                state.dragStart.lastTrackPos = tp;
-                const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp));
-                if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); }
-            }
-        } else {
-            state.dragStart.active = false; state.handle.active = false;
-            if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95; }
-        }
-
-        if (state.device && state.pipelines.sphere && state.msaaTexture) {
-            const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => {
-                state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0);
-                state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);
-                [0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); });
-                state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0;
-                state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere);
-                const pass = encoder.beginRenderPass({
-                    colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }],
-                    depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp }
+            state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0]));
+            if (!document.body.classList.contains('light-mode')) {
+                state.cones.forEach((c, i) => {
+                    const cache = state.uiCache[i]; if (!cache) return;
+                    if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; }
+                    ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx]; } });
                 });
-                pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount);
-                return pass;
-            };
+                if (state.mouse.down) {
+                    const tp = getTargetPos(state.mouse.x, state.mouse.y);
+                    if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; });
+                    if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np; }
+                } else state.draggedConeIndex = -1;
+                state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95); } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2); } });
+            } else if (state.mouse.down && state.dragStart.active) {
+                state.landing.active = false; state.landing.showHandle = false;
+                document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active');
+                const tp = getTargetPos(state.mouse.x, state.mouse.y);
+                if (tp) {
+                    state.handle.pos = tp;
+                    if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) }; }
+                    state.dragStart.lastTrackPos = tp;
+                    const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp));
+                    if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); }
+                }
+            } else {
+                state.dragStart.active = false; state.handle.active = false;
+                if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95; }
+            }
 
-            const drawCones = (pass) => {
-                pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16');
-                if (!document.body.classList.contains('light-mode')) {
-                    state.cones.forEach((c, i) => {
-                        if (c.active) {
-                            let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity());
-                            state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set([...c.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount);
-                        }
+            if (state.device && state.pipelines.sphere && state.msaaTexture) {
+                const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => {
+                    state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0);
+                    state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);
+                    [0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); });
+                    state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0;
+                    state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere);
+                    const pass = encoder.beginRenderPass({
+                        colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }],
+                        depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp }
                     });
-                } else {
-                    let bindIdx = 4;
-                    if (state.handle.active || state.landing.showHandle) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...state.handle.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount); }
-                    state.historyHandles.forEach(h => { const wp = transformPos(h.pos, state.sphere.rotation); if (wp[2] > -0.5) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...h.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++; } });
+                    pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount);
+                    return pass;
+                };
 
-
-                    // Draw white path line on sphere surface during drag
-                    if (state.pathPoints.length > 1 && (state.dragStart.active || state.landing.active)) {
-                        const pathVerts = pathToVertices(state.pathPoints, state.sphere.rotation);
-                        if (pathVerts && pathVerts.length > 0) {
-                            // Create or update dynamic path buffer
-                            if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) {
-                                if (state.buffers.pathVertex) state.buffers.pathVertex.destroy();
-                                state.buffers.pathVertex = state.device.createBuffer({
-                                    size: Math.max(pathVerts.byteLength, 1024 * 12), // Pre-allocate space
-                                    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-                                });
+                const drawCones = (pass) => {
+                    pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16');
+                    if (!document.body.classList.contains('light-mode')) {
+                        state.cones.forEach((c, i) => {
+                            if (c.active) {
+                                let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity());
+                                state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set([...c.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount);
                             }
-                            state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts);
+                        });
+                    } else {
+                        let bindIdx = 4;
+                        if (state.handle.active || state.landing.showHandle) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...state.handle.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount); }
+                        state.historyHandles.forEach(h => { const wp = transformPos(h.pos, state.sphere.rotation); if (wp[2] > -0.5) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...h.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++; } });
 
-                            // Use identity model matrix and white color
-                            state.uniforms.cone.set(state.vpMatrix, 0);
-                            state.uniforms.cone.set([1, 1, 1, 1], 16); // White color
-                            state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone);
 
-                            pass.setPipeline(state.pipelines.cone);
-                            pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx));
-                            pass.setVertexBuffer(0, state.buffers.pathVertex);
-                            pass.draw(pathVerts.length / 3); // Draw as triangles
+                        // Draw white path line on sphere surface during drag
+                        if (state.pathPoints.length > 1 && (state.dragStart.active || state.landing.active)) {
+                            const pathVerts = pathToVertices(state.pathPoints, state.sphere.rotation);
+                            if (pathVerts && pathVerts.length > 0) {
+                                // Create or update dynamic path buffer
+                                if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) {
+                                    if (state.buffers.pathVertex) state.buffers.pathVertex.destroy();
+                                    state.buffers.pathVertex = state.device.createBuffer({
+                                        size: Math.max(pathVerts.byteLength, 1024 * 12), // Pre-allocate space
+                                        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+                                    });
+                                }
+                                state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts);
+
+                                // Use identity model matrix and white color
+                                state.uniforms.cone.set(state.vpMatrix, 0);
+                                state.uniforms.cone.set([1, 1, 1, 1], 16); // White color
+                                state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone);
+
+                                pass.setPipeline(state.pipelines.cone);
+                                pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx));
+                                pass.setVertexBuffer(0, state.buffers.pathVertex);
+                                pass.draw(pathVerts.length / 3); // Draw as triangles
+                            }
                         }
                     }
-                }
-            };
+                };
 
-            if (renderBackgroundLayer) {
-                const bgEncoder = state.device.createCommandEncoder();
-                const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0]));
-                const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard');
-                bgPass.end(); state.device.queue.submit([bgEncoder.finish()]);
-                const fgEncoder = state.device.createCommandEncoder();
-                const fgPass = drawSphere(fgEncoder, state.vpMatrix, 'load', 'discard');
-                drawCones(fgPass); fgPass.end(); state.device.queue.submit([fgEncoder.finish()]);
-            } else {
-                const encoder = state.device.createCommandEncoder();
-                const pass = drawSphere(encoder, state.vpMatrix, 'clear', 'discard');
-                drawCones(pass); pass.end(); state.device.queue.submit([encoder.finish()]);
+                if (renderBackgroundLayer) {
+                    const bgEncoder = state.device.createCommandEncoder();
+                    const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0]));
+                    const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard');
+                    bgPass.end(); state.device.queue.submit([bgEncoder.finish()]);
+                    const fgEncoder = state.device.createCommandEncoder();
+                    const fgPass = drawSphere(fgEncoder, state.vpMatrix, 'load', 'discard');
+                    drawCones(fgPass); fgPass.end(); state.device.queue.submit([fgEncoder.finish()]);
+                } else {
+                    const encoder = state.device.createCommandEncoder();
+                    const pass = drawSphere(encoder, state.vpMatrix, 'clear', 'discard');
+                    drawCones(pass); pass.end(); state.device.queue.submit([encoder.finish()]);
+                }
             }
             requestAnimationFrame(loop);
         }
@@ -2602,6 +2582,17 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
 
                     // Trigger the landing animation
                     triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true);
+
+                    // Watch for animation completion and send zoom-done
+                    const checkLandingComplete = () => {
+                        if (state.landing.progress >= 1) {
+                            // Animation complete, send zoom-done to parent
+                            window.parent.postMessage({ type: 'zoom-done', color: hexColor }, "*");
+                        } else if (state.landing.active) {
+                            requestAnimationFrame(checkLandingComplete);
+                        }
+                    };
+                    requestAnimationFrame(checkLandingComplete);
                 }
             };
 
