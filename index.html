@@ -1908,6 +1908,7 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
         }
 
         async function init() {
+            if (window.self !== window.top) document.getElementById('debug-btn').style.display = 'none';
             state.canvas = document.getElementById('gpu-canvas');
             if (!navigator.gpu) return alert("WebGPU not supported!");
             const adapter = await navigator.gpu.requestAdapter(); state.device = await adapter.requestDevice();
@@ -2271,6 +2272,15 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot)));
             if (window.connectAndPreview) window.connectAndPreview(hex, fromUrl);
 
+            // UI Refinement: Swap freeze button to X with delay
+            setTimeout(() => {
+                const btn = document.getElementById('freeze-btn');
+                btn.style.opacity = '0';
+                setTimeout(() => {
+                    btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+                    btn.style.opacity = '1';
+                }, 200);
+            }, 1000);
         }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4; }
 
@@ -2282,6 +2292,11 @@ fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp
             state.cameraPos = [0, 0, getResponsiveZ()];
             f.style.backgroundColor = isFrozen ? 'white' : 'black'; document.body.style.backgroundColor = '';
             f.classList.remove('active'); void f.offsetWidth; f.classList.add('active'); setTimeout(() => f.classList.remove('active'), 0);
+
+            // Restore Lightbulb icon
+            const btn = document.getElementById('freeze-btn');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
+            btn.style.opacity = '1';
         }
         function getSurfaceColor(p, n, cones = state.cones) {
             const getI = (i) => {
