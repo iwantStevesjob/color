@@ -1,396 +1,306 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>webtorrent</title>
+    <title>WebTorrent WebRTC MVP</title>
     <style>
-        :root {
-            --bg: #0f172a;
-            --panel: #1e293b;
-            --accent: #3b82f6; /* Blue */
-            --accent-hover: #2563eb;
-            --text: #f8fafc;
-            --text-dim: #94a3b8;
-            --success: #22c55e;
-            --error: #ef4444;
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #0f0f12;
+            color: #e0e0e0;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
         }
-        body { margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; }
-        
-        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 15px; }
-        h2 { margin: 0; color: var(--accent); letter-spacing: -0.5px; }
-        
-        #status-bar { font-size: 14px; color: var(--text-dim); }
-        .badge { padding: 4px 8px; border-radius: 4px; background: #334155; font-family: monospace; }
-        .live { color: var(--success); }
 
-        #log { flex-grow: 1; background: var(--panel); border-radius: 8px; padding: 15px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 13px; margin-bottom: 20px; border: 1px solid #334155; }
-        .msg-sys { color: var(--text-dim); }
-        .msg-in { color: #60a5fa; } /* Light Blue */
-        .msg-out { color: #a78bfa; } /* Purple */
-        .msg-err { color: var(--error); }
+        #log {
+            background: #1a1a1d;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            border: 1px solid #333;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
 
-        .controls { display: flex; gap: 10px; }
-        input { flex-grow: 1; padding: 12px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: white; outline: none; transition: border 0.2s; }
-        input:focus { border-color: var(--accent); }
-        input:disabled { background: #1e293b; cursor: not-allowed; opacity: 0.5; }
-        
-        button { padding: 0 25px; background: var(--accent); border: none; color: white; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
-        button:hover { background: var(--accent-hover); }
-        button:disabled { background: #475569; cursor: not-allowed; }
+        .success {
+            color: #4ade80;
+        }
+
+        .error {
+            color: #f87171;
+        }
+
+        .info {
+            color: #94a3b8;
+        }
+
+        .debug {
+            color: #555;
+        }
+
+        input {
+            background: #222;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px;
+            flex: 1;
+            border-radius: 4px;
+        }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
+        #chat-controls {
+            display: flex;
+            gap: 8px;
+        }
     </style>
 </head>
+
 <body>
-
-    <header>
-        <h2>ColorConnect</h2>
-        <div id="status-bar">
-            ID: <span id="myIdDisplay" class="badge">...</span> | 
-            Peers: <span id="peerCount" class="badge">0</span>
-        </div>
-    </header>
-
+    <h2>WebTorrent WebRTC Mesh</h2>
+    <div id="status">Connecting...</div>
     <div id="log"></div>
-    
-    <div class="controls">
-        <input type="text" id="msgInput" placeholder="Waiting for connection..." disabled autocomplete="off">
-        <button id="sendBtn" disabled>Send</button>
+    <div id="chat-controls">
+        <input type="text" id="msg" placeholder="Type message..." disabled>
+        <button id="send" disabled>Send</button>
     </div>
 
-<script>
-/**
- * CONFIGURATION
- */
-const APP_ID = "color-connect-v1"; // Changing this isolates your room
-const TRACKERS = [
-    'wss://tracker.openwebtorrent.com',
-    'wss://tracker.btorrent.xyz',
-    'wss://tracker.webtorrent.dev'
-];
-const CHUNK_SIZE = 16384; // 16KB
+    <script>
+        // CONFIG
+        const TRACKERS = [
+            'wss://tracker.openwebtorrent.com',
+            'wss://tracker.btorrent.xyz',
+            'wss://tracker.webtorrent.io'
+        ];
+        const INFO_HASH_HEX = 'C6D0563C8B7262ACECC4540C647C965709971932'; // SHA1("webrtc-chat-v1")
+        const PEER_ID = '-WB0001-' + Math.random().toString(36).substr(2, 12).padEnd(12, '0');
 
-// State
-const STATE = {
-    id: generateId(12),
-    roomHash: null,
-    peers: {}, // Active WebRTC Connections
-    chunks: {} // Reassembly buffer
-};
+        // STATE
+        const activeChannels = new Set();
+        const seenPeers = new Set();
+        const pendingOffers = {}; // offer_id -> { pc, dc }
 
-// UI Refs
-const UI = {
-    log: document.getElementById('log'),
-    input: document.getElementById('msgInput'),
-    btn: document.getElementById('sendBtn'),
-    idDisp: document.getElementById('myIdDisplay'),
-    peerCount: document.getElementById('peerCount')
-};
-
-// 1. STARTUP
-(async () => {
-    UI.idDisp.innerText = STATE.id;
-    log('sys', `Generated Peer ID: ${STATE.id}`);
-    
-    // Hash the room name to create a valid Torrent InfoHash
-    STATE.roomHash = await sha1(APP_ID);
-    log('sys', `Room Hash: ${STATE.roomHash.substring(0,8)}...`);
-
-    // Connect to all trackers
-    TRACKERS.forEach(url => connectTracker(url));
-})();
-
-// 2. SIGNALING (Trackers)
-function connectTracker(url) {
-    const ws = new WebSocket(url);
-    
-    ws.onopen = () => {
-        // Announce immediately
-        sendAnnounce(ws);
-        // Announce periodically to keep connection alive and find peers
-        ws.interval = setInterval(() => sendAnnounce(ws), 30000);
-    };
-
-    ws.onmessage = (e) => handleTrackerMessage(ws, JSON.parse(e.data));
-    
-    ws.onerror = () => ws.close();
-    ws.onclose = () => {
-        clearInterval(ws.interval);
-        setTimeout(() => connectTracker(url), 5000); // Retry logic
-    };
-}
-
-function sendAnnounce(ws, opts = {}) {
-    if(ws.readyState !== 1) return;
-    const msg = {
-        action: 'announce',
-        info_hash: STATE.roomHash,
-        peer_id: STATE.id,
-        numwant: 50,
-        offers: opts.offers || []
-    };
-    if (opts.to_peer_id) {
-        msg.to_peer_id = opts.to_peer_id;
-        msg.offer_id = opts.offer_id;
-        msg.answer = opts.answer;
-    }
-    ws.send(JSON.stringify(msg));
-}
-
-// 3. SIGNAL HANDLING
-function handleTrackerMessage(ws, data) {
-    if (data.action !== 'announce') return;
-
-    // A. Tracker sent a list of active peers (Initiator Logic)
-    // "I see a new peer, I will call them."
-    if (data.peer_id && data.peer_id !== STATE.id) {
-        // If we don't have a connection to them, and they are not us
-        initiateConnection(data.peer_id, ws);
-    }
-
-    // B. Someone sent us an OFFER (Receiver Logic)
-    if (data.offer && data.offer_id) {
-        handleOffer(data, ws);
-    }
-
-    // C. Someone sent us an ANSWER (Initiator Logic)
-    if (data.answer && data.offer_id) {
-        handleAnswer(data);
-    }
-}
-
-// 4. WEBRTC LOGIC
-function initiateConnection(remoteId, ws) {
-    if (STATE.peers[remoteId]) return; // Already connected
-
-    log('sys', `Found peer ${remoteId.substring(0,6)}... initiating.`);
-    const pc = createPeer(remoteId);
-    
-    // Create Data Channel (Initiator must create it)
-    const dc = pc.createDataChannel("color-data");
-    setupDataChannel(dc, remoteId);
-
-    // Create Offer
-    pc.onnegotiationneeded = async () => {
-        // Prevent infinite loops
-        if (pc.signalingState !== 'stable') return;
-        
-        await pc.setLocalDescription(await pc.createOffer());
-        
-        // WAIT FOR ICE (Reliability Fix)
-        // We wait for the browser to gather local IPs before sending the offer.
-        // This avoids "Trickle ICE" issues on dumb trackers.
-        await waitForIce(pc);
-        
-        // Send Offer via Tracker
-        sendAnnounce(ws, { 
-            offers: [{ offer: pc.localDescription, offer_id: generateId(10) }] 
-        });
-    };
-}
-
-async function handleOffer(data, ws) {
-    const remoteId = data.peer_id;
-    if (STATE.peers[remoteId]) return; // Collision or already handled
-
-    log('sys', `Received offer from ${remoteId.substring(0,6)}...`);
-    const pc = createPeer(remoteId);
-    
-    // Handle incoming Data Channel
-    pc.ondatachannel = (e) => setupDataChannel(e.channel, remoteId);
-
-    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-    await pc.setLocalDescription(await pc.createAnswer());
-    
-    // Wait for ICE to be included in the answer
-    await waitForIce(pc);
-
-    // Send Answer via Tracker
-    sendAnnounce(ws, {
-        to_peer_id: remoteId,
-        offer_id: data.offer_id,
-        answer: pc.localDescription
-    });
-}
-
-async function handleAnswer(data) {
-    const pc = STATE.peers[data.peer_id];
-    if (pc && pc.signalingState === 'have-local-offer') {
-        log('sys', `Connected to ${data.peer_id.substring(0,6)}!`);
-        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-    }
-}
-
-function createPeer(remoteId) {
-    const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
-    
-    pc.onconnectionstatechange = () => {
-        if(pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-            log('msg-err', `Connection lost: ${remoteId}`);
-            cleanupPeer(remoteId);
+        // UTILS
+        const logDiv = document.getElementById('log');
+        function log(msg, type = 'info') {
+            const l = document.createElement('div');
+            l.className = type;
+            l.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.appendChild(l);
+            logDiv.scrollTop = logDiv.scrollHeight;
         }
-    };
-    
-    STATE.peers[remoteId] = pc;
-    return pc;
-}
 
-// Helper: Wait for ICE candidates to gather completely
-function waitForIce(pc) {
-    return new Promise(resolve => {
-        if (pc.iceGatheringState === 'complete') resolve();
-        else {
-            const check = () => {
-                if (pc.iceGatheringState === 'complete') {
-                    pc.removeEventListener('icegatheringstatechange', check);
-                    resolve();
-                }
+        function hexToBinary(hex) {
+            let str = '';
+            for (let i = 0; i < hex.length; i += 2) str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+            return str;
+        }
+        const INFO_HASH_BINARY = hexToBinary(INFO_HASH_HEX);
+
+        const rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+        };
+
+        // TRACKER CONNECTION
+        TRACKERS.forEach(url => {
+            const ws = new WebSocket(url);
+            ws.binaryType = 'arraybuffer';
+            ws.onopen = () => {
+                log(`Connected to ${url}`, 'success');
+                announce(ws);
+                setInterval(() => announce(ws), 30000); // Re-announce
             };
-            pc.addEventListener('icegatheringstatechange', check);
-            // Timeout backup (1.5s) in case state never hits 'complete'
-            setTimeout(resolve, 1500);
-        }
-    });
-}
+            ws.onmessage = (e) => {
+                try {
+                    if (typeof e.data === 'string') handleMessage(ws, JSON.parse(e.data));
+                } catch (err) { }
+            };
+            ws.onerror = () => log(`Tracker error ${url}`, 'error');
+        });
 
-function setupDataChannel(dc, remoteId) {
-    dc.onopen = () => {
-        log('sys', `Data Channel Open: ${remoteId}`);
-        updateUI();
-    };
-    dc.onmessage = (e) => handleData(e.data, remoteId);
-}
-
-function cleanupPeer(id) {
-    if(STATE.peers[id]) {
-        STATE.peers[id].close();
-        delete STATE.peers[id];
-    }
-    updateUI();
-}
-
-// 5. DATA & CHUNKING
-function handleData(raw, id) {
-    try {
-        const msg = JSON.parse(raw);
-        if(msg.type === 'txt') {
-            log('msg-in', `Peer: ${msg.val}`);
+        function announce(ws, opts = {}) {
+            if (ws.readyState !== WebSocket.OPEN) return;
+            const msg = {
+                action: 'announce',
+                info_hash: INFO_HASH_BINARY,
+                peer_id: PEER_ID,
+                numwant: 50,
+                uploaded: 0, downloaded: 0, left: 0,
+                event: opts.event
+            };
+            if (opts.answer) {
+                msg.answer = opts.answer;
+                msg.to_peer_id = opts.to_peer_id;
+                msg.offer_id = opts.offer_id;
+                ws.send(JSON.stringify(msg));
+            } else if (opts.offers) {
+                msg.offers = opts.offers;
+                ws.send(JSON.stringify(msg));
+            } else {
+                // If just normal announce, include NEW offers to find peers
+                generateOffers(3).then(offers => {
+                    msg.offers = offers;
+                    ws.send(JSON.stringify(msg));
+                });
+            }
         }
-        else if(msg.type === 'HEAD') {
-            STATE.chunks[msg.id] = { total: msg.total, parts: [], count: 0 };
+
+        async function generateOffers(n) {
+            const offers = [];
+            for (let i = 0; i < n; i++) {
+                const pc = new RTCPeerConnection(rtcConfig);
+                const dc = pc.createDataChannel('chat'); // We create channel as initiator
+                const offerId = Math.random().toString(36).substr(2, 20);
+
+                pendingOffers[offerId] = { pc, dc };
+
+                // Timeout for this offer
+                setTimeout(() => {
+                    if (pendingOffers[offerId]) {
+                        pendingOffers[offerId].pc.close();
+                        delete pendingOffers[offerId];
+                    }
+                }, 45000);
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                await waitForIce(pc);
+
+                offers.push({ offer: pc.localDescription, offer_id: offerId });
+            }
+            return offers;
         }
-        else if(msg.type === 'CHUNK') {
-            const buf = STATE.chunks[msg.id];
-            if(buf) {
-                buf.parts[msg.idx] = msg.data;
-                buf.count++;
-                if(buf.count === buf.total) {
-                    // Reassemble
-                    const full = buf.parts.join('');
-                    const final = JSON.parse(atob(full)); // Base64 decode
-                    log('msg-in', `Peer (Large): ${final.val}`);
-                    delete STATE.chunks[msg.id];
+
+        async function handleMessage(ws, data) {
+            if (data.info_hash !== INFO_HASH_BINARY) return;
+
+            // INCOMING OFFER
+            if (data.offer && data.offer_id) {
+                if (seenPeers.has(data.peer_id)) return; // Already connected?
+
+                log(`Offer from ${data.peer_id.substr(0, 8)}`, 'info');
+                const pc = new RTCPeerConnection(rtcConfig);
+
+                // As receiver, we wait for data channel
+                pc.ondatachannel = (e) => setupChannel(e.channel, data.peer_id);
+
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                await waitForIce(pc);
+
+                announce(ws, {
+                    answer: pc.localDescription,
+                    to_peer_id: data.peer_id,
+                    offer_id: data.offer_id
+                });
+            }
+
+            // INCOMING ANSWER
+            if (data.answer && data.offer_id) {
+                const pending = pendingOffers[data.offer_id];
+                if (pending) {
+                    log(`Answer from ${data.peer_id.substr(0, 8)}`, 'success');
+                    const { pc, dc } = pending;
+                    setupChannel(dc, data.peer_id);
+                    try {
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    } catch (e) {
+                        log('Failed to set remote desc', 'error');
+                        pc.close();
+                    }
+                    delete pendingOffers[data.offer_id];
                 }
             }
         }
-    } catch(e) { console.error(e); }
-}
 
-function sendMsg(text) {
-    if(!text) return;
-    const payload = JSON.stringify({ type: 'txt', val: text });
-    
-    // Simple logic: if small, send direct. If large, chunk.
-    if(payload.length < CHUNK_SIZE) {
-        broadcast(payload);
-    } else {
-        // Chunking
-        const msgId = generateId(8);
-        const b64 = btoa(payload);
-        const total = Math.ceil(b64.length / CHUNK_SIZE);
-        
-        broadcast(JSON.stringify({ type: 'HEAD', id: msgId, total: total }));
-        
-        for(let i=0; i<total; i++) {
-            const chunk = b64.slice(i*CHUNK_SIZE, (i+1)*CHUNK_SIZE);
-            broadcast(JSON.stringify({ type: 'CHUNK', id: msgId, idx: i, data: chunk }));
+        function setupChannel(dc, peerId) {
+            dc.onopen = () => {
+                log(`Channel OPEN: ${peerId.substr(0, 8)}`, 'success');
+                activeChannels.add(dc);
+                seenPeers.add(peerId);
+                updateUI();
+            };
+            dc.onclose = () => {
+                log(`Channel CLOSED: ${peerId.substr(0, 8)}`, 'info');
+                activeChannels.delete(dc);
+                seenPeers.delete(peerId);
+                updateUI();
+            };
+            dc.onmessage = (e) => {
+                const msgLines = document.createElement('div');
+                msgLines.textContent = `[${peerId.substr(0, 8)}] ${e.data}`;
+                msgLines.style.color = '#fff';
+                logDiv.appendChild(msgLines);
+                logDiv.scrollTop = logDiv.scrollHeight;
+            };
         }
-    }
-    
-    log('msg-out', `Me: ${text.substring(0, 50)}...`);
-    UI.input.value = '';
-}
 
-function broadcast(data) {
-    Object.values(STATE.peers).forEach(pc => {
-        // Find the data channel
-        const dc = (pc.getTransceivers() && pc.getTransceivers()[0]?.sender?.transport?.transport) 
-                   ? null // simplified lookup 
-                   : null; 
-        // Actually, just find the channel we attached
-        // We didn't store DC in STATE.peers directly in createPeer, let's fix strictly:
-        // Note: In handleOffer/initiate we didn't save DC globally. 
-        // We rely on closure, but to broadcast we need access.
-    });
-    // Correction: We need to store DataChannels to broadcast
-    // Let's modify cleanup/setup to store DCs
-}
+        function waitForIce(pc) {
+            return new Promise(resolve => {
+                if (pc.iceGatheringState === 'complete') {
+                    resolve();
+                } else {
+                    const check = () => {
+                        if (pc.iceGatheringState === 'complete') {
+                            pc.removeEventListener('icegatheringstatechange', check);
+                            resolve();
+                        }
+                    };
+                    pc.addEventListener('icegatheringstatechange', check);
+                    setTimeout(resolve, 3000);
+                }
+            });
+        }
 
-// 6. UTILS & DOM
-UI.btn.addEventListener('click', () => sendMsg(UI.input.value));
-UI.input.addEventListener('keyup', (e) => { if(e.key === 'Enter') sendMsg(UI.input.value); });
+        function updateUI() {
+            const count = activeChannels.size;
+            document.getElementById('status').textContent = `Connected Peers: ${count}`;
+            document.getElementById('msg').disabled = count === 0;
+            document.getElementById('send').disabled = count === 0;
+        }
 
-// Redefine broadcast to work with stored channels is hard without changing structure.
-// Easier: Just loop through STATE.peers, but we need the channel.
-// FIX: Let's attach channel to the PC object for easy access.
-const _setupDC = setupDataChannel;
-setupDataChannel = function(dc, id) {
-    if(STATE.peers[id]) STATE.peers[id].dc = dc;
-    _setupDC(dc, id);
-}
-// Now broadcast is easy:
-broadcast = function(msg) {
-    Object.values(STATE.peers).forEach(p => {
-        if(p.dc && p.dc.readyState === 'open') p.dc.send(msg);
-    });
-}
+        document.getElementById('send').onclick = () => {
+            const input = document.getElementById('msg');
+            const text = input.value;
+            if (!text) return;
 
-function updateUI() {
-    const count = Object.values(STATE.peers).filter(p => p.dc && p.dc.readyState === 'open').length;
-    UI.peerCount.innerText = count;
-    UI.peerCount.className = count > 0 ? "badge live" : "badge";
-    if(count > 0) {
-        UI.input.disabled = false;
-        UI.btn.disabled = false;
-        UI.input.placeholder = "Type a message...";
-    } else {
-        UI.input.disabled = true;
-        UI.btn.disabled = true;
-        UI.input.placeholder = "Waiting for connection...";
-    }
-}
+            activeChannels.forEach(dc => {
+                if (dc.readyState === 'open') dc.send(text);
+            });
 
-function log(cls, text) {
-    const div = document.createElement('div');
-    div.className = cls;
-    div.innerText = `[${new Date().toLocaleTimeString()}] ${text}`;
-    UI.log.appendChild(div);
-    UI.log.scrollTop = UI.log.scrollHeight;
-}
+            const localMsg = document.createElement('div');
+            localMsg.textContent = `[Me] ${text}`;
+            localMsg.style.color = '#aaf';
+            logDiv.appendChild(localMsg);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            input.value = '';
+        };
 
-function generateId(len) {
-    let s = '', c = '0123456789abcdef';
-    for(let i=0; i<len; i++) s += c[Math.floor(Math.random()*c.length)];
-    return s;
-}
+        document.getElementById('msg').onkeypress = (e) => {
+            if (e.key === 'Enter') document.getElementById('send').click();
+        };
 
-async function sha1(str) {
-    const b = new TextEncoder().encode(str);
-    const h = await crypto.subtle.digest('SHA-1', b);
-    return Array.from(new Uint8Array(h)).map(x => x.toString(16).padStart(2,'0')).join('');
-}
-
-</script>
+    </script>
 </body>
+
 </html>
