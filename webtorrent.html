@@ -278,7 +278,7 @@
 </head>
 
 <body>
-    <h2> WebTorrent</h2>
+    <h2>WebRTC Chat over WebTorrent</h2>
     <p class="subtitle">Serverless P2P chat using BitTorrent tracker signaling • No dependencies</p>
     <div id="room-info" style="margin-bottom: 12px; font-size: 0.9em; color: #888;">Room: <span id="room-name"
             style="color: #4ade80; font-weight: 600;">-</span></div>
@@ -497,12 +497,7 @@
                 }
             }
 
-            // Add tracks if local stream exists (critical for new peers)
-            if (localStream) {
-                for (const track of localStream.getTracks()) {
-                    pc.addTrack(track, localStream);
-                }
-            }
+
 
             await pc.setLocalDescription(await pc.createOffer());
             const offer = await waitForIce(pc);
@@ -644,66 +639,72 @@
 
         async function toggleCamera() {
             const btn = document.getElementById('camera-btn');
+            if (btn.disabled) return;
+            btn.disabled = true;
 
-            if (cameraActive) {
-                // Stop camera
-                if (localStream) {
-                    localStream.getTracks().forEach(track => track.stop());
-                    // Remove tracks from all peer connections
-                    for (const peer of Object.values(connectedPeers)) {
-                        const senders = peer.pc.getSenders();
-                        for (const sender of senders) {
-                            if (sender.track) {
-                                // Check if the sender's track is from the local stream
-                                if (localStream.getTracks().includes(sender.track)) {
-                                    peer.pc.removeTrack(sender);
+            try {
+                if (cameraActive) {
+                    // Stop camera
+                    if (localStream) {
+                        localStream.getTracks().forEach(track => track.stop());
+                        // Remove tracks from all peer connections
+                        for (const peer of Object.values(connectedPeers)) {
+                            const senders = peer.pc.getSenders();
+                            for (const sender of senders) {
+                                if (sender.track) {
+                                    // Check if the sender's track is from the local stream
+                                    if (localStream.getTracks().includes(sender.track)) {
+                                        peer.pc.removeTrack(sender);
+                                    }
                                 }
                             }
                         }
+                        localStream = null;
                     }
-                    localStream = null;
-                }
-                localStorage.setItem('cameraActive', 'false');
+                    localStorage.setItem('cameraActive', 'false');
 
-                // Clear and refill offer pool so next offers reflect "no video" state
-                offerPool.forEach(o => o.pc.close());
-                offerPool = [];
-                fillOfferPool();
-
-                document.getElementById('local-video').srcObject = null;
-                document.getElementById('local-video-wrapper').classList.remove('active');
-                btn.classList.remove('active');
-                cameraActive = false;
-                log('Camera stopped', 'info');
-            } else {
-                // Start camera
-                try {
-                    localStream = await navigator.mediaDevices.getUserMedia({
-                        video: { width: { ideal: 640 }, height: { ideal: 480 } },
-                        audio: false
-                    });
-
-                    document.getElementById('local-video').srcObject = localStream;
-                    document.getElementById('local-video-wrapper').classList.add('active');
-                    btn.classList.add('active');
-                    cameraActive = true;
-                    localStorage.setItem('cameraActive', 'true');
-                    log('Camera started', 'success');
-
-                    // Add tracks to all existing peer connections
-                    for (const peer of Object.values(connectedPeers)) {
-                        for (const track of localStream.getTracks()) {
-                            peer.pc.addTrack(track, localStream);
-                        }
-                    }
-
-                    // Clear and refill offer pool so next offers include video tracks
+                    // Clear and refill offer pool so next offers reflect "no video" state
                     offerPool.forEach(o => o.pc.close());
                     offerPool = [];
                     fillOfferPool();
-                } catch (err) {
-                    log(`Camera error: ${err.message}`, 'error');
+
+                    document.getElementById('local-video').srcObject = null;
+                    document.getElementById('local-video-wrapper').classList.remove('active');
+                    btn.classList.remove('active');
+                    cameraActive = false;
+                    log('Camera stopped', 'info');
+                } else {
+                    // Start camera
+                    try {
+                        localStream = await navigator.mediaDevices.getUserMedia({
+                            video: { width: { ideal: 640 }, height: { ideal: 480 } },
+                            audio: false
+                        });
+
+                        document.getElementById('local-video').srcObject = localStream;
+                        document.getElementById('local-video-wrapper').classList.add('active');
+                        btn.classList.add('active');
+                        cameraActive = true;
+                        localStorage.setItem('cameraActive', 'true');
+                        log('Camera started', 'success');
+
+                        // Add tracks to all existing peer connections
+                        for (const peer of Object.values(connectedPeers)) {
+                            for (const track of localStream.getTracks()) {
+                                peer.pc.addTrack(track, localStream);
+                            }
+                        }
+
+                        // Clear and refill offer pool so next offers include video tracks
+                        offerPool.forEach(o => o.pc.close());
+                        offerPool = [];
+                        fillOfferPool();
+                    } catch (err) {
+                        log(`Camera error: ${err.message}`, 'error');
+                    }
                 }
+            } finally {
+                btn.disabled = false;
             }
         }
 
