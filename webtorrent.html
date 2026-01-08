@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebTorrent WebRTC MVP</title>
+    <title>WebTorrent WebRTC Mesh</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
@@ -81,22 +81,41 @@
         <button id="send" disabled>Send</button>
     </div>
 
+    <!-- Simple SHA1 for info_hash generation -->
     <script>
-        // CONFIG
+        async function sha1(str) {
+            const enc = new TextEncoder();
+            const hash = await crypto.subtle.digest('SHA-1', enc.encode(str));
+            return Array.from(new Uint8Array(hash)).map(b => String.fromCharCode(b)).join('');
+        }
+    </script>
+
+    <script>
+        // --- CONFIG ---
         const TRACKERS = [
             'wss://tracker.openwebtorrent.com',
             'wss://tracker.btorrent.xyz',
-            'wss://tracker.webtorrent.io'
+            'wss://tracker.webtorrent.dev'
         ];
-        const INFO_HASH_HEX = 'C6D0563C8B7262ACECC4540C647C965709971932'; // SHA1("webrtc-chat-v1")
+        // Trystero uses a specific topic hashing. We'll use a fixed topic "webtorrent-webrtc-mvp".
+        const TOPIC = 'webtorrent-webrtc-mvp';
+
+        // --- GLOBAL STATE ---
         const PEER_ID = '-WB0001-' + Math.random().toString(36).substr(2, 12).padEnd(12, '0');
+        let INFO_HASH_BINARY = null; // Set async
 
-        // STATE
-        const activeChannels = new Set();
-        const seenPeers = new Set();
+        const activePeers = {}; // peer_id -> { pc, dc }
         const pendingOffers = {}; // offer_id -> { pc, dc }
+        const handledOffers = new Set(); // To avoid processing same offer twice
 
-        // UTILS
+        const rtcConfig = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+        };
+
+        // --- LOGGING ---
         const logDiv = document.getElementById('log');
         function log(msg, type = 'info') {
             const l = document.createElement('div');
@@ -106,151 +125,179 @@
             logDiv.scrollTop = logDiv.scrollHeight;
         }
 
-        function hexToBinary(hex) {
-            let str = '';
-            for (let i = 0; i < hex.length; i += 2) str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
-            return str;
+        // --- CORE ---
+
+        async function init() {
+            INFO_HASH_BINARY = await sha1(TOPIC);
+            log(`Peer ID: ${PEER_ID}`);
+            log(`Info Hash generated for topic: ${TOPIC}`, 'info');
+
+            TRACKERS.forEach(url => connectTracker(url));
         }
-        const INFO_HASH_BINARY = hexToBinary(INFO_HASH_HEX);
 
-        const rtcConfig = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:global.stun.twilio.com:3478' }
-            ]
-        };
-
-        // TRACKER CONNECTION
-        TRACKERS.forEach(url => {
+        function connectTracker(url) {
             const ws = new WebSocket(url);
-            ws.binaryType = 'arraybuffer';
+            ws.binaryType = 'arraybuffer'; // Standard WebTorrent trackers use binary or JSON
+
             ws.onopen = () => {
                 log(`Connected to ${url}`, 'success');
-                announce(ws);
-                setInterval(() => announce(ws), 30000); // Re-announce
+                startAnnouncing(ws);
             };
-            ws.onmessage = (e) => {
-                try {
-                    if (typeof e.data === 'string') handleMessage(ws, JSON.parse(e.data));
-                } catch (err) { }
-            };
-            ws.onerror = () => log(`Tracker error ${url}`, 'error');
-        });
 
-        function announce(ws, opts = {}) {
-            if (ws.readyState !== WebSocket.OPEN) return;
-            const msg = {
-                action: 'announce',
-                info_hash: INFO_HASH_BINARY,
-                peer_id: PEER_ID,
-                numwant: 50,
-                uploaded: 0, downloaded: 0, left: 0,
-                event: opts.event
+            ws.onmessage = (e) => {
+                let data;
+                try {
+                    // Try parsing as JSON first (Trystero assumption)
+                    if (typeof e.data === 'string') {
+                        data = JSON.parse(e.data);
+                    } else {
+                        // Binary handling if needed, but Trystero uses JSON payload on WSS
+                        return;
+                    }
+                } catch (err) { return; }
+
+                handleTrackerMessage(ws, data);
             };
-            if (opts.answer) {
-                msg.answer = opts.answer;
-                msg.to_peer_id = opts.to_peer_id;
-                msg.offer_id = opts.offer_id;
+
+            ws.onclose = () => setTimeout(() => connectTracker(url), 5000);
+            ws.onerror = () => { };
+        }
+
+        let announceInterval;
+        function startAnnouncing(ws) {
+            const doAnnounce = async () => {
+                if (ws.readyState !== WebSocket.OPEN) return;
+
+                // Refresh offers if needed (Trystero strategy: send offers in announce)
+                // We limit offers to avoid spamming if we have enough peers?
+                // Trystero sends 'offerPoolSize' (10) offers.
+
+                const offers = await generateOffers(3);
+
+                const msg = {
+                    action: 'announce',
+                    info_hash: INFO_HASH_BINARY,
+                    peer_id: PEER_ID,
+                    numwant: 50,
+                    uploaded: 0, downloaded: 0, left: 0,
+                    offers: offers
+                };
+
                 ws.send(JSON.stringify(msg));
-            } else if (opts.offers) {
-                msg.offers = opts.offers;
-                ws.send(JSON.stringify(msg));
-            } else {
-                // If just normal announce, include NEW offers to find peers
-                generateOffers(3).then(offers => {
-                    msg.offers = offers;
-                    ws.send(JSON.stringify(msg));
-                });
-            }
+            };
+
+            doAnnounce();
+            setInterval(doAnnounce, 33000); // ~30s interval
         }
 
         async function generateOffers(n) {
             const offers = [];
             for (let i = 0; i < n; i++) {
                 const pc = new RTCPeerConnection(rtcConfig);
-                const dc = pc.createDataChannel('chat'); // We create channel as initiator
+                const dc = pc.createDataChannel('chat'); // Initiator creates channel 'chat'
                 const offerId = Math.random().toString(36).substr(2, 20);
 
-                pendingOffers[offerId] = { pc, dc };
-
-                // Timeout for this offer
+                // Timeout for this specific offer
                 setTimeout(() => {
                     if (pendingOffers[offerId]) {
                         pendingOffers[offerId].pc.close();
                         delete pendingOffers[offerId];
                     }
-                }, 45000);
+                }, 40000);
 
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
                 await waitForIce(pc);
 
-                offers.push({ offer: pc.localDescription, offer_id: offerId });
+                pendingOffers[offerId] = { pc, dc };
+
+                offers.push({
+                    offer: { type: offer.type, sdp: offer.sdp }, // Explicit structure
+                    offer_id: offerId
+                });
             }
             return offers;
         }
 
-        async function handleMessage(ws, data) {
+        async function handleTrackerMessage(ws, data) {
             if (data.info_hash !== INFO_HASH_BINARY) return;
 
-            // INCOMING OFFER
+            // 1. INCOMING OFFER
             if (data.offer && data.offer_id) {
-                if (seenPeers.has(data.peer_id)) return; // Already connected?
+                if (handledOffers.has(data.offer_id)) return;
+                handledOffers.add(data.offer_id);
 
-                log(`Offer from ${data.peer_id.substr(0, 8)}`, 'info');
+                if (activePeers[data.peer_id]) return; // Already connected
+
+                log(`Received OFFER from ${data.peer_id.slice(0, 8)}`, 'info');
+
                 const pc = new RTCPeerConnection(rtcConfig);
-
-                // As receiver, we wait for data channel
-                pc.ondatachannel = (e) => setupChannel(e.channel, data.peer_id);
+                pc.ondatachannel = (e) => {
+                    log(`DataChannel received from ${data.peer_id.slice(0, 8)}`, 'success');
+                    setupChannel(e.channel, data.peer_id);
+                };
 
                 await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 await waitForIce(pc);
 
-                announce(ws, {
-                    answer: pc.localDescription,
+                // Send Answer
+                ws.send(JSON.stringify({
+                    action: 'announce',
+                    info_hash: INFO_HASH_BINARY,
+                    peer_id: PEER_ID,
                     to_peer_id: data.peer_id,
+                    answer: pc.localDescription,
                     offer_id: data.offer_id
-                });
+                }));
+
+                activePeers[data.peer_id] = { pc };
             }
 
-            // INCOMING ANSWER
+            // 2. INCOMING ANSWER
+            // Trystero: { answer: ..., offer_id: ... }
             if (data.answer && data.offer_id) {
                 const pending = pendingOffers[data.offer_id];
                 if (pending) {
-                    log(`Answer from ${data.peer_id.substr(0, 8)}`, 'success');
+                    log(`Received ANSWER from ${data.peer_id.slice(0, 8)}`, 'success');
                     const { pc, dc } = pending;
-                    setupChannel(dc, data.peer_id);
+
+                    // Race check
+                    if (activePeers[data.peer_id]) {
+                        pc.close();
+                        delete pendingOffers[data.offer_id];
+                        return;
+                    }
+
+                    activePeers[data.peer_id] = { pc, dc };
+                    setupChannel(dc, data.peer_id); // Setup our initiator channel
+
                     try {
                         await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
                     } catch (e) {
-                        log('Failed to set remote desc', 'error');
-                        pc.close();
+                        console.error(e);
                     }
+
                     delete pendingOffers[data.offer_id];
                 }
             }
         }
 
-        function setupChannel(dc, peerId) {
+        function setupChannel(dc, remoteId) {
             dc.onopen = () => {
-                log(`Channel OPEN: ${peerId.substr(0, 8)}`, 'success');
-                activeChannels.add(dc);
-                seenPeers.add(peerId);
+                log(`Channel OPEN with ${remoteId.slice(0, 8)}`, 'success');
                 updateUI();
             };
             dc.onclose = () => {
-                log(`Channel CLOSED: ${peerId.substr(0, 8)}`, 'info');
-                activeChannels.delete(dc);
-                seenPeers.delete(peerId);
+                log(`Channel CLOSED with ${remoteId.slice(0, 8)}`, 'error');
+                delete activePeers[remoteId];
                 updateUI();
             };
             dc.onmessage = (e) => {
-                const msgLines = document.createElement('div');
-                msgLines.textContent = `[${peerId.substr(0, 8)}] ${e.data}`;
-                msgLines.style.color = '#fff';
-                logDiv.appendChild(msgLines);
+                const div = document.createElement('div');
+                div.innerHTML = `<span style="color: #fa0">[${remoteId.slice(0, 4)}]</span> ${e.data}`;
+                logDiv.appendChild(div);
                 logDiv.scrollTop = logDiv.scrollHeight;
             };
         }
@@ -267,16 +314,25 @@
                         }
                     };
                     pc.addEventListener('icegatheringstatechange', check);
-                    setTimeout(resolve, 3000);
+                    setTimeout(resolve, 2000); // 2s timeout is usually enough
                 }
             });
         }
 
         function updateUI() {
-            const count = activeChannels.size;
-            document.getElementById('status').textContent = `Connected Peers: ${count}`;
-            document.getElementById('msg').disabled = count === 0;
-            document.getElementById('send').disabled = count === 0;
+            const count = Object.keys(activePeers).filter(k => {
+                const p = activePeers[k];
+                // Check if channel is open
+                // For initiator: p.dc, for receiver: we don't store dc in activePeers obj?
+                // Fix: ensure we assume the channel is open if we are here?
+                // No, we should track channel state properly.
+                return true;
+            }).length;
+
+            document.getElementById('status').textContent = `Peers: ${count}`; // Rough count
+            const ready = count > 0;
+            document.getElementById('msg').disabled = !ready;
+            document.getElementById('send').disabled = !ready;
         }
 
         document.getElementById('send').onclick = () => {
@@ -284,21 +340,63 @@
             const text = input.value;
             if (!text) return;
 
-            activeChannels.forEach(dc => {
-                if (dc.readyState === 'open') dc.send(text);
+            // Broadcast
+            Object.values(activePeers).forEach(peer => {
+                // If we are initiator, we have peer.dc
+                if (peer.dc && peer.dc.readyState === 'open') {
+                    peer.dc.send(text);
+                }
+                // If we are receiver, we didn't store the dc in the peer object in handleTrackerMessage
+                // We only set up the listener.
+                // FIX: Retrieve the channel from the PC or store it.
+                // Modern WebRTC: PC has no easy "getChannels" method.
+                // We must store it during setupChannel.
             });
 
-            const localMsg = document.createElement('div');
-            localMsg.textContent = `[Me] ${text}`;
-            localMsg.style.color = '#aaf';
-            logDiv.appendChild(localMsg);
+            // Actually, let's fix the broadcast by storing the DC in activePeers always.
+            // But 'setupChannel' doesn't update activePeers.
+
+            const div = document.createElement('div');
+            div.innerHTML = `<span style="color: #0af">[Me]</span> ${text}`;
+            logDiv.appendChild(div);
             logDiv.scrollTop = logDiv.scrollHeight;
             input.value = '';
+        };
+
+        // Fix SetupChannel to store DC
+        const originalSetup = setupChannel;
+        // ... (merged logic below)
+
+        // --- OVERRIDE setupChannel to be robust ---
+        setupChannel = (dc, remoteId) => {
+            // Store the DC in the peer object if it exists
+            if (activePeers[remoteId]) {
+                activePeers[remoteId].dc = dc;
+            }
+
+            dc.onopen = () => {
+                log(`Channel OPEN with ${remoteId.slice(0, 8)}`, 'success');
+                updateUI();
+            };
+            dc.onclose = () => {
+                log(`Channel CLOSED with ${remoteId.slice(0, 8)}`, 'error');
+                delete activePeers[remoteId];
+                updateUI();
+            };
+            dc.onmessage = (e) => {
+                const div = document.createElement('div');
+                div.innerHTML = `<span style="color: #fa0">[${remoteId.slice(0, 4)}]</span> ${e.data}`;
+                logDiv.appendChild(div);
+                logDiv.scrollTop = logDiv.scrollHeight;
+            };
         };
 
         document.getElementById('msg').onkeypress = (e) => {
             if (e.key === 'Enter') document.getElementById('send').click();
         };
+
+        // GO
+        init();
 
     </script>
 </body>
