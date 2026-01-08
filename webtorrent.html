@@ -3,502 +3,425 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC Secure Chat</title>
+    <title>Robust P2P Chat</title>
     <style>
+        /* [Previous CSS remains mostly the same, condensed for brevity] */
         * { box-sizing: border-box; }
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            background: linear-gradient(135deg, #0f0f12 0%, #1a1a2e 100%);
-            color: #e0e0e0;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            min-height: 100vh;
-        }
-        h2 {
-            background: linear-gradient(90deg, #4ade80, #22d3ee);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 8px;
-        }
-        #status {
-            padding: 12px 16px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            font-weight: 500;
-        }
-        .status-connecting { background: rgba(250, 204, 21, 0.1); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.3); }
-        .status-connected { background: rgba(74, 222, 128, 0.1); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
-
-        #log {
-            background: rgba(26, 26, 29, 0.8);
-            padding: 16px;
-            height: 300px;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 0.9em;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            margin-bottom: 16px;
-            border-radius: 12px;
-        }
-        .log-sys { color: #94a3b8; font-style: italic; }
-        .log-err { color: #f87171; }
-        .log-msg { margin: 4px 0; }
-
-        #chat-controls { display: flex; gap: 12px; }
-        input {
-            background: rgba(34, 34, 34, 0.8);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #fff;
-            padding: 14px;
-            flex: 1;
-            border-radius: 10px;
-        }
-        button {
-            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
-            color: #0f0f12;
-            border: none;
-            padding: 14px 24px;
-            border-radius: 10px;
-            cursor: pointer;
-            font-weight: 600;
-        }
+        body { font-family: system-ui, sans-serif; background: #0f0f12; color: #e0e0e0; max-width: 900px; margin: 0 auto; padding: 20px; }
+        h2 { color: #4ade80; margin-bottom: 5px; }
+        #status { padding: 10px; border-radius: 8px; margin-bottom: 15px; background: #222; border: 1px solid #333; }
+        .status-ok { color: #4ade80; border-color: #4ade80; }
+        .status-warn { color: #facc15; border-color: #facc15; }
+        #video-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .video-wrapper { position: relative; background: #000; aspect-ratio: 4/3; border-radius: 8px; overflow: hidden; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .label { position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.6); padding: 2px 6px; font-size: 12px; border-radius: 4px; }
+        #log { height: 200px; overflow-y: auto; background: #1a1a1e; padding: 10px; border: 1px solid #333; font-family: monospace; font-size: 0.85em; margin-bottom: 10px; }
+        .log-sys { color: #888; } .log-err { color: #f87171; } .log-msg { color: #fff; }
+        #controls { display: flex; gap: 10px; }
+        input { flex: 1; padding: 10px; background: #222; border: 1px solid #444; color: #fff; border-radius: 4px; }
+        button { padding: 10px 20px; cursor: pointer; background: #4ade80; border: none; border-radius: 4px; font-weight: bold; }
         button:disabled { background: #444; color: #888; cursor: not-allowed; }
-
-        /* Video Layout */
-        #video-container { display: none; margin-bottom: 16px; }
-        #video-container.active { display: block; }
-        #video-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 12px;
-        }
-        .video-wrapper {
-            position: relative;
-            border-radius: 12px;
-            overflow: hidden;
-            background: #000;
-            aspect-ratio: 4/3;
-        }
-        video { width: 100%; height: 100%; object-fit: cover; background: #000; }
-        .label {
-            position: absolute; bottom: 8px; left: 8px;
-            background: rgba(0,0,0,0.7); color: white;
-            padding: 4px 8px; border-radius: 4px; font-size: 0.8em;
-        }
-
-        /* Local Video (PiP style) */
-        #local-video-wrapper {
-            position: fixed; bottom: 20px; right: 20px;
-            width: 160px; border-radius: 12px; overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            display: none; border: 2px solid #333;
-        }
-        #local-video-wrapper.active { display: block; }
-        
-        #camera-btn { background: #6366f1; min-width: 50px; }
-        #camera-btn.active { background: #ef4444; }
+        #local-preview { position: fixed; bottom: 20px; right: 20px; width: 120px; aspect-ratio: 4/3; background: #000; border: 2px solid #333; border-radius: 8px; z-index: 100; display: none; }
     </style>
 </head>
 <body>
-
-    <h2>Secure P2P Chat</h2>
-    <div id="room-info" style="color:#888; margin-bottom:10px;">Room: <span id="room-name" style="color:#4ade80">-</span></div>
+    <h2>Secure P2P Mesh</h2>
+    <div id="status">Initializing...</div>
     
-    <div id="status" class="status-connecting">Initializing...</div>
-
-    <div id="video-container">
-        <div id="video-grid"></div>
-    </div>
-
-    <!-- Local Preview -->
-    <div id="local-video-wrapper">
-        <video id="local-video" autoplay muted playsinline></video>
-    </div>
+    <div id="video-grid"></div>
+    <div id="local-preview"><video id="local-video" autoplay muted playsinline></video></div>
 
     <div id="log"></div>
 
-    <div id="chat-controls">
-        <input type="text" id="msg" placeholder="Waiting for connection..." disabled>
-        <button id="camera-btn" title="Toggle Camera">📷</button>
-        <button id="send" disabled>Send</button>
+    <div id="controls">
+        <input type="text" id="msg" placeholder="Waiting for peers..." disabled>
+        <button id="camera-btn">Start Camera</button>
+        <button id="send-btn" disabled>Send</button>
     </div>
 
-<script>
-    // --- CONFIGURATION ---
-    const TRACKERS = [
-        'wss://tracker.webtorrent.dev',
-        'wss://tracker.openwebtorrent.com',
-        'wss://tracker.btorrent.xyz'
-    ];
-    
-    const ROOM_NAME = window.location.hash.slice(1) || 'secure-chat-v1';
-    document.getElementById('room-name').textContent = ROOM_NAME;
+    <script>
+        // --- 1. CONFIGURATION & BEST PRACTICES ---
+        const CONFIG = {
+            // Redundant Trackers (Reliability)
+            trackers: [
+                'wss://tracker.webtorrent.dev',
+                'wss://tracker.openwebtorrent.com',
+                'wss://tracker.btorrent.xyz',
+                'wss://tracker.files.fm:7073/announce',
+                'wss://open.tube/tracker/socket'
+            ],
+            // ICE Servers (STUN/TURN) - In prod, ADD TURN SERVERS HERE
+            rtc: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:global.stun.twilio.com:3478' }
+                ],
+                iceCandidatePoolSize: 10
+            },
+            // Bandwidth Limits (Bitrate Control)
+            videoBitrate: 300, // kbps (Low to allow Mesh scaling)
+            pingInterval: 2000,
+            offerTtl: 60000
+        };
 
-    // --- UTILS ---
-    const logDiv = document.getElementById('log');
-    function log(msg, type='') {
-        const d = document.createElement('div');
-        d.className = 'log-msg ' + (type === 'err' ? 'log-err' : 'log-sys');
-        d.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-        logDiv.appendChild(d);
-        logDiv.scrollTop = logDiv.scrollHeight;
-    }
-    
-    const genId = () => Math.random().toString(36).substring(2, 10);
-    const selfId = genId();
-    
-    // --- WEBRTC GLOBALS ---
-    let pc = null;         // The PeerConnection
-    let dc = null;         // The DataChannel
-    let ws = null;         // The Tracker WebSocket
-    let infoHash = null;   // Room ID hash
-    let connected = false; // Connection state
-    
-    // Camera State
-    let localStream = null;
-    let cameraActive = false;
-    let makingOffer = false; // For "Polite Peer" negotiation logic
-    let ignoreOffer = false;
-
-    // --- INITIALIZATION ---
-    async function init() {
-        // 1. Hash the room name for WebTorrent trackers
-        const encoder = new TextEncoder();
-        const data = encoder.encode(ROOM_NAME);
-        const buffer = await crypto.subtle.digest('SHA-1', data);
-        const hashArray = Array.from(new Uint8Array(buffer));
-        infoHash = hashArray.map(b => b.toString(36)).join('').slice(0, 20);
+        const ROOM_ID = (location.hash.slice(1) || 'default-room').toLowerCase();
+        const MY_ID = Math.random().toString(36).substring(2, 15);
         
-        log(`Your ID: ${selfId}`);
-        log(`Connecting to trackers...`);
+        // State
+        const peers = {}; // id -> { pc, dc, lastPing }
+        let localStream = null;
+        let isCameraOn = false;
         
-        // 2. Start connection loop
-        connectToTrackers();
-    }
-
-    // --- CONNECTION LOGIC (Polite Peer) ---
-    function setupPeerConnection() {
-        const config = {
-            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        // --- 2. UTILS & ROBUSTNESS ---
+        
+        const log = (msg, type='sys') => {
+            const el = document.getElementById('log');
+            el.innerHTML += `<div class="log-${type}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+            el.scrollTop = el.scrollHeight;
         };
-        pc = new RTCPeerConnection(config);
 
-        // A. Handle incoming tracks (Remote Video)
-        pc.ontrack = (e) => {
-            log('Receiving remote video track...', 'sys');
-            const vidContainer = document.getElementById('video-grid');
-            let wrapper = document.getElementById('remote-wrapper');
+        // SDP Munging to limit bandwidth (Crucial for P2P Mesh)
+        function setMediaBitrate(sdp, bitrate) {
+            const lines = sdp.split("\n");
+            let line = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].indexOf("m=video") === 0) {
+                    line = i;
+                    break;
+                }
+            }
+            if (line === -1) return sdp;
             
-            if (!wrapper) {
-                wrapper = document.createElement('div');
-                wrapper.id = 'remote-wrapper';
-                wrapper.className = 'video-wrapper';
-                wrapper.innerHTML = `<video id="remote-video" autoplay playsinline></video><div class="label">Remote</div>`;
-                vidContainer.appendChild(wrapper);
-                document.getElementById('video-container').classList.add('active');
+            // Find next m= line
+            let nextLine = lines.length;
+            for (let i = line + 1; i < lines.length; i++) {
+                if (lines[i].indexOf("m=") === 0) {
+                    nextLine = i;
+                    break;
+                }
             }
             
-            const vid = wrapper.querySelector('video');
-            if (vid.srcObject !== e.streams[0]) {
-                vid.srcObject = e.streams[0];
-                vid.play().catch(console.error);
-            }
-
-            // Cleanup when track ends
-            e.track.onended = () => {
-                log('Remote video stopped');
-                wrapper.remove();
-                if(!vidContainer.children.length) document.getElementById('video-container').classList.remove('active');
-            };
-        };
-
-        // B. ICE Candidates
-        pc.onicecandidate = ({candidate}) => {
-            if (candidate) sendSignal({ type: 'candidate', candidate });
-        };
-
-        // C. Negotiation (The Critical Part for reliability)
-        pc.onnegotiationneeded = async () => {
-            try {
-                makingOffer = true;
-                await pc.setLocalDescription();
-                sendSignal({ type: 'description', description: pc.localDescription });
-            } catch (err) {
-                console.error(err);
-            } finally {
-                makingOffer = false;
-            }
-        };
-
-        // D. Connection State
-        pc.onconnectionstatechange = () => {
-            if (pc.connectionState === 'connected') {
-                log('WebRTC Connection Established!', 'sys');
-                document.getElementById('status').className = 'status-connected';
-                document.getElementById('status').innerText = 'Connected Securely';
-                connected = true;
-                enableChat(true);
-            } else if (pc.connectionState === 'disconnected') {
-                log('Peer disconnected', 'err');
-                resetUI();
-            }
-        };
-
-        // E. Data Channel (Chat)
-        pc.ondatachannel = (e) => setupDataChannel(e.channel);
-    }
-
-    function setupDataChannel(channel) {
-        dc = channel;
-        dc.onopen = () => { log('Data Channel Open'); };
-        dc.onmessage = (e) => {
-            const data = JSON.parse(e.data);
-            
-            // If it's a signaling message (renegotiation), handle it internally
-            if (data.type === 'signal') {
-                handleSignalMessage(data.payload);
-            } else if (data.type === 'chat') {
-                // Actual chat message
-                const div = document.createElement('div');
-                div.className = 'log-msg';
-                div.innerHTML = `<span style="color:#f59e0b">Peer:</span> ${escapeHtml(data.text)}`;
-                logDiv.appendChild(div);
-                logDiv.scrollTop = logDiv.scrollHeight;
-            }
-        };
-    }
-
-    // --- SIGNALING (Hybrid: Tracker Init -> Data Channel Update) ---
-    function sendSignal(payload) {
-        // 1. If we are connected, use Data Channel (Fast, Private, Reliable)
-        if (dc && dc.readyState === 'open') {
-            dc.send(JSON.stringify({ type: 'signal', payload }));
-            return;
+            // Insert b=AS line
+            lines.splice(nextLine, 0, `b=AS:${bitrate}`);
+            return lines.join("\n");
         }
+
+        // --- 3. PEER CONNECTION FACTORY ---
+
+        function createPeer(peerId, initiator = false) {
+            const pc = new RTCPeerConnection(CONFIG.rtc);
+            
+            // Setup Data Channel (Our new Signaling Highway)
+            let dc;
+            if (initiator) {
+                dc = pc.createDataChannel('chat', { negotiated: true, id: 0 });
+            } else {
+                dc = pc.createDataChannel('chat', { negotiated: true, id: 0 });
+            }
+
+            const peerObj = { pc, dc, id: peerId, lastPing: Date.now(), polite: !initiator };
+            peers[peerId] = peerObj;
+
+            // 3a. Robust DataChannel Handlers
+            dc.onopen = () => {
+                log(`Connected to ${peerId}`, 'ok');
+                updateStatus();
+                startHeartbeat(peerObj);
+                
+                // If we have a camera on, send it now via the established channel
+                if (localStream) addTracksToConnection(pc, localStream);
+            };
+            
+            dc.onclose = () => handleDisconnect(peerId);
+            
+            dc.onmessage = async (e) => {
+                const data = JSON.parse(e.data);
+                
+                // IN-BAND SIGNALING (Reliability Upgrade)
+                if (data.type === 'signal') {
+                    handleInBandSignal(peerObj, data);
+                    return;
+                }
+                
+                if (data.type === 'ping') {
+                    dc.send(JSON.stringify({ type: 'pong' }));
+                    return;
+                }
+                if (data.type === 'pong') {
+                    peerObj.lastPing = Date.now();
+                    return;
+                }
+                
+                if (data.type === 'chat') {
+                    log(`${peerId.substr(0,4)}: ${data.text}`, 'msg');
+                }
+            };
+
+            // 3b. Video Handling
+            pc.ontrack = (e) => {
+                const vidId = `vid-${peerId}`;
+                let wrap = document.getElementById(vidId);
+                if (!wrap) {
+                    wrap = document.createElement('div');
+                    wrap.className = 'video-wrapper';
+                    wrap.id = vidId;
+                    wrap.innerHTML = `<video autoplay playsinline></video><div class="label">${peerId.substr(0,4)}</div>`;
+                    document.getElementById('video-grid').appendChild(wrap);
+                }
+                wrap.querySelector('video').srcObject = e.streams[0];
+            };
+
+            // 3c. Negotiation Logic (Perfect Negotiation Pattern)
+            pc.onnegotiationneeded = async () => {
+                try {
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    
+                    // Send signaling over DataChannel if open, otherwise wait for tracker
+                    if (dc.readyState === 'open') {
+                        dc.send(JSON.stringify({ 
+                            type: 'signal', 
+                            desc: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } 
+                        }));
+                    }
+                } catch (err) { console.error(err); }
+            };
+
+            // 3d. ICE Restart Logic
+            pc.oniceconnectionstatechange = () => {
+                if (pc.iceConnectionState === 'failed') {
+                    log(`Connection failed with ${peerId}, attempting ICE restart...`, 'err');
+                    pc.restartIce();
+                }
+            };
+
+            return peerObj;
+        }
+
+        // --- 4. SIGNALING LOGIC (HYBRID) ---
+
+        // Handle signaling that arrives via DataChannel (Fast, Reliable)
+        async function handleInBandSignal(peer, data) {
+            const { pc } = peer;
+            try {
+                if (data.desc) {
+                    const { type, sdp } = data.desc;
+                    // Apply bandwidth limits to incoming SDP
+                    const limitedSdp = setMediaBitrate(sdp, CONFIG.videoBitrate);
+                    
+                    // Collision handling (Polite Peer)
+                    const offerCollision = (type === 'offer') && 
+                                         (pc.signalingState !== 'stable') && 
+                                         !peer.polite;
+                    
+                    if (offerCollision) {
+                        console.log("Ignoring colliding offer");
+                        return;
+                    }
+
+                    await pc.setRemoteDescription({ type, sdp: limitedSdp });
+                    
+                    if (type === 'offer') {
+                        await pc.setLocalDescription(await pc.createAnswer());
+                        peer.dc.send(JSON.stringify({
+                            type: 'signal',
+                            desc: pc.localDescription
+                        }));
+                    }
+                }
+                if (data.candidate) {
+                    await pc.addIceCandidate(data.candidate);
+                }
+            } catch (err) {
+                console.error("Signal Error", err);
+            }
+        }
+
+        // --- 5. TRACKER / WEBTORRENT EMULATION ---
+        // (Simplified logic to connect to websocket trackers and find peers)
         
-        // 2. Otherwise, use Tracker (Initial Handshake)
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        async function initLink() {
+            const hashBuffer = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(ROOM_ID));
+            const infoHashArray = Array.from(new Uint8Array(hashBuffer));
+            const infoHash = infoHashArray.map(b => b.toString(36)).join('').slice(0, 20); // Base36 for Webtorrent trackers
+
+            log(`Room Hash: ${infoHash}`, 'sys');
+
+            CONFIG.trackers.forEach(url => {
+                const ws = new WebSocket(url);
+                ws.onopen = () => {
+                    setInterval(() => {
+                        ws.send(JSON.stringify({
+                            action: 'announce',
+                            info_hash: infoHash,
+                            peer_id: MY_ID,
+                            numwant: 10,
+                            offers: [] // In a full implementation, we'd send pooled offers here
+                        }));
+                    }, 9000); // Keep-alive announce
+                    
+                    // Initial Announce with an offer
+                    sendTrackerOffer(ws, infoHash);
+                };
+
+                ws.onmessage = async (e) => {
+                    const msg = JSON.parse(e.data);
+                    if (msg.peer_id === MY_ID) return;
+                    
+                    // Received an Offer
+                    if (msg.offer && !peers[msg.peer_id]) {
+                        log(`Incoming connection from ${msg.peer_id}`, 'sys');
+                        const peer = createPeer(msg.peer_id, false); // Not initiator
+                        await peer.pc.setRemoteDescription(msg.offer);
+                        const answer = await peer.pc.createAnswer();
+                        await peer.pc.setLocalDescription(answer);
+                        
+                        ws.send(JSON.stringify({
+                            action: 'announce',
+                            info_hash: infoHash,
+                            to_peer_id: msg.peer_id,
+                            peer_id: MY_ID,
+                            offer_id: msg.offer_id,
+                            answer: answer
+                        }));
+                    }
+
+                    // Received an Answer
+                    if (msg.answer && pendingOffers[msg.offer_id]) {
+                        const peerData = pendingOffers[msg.offer_id];
+                        // Promote to full peer
+                        peers[msg.peer_id] = peerData.peerObj;
+                        peerData.peerObj.id = msg.peer_id; // Update ID
+                        await peerData.peerObj.pc.setRemoteDescription(msg.answer);
+                        delete pendingOffers[msg.offer_id];
+                        log(`Connected to ${msg.peer_id}`, 'ok');
+                    }
+                };
+            });
+        }
+
+        // Simple Offer Pool Logic
+        const pendingOffers = {}; 
+        async function sendTrackerOffer(ws, infoHash) {
+            const offerId = Math.random().toString(36).slice(2);
+            // Create a temporary peer for this offer
+            const peerObj = createPeer('pending', true); 
+            const offer = await peerObj.pc.createOffer();
+            await peerObj.pc.setLocalDescription(offer);
+
+            // Wait for ICE to gather locally before sending (Vanilla WebRTC trick)
+            await new Promise(r => setTimeout(r, 1000)); 
+
+            pendingOffers[offerId] = { peerObj, timestamp: Date.now() };
+
             ws.send(JSON.stringify({
                 action: 'announce',
                 info_hash: infoHash,
-                peer_id: selfId,
-                offer: payload // Wrap it simply for our logic
+                peer_id: MY_ID,
+                offers: [{ offer_id: offerId, offer: peerObj.pc.localDescription }]
             }));
         }
-    }
 
-    async function handleSignalMessage(data) {
-        try {
-            if (data.description) {
-                const offerCollision = (data.description.type === 'offer') &&
-                                     (makingOffer || pc.signalingState !== 'stable');
-                
-                ignoreOffer = !isPolite() && offerCollision;
-                if (ignoreOffer) return;
+        // --- 6. MEDIA LOGIC ---
 
-                if (offerCollision) {
-                    await Promise.all([
-                        pc.setLocalDescription({type: 'rollback'}),
-                        pc.setRemoteDescription(data.description)
-                    ]);
+        function addTracksToConnection(pc, stream) {
+            stream.getTracks().forEach(track => {
+                // Check if track already exists to avoid duplication
+                const senders = pc.getSenders();
+                const hasTrack = senders.some(s => s.track && s.track.kind === track.kind);
+                if (!hasTrack) {
+                    pc.addTrack(track, stream);
                 } else {
-                    await pc.setRemoteDescription(data.description);
+                    // Replace track if exists (re-enabling camera)
+                    const sender = senders.find(s => s.track && s.track.kind === track.kind);
+                    sender.replaceTrack(track);
                 }
-
-                if (data.description.type === 'offer') {
-                    await pc.setLocalDescription();
-                    sendSignal({ type: 'description', description: pc.localDescription });
-                }
-            } else if (data.candidate) {
-                try {
-                    await pc.addIceCandidate(data.candidate);
-                } catch (err) {
-                    if (!ignoreOffer) throw err;
-                }
-            }
-        } catch (err) {
-            console.error('Signal Error:', err);
-        }
-    }
-
-    // "Polite Peer" determination: simple string comparison of IDs
-    // Determines who yields if both try to negotiate video at once
-    function isPolite() {
-        // Ensure remote peer ID is known. If negotiation happens via DC, we don't need this 
-        // as much, but for tracker handshake we rely on implicit timing. 
-        // For simplicity: We will assume the one sending the OFFER is "impolite" via DC logic.
-        return false; // Simplified for this specific implementation
-    }
-
-    // --- TRACKER LOGIC ---
-    function connectToTrackers() {
-        const url = TRACKERS[0]; // Simple single tracker for reliability test
-        ws = new WebSocket(url);
-        
-        ws.onopen = () => {
-            log('Tracker connected. Waiting for peer...');
-            setInterval(() => {
-                if (!connected && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        action: 'announce',
-                        info_hash: infoHash,
-                        peer_id: selfId,
-                        numwant: 1
-                    }));
-                }
-            }, 3000);
-        };
-
-        ws.onmessage = async (e) => {
-            let msg;
-            try { msg = JSON.parse(e.data); } catch { return; }
-            
-            if (msg.peer_id === selfId) return;
-
-            // Handshake Logic
-            if (!pc) {
-                setupPeerConnection();
-                // Create Data Channel if we are the "initiator" (arbitrary logic: lex sort)
-                if (selfId > msg.peer_id) {
-                    dc = pc.createDataChannel('chat');
-                    setupDataChannel(dc);
-                    // Start negotiation
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-                    sendSignal({ type: 'description', description: pc.localDescription });
-                }
-            }
-
-            // Handle relayed signals
-            if (msg.offer) {
-                handleSignalMessage(msg.offer);
-            }
-        };
-    }
-
-    // --- CAMERA LOGIC (The specific fix you wanted) ---
-    const camBtn = document.getElementById('camera-btn');
-    
-    camBtn.onclick = async () => {
-        if (!connected) {
-            log("Wait for connection first!", "err");
-            return;
+            });
         }
 
-        camBtn.disabled = true;
-
-        try {
-            if (!cameraActive) {
-                // --- START CAMERA ---
-                // 1. Get User Media (Light turns on NOW)
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    video: { width: 640, height: 480 },
-                    audio: false
-                });
-
-                // 2. Show Local Preview
-                const localVid = document.getElementById('local-video');
-                localVid.srcObject = localStream;
-                document.getElementById('local-video-wrapper').classList.add('active');
-
-                // 3. Add tracks to connection
-                // This triggers 'negotiationneeded' automatically
-                localStream.getTracks().forEach(track => {
-                    pc.addTrack(track, localStream);
-                });
-
-                cameraActive = true;
-                camBtn.innerText = "⛔";
-                camBtn.classList.add('active');
-                log("Camera Started - Negotiating...");
-
-            } else {
-                // --- STOP CAMERA ---
-                // 1. Stop all tracks (Light turns off NOW)
-                if (localStream) {
-                    localStream.getTracks().forEach(track => track.stop());
-                }
-
-                // 2. Remove from connection
-                // This triggers 'negotiationneeded' automatically
-                pc.getSenders().forEach(sender => {
-                    if (sender.track && sender.track.kind === 'video') {
-                        pc.removeTrack(sender);
-                    }
-                });
-
-                // 3. UI Cleanup
-                document.getElementById('local-video').srcObject = null;
-                document.getElementById('local-video-wrapper').classList.remove('active');
-                
+        document.getElementById('camera-btn').onclick = async () => {
+            if (isCameraOn) {
+                // Stop Camera
+                localStream.getTracks().forEach(t => t.stop());
                 localStream = null;
-                cameraActive = false;
-                camBtn.innerText = "📷";
-                camBtn.classList.remove('active');
-                log("Camera Stopped");
+                document.getElementById('local-preview').style.display = 'none';
+                document.getElementById('camera-btn').textContent = "Start Camera";
+                isCameraOn = false;
+                
+                // Notify peers (Remove tracks or send black frames - simplistic removal here)
+                Object.values(peers).forEach(p => {
+                    p.pc.getSenders().forEach(s => p.pc.removeTrack(s));
+                });
+            } else {
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    document.getElementById('local-video').srcObject = localStream;
+                    document.getElementById('local-preview').style.display = 'block';
+                    document.getElementById('camera-btn').textContent = "Stop Camera";
+                    isCameraOn = true;
+
+                    // Add to all existing peers
+                    Object.values(peers).forEach(p => {
+                        addTracksToConnection(p.pc, localStream);
+                    });
+                } catch(e) { log('Camera fail: ' + e.message, 'err'); }
             }
-        } catch (err) {
-            log("Camera Error: " + err.message, "err");
-            console.error(err);
-        } finally {
-            camBtn.disabled = false;
+        };
+
+        // --- 7. CLEANUP & HEARTBEAT ---
+
+        function startHeartbeat(peer) {
+            setInterval(() => {
+                if (peer.dc.readyState === 'open') {
+                    peer.dc.send(JSON.stringify({ type: 'ping' }));
+                    
+                    // Check timeout (10 seconds)
+                    if (Date.now() - peer.lastPing > 10000) {
+                        log(`Peer ${peer.id} timed out`, 'err');
+                        handleDisconnect(peer.id);
+                    }
+                }
+            }, CONFIG.pingInterval);
         }
-    };
 
-    // --- CHAT LOGIC ---
-    const msgInput = document.getElementById('msg');
-    const sendBtn = document.getElementById('send');
-    
-    function enableChat(enabled) {
-        msgInput.disabled = !enabled;
-        sendBtn.disabled = !enabled;
-        if (enabled) msgInput.placeholder = "Type a message...";
-    }
+        function handleDisconnect(id) {
+            if (peers[id]) {
+                peers[id].pc.close();
+                delete peers[id];
+                const v = document.getElementById(`vid-${id}`);
+                if (v) v.remove();
+                updateStatus();
+            }
+        }
 
-    function sendChat() {
-        const text = msgInput.value.trim();
-        if (!text || !dc || dc.readyState !== 'open') return;
-        
-        dc.send(JSON.stringify({ type: 'chat', text }));
-        
-        const div = document.createElement('div');
-        div.className = 'log-msg';
-        div.innerHTML = `<span style="color:#22d3ee">You:</span> ${escapeHtml(text)}`;
-        logDiv.appendChild(div);
-        logDiv.scrollTop = logDiv.scrollHeight;
-        msgInput.value = '';
-    }
+        function updateStatus() {
+            const count = Object.keys(peers).length;
+            const el = document.getElementById('status');
+            el.innerHTML = count > 0 ? `Connected to ${count} peer(s)` : 'Waiting for peers...';
+            el.className = count > 0 ? 'status-ok' : '';
+            
+            document.getElementById('msg').disabled = count === 0;
+            document.getElementById('send-btn').disabled = count === 0;
+        }
 
-    sendBtn.onclick = sendChat;
-    msgInput.onkeypress = (e) => { if(e.key === 'Enter') sendChat(); };
+        // --- 8. CHAT ---
+        const sendMsg = () => {
+            const inp = document.getElementById('msg');
+            const txt = inp.value.trim();
+            if (!txt) return;
+            Object.values(peers).forEach(p => {
+                if(p.dc.readyState === 'open') p.dc.send(JSON.stringify({ type: 'chat', text: txt }));
+            });
+            log(`You: ${txt}`, 'msg');
+            inp.value = '';
+        };
+        document.getElementById('send-btn').onclick = sendMsg;
+        document.getElementById('msg').onkeydown = (e) => e.key === 'Enter' && sendMsg();
 
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
-    function resetUI() {
-        document.getElementById('status').className = 'status-connecting';
-        document.getElementById('status').innerText = 'Reconnecting...';
-        connected = false;
-        enableChat(false);
-        if (cameraActive) camBtn.click(); // Auto turn off camera if disconnect
-        document.getElementById('video-grid').innerHTML = '';
-        document.getElementById('video-container').classList.remove('active');
-        
-        // Hard reset peer connection
-        if(pc) pc.close();
-        pc = null;
-        dc = null;
-        connectToTrackers();
-    }
+        // Start
+        initLink();
 
-    // Start
-    init();
-
-</script>
+    </script>
 </body>
 </html>
