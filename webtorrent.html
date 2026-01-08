@@ -278,7 +278,7 @@
 </head>
 
 <body>
-    <h2>WebRTC Chat over WebTorrent</h2>
+    <h2>WebRTC Chat \ WebTorrent</h2>
     <p class="subtitle">Serverless P2P chat using BitTorrent tracker signaling • No dependencies</p>
     <div id="room-info" style="margin-bottom: 12px; font-size: 0.9em; color: #888;">Room: <span id="room-name"
             style="color: #4ade80; font-weight: 600;">-</span></div>
@@ -385,10 +385,15 @@
             console.log(`[${type.toUpperCase()}] ${msg}`);
         }
 
-        function logMessage(senderId, text, isSelf = false) {
+        function logMessage(senderId, text, isSelf = false, isSystem = false) {
             const div = document.createElement('div');
             div.className = 'log-message';
-            div.innerHTML = `<span class="${isSelf ? 'self-tag' : 'peer-tag'}">[${isSelf ? 'You' : senderId.slice(0, 6)}]</span> ${escapeHtml(text)}`;
+
+            if (isSystem) {
+                div.innerHTML = `<span class="log-info" style="font-style: italic;">[${senderId.slice(0, 6)}] ${escapeHtml(text)}</span>`;
+            } else {
+                div.innerHTML = `<span class="${isSelf ? 'self-tag' : 'peer-tag'}">[${isSelf ? 'You' : senderId.slice(0, 6)}]</span> ${escapeHtml(text)}`;
+            }
             logDiv.appendChild(div);
             logDiv.scrollTop = logDiv.scrollHeight;
         }
@@ -560,9 +565,10 @@
             };
 
             dc.onmessage = async (e) => {
-                // Check if signal message (renegotiation)
+                // Check if signal message (renegotiation) or system message
                 try {
                     const msg = JSON.parse(e.data);
+
                     if (msg.type === 'signal' && msg.description) {
                         const pc = connectedPeers[peerId]?.pc;
                         if (!pc) return;
@@ -580,8 +586,13 @@
                         }
                         return; // Handled as signal
                     }
+
+                    if (msg.type === 'info' && msg.text) {
+                        logMessage(peerId, msg.text, false, true);
+                        return; // Handled as system message
+                    }
                 } catch (_) {
-                    // Not JSON or not signal -> Chat message
+                    // Not JSON or unknown format -> Chat message
                 }
 
                 logMessage(peerId, e.data);
@@ -672,7 +683,16 @@
                     document.getElementById('local-video-wrapper').classList.remove('active');
                     btn.classList.remove('active');
                     cameraActive = false;
+                    cameraActive = false;
                     log('Camera stopped', 'info');
+
+                    // Broadcast status
+                    for (const peer of Object.values(connectedPeers)) {
+                        if (peer.dc && peer.dc.readyState === 'open') {
+                            peer.dc.send(JSON.stringify({ type: 'info', text: 'stopped camera' }));
+                        }
+                    }
+                    logMessage('You', 'stopped camera', true, true);
                 } else {
                     // Start camera
                     try {
@@ -686,7 +706,15 @@
                         btn.classList.add('active');
                         cameraActive = true;
                         localStorage.setItem('cameraActive', 'true');
+                        localStorage.setItem('cameraActive', 'true');
                         log('Camera started', 'success');
+
+                        // Broadcast status
+                        for (const peer of Object.values(connectedPeers)) {
+                            if (peer.dc && peer.dc.readyState === 'open') {
+                                peer.dc.send(JSON.stringify({ type: 'info', text: 'started camera' }));
+                            }
+                        }
 
                         // Add tracks to all existing peer connections
                         for (const peer of Object.values(connectedPeers)) {
@@ -844,9 +872,16 @@
                         connectedPeers[data.peer_id].dc = channel;
                     });
 
+                    // If we have local stream, add tracks BEFORE creating answer
+                    if (localStream) {
+                        for (const track of localStream.getTracks()) {
+                            pc.addTrack(track, localStream);
+                        }
+                    }
+
                     await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                    await pc.setLocalDescription(await pc.createAnswer());
-                    const answer = await waitForIce(pc);
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
 
                     // Store peer connection
                     connectedPeers[data.peer_id] = {
@@ -855,21 +890,17 @@
                         instanceId: data.instance_id // Store their instance ID
                     };
 
-                    // If we have local stream, add tracks
-                    if (localStream) {
-                        for (const track of localStream.getTracks()) {
-                            pc.addTrack(track, localStream);
-                        }
-                    }
+                    // Send answer back calls waitForIce implicitly via createOffer in original flow, 
+                    // but here we need to wait for ICE gathering for the answer
+                    const fullAnswer = await waitForIce(pc);
 
-                    // Send answer back
                     ws.send(JSON.stringify({
                         action: 'announce',
                         info_hash: infoHash,
                         peer_id: selfId,
                         to_peer_id: data.peer_id,
                         offer_id: data.offer_id,
-                        answer: { type: answer.type, sdp: answer.sdp }
+                        answer: { type: fullAnswer.type, sdp: fullAnswer.sdp }
                     }));
 
                     log(`Sent answer to ${data.peer_id.slice(0, 6)}`, 'info');
@@ -898,13 +929,6 @@
                     // Store peer connection
                     connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc };
                     setupDataChannel(pending.dc, data.peer_id);
-
-                    // If we have local stream, add tracks
-                    if (localStream) {
-                        for (const track of localStream.getTracks()) {
-                            pending.pc.addTrack(track, localStream);
-                        }
-                    }
 
                     delete pendingOffers[data.offer_id];
                 } catch (err) {
