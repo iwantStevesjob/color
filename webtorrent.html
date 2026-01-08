@@ -195,16 +195,109 @@
                 opacity: 0.5;
             }
         }
+
+        /* Video styles */
+        #video-container {
+            display: none;
+            margin-bottom: 16px;
+        }
+
+        #video-container.active {
+            display: block;
+        }
+
+        #video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .video-wrapper {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #111;
+            aspect-ratio: 4/3;
+        }
+
+        .video-wrapper video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            color: #fff;
+        }
+
+        #local-video-wrapper {
+            position: fixed;
+            bottom: 100px;
+            right: 20px;
+            width: 150px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            display: none;
+        }
+
+        #local-video-wrapper.active {
+            display: block;
+        }
+
+        #local-video {
+            width: 100%;
+            transform: scaleX(-1);
+        }
+
+        #camera-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            padding: 14px;
+            min-width: 52px;
+        }
+
+        #camera-btn.active {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        #camera-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+        }
     </style>
 </head>
 
 <body>
     <h2>WebRTC Chat over WebTorrent</h2>
     <p class="subtitle">Serverless P2P chat using BitTorrent tracker signaling • No dependencies</p>
+    <div id="room-info" style="margin-bottom: 12px; font-size: 0.9em; color: #888;">Room: <span id="room-name"
+            style="color: #4ade80; font-weight: 600;">-</span></div>
     <div id="status" class="status-connecting">⏳ Connecting to trackers...</div>
+    <div id="video-container">
+        <div id="video-grid"></div>
+    </div>
+    <div id="local-video-wrapper">
+        <video id="local-video" autoplay muted playsinline></video>
+    </div>
     <div id="log"></div>
     <div id="chat-controls">
         <input type="text" id="msg" placeholder="Type a message..." disabled>
+        <button id="camera-btn" title="Toggle Camera">
+            <svg viewBox="0 0 24 24">
+                <path
+                    d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
+            </svg>
+        </button>
         <button id="send" disabled>Send</button>
     </div>
 
@@ -221,11 +314,22 @@
             'wss://tracker.btorrent.xyz'
         ];
 
-        const TOPIC = 'webtorrent-webrtc-chat-v2'; // Room/topic name
+        const DEFAULT_ROOM = 'webtorrent-webrtc-chat-v2';
         const OFFER_POOL_SIZE = 10;
         const OFFER_TTL = 57_333; // 57 seconds
         const ANNOUNCE_INTERVAL = 33_333; // 33 seconds
         const ICE_TIMEOUT = 5000; // 5 seconds
+        const PING_INTERVAL = 15_000; // 15 seconds
+        const PING_TIMEOUT = 45_000; // 45 seconds - remove peer if no pong
+        const BASE_RETRY_MS = 5000; // Initial retry delay
+        const MAX_RETRY_MS = 60_000; // Max retry delay (1 minute)
+
+        // Get room from URL hash or use default
+        function getRoomFromHash() {
+            const hash = window.location.hash.slice(1).trim();
+            return hash || DEFAULT_ROOM;
+        }
+        let currentRoom = getRoomFromHash();
 
         const RTC_CONFIG = {
             iceServers: [
@@ -255,10 +359,15 @@
         const selfId = genId(20);
         let infoHash = null;
 
-        const connectedPeers = {}; // peerId -> { pc, dc }
+        const connectedPeers = {}; // peerId -> { pc, dc, lastPong }
         const pendingOffers = {}; // offerId -> { pc, dc, created, peerId? }
         const handledOffers = new Set(); // Prevent duplicate offer processing
         const trackerSockets = {}; // url -> WebSocket
+        const trackerRetryMs = {}; // url -> current retry delay
+        const announceIntervals = {}; // url -> interval id
+        let pingInterval = null;
+        let localStream = null; // Local video stream
+        let cameraActive = false;
 
         // --- LOGGING ---
         const logDiv = document.getElementById('log');
@@ -335,6 +444,9 @@
                     }
                 }
             };
+            pc.ontrack = e => {
+                handleRemoteTrack(e, pc);
+            };
 
             return { pc, dc };
         }
@@ -387,6 +499,9 @@
         function setupDataChannel(dc, peerId) {
             dc.onopen = () => {
                 log(`✓ DataChannel OPEN with ${peerId.slice(0, 6)}`, 'success');
+                if (connectedPeers[peerId]) {
+                    connectedPeers[peerId].lastPong = Date.now();
+                }
                 updateUI();
             };
 
@@ -401,8 +516,141 @@
             };
 
             dc.onmessage = e => {
+                // Handle ping/pong for heartbeat
+                if (e.data === '__ping__') {
+                    if (dc.readyState === 'open') dc.send('__pong__');
+                    return;
+                }
+                if (e.data === '__pong__') {
+                    if (connectedPeers[peerId]) {
+                        connectedPeers[peerId].lastPong = Date.now();
+                    }
+                    return;
+                }
                 logMessage(peerId, e.data);
             };
+        }
+
+        // --- VIDEO HANDLING ---
+        function handleRemoteTrack(event, pc) {
+            const stream = event.streams[0];
+            if (!stream) return;
+
+            // Find peer ID for this connection
+            let peerId = null;
+            for (const [id, peer] of Object.entries(connectedPeers)) {
+                if (peer.pc === pc) {
+                    peerId = id;
+                    break;
+                }
+            }
+
+            if (!peerId) return;
+
+            // Check if video element already exists
+            let videoWrapper = document.getElementById(`video-${peerId}`);
+            if (!videoWrapper) {
+                videoWrapper = document.createElement('div');
+                videoWrapper.id = `video-${peerId}`;
+                videoWrapper.className = 'video-wrapper';
+                videoWrapper.innerHTML = `
+                    <video autoplay playsinline></video>
+                    <div class="video-label">${peerId.slice(0, 6)}</div>
+                `;
+                document.getElementById('video-grid').appendChild(videoWrapper);
+                document.getElementById('video-container').classList.add('active');
+            }
+
+            const video = videoWrapper.querySelector('video');
+            if (video.srcObject !== stream) {
+                video.srcObject = stream;
+            }
+
+            log(`Receiving video from ${peerId.slice(0, 6)}`, 'success');
+        }
+
+        function removeRemoteVideo(peerId) {
+            const videoWrapper = document.getElementById(`video-${peerId}`);
+            if (videoWrapper) {
+                videoWrapper.remove();
+            }
+            // Hide container if no videos left
+            if (document.getElementById('video-grid').children.length === 0) {
+                document.getElementById('video-container').classList.remove('active');
+            }
+        }
+
+        async function toggleCamera() {
+            const btn = document.getElementById('camera-btn');
+
+            if (cameraActive) {
+                // Stop camera
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    // Remove tracks from all peer connections
+                    for (const peer of Object.values(connectedPeers)) {
+                        const senders = peer.pc.getSenders();
+                        for (const sender of senders) {
+                            if (sender.track) {
+                                peer.pc.removeTrack(sender);
+                            }
+                        }
+                    }
+                    localStream = null;
+                }
+                document.getElementById('local-video').srcObject = null;
+                document.getElementById('local-video-wrapper').classList.remove('active');
+                btn.classList.remove('active');
+                cameraActive = false;
+                log('Camera stopped', 'info');
+            } else {
+                // Start camera
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+                        audio: false
+                    });
+
+                    document.getElementById('local-video').srcObject = localStream;
+                    document.getElementById('local-video-wrapper').classList.add('active');
+                    btn.classList.add('active');
+                    cameraActive = true;
+                    log('Camera started', 'success');
+
+                    // Add tracks to all existing peer connections
+                    for (const peer of Object.values(connectedPeers)) {
+                        for (const track of localStream.getTracks()) {
+                            peer.pc.addTrack(track, localStream);
+                        }
+                    }
+                } catch (err) {
+                    log(`Camera error: ${err.message}`, 'error');
+                }
+            }
+        }
+
+        document.getElementById('camera-btn').onclick = toggleCamera;
+
+        // --- HEARTBEAT ---
+        function startHeartbeat() {
+            pingInterval = setInterval(() => {
+                const now = Date.now();
+                for (const [peerId, peer] of Object.entries(connectedPeers)) {
+                    // Check for stale peers
+                    if (peer.lastPong && now - peer.lastPong > PING_TIMEOUT) {
+                        log(`Peer ${peerId.slice(0, 6)} timed out (no pong)`, 'error');
+                        peer.pc.close();
+                        removeRemoteVideo(peerId);
+                        delete connectedPeers[peerId];
+                        updateUI();
+                        continue;
+                    }
+                    // Send ping
+                    if (peer.dc && peer.dc.readyState === 'open') {
+                        peer.dc.send('__ping__');
+                    }
+                }
+            }, PING_INTERVAL);
         }
 
         // --- TRACKER COMMUNICATION ---
@@ -412,6 +660,7 @@
 
             ws.onopen = () => {
                 log(`Connected to ${url.replace('wss://', '')}`, 'success');
+                trackerRetryMs[url] = BASE_RETRY_MS; // Reset on successful connect
                 startAnnouncing(ws, url);
             };
 
@@ -427,7 +676,15 @@
             ws.onclose = () => {
                 log(`Disconnected from ${url.replace('wss://', '')}`, 'info');
                 delete trackerSockets[url];
-                setTimeout(() => connectToTracker(url), 5000);
+                if (announceIntervals[url]) {
+                    clearInterval(announceIntervals[url]);
+                    delete announceIntervals[url];
+                }
+                // Exponential backoff
+                const retryMs = trackerRetryMs[url] || BASE_RETRY_MS;
+                trackerRetryMs[url] = Math.min(retryMs * 2, MAX_RETRY_MS);
+                log(`Reconnecting to ${url.replace('wss://', '')} in ${retryMs / 1000}s`, 'debug');
+                setTimeout(() => connectToTracker(url), retryMs);
             };
 
             ws.onerror = () => { };
@@ -476,8 +733,8 @@
             // Initial announce
             await announce();
 
-            // Periodic announce
-            setInterval(announce, ANNOUNCE_INTERVAL);
+            // Periodic announce (store interval ID for cleanup)
+            announceIntervals[url] = setInterval(announce, ANNOUNCE_INTERVAL);
         }
 
         async function handleTrackerMessage(ws, data) {
@@ -517,7 +774,14 @@
                     const answer = await waitForIce(pc);
 
                     // Store peer connection
-                    connectedPeers[data.peer_id] = { pc, dc: null };
+                    connectedPeers[data.peer_id] = { pc, dc: null, lastPong: Date.now() };
+
+                    // If we have local stream, add tracks
+                    if (localStream) {
+                        for (const track of localStream.getTracks()) {
+                            pc.addTrack(track, localStream);
+                        }
+                    }
 
                     // Send answer back
                     ws.send(JSON.stringify({
@@ -553,8 +817,15 @@
                     await pending.pc.setRemoteDescription(new RTCSessionDescription(data.answer));
 
                     // Store peer connection
-                    connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc };
+                    connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc, lastPong: Date.now() };
                     setupDataChannel(pending.dc, data.peer_id);
+
+                    // If we have local stream, add tracks
+                    if (localStream) {
+                        for (const track of localStream.getTracks()) {
+                            pending.pc.addTrack(track, localStream);
+                        }
+                    }
 
                     delete pendingOffers[data.offer_id];
                 } catch (err) {
@@ -612,13 +883,79 @@
             if (e.key === 'Enter') sendMessage();
         };
 
+        // --- CLEANUP ---
+        function cleanup() {
+            // Stop camera
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            cameraActive = false;
+            document.getElementById('local-video').srcObject = null;
+            document.getElementById('local-video-wrapper').classList.remove('active');
+            document.getElementById('camera-btn').classList.remove('active');
+            // Clear video grid
+            document.getElementById('video-grid').innerHTML = '';
+            document.getElementById('video-container').classList.remove('active');
+            // Close all peer connections
+            for (const peer of Object.values(connectedPeers)) {
+                peer.dc?.close();
+                peer.pc?.close();
+            }
+            // Close pending offers
+            for (const pending of Object.values(pendingOffers)) {
+                pending.pc?.close();
+            }
+            // Close offer pool
+            for (const offer of offerPool) {
+                offer.pc?.close();
+            }
+            // Close tracker sockets
+            for (const ws of Object.values(trackerSockets)) {
+                ws?.close();
+            }
+            // Clear intervals
+            for (const id of Object.values(announceIntervals)) {
+                clearInterval(id);
+            }
+            if (pingInterval) clearInterval(pingInterval);
+        }
+
+        // Handle page unload
+        window.addEventListener('beforeunload', cleanup);
+        window.addEventListener('unload', cleanup);
+
+        // Handle hash change (room switch)
+        window.addEventListener('hashchange', () => {
+            const newRoom = getRoomFromHash();
+            if (newRoom !== currentRoom) {
+                log(`Room changed to: ${newRoom}`, 'info');
+                cleanup();
+                currentRoom = newRoom;
+                // Reset state
+                Object.keys(connectedPeers).forEach(k => delete connectedPeers[k]);
+                Object.keys(pendingOffers).forEach(k => delete pendingOffers[k]);
+                handledOffers.clear();
+                Object.keys(trackerSockets).forEach(k => delete trackerSockets[k]);
+                Object.keys(trackerRetryMs).forEach(k => delete trackerRetryMs[k]);
+                Object.keys(announceIntervals).forEach(k => delete announceIntervals[k]);
+                offerPool = [];
+                infoHash = null;
+                // Reinitialize
+                init();
+            }
+        });
+
         // --- INIT ---
         async function init() {
             log(`Your ID: ${selfId}`, 'info');
 
-            // Generate info hash from topic
-            infoHash = await sha1Hash(TOPIC);
-            log(`Room: ${TOPIC} (hash: ${infoHash})`, 'info');
+            // Update room name display
+            document.getElementById('room-name').textContent = currentRoom;
+
+            // Generate info hash from room
+            infoHash = await sha1Hash(currentRoom);
+            log(`Room: ${currentRoom} (hash: ${infoHash})`, 'info');
 
             // Pre-fill offer pool
             log('Generating initial offer pool...', 'info');
@@ -626,7 +963,13 @@
             log(`Offer pool ready with ${offerPool.length} offers`, 'success');
 
             // Connect to trackers
-            TRACKERS.forEach(url => connectToTracker(url));
+            TRACKERS.forEach(url => {
+                trackerRetryMs[url] = BASE_RETRY_MS;
+                connectToTracker(url);
+            });
+
+            // Start heartbeat
+            startHeartbeat();
 
             // Periodic pool cleanup and refill
             setInterval(() => {
