@@ -354,7 +354,11 @@
         }
 
         // --- GLOBAL STATE ---
-        const selfId = genId(20);
+        // Identity Persistence
+        const storedId = localStorage.getItem('webtorrent-peer-id');
+        const selfId = storedId || genId(20);
+        if (!storedId) localStorage.setItem('webtorrent-peer-id', selfId);
+
         let infoHash = null;
 
         const connectedPeers = {}; // peerId -> { pc, dc, lastPong }
@@ -482,6 +486,20 @@
         async function createOffer() {
             const { pc, dc } = createPeerConnection(true);
             const offerId = genId(20);
+
+            // Add tracks if local stream exists
+            if (localStream) {
+                for (const track of localStream.getTracks()) {
+                    pc.addTrack(track, localStream);
+                }
+            }
+
+            // Add tracks if local stream exists (critical for new peers)
+            if (localStream) {
+                for (const track of localStream.getTracks()) {
+                    pc.addTrack(track, localStream);
+                }
+            }
 
             await pc.setLocalDescription(await pc.createOffer());
             const offer = await waitForIce(pc);
@@ -633,12 +651,22 @@
                         const senders = peer.pc.getSenders();
                         for (const sender of senders) {
                             if (sender.track) {
-                                peer.pc.removeTrack(sender);
+                                // Check if the sender's track is from the local stream
+                                if (localStream.getTracks().includes(sender.track)) {
+                                    peer.pc.removeTrack(sender);
+                                }
                             }
                         }
                     }
                     localStream = null;
                 }
+                localStorage.setItem('cameraActive', 'false');
+
+                // Clear and refill offer pool so next offers reflect "no video" state
+                offerPool.forEach(o => o.pc.close());
+                offerPool = [];
+                fillOfferPool();
+
                 document.getElementById('local-video').srcObject = null;
                 document.getElementById('local-video-wrapper').classList.remove('active');
                 btn.classList.remove('active');
@@ -656,6 +684,7 @@
                     document.getElementById('local-video-wrapper').classList.add('active');
                     btn.classList.add('active');
                     cameraActive = true;
+                    localStorage.setItem('cameraActive', 'true');
                     log('Camera started', 'success');
 
                     // Add tracks to all existing peer connections
@@ -664,6 +693,11 @@
                             peer.pc.addTrack(track, localStream);
                         }
                     }
+
+                    // Clear and refill offer pool so next offers include video tracks
+                    offerPool.forEach(o => o.pc.close());
+                    offerPool = [];
+                    fillOfferPool();
                 } catch (err) {
                     log(`Camera error: ${err.message}`, 'error');
                 }
@@ -772,7 +806,15 @@
                 handledOffers.add(data.offer_id);
 
                 // Already connected to this peer?
-                if (connectedPeers[data.peer_id]) return;
+                if (connectedPeers[data.peer_id]) {
+                    // Treat as reconnection - replace existing
+                    log(`Peer ${data.peer_id.slice(0, 6)} reconnecting...`, 'info');
+                    if (connectedPeers[data.peer_id].pc) {
+                        connectedPeers[data.peer_id].pc.close();
+                    }
+                    removeRemoteVideo(data.peer_id);
+                    delete connectedPeers[data.peer_id];
+                }
 
                 // Collision handling: if we have a pending offer to this peer,
                 // and our ID is higher, ignore their offer (we'll use ours)
@@ -1004,7 +1046,42 @@
             }, OFFER_TTL);
         }
 
-        init();
+        // --- SINGLE TAB & INIT ---
+        const tabChannel = new BroadcastChannel('webtorrent-chat-tabs');
+        let isDuplicate = false;
+
+        tabChannel.onmessage = e => {
+            if (e.data === 'check') {
+                // Someone asked if we are here
+                tabChannel.postMessage('alive');
+            } else if (e.data === 'alive') {
+                // Another tab is alive, we are duplicate
+                isDuplicate = true;
+                cleanup();
+                document.body.innerHTML = `
+                    <div style="height:100vh;display:flex;align-items:center;justify-content:center;color:#ef4444;font-family:system-ui;text-align:center;background:#0f0f12">
+                        <div>
+                            <h1>Chat Open in Another Tab</h1>
+                            <p>Please close this tab to avoid connection issues.</p>
+                        </div>
+                    </div>
+                `;
+            }
+        };
+
+        // Check if another tab is open
+        tabChannel.postMessage('check');
+
+        setTimeout(async () => {
+            if (!isDuplicate) {
+                await init();
+
+                // Auto-start camera if previously active
+                if (localStorage.getItem('cameraActive') === 'true') {
+                    toggleCamera();
+                }
+            }
+        }, 100);
     </script>
 </body>
 
