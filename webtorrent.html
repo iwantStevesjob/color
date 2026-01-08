@@ -5,462 +5,392 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>webtorrent</title>
     <style>
-        body { font-family: 'Segoe UI', monospace; padding: 20px; background: #1a1a1a; color: #e0e0e0; }
-        #log { border: 1px solid #333; height: 350px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; background: #000; font-size: 12px; }
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --accent: #3b82f6; /* Blue */
+            --accent-hover: #2563eb;
+            --text: #f8fafc;
+            --text-dim: #94a3b8;
+            --success: #22c55e;
+            --error: #ef4444;
+        }
+        body { margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; box-sizing: border-box; }
+        
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 15px; }
+        h2 { margin: 0; color: var(--accent); letter-spacing: -0.5px; }
+        
+        #status-bar { font-size: 14px; color: var(--text-dim); }
+        .badge { padding: 4px 8px; border-radius: 4px; background: #334155; font-family: monospace; }
+        .live { color: var(--success); }
+
+        #log { flex-grow: 1; background: var(--panel); border-radius: 8px; padding: 15px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 13px; margin-bottom: 20px; border: 1px solid #334155; }
+        .msg-sys { color: var(--text-dim); }
+        .msg-in { color: #60a5fa; } /* Light Blue */
+        .msg-out { color: #a78bfa; } /* Purple */
+        .msg-err { color: var(--error); }
+
         .controls { display: flex; gap: 10px; }
-        input { flex-grow: 1; padding: 10px; background: #222; border: 1px solid #444; color: white; }
-        button { padding: 10px 20px; background: #006600; border: none; color: white; cursor: pointer; }
-        button:disabled { background: #444; cursor: not-allowed; }
-        .sys { color: #888; } .err { color: #f55; } .in { color: #0f0; } .out { color: #55f; }
-        #stats { font-size: 11px; color: #aaa; margin-bottom: 5px; }
+        input { flex-grow: 1; padding: 12px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: white; outline: none; transition: border 0.2s; }
+        input:focus { border-color: var(--accent); }
+        input:disabled { background: #1e293b; cursor: not-allowed; opacity: 0.5; }
+        
+        button { padding: 0 25px; background: var(--accent); border: none; color: white; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: var(--accent-hover); }
+        button:disabled { background: #475569; cursor: not-allowed; }
     </style>
 </head>
 <body>
 
-    <div id="stats">Active Peers: 0 | My ID: <span id="myIdDisplay">...</span></div>
+    <header>
+        <h2>ColorConnect</h2>
+        <div id="status-bar">
+            ID: <span id="myIdDisplay" class="badge">...</span> | 
+            Peers: <span id="peerCount" class="badge">0</span>
+        </div>
+    </header>
+
     <div id="log"></div>
     
     <div class="controls">
-        <input type="text" id="msgInput" placeholder="Type a message (supports large text/base64)..." disabled>
+        <input type="text" id="msgInput" placeholder="Waiting for connection..." disabled autocomplete="off">
         <button id="sendBtn" disabled>Send</button>
     </div>
 
 <script>
 /**
- * ----------------------------------------------------------------------------
- * CONFIGURATION & CONSTANTS
- * ----------------------------------------------------------------------------
+ * CONFIGURATION
  */
-const CONFIG = {
-    room: 'my-robust-app-room', // Unique Room ID
-    trackers: [
-        'wss://tracker.openwebtorrent.com',
-        'wss://tracker.btorrent.xyz',
-        'wss://tracker.webtorrent.dev'
-    ],
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    chunkSize: 16 * 1024, // 16KB limit for safe WebRTC transfer
-    trackerInterval: 60000 // Heartbeat every 60s
-};
+const APP_ID = "color-connect-v1"; // Changing this isolates your room
+const TRACKERS = [
+    'wss://tracker.openwebtorrent.com',
+    'wss://tracker.btorrent.xyz',
+    'wss://tracker.webtorrent.dev'
+];
+const CHUNK_SIZE = 16384; // 16KB
 
-/**
- * ----------------------------------------------------------------------------
- * GLOBAL STATE
- * ----------------------------------------------------------------------------
- */
+// State
 const STATE = {
-    myId: generateRandomId(20),
-    infoHash: null,
-    peers: {}, // Map<peerId, PeerObject>
-    chunks: {} // Map<transferId, Array<chunks>> (Reassembly buffer)
+    id: generateId(12),
+    roomHash: null,
+    peers: {}, // Active WebRTC Connections
+    chunks: {} // Reassembly buffer
 };
 
-// UI Elements
-const ui = {
+// UI Refs
+const UI = {
     log: document.getElementById('log'),
     input: document.getElementById('msgInput'),
     btn: document.getElementById('sendBtn'),
-    stats: document.getElementById('stats'),
-    myId: document.getElementById('myIdDisplay')
+    idDisp: document.getElementById('myIdDisplay'),
+    peerCount: document.getElementById('peerCount')
 };
-ui.myId.innerText = STATE.myId;
 
-/**
- * ----------------------------------------------------------------------------
- * CORE LOGIC: INITIALIZATION
- * ----------------------------------------------------------------------------
- */
-(async function init() {
-    log('sys', `Initializing as ${STATE.myId}...`);
-    STATE.infoHash = await sha1(CONFIG.room);
-    log('sys', `Room Hash: ${STATE.infoHash}`);
+// 1. STARTUP
+(async () => {
+    UI.idDisp.innerText = STATE.id;
+    log('sys', `Generated Peer ID: ${STATE.id}`);
     
-    // Connect to all trackers for redundancy
-    CONFIG.trackers.forEach(url => new TrackerConnection(url));
+    // Hash the room name to create a valid Torrent InfoHash
+    STATE.roomHash = await sha1(APP_ID);
+    log('sys', `Room Hash: ${STATE.roomHash.substring(0,8)}...`);
+
+    // Connect to all trackers
+    TRACKERS.forEach(url => connectTracker(url));
 })();
 
-/**
- * ----------------------------------------------------------------------------
- * CLASS: TRACKER CONNECTION (Signaling Layer)
- * Handles Reconnection and Politeness
- * ----------------------------------------------------------------------------
- */
-class TrackerConnection {
-    constructor(url) {
-        this.url = url;
-        this.ws = null;
-        this.reconnectTimer = null;
-        this.connect();
-    }
-
-    connect() {
-        this.ws = new WebSocket(this.url);
-        this.ws.onopen = () => {
-            log('sys', `Connected to tracker: ${this.url}`);
-            this.announce();
-            // Regular heartbeat to keep connection alive and find new peers
-            this.interval = setInterval(() => this.announce(), CONFIG.trackerInterval);
-        };
-
-        this.ws.onmessage = (e) => this.handleMessage(JSON.parse(e.data));
-        
-        this.ws.onclose = () => {
-            clearInterval(this.interval);
-            log('err', `Tracker disconnected: ${this.url}. Retrying in 5s...`);
-            setTimeout(() => this.connect(), 5000); // Reconnect logic
-        };
-    }
-
-    announce(opts = {}) {
-        if (this.ws.readyState !== WebSocket.OPEN) return;
-        const msg = {
-            action: 'announce',
-            info_hash: STATE.infoHash,
-            peer_id: STATE.myId,
-            numwant: 50,
-            offers: opts.offers || [] 
-        };
-        // To indicate an answer, WebTorrent uses the 'offers' array but with different structure
-        if (opts.answer) {
-            msg.to_peer_id = opts.to_peer_id;
-            msg.offer_id = opts.offer_id;
-            msg.answer = opts.answer;
-        }
-        this.ws.send(JSON.stringify(msg));
-    }
-
-    handleMessage(data) {
-        if (data.action !== 'announce') return;
-
-        // 1. New Peer Discovered (Tracker sent us a list)
-        // Note: WebTorrent trackers send "offer" inside the announce response usually
-        if (data.offer && data.offer_id) {
-            // Incoming Offer
-            getPeer(data.peer_id).handleSignal({ type: 'offer', sdp: data.offer, offer_id: data.offer_id }, this);
-        } else if (data.answer && data.offer_id) {
-            // Incoming Answer
-            getPeer(data.peer_id).handleSignal({ type: 'answer', sdp: data.answer }, this);
-        } else if (data.offers) {
-            // Sometimes offers come in an array
-            data.offers.forEach(o => {
-                if (o.offer && o.offer_id) {
-                    getPeer(data.peer_id).handleSignal({ type: 'offer', sdp: o.offer, offer_id: o.offer_id }, this);
-                }
-            });
-        }
-    }
-}
-
-/**
- * ----------------------------------------------------------------------------
- * CLASS: PEER (WebRTC Layer)
- * Handles Trickle ICE, Glare, and Chunking
- * ----------------------------------------------------------------------------
- */
-function getPeer(remoteId) {
-    if (STATE.peers[remoteId]) return STATE.peers[remoteId];
-    STATE.peers[remoteId] = new Peer(remoteId);
-    updateStats();
-    return STATE.peers[remoteId];
-}
-
-class Peer {
-    constructor(remoteId) {
-        this.id = remoteId;
-        this.pc = new RTCPeerConnection({ iceServers: CONFIG.iceServers });
-        this.dc = null;
-        this.makingOffer = false;
-        this.ignoreOffer = false;
-        this.isSettingRemoteAnswerPending = false;
-        this.iceQueue = []; // Buffer for Trickle ICE
-        
-        // "Polite Peer" Pattern: deterministically decide who yields
-        // If my ID is lexicographically smaller, I am polite (I yield).
-        this.polite = STATE.myId < this.id; 
-
-        this.setupPC();
-    }
-
-    setupPC() {
-        // Handle Ice Candidates (Trickle)
-        this.pc.onicecandidate = ({ candidate }) => {
-            if (candidate) {
-                // Batch candidates to avoid spamming tracker (Politeness)
-                this.iceQueue.push(candidate);
-                if (this.iceQueue.length === 1) {
-                    setTimeout(() => this.sendIceBatch(), 500);
-                }
-            }
-        };
-
-        this.pc.onnegotiationneeded = async () => {
-            try {
-                this.makingOffer = true;
-                await this.pc.setLocalDescription();
-                this.sendSignal({ type: 'offer', sdp: this.pc.localDescription });
-            } catch (err) {
-                console.error(err);
-            } finally {
-                this.makingOffer = false;
-            }
-        };
-
-        this.pc.ondatachannel = (e) => this.setupDC(e.channel);
-    }
-
-    sendIceBatch() {
-        // In WebTorrent protocol, we usually re-send the offer with new candidates embedded 
-        // OR send a new offer. Standard Trickle isn't natively supported by the tracker JSON,
-        // so we just re-announce. Ideally, we would send specific candidate messages, 
-        // but to keep compatibility with standard trackers, we rely on the tracker forwarding offers.
-        // NOTE: For pure vanilla replacement, we are assuming the tracker forwards these payloads.
-        // A specific "candidate" field isn't standard in WebTorrent trackers, so we often merge into SDP.
-        // However, for this demo, we assume the initial SDP is enough OR we rely on aggressive STUN.
-        // *Advanced Trickle Implementation omitted to strictly match WebTorrent tracker schema capabilities*
-        // Instead, we rely on the fact that modern browsers might hold candidates in the initial offer if we wait slightly,
-        // OR we accept that without a custom signaling server, Trickle is limited.
-        
-        // However, we can send a new "offer" that is actually just an update.
-        if (this.iceQueue.length === 0) return;
-        // In this specific implementation, strictly following tracker.btorrent.xyz protocols, 
-        // we can't easily trickle after handshake without a custom protocol inside the established connection.
-        // So we will rely on connection establishment. 
-        this.iceQueue = []; 
-    }
-
-    async handleSignal(signal, tracker) {
-        try {
-            const description = signal.sdp;
-            
-            // GLARE HANDLING (Collision Resolution)
-            const isStable = this.pc.signalingState === 'stable' || (this.pc.signalingState === 'have-local-offer' && this.isSettingRemoteAnswerPending);
-            this.ignoreOffer = !this.polite && (this.makingOffer || !isStable);
-
-            if (signal.type === 'offer') {
-                if (this.ignoreOffer) {
-                    log('sys', `Glare detected. I am impolite, ignoring offer from ${this.id}`);
-                    return;
-                }
-                
-                // If we are polite, we rollback to accept their offer
-                if (this.pc.signalingState !== "stable") {
-                   await this.pc.setLocalDescription({type: "rollback"});
-                }
-
-                await this.pc.setRemoteDescription(description);
-                await this.pc.setLocalDescription();
-                
-                // Send Answer
-                tracker.announce({
-                    answer: this.pc.localDescription,
-                    to_peer_id: this.id,
-                    offer_id: signal.offer_id
-                });
-                
-            } else if (signal.type === 'answer') {
-                await this.pc.setRemoteDescription(description);
-            }
-        } catch (err) {
-            console.error("Signal Error", err);
-        }
-    }
-
-    sendSignal(signal) {
-        // Broadcast offer to all trackers to ensure they find us
-        const offerId = generateRandomId(10);
-        CONFIG.trackers.forEach(url => {
-            const conn = new WebSocket(url);
-            conn.onopen = () => {
-                conn.send(JSON.stringify({
-                    action: 'announce',
-                    info_hash: STATE.infoHash,
-                    peer_id: STATE.myId,
-                    offers: [{ offer: signal.sdp, offer_id: offerId }]
-                }));
-                conn.close();
-            };
-        });
-    }
-
-    setupDC(dc) {
-        this.dc = dc;
-        dc.onopen = () => {
-            log('in', `Connected to ${this.id}`);
-            updateStats();
-            enableChat();
-        };
-        dc.onclose = () => {
-             log('err', `Disconnected from ${this.id}`);
-             delete STATE.peers[this.id];
-             updateStats();
-        };
-        dc.onmessage = (e) => handleIncomingData(e.data, this.id);
-    }
-}
-
-/**
- * ----------------------------------------------------------------------------
- * DATA HANDLING (Chunking & Reassembly)
- * ----------------------------------------------------------------------------
- */
-
-// Override Peer.setupPC to add createDataChannel
-const originalSetup = Peer.prototype.setupPC;
-Peer.prototype.setupPC = function() {
-    originalSetup.call(this); // Call original
-    this.dc = this.pc.createDataChannel("color-ffffff");
-    this.setupDC(this.dc);
-};
-
-
-function sendLargeMessage(text) {
-    const msgId = generateRandomId(8);
-    const jsonString = JSON.stringify({ text: text, timestamp: Date.now() });
-    const encoder = new TextEncoder();
-    const rawData = encoder.encode(jsonString); // Uint8Array
+// 2. SIGNALING (Trackers)
+function connectTracker(url) {
+    const ws = new WebSocket(url);
     
-    const totalChunks = Math.ceil(rawData.length / CONFIG.chunkSize);
+    ws.onopen = () => {
+        // Announce immediately
+        sendAnnounce(ws);
+        // Announce periodically to keep connection alive and find peers
+        ws.interval = setInterval(() => sendAnnounce(ws), 30000);
+    };
+
+    ws.onmessage = (e) => handleTrackerMessage(ws, JSON.parse(e.data));
     
-    // 1. Send Metadata Header
-    broadcast(JSON.stringify({
-        type: 'HEAD',
-        id: msgId,
-        total: totalChunks,
-        size: rawData.length
-    }));
+    ws.onerror = () => ws.close();
+    ws.onclose = () => {
+        clearInterval(ws.interval);
+        setTimeout(() => connectTracker(url), 5000); // Retry logic
+    };
+}
 
-    // 2. Send Chunks
-    for (let i = 0; i < totalChunks; i++) {
-        const start = i * CONFIG.chunkSize;
-        const end = start + CONFIG.chunkSize;
-        const chunk = rawData.slice(start, end);
+function sendAnnounce(ws, opts = {}) {
+    if(ws.readyState !== 1) return;
+    const msg = {
+        action: 'announce',
+        info_hash: STATE.roomHash,
+        peer_id: STATE.id,
+        numwant: 50,
+        offers: opts.offers || []
+    };
+    if (opts.to_peer_id) {
+        msg.to_peer_id = opts.to_peer_id;
+        msg.offer_id = opts.offer_id;
+        msg.answer = opts.answer;
+    }
+    ws.send(JSON.stringify(msg));
+}
+
+// 3. SIGNAL HANDLING
+function handleTrackerMessage(ws, data) {
+    if (data.action !== 'announce') return;
+
+    // A. Tracker sent a list of active peers (Initiator Logic)
+    // "I see a new peer, I will call them."
+    if (data.peer_id && data.peer_id !== STATE.id) {
+        // If we don't have a connection to them, and they are not us
+        initiateConnection(data.peer_id, ws);
+    }
+
+    // B. Someone sent us an OFFER (Receiver Logic)
+    if (data.offer && data.offer_id) {
+        handleOffer(data, ws);
+    }
+
+    // C. Someone sent us an ANSWER (Initiator Logic)
+    if (data.answer && data.offer_id) {
+        handleAnswer(data);
+    }
+}
+
+// 4. WEBRTC LOGIC
+function initiateConnection(remoteId, ws) {
+    if (STATE.peers[remoteId]) return; // Already connected
+
+    log('sys', `Found peer ${remoteId.substring(0,6)}... initiating.`);
+    const pc = createPeer(remoteId);
+    
+    // Create Data Channel (Initiator must create it)
+    const dc = pc.createDataChannel("color-data");
+    setupDataChannel(dc, remoteId);
+
+    // Create Offer
+    pc.onnegotiationneeded = async () => {
+        // Prevent infinite loops
+        if (pc.signalingState !== 'stable') return;
         
-        // Convert to Base64 to safely send over string-based generic P2P if needed, 
-        // OR send as ArrayBuffer if DC supports it. Let's convert to string for safety in this demo.
-        // Actually, DC supports ArrayBuffer. Let's wrap it in a JSON envelope to track index.
+        await pc.setLocalDescription(await pc.createOffer());
         
-        const chunkPayload = JSON.stringify({
-            type: 'CHUNK',
-            id: msgId,
-            idx: i,
-            data: arrayBufferToBase64(chunk)
+        // WAIT FOR ICE (Reliability Fix)
+        // We wait for the browser to gather local IPs before sending the offer.
+        // This avoids "Trickle ICE" issues on dumb trackers.
+        await waitForIce(pc);
+        
+        // Send Offer via Tracker
+        sendAnnounce(ws, { 
+            offers: [{ offer: pc.localDescription, offer_id: generateId(10) }] 
         });
-        
-        broadcast(chunkPayload);
-    }
+    };
 }
 
-function handleIncomingData(raw, peerId) {
-    try {
-        const msg = JSON.parse(raw);
-        
-        // Standard Chat Message
-        if (!msg.type && msg.text) {
-             log('in', `${peerId}: ${msg.text}`);
-             return;
-        }
+async function handleOffer(data, ws) {
+    const remoteId = data.peer_id;
+    if (STATE.peers[remoteId]) return; // Collision or already handled
 
-        // Chunking Protocol
-        if (msg.type === 'HEAD') {
-            STATE.chunks[msg.id] = {
-                total: msg.total,
-                count: 0,
-                parts: new Array(msg.total)
-            };
-        } else if (msg.type === 'CHUNK') {
-            const buffer = STATE.chunks[msg.id];
-            if (!buffer) return;
-            
-            buffer.parts[msg.idx] = msg.data;
-            buffer.count++;
-            
-            if (buffer.count === buffer.total) {
-                // Reassemble
-                const fullBase64 = buffer.parts.join('');
-                const jsonStr = new TextDecoder().decode(base64ToArrayBuffer(fullBase64));
-                const finalData = JSON.parse(jsonStr);
-                log('in', `${peerId} (Large): ${finalData.text}`);
-                delete STATE.chunks[msg.id];
-            }
-        }
+    log('sys', `Received offer from ${remoteId.substring(0,6)}...`);
+    const pc = createPeer(remoteId);
+    
+    // Handle incoming Data Channel
+    pc.ondatachannel = (e) => setupDataChannel(e.channel, remoteId);
 
-    } catch (e) {
-        log('in', `${peerId}: ${raw}`); // Fallback for simple strings
-    }
-}
+    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+    await pc.setLocalDescription(await pc.createAnswer());
+    
+    // Wait for ICE to be included in the answer
+    await waitForIce(pc);
 
-function broadcast(msg) {
-    Object.values(STATE.peers).forEach(p => {
-        if (p.dc && p.dc.readyState === 'open') p.dc.send(msg);
+    // Send Answer via Tracker
+    sendAnnounce(ws, {
+        to_peer_id: remoteId,
+        offer_id: data.offer_id,
+        answer: pc.localDescription
     });
 }
 
-/**
- * ----------------------------------------------------------------------------
- * UTILITIES
- * ----------------------------------------------------------------------------
- */
-function updateStats() {
-    const count = Object.keys(STATE.peers).length;
-    ui.stats.innerHTML = `Active Peers: ${count} | My ID: ${STATE.myId}`;
-    if(count > 0) enableChat();
+async function handleAnswer(data) {
+    const pc = STATE.peers[data.peer_id];
+    if (pc && pc.signalingState === 'have-local-offer') {
+        log('sys', `Connected to ${data.peer_id.substring(0,6)}!`);
+        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+    }
 }
 
-function enableChat() {
-    ui.input.disabled = false;
-    ui.btn.disabled = false;
-}
-
-ui.btn.addEventListener('click', () => {
-    const txt = ui.input.value;
-    if(!txt) return;
+function createPeer(remoteId) {
+    const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
     
-    if (txt.length < CONFIG.chunkSize) {
-        // Small message: Send directly
-        broadcast(JSON.stringify({ text: txt }));
+    pc.onconnectionstatechange = () => {
+        if(pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+            log('msg-err', `Connection lost: ${remoteId}`);
+            cleanupPeer(remoteId);
+        }
+    };
+    
+    STATE.peers[remoteId] = pc;
+    return pc;
+}
+
+// Helper: Wait for ICE candidates to gather completely
+function waitForIce(pc) {
+    return new Promise(resolve => {
+        if (pc.iceGatheringState === 'complete') resolve();
+        else {
+            const check = () => {
+                if (pc.iceGatheringState === 'complete') {
+                    pc.removeEventListener('icegatheringstatechange', check);
+                    resolve();
+                }
+            };
+            pc.addEventListener('icegatheringstatechange', check);
+            // Timeout backup (1.5s) in case state never hits 'complete'
+            setTimeout(resolve, 1500);
+        }
+    });
+}
+
+function setupDataChannel(dc, remoteId) {
+    dc.onopen = () => {
+        log('sys', `Data Channel Open: ${remoteId}`);
+        updateUI();
+    };
+    dc.onmessage = (e) => handleData(e.data, remoteId);
+}
+
+function cleanupPeer(id) {
+    if(STATE.peers[id]) {
+        STATE.peers[id].close();
+        delete STATE.peers[id];
+    }
+    updateUI();
+}
+
+// 5. DATA & CHUNKING
+function handleData(raw, id) {
+    try {
+        const msg = JSON.parse(raw);
+        if(msg.type === 'txt') {
+            log('msg-in', `Peer: ${msg.val}`);
+        }
+        else if(msg.type === 'HEAD') {
+            STATE.chunks[msg.id] = { total: msg.total, parts: [], count: 0 };
+        }
+        else if(msg.type === 'CHUNK') {
+            const buf = STATE.chunks[msg.id];
+            if(buf) {
+                buf.parts[msg.idx] = msg.data;
+                buf.count++;
+                if(buf.count === buf.total) {
+                    // Reassemble
+                    const full = buf.parts.join('');
+                    const final = JSON.parse(atob(full)); // Base64 decode
+                    log('msg-in', `Peer (Large): ${final.val}`);
+                    delete STATE.chunks[msg.id];
+                }
+            }
+        }
+    } catch(e) { console.error(e); }
+}
+
+function sendMsg(text) {
+    if(!text) return;
+    const payload = JSON.stringify({ type: 'txt', val: text });
+    
+    // Simple logic: if small, send direct. If large, chunk.
+    if(payload.length < CHUNK_SIZE) {
+        broadcast(payload);
     } else {
-        // Large message: Use Chunking
-        sendLargeMessage(txt);
+        // Chunking
+        const msgId = generateId(8);
+        const b64 = btoa(payload);
+        const total = Math.ceil(b64.length / CHUNK_SIZE);
+        
+        broadcast(JSON.stringify({ type: 'HEAD', id: msgId, total: total }));
+        
+        for(let i=0; i<total; i++) {
+            const chunk = b64.slice(i*CHUNK_SIZE, (i+1)*CHUNK_SIZE);
+            broadcast(JSON.stringify({ type: 'CHUNK', id: msgId, idx: i, data: chunk }));
+        }
     }
     
-    log('out', `Me: ${txt.substring(0, 50)}${txt.length>50?'...':''}`);
-    ui.input.value = '';
-});
-
-function log(type, msg) {
-    const div = document.createElement('div');
-    div.className = type;
-    div.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    ui.log.appendChild(div);
-    ui.log.scrollTop = ui.log.scrollHeight;
+    log('msg-out', `Me: ${text.substring(0, 50)}...`);
+    UI.input.value = '';
 }
 
-function generateRandomId(len) {
-    let res = '';
-    const c = '0123456789abcdef';
-    for(let i=0; i<len; i++) res += c[Math.floor(Math.random()*c.length)];
-    return res;
+function broadcast(data) {
+    Object.values(STATE.peers).forEach(pc => {
+        // Find the data channel
+        const dc = (pc.getTransceivers() && pc.getTransceivers()[0]?.sender?.transport?.transport) 
+                   ? null // simplified lookup 
+                   : null; 
+        // Actually, just find the channel we attached
+        // We didn't store DC in STATE.peers directly in createPeer, let's fix strictly:
+        // Note: In handleOffer/initiate we didn't save DC globally. 
+        // We rely on closure, but to broadcast we need access.
+    });
+    // Correction: We need to store DataChannels to broadcast
+    // Let's modify cleanup/setup to store DCs
+}
+
+// 6. UTILS & DOM
+UI.btn.addEventListener('click', () => sendMsg(UI.input.value));
+UI.input.addEventListener('keyup', (e) => { if(e.key === 'Enter') sendMsg(UI.input.value); });
+
+// Redefine broadcast to work with stored channels is hard without changing structure.
+// Easier: Just loop through STATE.peers, but we need the channel.
+// FIX: Let's attach channel to the PC object for easy access.
+const _setupDC = setupDataChannel;
+setupDataChannel = function(dc, id) {
+    if(STATE.peers[id]) STATE.peers[id].dc = dc;
+    _setupDC(dc, id);
+}
+// Now broadcast is easy:
+broadcast = function(msg) {
+    Object.values(STATE.peers).forEach(p => {
+        if(p.dc && p.dc.readyState === 'open') p.dc.send(msg);
+    });
+}
+
+function updateUI() {
+    const count = Object.values(STATE.peers).filter(p => p.dc && p.dc.readyState === 'open').length;
+    UI.peerCount.innerText = count;
+    UI.peerCount.className = count > 0 ? "badge live" : "badge";
+    if(count > 0) {
+        UI.input.disabled = false;
+        UI.btn.disabled = false;
+        UI.input.placeholder = "Type a message...";
+    } else {
+        UI.input.disabled = true;
+        UI.btn.disabled = true;
+        UI.input.placeholder = "Waiting for connection...";
+    }
+}
+
+function log(cls, text) {
+    const div = document.createElement('div');
+    div.className = cls;
+    div.innerText = `[${new Date().toLocaleTimeString()}] ${text}`;
+    UI.log.appendChild(div);
+    UI.log.scrollTop = UI.log.scrollHeight;
+}
+
+function generateId(len) {
+    let s = '', c = '0123456789abcdef';
+    for(let i=0; i<len; i++) s += c[Math.floor(Math.random()*c.length)];
+    return s;
 }
 
 async function sha1(str) {
-    const hash = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(str));
-    return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const b = new TextEncoder().encode(str);
+    const h = await crypto.subtle.digest('SHA-1', b);
+    return Array.from(new Uint8Array(h)).map(x => x.toString(16).padStart(2,'0')).join('');
 }
 
-// Helpers for binary conversion
-function arrayBufferToBase64(buffer) {
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-    return window.btoa(binary);
-}
-function base64ToArrayBuffer(base64) {
-    const binary_string = window.atob(base64);
-    const len = binary_string.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) bytes[i] = binary_string.charCodeAt(i);
-    return bytes.buffer;
-}
 </script>
 </body>
 </html>
