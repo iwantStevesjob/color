@@ -319,8 +319,6 @@
         const OFFER_TTL = 57_333; // 57 seconds
         const ANNOUNCE_INTERVAL = 33_333; // 33 seconds
         const ICE_TIMEOUT = 5000; // 5 seconds
-        const PING_INTERVAL = 15_000; // 15 seconds
-        const PING_TIMEOUT = 45_000; // 45 seconds - remove peer if no pong
         const BASE_RETRY_MS = 5000; // Initial retry delay
         const MAX_RETRY_MS = 60_000; // Max retry delay (1 minute)
 
@@ -365,7 +363,6 @@
         const trackerSockets = {}; // url -> WebSocket
         const trackerRetryMs = {}; // url -> current retry delay
         const announceIntervals = {}; // url -> interval id
-        let pingInterval = null;
         let localStream = null; // Local video stream
         let cameraActive = false;
 
@@ -437,6 +434,7 @@
                     for (const [peerId, peer] of Object.entries(connectedPeers)) {
                         if (peer.pc === pc) {
                             log(`Connection closed with ${peerId.slice(0, 6)}`, 'error');
+                            removeRemoteVideo(peerId);
                             delete connectedPeers[peerId];
                             updateUI();
                             break;
@@ -444,11 +442,41 @@
                     }
                 }
             };
+
+            pc.onnegotiationneeded = async () => {
+                // Only renegotiate if fully connected (avoid conflict with initial setup)
+                if (pc.connectionState !== 'connected') return;
+
+                try {
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+
+                    // Find dc to send signal
+                    let dcToSend = resolveDc(pc);
+                    if (dcToSend && dcToSend.readyState === 'open') {
+                        dcToSend.send(JSON.stringify({
+                            type: 'signal',
+                            description: pc.localDescription
+                        }));
+                    }
+                } catch (err) {
+                    console.error('Renegotiation error:', err);
+                }
+            };
+
             pc.ontrack = e => {
                 handleRemoteTrack(e, pc);
             };
 
             return { pc, dc };
+        }
+
+        // Helper to find DC for a PC
+        function resolveDc(pc) {
+            for (const peer of Object.values(connectedPeers)) {
+                if (peer.pc === pc) return peer.dc;
+            }
+            return null;
         }
 
         async function createOffer() {
@@ -515,18 +543,31 @@
                 log(`DataChannel error with ${peerId.slice(0, 6)}: ${err.message || err}`, 'error');
             };
 
-            dc.onmessage = e => {
-                // Handle ping/pong for heartbeat
-                if (e.data === '__ping__') {
-                    if (dc.readyState === 'open') dc.send('__pong__');
-                    return;
-                }
-                if (e.data === '__pong__') {
-                    if (connectedPeers[peerId]) {
-                        connectedPeers[peerId].lastPong = Date.now();
+            dc.onmessage = async (e) => {
+                // Check if signal message (renegotiation)
+                try {
+                    const msg = JSON.parse(e.data);
+                    if (msg.type === 'signal' && msg.description) {
+                        const pc = connectedPeers[peerId]?.pc;
+                        if (!pc) return;
+
+                        if (msg.description.type === 'offer') {
+                            await pc.setRemoteDescription(msg.description);
+                            const answer = await pc.createAnswer();
+                            await pc.setLocalDescription(answer);
+                            dc.send(JSON.stringify({
+                                type: 'signal',
+                                description: pc.localDescription
+                            }));
+                        } else if (msg.description.type === 'answer') {
+                            await pc.setRemoteDescription(msg.description);
+                        }
+                        return; // Handled as signal
                     }
-                    return;
+                } catch (_) {
+                    // Not JSON or not signal -> Chat message
                 }
+
                 logMessage(peerId, e.data);
             };
         }
@@ -631,27 +672,7 @@
 
         document.getElementById('camera-btn').onclick = toggleCamera;
 
-        // --- HEARTBEAT ---
-        function startHeartbeat() {
-            pingInterval = setInterval(() => {
-                const now = Date.now();
-                for (const [peerId, peer] of Object.entries(connectedPeers)) {
-                    // Check for stale peers
-                    if (peer.lastPong && now - peer.lastPong > PING_TIMEOUT) {
-                        log(`Peer ${peerId.slice(0, 6)} timed out (no pong)`, 'error');
-                        peer.pc.close();
-                        removeRemoteVideo(peerId);
-                        delete connectedPeers[peerId];
-                        updateUI();
-                        continue;
-                    }
-                    // Send ping
-                    if (peer.dc && peer.dc.readyState === 'open') {
-                        peer.dc.send('__ping__');
-                    }
-                }
-            }, PING_INTERVAL);
-        }
+
 
         // --- TRACKER COMMUNICATION ---
         function connectToTracker(url) {
@@ -774,7 +795,7 @@
                     const answer = await waitForIce(pc);
 
                     // Store peer connection
-                    connectedPeers[data.peer_id] = { pc, dc: null, lastPong: Date.now() };
+                    connectedPeers[data.peer_id] = { pc, dc: null };
 
                     // If we have local stream, add tracks
                     if (localStream) {
@@ -817,7 +838,7 @@
                     await pending.pc.setRemoteDescription(new RTCSessionDescription(data.answer));
 
                     // Store peer connection
-                    connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc, lastPong: Date.now() };
+                    connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc };
                     setupDataChannel(pending.dc, data.peer_id);
 
                     // If we have local stream, add tracks
@@ -918,7 +939,6 @@
             for (const id of Object.values(announceIntervals)) {
                 clearInterval(id);
             }
-            if (pingInterval) clearInterval(pingInterval);
         }
 
         // Handle page unload
@@ -968,8 +988,7 @@
                 connectToTracker(url);
             });
 
-            // Start heartbeat
-            startHeartbeat();
+
 
             // Periodic pool cleanup and refill
             setInterval(() => {
