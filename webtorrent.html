@@ -278,7 +278,7 @@
 </head>
 
 <body>
-    <h2>WebRTC Chat over WebTorrent</h2>
+    <h2> WebTorrent</h2>
     <p class="subtitle">Serverless P2P chat using BitTorrent tracker signaling • No dependencies</p>
     <div id="room-info" style="margin-bottom: 12px; font-size: 0.9em; color: #888;">Room: <span id="room-name"
             style="color: #4ade80; font-weight: 600;">-</span></div>
@@ -358,6 +358,9 @@
         const storedId = localStorage.getItem('webtorrent-peer-id');
         const selfId = storedId || genId(20);
         if (!storedId) localStorage.setItem('webtorrent-peer-id', selfId);
+
+        // Instance ID to distinguish between re-announces vs page refreshes
+        const selfInstanceId = genId(20);
 
         let infoHash = null;
 
@@ -774,6 +777,7 @@
                     action: 'announce',
                     info_hash: infoHash,
                     peer_id: selfId,
+                    instance_id: selfInstanceId, // Send our instance ID
                     numwant: OFFER_POOL_SIZE,
                     offers: offers.map(o => ({
                         offer_id: o.offerId,
@@ -807,8 +811,15 @@
 
                 // Already connected to this peer?
                 if (connectedPeers[data.peer_id]) {
-                    // Treat as reconnection - replace existing
-                    log(`Peer ${data.peer_id.slice(0, 6)} reconnecting...`, 'info');
+                    // Check instance ID to prevent loop
+                    if (connectedPeers[data.peer_id].instanceId === data.instance_id) {
+                        // Same instance re-announcing -> IGNORE
+                        // log(`Ignoring re-announce from ${data.peer_id.slice(0, 6)}`, 'debug'); // noisy
+                        return;
+                    }
+
+                    // Different instance ID -> They refreshed/reconnected -> REPLACE
+                    log(`Peer ${data.peer_id.slice(0, 6)} reconnecting (new instance)...`, 'info');
                     if (connectedPeers[data.peer_id].pc) {
                         connectedPeers[data.peer_id].pc.close();
                     }
@@ -837,7 +848,11 @@
                     const answer = await waitForIce(pc);
 
                     // Store peer connection
-                    connectedPeers[data.peer_id] = { pc, dc: null };
+                    connectedPeers[data.peer_id] = {
+                        pc,
+                        dc: null,
+                        instanceId: data.instance_id // Store their instance ID
+                    };
 
                     // If we have local stream, add tracks
                     if (localStream) {
