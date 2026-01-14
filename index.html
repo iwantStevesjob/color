@@ -870,223 +870,292 @@
     </div>
 
     <script type="module">
-        const { joinRoom, selfId } = (() => {
-            const TRACKERS = [
-                'wss://tracker.webtorrent.dev',
-                'wss://tracker.openwebtorrent.com',
-                'wss://tracker.btorrent.xyz'
-            ];
-            const OFFER_POOL_SIZE = 5;
-            const OFFER_TTL = 57333;
-            const ANNOUNCE_INTERVAL = 33333;
-            const ICE_TIMEOUT = 5000;
-            const RTC_CONFIG = {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'stun:stun.cloudflare.com:3478' }
-                ]
-            };
-            const charSet = '0123456789AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
-            const genId = n => Array(n).fill().map(() => charSet[Math.floor(Math.random() * charSet.length)]).join('');
-            const selfId = genId(20);
-            const encoder = new TextEncoder();
-            async function sha1Hash(str) {
-                const hashBuffer = await crypto.subtle.digest('SHA-1', encoder.encode(str));
-                return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(36)).join('').slice(0, 20);
-            }
-            function waitForIce(pc) {
-                return Promise.race([
-                    new Promise(resolve => {
-                        const checkState = () => {
-                            if (pc.iceGatheringState === 'complete') {
-                                pc.removeEventListener('icegatheringstatechange', checkState);
-                                resolve();
-                            }
-                        };
-                        pc.addEventListener('icegatheringstatechange', checkState);
-                        checkState();
-                    }),
-                    new Promise(resolve => setTimeout(resolve, ICE_TIMEOUT))
-                ]).then(() => ({
-                    type: pc.localDescription.type,
-                    sdp: pc.localDescription.sdp.replace(/a=ice-options:trickle\s\n/g, '')
-                }));
-            }
-            return {
-                selfId,
-                joinRoom: (config, roomId) => {
-                    let infoHash = null;
-                    const connectedPeers = {};
-                    const pendingOffers = {};
-                    const handledOffers = new Set();
-                    const trackerSockets = {};
-                    let offerPool = [];
-                    const messageHandlers = {}; // namespace -> [handler]
-                    const listeners = { peerJoin: [], peerLeave: [] };
+        // ============================================================
+        // Native WebRTC over WebTorrent Tracker Signaling
+        // Replaces trystero library with zero-dependency implementation
+        // ============================================================
 
-                    async function init() {
-                        infoHash = await sha1Hash(roomId);
-                        await fillOfferPool();
-                        TRACKERS.forEach(url => connectToTracker(url));
-                        setInterval(() => {
-                            const now = Date.now();
-                            offerPool = offerPool.filter(o => {
-                                if (now - o.created > OFFER_TTL) { o.pc.close(); return false; }
-                                return true;
-                            });
-                            fillOfferPool();
-                        }, OFFER_TTL);
-                    }
-                    init();
+        const TRACKERS = [
+            'wss://tracker.webtorrent.dev',
+            'wss://tracker.openwebtorrent.com',
+            'wss://tracker.btorrent.xyz'
+        ];
 
-                    function connectToTracker(url) {
-                        const ws = new WebSocket(url);
-                        trackerSockets[url] = ws;
-                        ws.onopen = () => startAnnouncing(ws, url);
-                        ws.onmessage = e => {
-                            try {
-                                const data = typeof e.data === 'string' ? JSON.parse(e.data) : null;
-                                if (data) handleTrackerMessage(ws, data);
-                            } catch (err) { }
-                        };
-                        ws.onclose = () => {
-                            delete trackerSockets[url];
-                            setTimeout(() => connectToTracker(url), 5000);
-                        };
-                        ws.onerror = () => { };
-                    }
-                    async function startAnnouncing(ws, url) {
-                        const announce = async () => {
-                            if (ws.readyState !== WebSocket.OPEN) return;
-                            const offers = getOffersFromPool(3);
-                            if (offers.length === 0) return;
-                            for (const o of offers) {
-                                pendingOffers[o.offerId] = { pc: o.pc, dc: o.dc, created: o.created };
-                                setTimeout(() => {
-                                    if (pendingOffers[o.offerId]) {
-                                        pendingOffers[o.offerId].pc.close();
-                                        delete pendingOffers[o.offerId];
-                                    }
-                                }, OFFER_TTL);
-                            }
-                            const msg = { action: 'announce', info_hash: infoHash, peer_id: selfId, numwant: OFFER_POOL_SIZE, offers: offers.map(o => ({ offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp } })) };
-                            ws.send(JSON.stringify(msg));
-                        };
-                        await announce();
-                        setInterval(announce, ANNOUNCE_INTERVAL);
-                    }
-                    function createPeerConnection(isInitiator, onDataChannel) {
-                        const pc = new RTCPeerConnection(RTC_CONFIG);
-                        let dc = null;
-                        if (isInitiator) {
-                            dc = pc.createDataChannel('data');
-                            dc.binaryType = 'arraybuffer';
-                        } else {
-                            pc.ondatachannel = e => {
-                                dc = e.channel;
-                                dc.binaryType = 'arraybuffer';
-                                onDataChannel?.(dc);
-                            };
-                        }
-                        pc.onconnectionstatechange = () => {
-                            if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
-                                for (const [peerId, peer] of Object.entries(connectedPeers)) {
-                                    if (peer.pc === pc) {
-                                        delete connectedPeers[peerId];
-                                        listeners.peerLeave.forEach(cb => cb(peerId));
-                                        break;
-                                    }
-                                }
-                            }
-                        };
-                        return { pc, dc };
-                    }
-                    async function createOffer() {
-                        const { pc, dc } = createPeerConnection(true);
-                        const offerId = genId(20);
-                        await pc.setLocalDescription(await pc.createOffer());
-                        const offer = await waitForIce(pc);
-                        return { pc, dc, offer, offerId, created: Date.now() };
-                    }
-                    async function fillOfferPool() {
-                        const needed = OFFER_POOL_SIZE - offerPool.length;
-                        if (needed > 0) offerPool.push(...(await Promise.all(Array(needed).fill().map(() => createOffer()))));
-                    }
-                    function getOffersFromPool(n) {
-                        const now = Date.now();
-                        offerPool = offerPool.filter(o => { if (now - o.created > OFFER_TTL) { o.pc.close(); return false; } return true; });
-                        const taken = offerPool.splice(0, n);
-                        fillOfferPool();
-                        return taken;
-                    }
-                    function setupDataChannel(dc, peerId) {
-                        dc.onopen = () => listeners.peerJoin.forEach(cb => cb(peerId));
-                        dc.onclose = () => { delete connectedPeers[peerId]; listeners.peerLeave.forEach(cb => cb(peerId)); };
-                        dc.onmessage = e => {
-                            try {
-                                const payload = JSON.parse(e.data);
-                                const handlers = messageHandlers[payload.ns];
-                                if (handlers) handlers.forEach(cb => cb(payload.data, peerId));
-                            } catch (err) { }
-                        };
-                    }
-                    async function handleTrackerMessage(ws, data) {
-                        if (data.info_hash !== infoHash || data.peer_id === selfId) return;
-                        if (data.offer && data.offer_id) {
-                            if (handledOffers.has(data.offer_id) || connectedPeers[data.peer_id]) return;
-                            handledOffers.add(data.offer_id);
-                            const hasPending = Object.values(pendingOffers).some(p => p.peerId === data.peer_id);
-                            if (hasPending && selfId > data.peer_id) return;
-                            try {
-                                const { pc, dc } = createPeerConnection(false, channel => { setupDataChannel(channel, data.peer_id); connectedPeers[data.peer_id].dc = channel; });
-                                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                                await pc.setLocalDescription(await pc.createAnswer());
-                                const answer = await waitForIce(pc);
-                                connectedPeers[data.peer_id] = { pc, dc: null };
-                                ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer: { type: answer.type, sdp: answer.sdp } }));
-                            } catch (err) { }
-                        }
-                        if (data.answer && data.offer_id) {
-                            const pending = pendingOffers[data.offer_id];
-                            if (!pending || connectedPeers[data.peer_id]) { if (pending) { pending.pc.close(); delete pendingOffers[data.offer_id]; } return; }
-                            try {
-                                await pending.pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                                connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc };
-                                setupDataChannel(pending.dc, data.peer_id);
-                                delete pendingOffers[data.offer_id];
-                            } catch (err) { pending.pc.close(); delete pendingOffers[data.offer_id]; }
-                        }
-                    }
-                    return {
-                        makeAction: (namespace) => {
-                            if (!messageHandlers[namespace]) messageHandlers[namespace] = [];
-                            return [
-                                (data, targetPeer) => {
-                                    const msg = JSON.stringify({ ns: namespace, data });
-                                    if (targetPeer) {
-                                        const p = connectedPeers[targetPeer];
-                                        if (p && p.dc && p.dc.readyState === 'open') p.dc.send(msg);
-                                    } else {
-                                        Object.values(connectedPeers).forEach(p => { if (p.dc && p.dc.readyState === 'open') p.dc.send(msg); });
-                                    }
-                                },
-                                (cb) => messageHandlers[namespace].push(cb)
-                            ];
-                        },
-                        onPeerJoin: cb => listeners.peerJoin.push(cb),
-                        onPeerLeave: cb => listeners.peerLeave.push(cb),
-                        getPeers: () => Object.keys(connectedPeers),
-                        leave: () => {
-                            offerPool.forEach(o => o.pc.close());
-                            Object.values(connectedPeers).forEach(p => p.pc.close());
-                            Object.values(trackerSockets).forEach(ws => ws.close());
+        const OFFER_POOL_SIZE = 10;
+        const OFFER_TTL = 57_333;
+        const ANNOUNCE_INTERVAL = 33_333;
+        const ICE_TIMEOUT = 5000;
+
+        const RTC_CONFIG = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun.cloudflare.com:3478' }
+            ]
+        };
+
+        const charSet = '0123456789AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
+        const genId = n => Array(n).fill().map(() => charSet[Math.floor(Math.random() * charSet.length)]).join('');
+        const encoder = new TextEncoder();
+
+        async function sha1Hash(str) {
+            const hashBuffer = await crypto.subtle.digest('SHA-1', encoder.encode(str));
+            return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(36)).join('').slice(0, 20);
+        }
+
+        const selfId = genId(20);
+
+        function waitForIce(pc) {
+            return Promise.race([
+                new Promise(resolve => {
+                    const checkState = () => {
+                        if (pc.iceGatheringState === 'complete') {
+                            pc.removeEventListener('icegatheringstatechange', checkState);
+                            resolve();
                         }
                     };
+                    pc.addEventListener('icegatheringstatechange', checkState);
+                    checkState();
+                }),
+                new Promise(resolve => setTimeout(resolve, ICE_TIMEOUT))
+            ]).then(() => ({
+                type: pc.localDescription.type,
+                sdp: pc.localDescription.sdp.replace(/a=ice-options:trickle\s\n/g, '')
+            }));
+        }
+
+        function createPeerConnection(isInitiator, onDataChannel) {
+            const pc = new RTCPeerConnection(RTC_CONFIG);
+            let dc = null;
+
+            if (isInitiator) {
+                dc = pc.createDataChannel('data');
+                dc.binaryType = 'arraybuffer';
+            } else {
+                pc.ondatachannel = e => {
+                    dc = e.channel;
+                    dc.binaryType = 'arraybuffer';
+                    onDataChannel?.(dc);
+                };
+            }
+            return { pc, dc };
+        }
+
+        async function createOffer() {
+            const { pc, dc } = createPeerConnection(true);
+            const offerId = genId(20);
+            await pc.setLocalDescription(await pc.createOffer());
+            const offer = await waitForIce(pc);
+            return { pc, dc, offer, offerId, created: Date.now() };
+        }
+
+        function joinRoom(config, roomId) {
+            const connectedPeers = {};
+            const pendingOffers = {};
+            const handledOffers = new Set();
+            const trackerSockets = {};
+            let offerPool = [];
+            let infoHash = null;
+            const peerJoinCallbacks = [];
+            const peerLeaveCallbacks = [];
+            const actionHandlers = {};
+            const announceIntervals = [];
+            let isLeaving = false;
+
+            async function fillOfferPool() {
+                const needed = OFFER_POOL_SIZE - offerPool.length;
+                if (needed > 0) {
+                    const newOffers = await Promise.all(Array(needed).fill().map(() => createOffer()));
+                    offerPool.push(...newOffers);
+                }
+            }
+
+            function getOffersFromPool(n) {
+                const now = Date.now();
+                offerPool = offerPool.filter(o => {
+                    if (now - o.created > OFFER_TTL) { o.pc.close(); return false; }
+                    return true;
+                });
+                const taken = offerPool.splice(0, n);
+                fillOfferPool();
+                return taken;
+            }
+
+            function setupDataChannel(dc, peerId) {
+                dc.onopen = () => {
+                    peerJoinCallbacks.forEach(cb => cb(peerId));
+                };
+                dc.onclose = () => {
+                    delete connectedPeers[peerId];
+                    peerLeaveCallbacks.forEach(cb => cb(peerId));
+                };
+                dc.onerror = () => { };
+                dc.onmessage = e => {
+                    try {
+                        const msg = JSON.parse(e.data);
+                        if (msg.action && actionHandlers[msg.action]) {
+                            actionHandlers[msg.action].forEach(cb => cb(msg.data, peerId));
+                        }
+                    } catch (err) { }
+                };
+            }
+
+            function sendToAllPeers(action, data, targetPeerId = null) {
+                const message = JSON.stringify({ action, data });
+                for (const [peerId, peer] of Object.entries(connectedPeers)) {
+                    if (targetPeerId && peerId !== targetPeerId) continue;
+                    if (peer.dc && peer.dc.readyState === 'open') {
+                        try { peer.dc.send(message); } catch (e) { }
+                    }
+                }
+            }
+
+            function connectToTracker(url) {
+                if (isLeaving) return;
+                const ws = new WebSocket(url);
+                trackerSockets[url] = ws;
+
+                ws.onopen = () => { startAnnouncing(ws, url); };
+                ws.onmessage = e => {
+                    try {
+                        const data = typeof e.data === 'string' ? JSON.parse(e.data) : null;
+                        if (data) handleTrackerMessage(ws, data);
+                    } catch (err) { }
+                };
+                ws.onclose = () => {
+                    delete trackerSockets[url];
+                    if (!isLeaving) setTimeout(() => connectToTracker(url), 5000);
+                };
+                ws.onerror = () => { };
+            }
+
+            async function startAnnouncing(ws, url) {
+                const announce = async () => {
+                    if (ws.readyState !== WebSocket.OPEN || isLeaving) return;
+                    const offers = getOffersFromPool(3);
+                    if (offers.length === 0) return;
+
+                    for (const o of offers) {
+                        pendingOffers[o.offerId] = { pc: o.pc, dc: o.dc, created: o.created };
+                        setTimeout(() => {
+                            if (pendingOffers[o.offerId]) {
+                                pendingOffers[o.offerId].pc.close();
+                                delete pendingOffers[o.offerId];
+                            }
+                        }, OFFER_TTL);
+                    }
+
+                    const msg = {
+                        action: 'announce',
+                        info_hash: infoHash,
+                        peer_id: selfId,
+                        numwant: OFFER_POOL_SIZE,
+                        offers: offers.map(o => ({
+                            offer_id: o.offerId,
+                            offer: { type: o.offer.type, sdp: o.offer.sdp }
+                        }))
+                    };
+                    ws.send(JSON.stringify(msg));
+                };
+
+                await announce();
+                const interval = setInterval(announce, ANNOUNCE_INTERVAL);
+                announceIntervals.push(interval);
+            }
+
+            async function handleTrackerMessage(ws, data) {
+                if (data.info_hash !== infoHash) return;
+                if (data.peer_id === selfId) return;
+
+                if (data.offer && data.offer_id) {
+                    if (handledOffers.has(data.offer_id)) return;
+                    handledOffers.add(data.offer_id);
+                    if (connectedPeers[data.peer_id]) return;
+
+                    const hasPendingToThem = Object.values(pendingOffers).some(p => p.peerId === data.peer_id);
+                    if (hasPendingToThem && selfId > data.peer_id) return;
+
+                    try {
+                        const { pc, dc } = createPeerConnection(false, channel => {
+                            setupDataChannel(channel, data.peer_id);
+                            connectedPeers[data.peer_id].dc = channel;
+                        });
+
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                        await pc.setLocalDescription(await pc.createAnswer());
+                        const answer = await waitForIce(pc);
+
+                        connectedPeers[data.peer_id] = { pc, dc: null };
+
+                        ws.send(JSON.stringify({
+                            action: 'announce',
+                            info_hash: infoHash,
+                            peer_id: selfId,
+                            to_peer_id: data.peer_id,
+                            offer_id: data.offer_id,
+                            answer: { type: answer.type, sdp: answer.sdp }
+                        }));
+                    } catch (err) { }
+                }
+
+                if (data.answer && data.offer_id) {
+                    const pending = pendingOffers[data.offer_id];
+                    if (!pending) return;
+                    if (connectedPeers[data.peer_id]) {
+                        pending.pc.close();
+                        delete pendingOffers[data.offer_id];
+                        return;
+                    }
+
+                    try {
+                        await pending.pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                        connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc };
+                        setupDataChannel(pending.dc, data.peer_id);
+                        delete pendingOffers[data.offer_id];
+                    } catch (err) {
+                        pending.pc.close();
+                        delete pendingOffers[data.offer_id];
+                    }
+                }
+            }
+
+            // Initialize room
+            (async () => {
+                infoHash = await sha1Hash(config.appId + roomId);
+                await fillOfferPool();
+                TRACKERS.forEach(url => connectToTracker(url));
+
+                setInterval(() => {
+                    const now = Date.now();
+                    offerPool = offerPool.filter(o => {
+                        if (now - o.created > OFFER_TTL) { o.pc.close(); return false; }
+                        return true;
+                    });
+                    fillOfferPool();
+                }, OFFER_TTL);
+            })();
+
+            return {
+                makeAction(name) {
+                    if (!actionHandlers[name]) actionHandlers[name] = [];
+                    const send = (data, targetPeerId = null) => sendToAllPeers(name, data, targetPeerId);
+                    const receive = (callback) => { actionHandlers[name].push(callback); };
+                    return [send, receive];
+                },
+                onPeerJoin(callback) { peerJoinCallbacks.push(callback); },
+                onPeerLeave(callback) { peerLeaveCallbacks.push(callback); },
+                getPeers() { return connectedPeers; },
+                leave() {
+                    isLeaving = true;
+                    announceIntervals.forEach(i => clearInterval(i));
+                    Object.values(trackerSockets).forEach(ws => { try { ws.close(); } catch (e) { } });
+                    Object.values(connectedPeers).forEach(p => { try { p.pc.close(); } catch (e) { } });
+                    Object.values(pendingOffers).forEach(p => { try { p.pc.close(); } catch (e) { } });
+                    offerPool.forEach(o => { try { o.pc.close(); } catch (e) { } });
                 }
             };
-        })();
+        }
 
         class ColorDB {
             constructor() { this.name = 'color'; }
@@ -1279,19 +1348,26 @@
             tryAutoConnectFromHash() { if (window.location.hash.length > 1) this.connectAndPreview(window.location.hash, true); }
 
             joinNetwork(mode = 'standard') {
-                try { this.room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69', trackerUrls: ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebrtc.io'] }, this.roomId); } catch (e) { return; }
-                const actions = ['fragment', 'lock', 'req', 'identity'];
-                this.actions = Object.assign({}, ...actions.map(k => ({ [`send${k.charAt(0).toUpperCase() + k.slice(1)}`]: this.room.makeAction(k)[0] })));
-                const [getFragment] = this.room.makeAction('fragment').slice(1);
-                const [getLock] = this.room.makeAction('lock').slice(1);
-                const [getReqSync] = this.room.makeAction('req').slice(1);
-                const [getIdentity] = this.room.makeAction('identity').slice(1);
+                try { this.room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, this.roomId); } catch (e) { return; }
 
-                this.actions.reqSync = this.room.makeAction('req')[0];
-                getIdentity((data, pid) => this.handlePeerIdentity(data, pid));
-                getFragment((fragMap) => this.handleRemoteFragments(fragMap));
-                getLock((data, pid) => this.handleRemoteLock(data, pid));
-                getReqSync(async (reqKeys, pid) => {
+                // Set up actions using the native P2P API - makeAction returns [send, receive]
+                const [sendFragment, receiveFragment] = this.room.makeAction('fragment');
+                const [sendLock, receiveLock] = this.room.makeAction('lock');
+                const [sendReq, receiveReq] = this.room.makeAction('req');
+                const [sendIdentity, receiveIdentity] = this.room.makeAction('identity');
+
+                this.actions = {
+                    sendFragment,
+                    sendLock,
+                    sendReq,
+                    sendIdentity,
+                    reqSync: sendReq
+                };
+
+                receiveIdentity((data, pid) => this.handlePeerIdentity(data, pid));
+                receiveFragment((fragMap) => this.handleRemoteFragments(fragMap));
+                receiveLock((data, pid) => this.handleRemoteLock(data, pid));
+                receiveReq(async (reqKeys, pid) => {
                     if (reqKeys && Array.isArray(reqKeys)) {
                         const roomHex = this.roomId.replace('color-', '');
                         const payload = {};
