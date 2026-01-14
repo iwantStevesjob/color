@@ -925,7 +925,7 @@
             }));
         }
 
-        function createPeerConnection(isInitiator, onDataChannel, connectedPeersRef = null) {
+        function createPeerConnection(isInitiator, onDataChannel, connectedPeersRef = null, peerLeaveCallbacksRef = null) {
             const pc = new RTCPeerConnection(RTC_CONFIG);
             let dc = null;
 
@@ -950,6 +950,10 @@
                             if (peer.pc === pc) {
                                 console.log(`[WebRTC] Connection closed with ${peerId.slice(0, 6)}`);
                                 delete connectedPeersRef[peerId];
+                                // Trigger leave callbacks
+                                if (peerLeaveCallbacksRef) {
+                                    peerLeaveCallbacksRef.forEach(cb => cb(peerId));
+                                }
                                 break;
                             }
                         }
@@ -964,8 +968,8 @@
             return { pc, dc };
         }
 
-        async function createOffer(connectedPeersRef = null) {
-            const { pc, dc } = createPeerConnection(true, null, connectedPeersRef);
+        async function createOffer(connectedPeersRef = null, peerLeaveCallbacksRef = null) {
+            const { pc, dc } = createPeerConnection(true, null, connectedPeersRef, peerLeaveCallbacksRef);
             const offerId = genId(20);
             await pc.setLocalDescription(await pc.createOffer());
             const offer = await waitForIce(pc);
@@ -991,7 +995,7 @@
                 const needed = OFFER_POOL_SIZE - offerPool.length;
                 if (needed > 0) {
                     console.log(`[P2P] Generating ${needed} new offers for pool`);
-                    const newOffers = await Promise.all(Array(needed).fill().map(() => createOffer(connectedPeers)));
+                    const newOffers = await Promise.all(Array(needed).fill().map(() => createOffer(connectedPeers, peerLeaveCallbacks)));
                     offerPool.push(...newOffers);
                     console.log(`[P2P] Offer pool now has ${offerPool.length} offers`);
                 }
@@ -1139,7 +1143,7 @@
                         const { pc, dc } = createPeerConnection(false, channel => {
                             setupDataChannel(channel, data.peer_id);
                             connectedPeers[data.peer_id].dc = channel;
-                        }, connectedPeers);
+                        }, connectedPeers, peerLeaveCallbacks);
 
                         await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
                         await pc.setLocalDescription(await pc.createAnswer());
@@ -1464,16 +1468,35 @@
                         if (Object.keys(frags).length) this.actions.sendFragment(frags, pid);
                     }
                 });
-                this.room.onPeerJoin(id => { this.handlePeerJoin(id); this.updateStatus(); });
-                this.room.onPeerLeave(() => { this.updateStatus(); this.reapplyVisualLocks(); });
+                this.room.onPeerJoin(id => {
+                    console.log(`[EditorApp] Peer joined: ${id.slice(0, 6)}`);
+                    this.handlePeerJoin(id);
+                    // Get fresh peer count from room
+                    const peerCount = Object.values(this.room.getPeers()).filter(p => p.dc && p.dc.readyState === 'open').length;
+                    console.log(`[EditorApp] Peer count after join: ${peerCount}`);
+                    this.updateStatus(peerCount, 999); // 999 = past timeout, use actual count
+                });
+                this.room.onPeerLeave((id) => {
+                    console.log(`[EditorApp] Peer left: ${id ? id.slice(0, 6) : 'unknown'}`);
+                    const peerCount = Object.values(this.room.getPeers()).filter(p => p.dc && p.dc.readyState === 'open').length;
+                    console.log(`[EditorApp] Peer count after leave: ${peerCount}`);
+                    this.updateStatus(peerCount, 999);
+                    this.reapplyVisualLocks();
+                });
 
                 let attempts = 0;
                 const poll = setInterval(() => {
-                    attempts++; if (!this.room) { clearInterval(poll); return; }
-                    this.updateStatus(Object.keys(this.room.getPeers()).length, attempts);
+                    attempts++;
+                    if (!this.room) { clearInterval(poll); return; }
+                    // Count only peers with open data channels
+                    const peers = this.room.getPeers();
+                    const openPeers = Object.values(peers).filter(p => p.dc && p.dc.readyState === 'open').length;
+                    const totalPeers = Object.keys(peers).length;
+                    console.log(`[EditorApp] Poll #${attempts}: ${openPeers} open / ${totalPeers} total peers`);
+                    this.updateStatus(openPeers, attempts);
                     if (attempts > 120) clearInterval(poll);
-                }, 250);
-                setTimeout(() => { if (this.room) this.actions.reqSync(null); }, 500);
+                }, 500); // Increase interval to 500ms for less spam
+                setTimeout(() => { if (this.room) this.actions.reqSync(null); }, 1000); // Give more time for connections
             }
 
             setupGlobalExposure() { window.connectAndPreview = (hex, u) => this.connectAndPreview(hex, u); window.enterRoomUI = () => this.enterRoomUI(); }
@@ -1513,7 +1536,7 @@
                     setTimeout(() => {
                         if (!this.ui.display.querySelector('.editor-line')) {
                             this.renderInitialState({}, 0);
-                            if (this.ui.loginBtn.innerText !== "JOIN") this.ui.roomStatus.innerText = "COLOR AVAILABLE";
+                            if (this.ui.loginBtn.textContent !== "JOIN") this.ui.roomStatus.innerText = "COLOR AVAILABLE";
                         }
                     }, 3000);
                 }
@@ -1546,7 +1569,7 @@
                 const roomHex = this.roomId.replace('color-', '');
 
                 // 1. UPDATE VISUALS FIRST (Instant feedback)
-                if (this.ui.loginBtn.innerText === "LOGIN") {
+                if (this.ui.loginBtn.textContent === "LOGIN") {
                     this.user.color = '#' + roomHex;
                     this.ui.userBadge.style.backgroundColor = this.user.color;
                     localStorage.setItem('lastSphereColor', this.user.color);
@@ -1722,26 +1745,39 @@
             }
 
             updateStatus(peers = 0, attempts = 0) {
-                if (!this.room) return;
+                if (!this.room) {
+                    console.log(`[EditorApp] updateStatus called but no room`);
+                    return;
+                }
+
+                console.log(`[EditorApp] updateStatus: peers=${peers}, attempts=${attempts}`);
+
                 if (peers > 0) {
+                    // Peers are online - show JOIN button
+                    console.log(`[EditorApp] Setting button to JOIN, ${peers} peers online`);
                     this.ui.loginBtn.innerHTML = "<span>JOIN</span>";
                     this.ui.loginBtn.classList.remove('hidden');
                     this.ui.roomStatus.innerText = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
-                    this.ui.peerCount.innerText = `${peers} visitors(s)`;
+                    this.ui.peerCount.innerText = `${peers} visitor${peers > 1 ? 's' : ''}`;
                     this.ui.dot.classList.add('on');
                     return;
-                } else {
-                    if (this.ui.roomStatus.innerText !== "READY") this.ui.loginBtn.innerText = "LOGIN";
                 }
+
+                // No peers found
                 if (attempts < this.statusTimeoutAttempts) {
+                    // Still searching
                     this.ui.roomStatus.innerText = "SEARCHING...";
                     this.ui.peerCount.innerText = "Connecting...";
+                    this.ui.dot.classList.remove('on');
                 } else {
+                    // Timeout reached, no peers - show LOGIN button
+                    console.log(`[EditorApp] Setting button to LOGIN, no peers found after ${attempts} attempts`);
                     this.ui.roomStatus.innerText = "COLOR AVAILABLE";
                     this.ui.peerCount.innerText = "Offline";
-                    if (this.ui.loginBtn.innerText !== "JOIN") this.ui.loginBtn.innerHTML = "<span>LOGIN</span>";
+                    this.ui.loginBtn.innerHTML = "<span>LOGIN</span>";
+                    this.ui.loginBtn.classList.remove('hidden');
+                    this.ui.dot.classList.remove('on');
                 }
-                this.ui.dot.classList.remove('on');
             }
 
             getFragments(visibleOnly = false) {
