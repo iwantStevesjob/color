@@ -527,7 +527,19 @@
                 let { pc } = this.createPeerConnection(false);
                 this.peers[peerId] = { pc, id: peerId };
 
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdp }));
+                let sdpStr = remoteSdp;
+                if (typeof remoteSdp !== 'string') {
+                    if (remoteSdp && remoteSdp.sdp) sdpStr = remoteSdp.sdp;
+                    else console.error("Invalid offer SDP from tracker:", remoteSdp);
+                }
+
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: sdpStr }));
+                } catch (e) {
+                    console.error("Failed to set remote offer:", e, sdpStr);
+                    return;
+                }
+
                 // Add local stream if exists
                 if (this.localStream) {
                     this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream));
@@ -551,7 +563,18 @@
             async finalizeConnection(pending, peerId, remoteSdp) {
                 const { pc } = pending;
                 this.peers[peerId] = { pc, id: peerId, dc: pending.dc };
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: remoteSdp }));
+
+                let sdpStr = remoteSdp;
+                if (typeof remoteSdp !== 'string') {
+                    if (remoteSdp && remoteSdp.sdp) sdpStr = remoteSdp.sdp;
+                    else console.error("Invalid answer SDP from tracker:", remoteSdp);
+                }
+
+                try {
+                    await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: sdpStr }));
+                } catch (e) {
+                    console.error("Failed to set remote answer:", e, sdpStr);
+                }
             }
 
             async handleInBandSignal(pc, desc) {
