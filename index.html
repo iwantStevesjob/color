@@ -1140,16 +1140,26 @@
                     console.log(`[P2P] Received offer from ${data.peer_id.slice(0, 6)}`);
 
                     try {
+                        // Create a placeholder in connectedPeers BEFORE setRemoteDescription
+                        // because ondatachannel can fire during or right after setRemoteDescription
+                        const peerEntry = { pc: null, dc: null };
+                        connectedPeers[data.peer_id] = peerEntry;
+
                         const { pc, dc } = createPeerConnection(false, channel => {
+                            console.log(`[P2P] ondatachannel fired for ${data.peer_id.slice(0, 6)}`);
                             setupDataChannel(channel, data.peer_id);
-                            connectedPeers[data.peer_id].dc = channel;
+                            // Update the already-existing entry
+                            if (connectedPeers[data.peer_id]) {
+                                connectedPeers[data.peer_id].dc = channel;
+                            }
                         }, connectedPeers, peerLeaveCallbacks);
+
+                        // Now update the entry with the actual pc
+                        peerEntry.pc = pc;
 
                         await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
                         await pc.setLocalDescription(await pc.createAnswer());
                         const answer = await waitForIce(pc);
-
-                        connectedPeers[data.peer_id] = { pc, dc: null };
 
                         ws.send(JSON.stringify({
                             action: 'announce',
@@ -1162,6 +1172,7 @@
                         console.log(`[P2P] Sent answer to ${data.peer_id.slice(0, 6)}`);
                     } catch (err) {
                         console.error(`[P2P] Error handling offer from ${data.peer_id.slice(0, 6)}:`, err);
+                        delete connectedPeers[data.peer_id]; // Clean up on error
                     }
                 }
 
@@ -1492,10 +1503,13 @@
                     const peers = this.room.getPeers();
                     const openPeers = Object.values(peers).filter(p => p.dc && p.dc.readyState === 'open').length;
                     const totalPeers = Object.keys(peers).length;
-                    console.log(`[EditorApp] Poll #${attempts}: ${openPeers} open / ${totalPeers} total peers`);
+                    // Only log during initial search period or when counts change
+                    if (attempts <= 40 || attempts % 20 === 0) {
+                        console.log(`[EditorApp] Poll #${attempts}: ${openPeers} open / ${totalPeers} total peers`);
+                    }
                     this.updateStatus(openPeers, attempts);
-                    if (attempts > 120) clearInterval(poll);
-                }, 500); // Increase interval to 500ms for less spam
+                    // Keep polling forever while room exists - no limit
+                }, 500);
                 setTimeout(() => { if (this.room) this.actions.reqSync(null); }, 1000); // Give more time for connections
             }
 
