@@ -925,7 +925,7 @@
             }));
         }
 
-        function createPeerConnection(isInitiator, onDataChannel) {
+        function createPeerConnection(isInitiator, onDataChannel, connectedPeersRef = null) {
             const pc = new RTCPeerConnection(RTC_CONFIG);
             let dc = null;
 
@@ -939,11 +939,33 @@
                     onDataChannel?.(dc);
                 };
             }
+
+            // Connection state change handler - critical for detecting failures
+            pc.onconnectionstatechange = () => {
+                console.log(`[WebRTC] Connection state: ${pc.connectionState}`);
+                if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+                    // Find and remove this peer from connectedPeersRef if provided
+                    if (connectedPeersRef) {
+                        for (const [peerId, peer] of Object.entries(connectedPeersRef)) {
+                            if (peer.pc === pc) {
+                                console.log(`[WebRTC] Connection closed with ${peerId.slice(0, 6)}`);
+                                delete connectedPeersRef[peerId];
+                                break;
+                            }
+                        }
+                    }
+                }
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                console.log(`[WebRTC] ICE state: ${pc.iceConnectionState}`);
+            };
+
             return { pc, dc };
         }
 
-        async function createOffer() {
-            const { pc, dc } = createPeerConnection(true);
+        async function createOffer(connectedPeersRef = null) {
+            const { pc, dc } = createPeerConnection(true, null, connectedPeersRef);
             const offerId = genId(20);
             await pc.setLocalDescription(await pc.createOffer());
             const offer = await waitForIce(pc);
@@ -968,8 +990,10 @@
             async function fillOfferPool() {
                 const needed = OFFER_POOL_SIZE - offerPool.length;
                 if (needed > 0) {
-                    const newOffers = await Promise.all(Array(needed).fill().map(() => createOffer()));
+                    console.log(`[P2P] Generating ${needed} new offers for pool`);
+                    const newOffers = await Promise.all(Array(needed).fill().map(() => createOffer(connectedPeers)));
                     offerPool.push(...newOffers);
+                    console.log(`[P2P] Offer pool now has ${offerPool.length} offers`);
                 }
             }
 
@@ -986,20 +1010,26 @@
 
             function setupDataChannel(dc, peerId) {
                 dc.onopen = () => {
+                    console.log(`[P2P] ✓ DataChannel OPEN with ${peerId.slice(0, 6)}`);
                     peerJoinCallbacks.forEach(cb => cb(peerId));
                 };
                 dc.onclose = () => {
+                    console.log(`[P2P] DataChannel closed with ${peerId.slice(0, 6)}`);
                     delete connectedPeers[peerId];
                     peerLeaveCallbacks.forEach(cb => cb(peerId));
                 };
-                dc.onerror = () => { };
+                dc.onerror = (err) => {
+                    console.error(`[P2P] DataChannel error with ${peerId.slice(0, 6)}:`, err);
+                };
                 dc.onmessage = e => {
                     try {
                         const msg = JSON.parse(e.data);
                         if (msg.action && actionHandlers[msg.action]) {
                             actionHandlers[msg.action].forEach(cb => cb(msg.data, peerId));
                         }
-                    } catch (err) { }
+                    } catch (err) {
+                        console.error(`[P2P] Message parse error:`, err);
+                    }
                 };
             }
 
@@ -1015,21 +1045,30 @@
 
             function connectToTracker(url) {
                 if (isLeaving) return;
+                console.log(`[Tracker] Connecting to ${url.replace('wss://', '')}...`);
                 const ws = new WebSocket(url);
                 trackerSockets[url] = ws;
 
-                ws.onopen = () => { startAnnouncing(ws, url); };
+                ws.onopen = () => {
+                    console.log(`[Tracker] ✓ Connected to ${url.replace('wss://', '')}`);
+                    startAnnouncing(ws, url);
+                };
                 ws.onmessage = e => {
                     try {
                         const data = typeof e.data === 'string' ? JSON.parse(e.data) : null;
                         if (data) handleTrackerMessage(ws, data);
-                    } catch (err) { }
+                    } catch (err) {
+                        console.error(`[Tracker] Message parse error:`, err);
+                    }
                 };
                 ws.onclose = () => {
+                    console.log(`[Tracker] Disconnected from ${url.replace('wss://', '')}`);
                     delete trackerSockets[url];
                     if (!isLeaving) setTimeout(() => connectToTracker(url), 5000);
                 };
-                ws.onerror = () => { };
+                ws.onerror = (err) => {
+                    console.error(`[Tracker] Error connecting to ${url.replace('wss://', '')}:`, err);
+                };
             }
 
             async function startAnnouncing(ws, url) {
@@ -1039,7 +1078,10 @@
                 const announce = async () => {
                     if (ws.readyState !== WebSocket.OPEN || isLeaving || !infoHash) return;
                     const offers = getOffersFromPool(3);
-                    if (offers.length === 0) return;
+                    if (offers.length === 0) {
+                        console.log(`[Tracker] No offers available for ${url.replace('wss://', '')}`);
+                        return;
+                    }
 
                     for (const o of offers) {
                         pendingOffers[o.offerId] = { pc: o.pc, dc: o.dc, created: o.created };
@@ -1062,6 +1104,7 @@
                         }))
                     };
                     ws.send(JSON.stringify(msg));
+                    console.log(`[Tracker] Announced to ${url.replace('wss://', '')} with ${offers.length} offers`);
                 };
 
                 await announce();
@@ -1079,16 +1122,24 @@
                 if (data.offer && data.offer_id) {
                     if (handledOffers.has(data.offer_id)) return;
                     handledOffers.add(data.offer_id);
-                    if (connectedPeers[data.peer_id]) return;
+                    if (connectedPeers[data.peer_id]) {
+                        console.log(`[P2P] Already connected to ${data.peer_id.slice(0, 6)}, ignoring offer`);
+                        return;
+                    }
 
                     const hasPendingToThem = Object.values(pendingOffers).some(p => p.peerId === data.peer_id);
-                    if (hasPendingToThem && selfId > data.peer_id) return;
+                    if (hasPendingToThem && selfId > data.peer_id) {
+                        console.log(`[P2P] Ignoring offer from ${data.peer_id.slice(0, 6)} (collision, our ID higher)`);
+                        return;
+                    }
+
+                    console.log(`[P2P] Received offer from ${data.peer_id.slice(0, 6)}`);
 
                     try {
                         const { pc, dc } = createPeerConnection(false, channel => {
                             setupDataChannel(channel, data.peer_id);
                             connectedPeers[data.peer_id].dc = channel;
-                        });
+                        }, connectedPeers);
 
                         await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
                         await pc.setLocalDescription(await pc.createAnswer());
@@ -1104,24 +1155,35 @@
                             offer_id: data.offer_id,
                             answer: { type: answer.type, sdp: answer.sdp }
                         }));
-                    } catch (err) { }
+                        console.log(`[P2P] Sent answer to ${data.peer_id.slice(0, 6)}`);
+                    } catch (err) {
+                        console.error(`[P2P] Error handling offer from ${data.peer_id.slice(0, 6)}:`, err);
+                    }
                 }
 
                 if (data.answer && data.offer_id) {
                     const pending = pendingOffers[data.offer_id];
-                    if (!pending) return;
+                    if (!pending) {
+                        console.log(`[P2P] No pending offer for answer from ${data.peer_id.slice(0, 6)}`);
+                        return;
+                    }
                     if (connectedPeers[data.peer_id]) {
+                        console.log(`[P2P] Already connected to ${data.peer_id.slice(0, 6)}, ignoring answer`);
                         pending.pc.close();
                         delete pendingOffers[data.offer_id];
                         return;
                     }
+
+                    console.log(`[P2P] Received answer from ${data.peer_id.slice(0, 6)}`);
 
                     try {
                         await pending.pc.setRemoteDescription(new RTCSessionDescription(data.answer));
                         connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc };
                         setupDataChannel(pending.dc, data.peer_id);
                         delete pendingOffers[data.offer_id];
+                        console.log(`[P2P] Connection established with ${data.peer_id.slice(0, 6)}`);
                     } catch (err) {
+                        console.error(`[P2P] Error handling answer from ${data.peer_id.slice(0, 6)}:`, err);
                         pending.pc.close();
                         delete pendingOffers[data.offer_id];
                     }
@@ -1133,16 +1195,24 @@
 
             // Then do async initialization
             (async () => {
+                console.log(`[P2P] Your ID: ${selfId}`);
                 infoHash = await sha1Hash(config.appId + roomId);
+                console.log(`[P2P] Room: ${roomId} (hash: ${infoHash})`);
+                console.log(`[P2P] Generating initial offer pool...`);
                 await fillOfferPool();
+                console.log(`[P2P] ✓ Offer pool ready with ${offerPool.length} offers`);
                 readyResolve(); // Signal that initialization is complete
 
                 setInterval(() => {
                     const now = Date.now();
+                    const beforeCount = offerPool.length;
                     offerPool = offerPool.filter(o => {
                         if (now - o.created > OFFER_TTL) { o.pc.close(); return false; }
                         return true;
                     });
+                    if (offerPool.length < beforeCount) {
+                        console.log(`[P2P] Cleaned ${beforeCount - offerPool.length} stale offers`);
+                    }
                     fillOfferPool();
                 }, OFFER_TTL);
             })();
