@@ -1,1 +1,793 @@
-test
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Chat over WebTorrent</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #0f0f12 0%, #1a1a2e 100%);
+            color: #e0e0e0;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        h2 {
+            background: linear-gradient(90deg, #4ade80, #22d3ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 0.85em;
+            margin-bottom: 20px;
+        }
+
+        #status {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .status-connecting {
+            background: rgba(250, 204, 21, 0.1);
+            border: 1px solid rgba(250, 204, 21, 0.3);
+            color: #facc15;
+        }
+
+        .status-connected {
+            background: rgba(74, 222, 128, 0.1);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            color: #4ade80;
+        }
+
+        .status-error {
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+            color: #f87171;
+        }
+
+        #log {
+            background: rgba(26, 26, 29, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 16px;
+            height: 350px;
+            overflow-y: auto;
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-size: 0.9em;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+        }
+
+        #log::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #log::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #log::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+
+        .log-success {
+            color: #4ade80;
+        }
+
+        .log-error {
+            color: #f87171;
+        }
+
+        .log-info {
+            color: #94a3b8;
+        }
+
+        .log-debug {
+            color: #555;
+            font-size: 0.85em;
+        }
+
+        .log-message {
+            padding: 4px 0;
+        }
+
+        .peer-tag {
+            color: #f59e0b;
+            font-weight: 600;
+        }
+
+        .self-tag {
+            color: #22d3ee;
+            font-weight: 600;
+        }
+
+        #chat-controls {
+            display: flex;
+            gap: 12px;
+        }
+
+        input {
+            background: rgba(34, 34, 34, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #fff;
+            padding: 14px 16px;
+            flex: 1;
+            border-radius: 10px;
+            font-size: 1em;
+            transition: all 0.2s ease;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: rgba(74, 222, 128, 0.5);
+            box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.1);
+        }
+
+        input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        button {
+            background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+            color: #0f0f12;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 1em;
+            transition: all 0.2s ease;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(74, 222, 128, 0.3);
+        }
+
+        button:disabled {
+            background: #444;
+            color: #888;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .peer-count {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4ade80;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        /* Video styles */
+        #video-container {
+            display: none;
+            margin-bottom: 16px;
+        }
+
+        #video-container.active {
+            display: block;
+        }
+
+        #video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .video-wrapper {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #111;
+            aspect-ratio: 4/3;
+        }
+
+        .video-wrapper video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            color: #fff;
+        }
+
+        #local-video-wrapper {
+            position: fixed;
+            bottom: 100px;
+            right: 20px;
+            width: 150px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            display: none;
+        }
+
+        #local-video-wrapper.active {
+            display: block;
+        }
+
+        #local-video {
+            width: 100%;
+            transform: scaleX(-1);
+        }
+
+        #camera-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            padding: 14px;
+            min-width: 52px;
+        }
+
+        #camera-btn.active {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }
+
+        #camera-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>WebRTC Chat \ WebTorrent</h2>
+    <p class="subtitle">Serverless P2P chat using BitTorrent tracker signaling • No dependencies</p>
+    <div id="room-info" style="margin-bottom: 12px; font-size: 0.9em; color: #888;">Color Frequency: <span
+            id="room-name" style="color: #4ade80; font-weight: 600;">-</span></div>
+    <div id="status" class="status-connecting">⏳ Connecting to trackers...</div>
+    <div id="video-container">
+        <div id="video-grid"></div>
+    </div>
+    <div id="local-video-wrapper">
+        <video id="local-video" autoplay muted playsinline></video>
+    </div>
+    <div id="log"></div>
+    <div id="chat-controls">
+        <input type="text" id="msg" placeholder="Type a message..." disabled>
+        <button id="camera-btn" title="Toggle Camera">
+            <svg viewBox="0 0 24 24">
+                <path
+                    d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
+            </svg>
+        </button>
+        <button id="send" disabled>Send</button>
+    </div>
+
+    <script>
+        // ============================================================
+        // ColorMesh - WebRTC/WebTorrent Wrapper
+        // Based on original implementation
+        // ============================================================
+
+        const Utils = {
+            genId: n => Array(n).fill().map(() => '0123456789AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz'[Math.floor(Math.random() * 62)]).join(''),
+            sha1: async (str) => {
+                const buffer = new TextEncoder().encode(str);
+                const hash = await crypto.subtle.digest('SHA-1', buffer);
+                return Array.from(new Uint8Array(hash)).map(b => b.toString(36)).join('').slice(0, 20);
+            }
+        };
+
+        class ColorMesh {
+            constructor(config = {}) {
+                this.trackers = config.trackers || [];
+                this.ice = config.ice || {};
+            }
+
+            joinColor(hexColor) {
+                return new Spectrum(this, hexColor);
+            }
+        }
+
+        class Spectrum {
+            constructor(mesh, hex) {
+                this.mesh = mesh;
+                this.hex = hex;
+                this.roomId = hex; // can prefix if needed
+                this.peers = {};
+                this.events = {};
+                this.selfId = localStorage.getItem('webtorrent-peer-id') || Utils.genId(20);
+                localStorage.setItem('webtorrent-peer-id', this.selfId);
+
+                this.offerPool = [];
+                this.pendingOffers = {};
+                this.trackerSockets = {};
+                this.announceIntervals = {};
+                this.trackerRetryMs = {};
+                this.localStream = null;
+
+                // Config constants
+                this.OFFER_POOL_SIZE = 10;
+                this.OFFER_TTL = 57000;
+                this.ANNOUNCE_INTERVAL = 33000;
+                this.ICE_TIMEOUT = 5000;
+
+                this.init();
+            }
+
+            async init() {
+                this.infoHash = await Utils.sha1(this.roomId);
+                this.fillOfferPool();
+                this.mesh.trackers.forEach(url => this.connectToTracker(url));
+            }
+
+            on(event, cb) {
+                if (!this.events[event]) this.events[event] = [];
+                this.events[event].push(cb);
+            }
+
+            trigger(event, ...args) {
+                (this.events[event] || []).forEach(cb => cb(...args));
+            }
+
+            // --- Network Logic (Original wrapped) ---
+
+            connectToTracker(url) {
+                const ws = new WebSocket(url);
+                this.trackerSockets[url] = ws;
+
+                ws.onopen = () => {
+                    this.trigger('tracker-connected', url);
+                    this.trackerRetryMs[url] = 5000;
+                    this.startAnnouncing(ws, url);
+                };
+
+                ws.onmessage = e => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (data) this.handleTrackerMessage(ws, data);
+                    } catch (err) { }
+                };
+
+                ws.onclose = () => {
+                    this.trigger('tracker-disconnected', url);
+                    clearInterval(this.announceIntervals[url]);
+                    const retry = this.trackerRetryMs[url] || 5000;
+                    this.trackerRetryMs[url] = Math.min(retry * 2, 60000);
+                    setTimeout(() => this.connectToTracker(url), retry);
+                };
+                ws.onerror = () => { };
+            }
+
+            startAnnouncing(ws, url) {
+                const announce = () => {
+                    if (ws.readyState !== 1) return;
+                    const offers = this.getOffersFromPool(3);
+
+                    // Track pending
+                    offers.forEach(o => {
+                        this.pendingOffers[o.offerId] = o;
+                        setTimeout(() => {
+                            if (this.pendingOffers[o.offerId]) {
+                                o.pc.close();
+                                delete this.pendingOffers[o.offerId];
+                            }
+                        }, this.OFFER_TTL);
+                    });
+
+                    const msg = {
+                        action: 'announce',
+                        info_hash: this.infoHash,
+                        peer_id: this.selfId,
+                        numwant: 50,
+                        offers: offers.map(o => ({ offer: o.offer.sdp, offer_id: o.offerId }))
+                    };
+                    ws.send(JSON.stringify(msg));
+                };
+                announce();
+                this.announceIntervals[url] = setInterval(announce, this.ANNOUNCE_INTERVAL);
+            }
+
+            handleTrackerMessage(ws, data) {
+                if (data.action !== 'announce') return;
+
+                if (data.peer_id && data.peer_id !== this.selfId) {
+                    if (!this.peers[data.peer_id]) {
+                        // We see a peer. In WebTorrent/Trystero, usually we wait for them to offer, 
+                        // OR if we sent an offer and they answer.
+                        // Use logic: if we have "connectedPeers" check?
+                    }
+                }
+
+                if (data.offer && data.offer_id) {
+                    if (this.peers[data.peer_id]) return;
+                    this.acceptOffer(data.peer_id, data.offer, data.offer_id, ws);
+                }
+
+                if (data.answer && data.offer_id) {
+                    const pending = this.pendingOffers[data.offer_id];
+                    if (pending) {
+                        this.finalizeConnection(pending, data.peer_id, data.answer);
+                        delete this.pendingOffers[data.offer_id];
+                    }
+                }
+            }
+
+            // --- WebRTC Logic ---
+
+            createPeerConnection(initiator, onDataChannel) {
+                const pc = new RTCPeerConnection(this.mesh.ice);
+                let dc;
+                if (initiator) {
+                    dc = pc.createDataChannel('data');
+                    this.setupDC(dc, pc);
+                } else {
+                    pc.ondatachannel = e => this.setupDC(e.channel, pc);
+                }
+
+                pc.onconnectionstatechange = () => {
+                    if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+                        this.handlePeerDisconnect(pc);
+                    }
+                };
+                pc.ontrack = e => {
+                    const peerId = this.getPeerIdByPC(pc);
+                    if (peerId) this.trigger('peer:stream', e.streams[0], peerId);
+                };
+                return { pc, dc };
+            }
+
+            setupDC(dc, pc) {
+                dc.onopen = () => {
+                    const peerId = this.getPeerIdByPC(pc);
+                    if (peerId) this.trigger('peer:connect', peerId);
+                };
+                dc.onmessage = e => {
+                    const peerId = this.getPeerIdByPC(pc);
+                    if (!peerId) return;
+                    try {
+                        const msg = JSON.parse(e.data);
+                        // Forward signal negotiation
+                        if (msg.type === 'signal') {
+                            this.handleInBandSignal(pc, msg.description);
+                        } else {
+                            this.trigger('msg', msg, peerId);
+                        }
+                    } catch (err) {
+                        // Plain text fallback?
+                    }
+                };
+            }
+
+            handlePeerDisconnect(pc) {
+                const peerId = this.getPeerIdByPC(pc);
+                if (peerId) {
+                    delete this.peers[peerId];
+                    this.trigger('peer:disconnect', peerId);
+                }
+            }
+
+            getPeerIdByPC(pc) {
+                return Object.keys(this.peers).find(id => this.peers[id].pc === pc);
+            }
+
+            async createOffer() {
+                let { pc, dc } = this.createPeerConnection(true);
+                // Add local stream if exists
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream));
+                }
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                await this.waitForIce(pc);
+
+                return { pc, dc, offer: { type: pc.localDescription.type, sdp: pc.localDescription.sdp }, offerId: Utils.genId(20), created: Date.now() };
+            }
+
+            async acceptOffer(peerId, remoteSdp, offerId, ws) {
+                let { pc } = this.createPeerConnection(false);
+                this.peers[peerId] = { pc, id: peerId };
+
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: remoteSdp }));
+                // Add local stream if exists
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream));
+                }
+
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                await this.waitForIce(pc);
+
+                const answerSdp = { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
+                ws.send(JSON.stringify({
+                    action: 'announce',
+                    info_hash: this.infoHash,
+                    peer_id: this.selfId,
+                    to_peer_id: peerId,
+                    offer_id: offerId,
+                    answer: answerSdp.sdp
+                }));
+            }
+
+            async finalizeConnection(pending, peerId, remoteSdp) {
+                const { pc } = pending;
+                this.peers[peerId] = { pc, id: peerId, dc: pending.dc };
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: remoteSdp }));
+            }
+
+            async handleInBandSignal(pc, desc) {
+                if (desc.type === 'offer') {
+                    await pc.setRemoteDescription(desc);
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    // find dc
+                    const dc = this.resolveDC(pc);
+                    dc.send(JSON.stringify({ type: 'signal', description: pc.localDescription }));
+                } else if (desc.type === 'answer') {
+                    await pc.setRemoteDescription(desc);
+                }
+            }
+
+            resolveDC(pc) {
+                // helper to get DC from PC
+                const peerId = this.getPeerIdByPC(pc);
+                return this.peers[peerId]?.dc;
+            }
+
+            waitForIce(pc) {
+                return new Promise(resolve => {
+                    if (pc.iceGatheringState === 'complete') { resolve(); return; }
+                    const check = () => {
+                        if (pc.iceGatheringState === 'complete') {
+                            pc.removeEventListener('icegatheringstatechange', check);
+                            resolve();
+                        }
+                    };
+                    pc.addEventListener('icegatheringstatechange', check);
+                    setTimeout(resolve, 5000);
+                });
+            }
+
+            fillOfferPool() {
+                const needed = this.OFFER_POOL_SIZE - this.offerPool.length;
+                for (let i = 0; i < needed; i++) {
+                    this.createOffer().then(o => this.offerPool.push(o));
+                }
+            }
+
+            getOffersFromPool(n) {
+                const now = Date.now();
+                this.offerPool = this.offerPool.filter(o => {
+                    if (now - o.created > this.OFFER_TTL) { o.pc.close(); return false; }
+                    return true;
+                });
+                const taken = this.offerPool.splice(0, n);
+                this.fillOfferPool();
+                return taken;
+            }
+
+            // --- Public API methods ---
+
+            broadcast(data) {
+                const payload = JSON.stringify(data);
+                Object.values(this.peers).forEach(p => {
+                    if (p.dc && p.dc.readyState === 'open') p.dc.send(payload);
+                });
+            }
+
+            addStream(stream) {
+                this.localStream = stream;
+                Object.values(this.peers).forEach(p => {
+                    stream.getTracks().forEach(t => p.pc.addTrack(t, stream));
+                    // naive renegotiation
+                    p.pc.createOffer().then(offer => {
+                        p.pc.setLocalDescription(offer);
+                        // send offer via DC?
+                        if (p.dc && p.dc.readyState === 'open') {
+                            p.dc.send(JSON.stringify({ type: 'signal', description: pc.localDescription }));
+                        }
+                    });
+                });
+            }
+
+            removeStream() {
+                this.localStream = null;
+                // Complex implementation omitted for brevity/safety to not break logic
+            }
+        }
+
+
+        // ============================================================
+        // UI Glue Code (Using ColorMesh)
+        // ============================================================
+
+        const TRACKERS = [
+            'wss://tracker.webtorrent.dev',
+            'wss://tracker.openwebtorrent.com',
+            'wss://tracker.btorrent.xyz'
+        ];
+
+        const RTC_CONFIG = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' }
+            ]
+        };
+
+        const getRoomFromHash = () => {
+            const h = window.location.hash.slice(1);
+            return h || 'webtorrent-chat-default';
+        };
+
+        const currentRoom = getRoomFromHash();
+        document.getElementById('room-name').innerText = currentRoom;
+
+        const mesh = new ColorMesh({ trackers: TRACKERS, ice: RTC_CONFIG });
+        const spectrum = mesh.joinColor(currentRoom);
+
+        // --- Status ---
+        const statusEl = document.getElementById('status');
+        spectrum.on('tracker-connected', url => {
+            statusEl.innerText = "Tracking";
+            statusEl.className = "status-connected";
+        });
+        spectrum.on('peer:connect', id => {
+            log(`Peer connected: ${id.slice(0, 6)}`, 'success');
+            updatePeerCount();
+        });
+        spectrum.on('peer:disconnect', id => {
+            log(`Peer disconnected: ${id.slice(0, 6)}`, 'error');
+            removeRemoteVideo(id);
+            updatePeerCount();
+        });
+
+        // --- Chat ---
+        const logDiv = document.getElementById('log');
+        function log(msg, type = 'info') {
+            const d = document.createElement('div');
+            d.className = `log-message log-${type}`;
+            d.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.appendChild(d);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        spectrum.on('msg', (data, id) => {
+            if (data.type === 'chat') {
+                const d = document.createElement('div');
+                d.className = 'log-message';
+                d.innerHTML = `<span class="peer-tag">[${id.slice(0, 6)}]</span> ${escapeHtml(data.text)}`;
+                logDiv.appendChild(d);
+                logDiv.scrollTop = logDiv.scrollHeight;
+            } else if (data.type === 'info') {
+                log(`Peer ${id.slice(0, 6)}: ${data.text}`, 'info');
+            }
+        });
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        const msgInput = document.getElementById('msg');
+        const sendBtn = document.getElementById('send');
+
+        function send() {
+            const text = msgInput.value;
+            if (!text) return;
+            spectrum.broadcast({ type: 'chat', text });
+
+            const d = document.createElement('div');
+            d.className = 'log-message';
+            d.innerHTML = `<span class="self-tag">[You]</span> ${escapeHtml(text)}`;
+            logDiv.appendChild(d);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            msgInput.value = '';
+        }
+
+        sendBtn.onclick = send;
+        msgInput.onkeyup = e => { if (e.key === 'Enter') send(); };
+
+        function updatePeerCount() {
+            const count = Object.keys(spectrum.peers).length;
+            if (count > 0) {
+                msgInput.disabled = false;
+                sendBtn.disabled = false;
+                statusEl.innerText = `Connected (${count} peers)`;
+            } else {
+                msgInput.disabled = true;
+                sendBtn.disabled = true;
+                statusEl.innerText = "Searching for peers...";
+            }
+        }
+
+        // --- Video ---
+        spectrum.on('peer:stream', (stream, id) => {
+            let wrap = document.getElementById(`video-${id}`);
+            if (!wrap) {
+                wrap = document.createElement('div');
+                wrap.id = `video-${id}`;
+                wrap.className = 'video-wrapper';
+                wrap.innerHTML = `<video autoplay playsinline></video><div class="video-label">${id.slice(0, 6)}</div>`;
+                document.getElementById('video-grid').appendChild(wrap);
+                document.getElementById('video-container').classList.add('active');
+            }
+            wrap.querySelector('video').srcObject = stream;
+        });
+
+        function removeRemoteVideo(id) {
+            const el = document.getElementById(`video-${id}`);
+            if (el) el.remove();
+        }
+
+        let cameraActive = false;
+        document.getElementById('camera-btn').onclick = async () => {
+            const btn = document.getElementById('camera-btn');
+            if (cameraActive) {
+                // stop
+                spectrum.removeStream(); // impl logic
+                const v = document.getElementById('local-video');
+                if (v.srcObject) v.srcObject.getTracks().forEach(t => t.stop());
+                v.srcObject = null;
+                document.getElementById('local-video-wrapper').classList.remove('active');
+                btn.classList.remove('active');
+                cameraActive = false;
+                spectrum.broadcast({ type: 'info', text: 'stopped camera' });
+            } else {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    document.getElementById('local-video').srcObject = stream;
+                    document.getElementById('local-video-wrapper').classList.add('active');
+                    btn.classList.add('active');
+                    cameraActive = true;
+                    spectrum.addStream(stream);
+                    spectrum.broadcast({ type: 'info', text: 'started camera' });
+                } catch (e) {
+                    log(`Camera error: ${e.message}`, 'error');
+                }
+            }
+        };
+
+    </script>
+</body>
+
+</html>
