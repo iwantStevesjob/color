@@ -617,6 +617,7 @@
             transition: border-left-color 0.4s ease;
         }
 
+
         .editor-line:hover,
         .editor-line.group-hover {
             border-left-color: var(--owner-color, transparent);
@@ -1591,15 +1592,82 @@
                         if (this.mesh) this.mesh.broadcastLock({ lineId: line.id, userColor: this.user.color });
                     }
                 });
-                this.ui.display.addEventListener('keydown', e => {
-                    if (e.key === 'Enter') { e.preventDefault(); document.execCommand('insertHTML', false, '<br>'); }
+
+                document.getElementById('display').addEventListener('keydown', (e) => {
+                    // 1. Backspace Protection (Your original code)
+                    if (e.key === 'Backspace') {
+                        const sel = window.getSelection();
+                        if (sel.rangeCount) {
+                            const range = sel.getRangeAt(0);
+                            const anchor = sel.anchorNode;
+                            const currentLine = (anchor.nodeType === 3 ? anchor.parentNode : anchor).closest('.editor-line');
+                            if (currentLine) {
+                                const isAtStart = range.collapsed && range.startOffset === 0 &&
+                                    (anchor === currentLine || anchor === currentLine.firstChild);
+                                if (isAtStart) {
+                                    const prevLine = currentLine.previousElementSibling;
+                                    if (prevLine && prevLine.isContentEditable === false) {
+                                        e.preventDefault();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Enter Logic (Modified to fix Double-Enter bug)
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const sel = window.getSelection();
+                        if (sel.rangeCount) {
+                            const range = sel.getRangeAt(0);
+                            const br = document.createElement('br');
+
+                            // 1. Delete any selected text
+                            range.deleteContents();
+
+                            // 2. Insert the BR
+                            range.insertNode(br);
+
+                            // 3. Move the cursor range to immediately after the inserted BR
+                            range.setStartAfter(br);
+                            range.setEndAfter(br);
+
+                            // 4. THE FIX: Check nextSibling but ignore empty text nodes
+                            // When inserting in a text node, the DOM splits, leaving an empty text node after the BR.
+                            let next = br.nextSibling;
+                            if (next && next.nodeType === 3 && next.length === 0) {
+                                next = next.nextSibling;
+                            }
+
+                            // If there is no real content after the break, add the phantom BR
+                            // so the browser renders the new line and holds the cursor open
+                            if (!next) {
+                                br.parentNode.appendChild(document.createElement('br'));
+                            }
+
+                            // 5. Update selection
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+
+                            // 6. Force Input Event for saving
+                            e.target.dispatchEvent(new Event('input', { bubbles: true }));
+
+                            // 7. Scroll into view (keeps cursor visible if at bottom of screen)
+                            const anchor = sel.anchorNode;
+                            const element = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+                            if (element) {
+                                element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                            }
+                        }
+                    }
                 });
                 ['bold', 'italic'].forEach(c => document.getElementById('btn-' + c).onclick = () => document.execCommand(c));
                 document.getElementById('btn-link').onclick = () => { const u = prompt("URL:"); if (u) document.execCommand('createLink', false, u); };
             }
 
             updateStatus() {
-                if (!this.mesh) return;
+                if (!this.mesh) return
                 const peers = Object.values(this.mesh.getPeers()).filter(p => p.dc?.readyState === 'open').length;
                 if (peers > 0) {
                     this.ui.loginBtn.innerHTML = "<span>JOIN</span>"; this.ui.loginBtn.classList.remove('hidden');
@@ -1746,7 +1814,13 @@
         async function init() {
             if (window.self !== window.top) document.getElementById('debug-btn').style.display = 'none';
             state.canvas = document.getElementById('gpu-canvas'); if (!navigator.gpu) return alert("WebGPU not supported!"); const adapter = await navigator.gpu.requestAdapter(); state.device = await adapter.requestDevice(); state.context = state.canvas.getContext('webgpu'); state.presentationFormat = navigator.gpu.getPreferredCanvasFormat(); state.context.configure({ device: state.device, format: state.presentationFormat, alphaMode: 'premultiplied' });
-            const rooms = await (new window.ColorDB()).getAllRooms(); state.historyHandles = []; await createAssets(); window.addEventListener('resize', onResize); onResize();
+
+            await createAssets();
+            state.historyHandles = [];
+            const rooms = await (new window.ColorDB()).getAllRooms();
+
+            window.addEventListener('resize', onResize); onResize();
+
             state.canvas.addEventListener('mousedown', onMouseDown); window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp); state.canvas.addEventListener('touchstart', (e) => { e.preventDefault(); onMouseDown(e.touches[0]) }, { passive: false }); state.canvas.addEventListener('touchmove', (e) => { e.preventDefault(); onMouseMove(e.touches[0]) }, { passive: false }); state.canvas.addEventListener('touchend', (e) => { e.preventDefault(); onMouseUp(e.changedTouches[0]) }); document.getElementById('freeze-btn').addEventListener('click', toggleFreeze);
             document.getElementById('debug-btn').onclick = function () { state.debugMode = !state.debugMode; this.classList.toggle('active', state.debugMode); this.innerText = state.debugMode ? "DEBUG ON" : "DEBUG OFF"; document.getElementById('debug-panel').classList.toggle('visible', state.debugMode); };
             document.getElementById('reset-btn').onclick = async () => { if (confirm("Permanently wipe all local data?")) { localStorage.clear(); try { const dbs = await window.indexedDB.databases(); for (const db of dbs) { await window.indexedDB.deleteDatabase(db.name); } } catch (e) { } window.location.reload(); } };
@@ -1771,7 +1845,31 @@
         function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return; } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const col = getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = rgbToHex(col[0], col[1], col[2]); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, false); setTimeout(() => { state.pathPoints = []; state.pathStartPos = null; }, 500); return; } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { try { localStorage.setItem("lastSphereColor", h.hex); } catch (e) { } triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true); return; } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false); } } } state.pathPoints = []; state.pathStartPos = null; }
         function triggerLanding(norm, pos, col, fromUrl = false) { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const cam = Vec3.normalize(state.cameraPos), axis = Vec3.cross(norm, cam), dot = Vec3.dot(norm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (window.connectAndPreview) window.connectAndPreview(hex, fromUrl); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1'; }, 200); }, 1000); }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4; }
-        function toggleFreeze() { if (document.getElementById('dashboard-panel').classList.contains('active')) return; const f = document.getElementById('flash-overlay'), isFrozen = document.body.classList.toggle('light-mode'); state.landing = { active: false, showHandle: false }; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active'); state.cameraPos = [0, 0, getResponsiveZ()]; f.style.backgroundColor = isFrozen ? 'white' : 'black'; document.body.style.backgroundColor = ''; f.classList.remove('active'); void f.offsetWidth; f.classList.add('active'); setTimeout(() => f.classList.remove('active'), 0); const btn = document.getElementById('freeze-btn'); btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>'; btn.style.opacity = '1'; }
+        function toggleFreeze() {
+            // Check if we are in "Zoomed In" mode (either fully logged in OR just looking at the login card)
+            const isZoomed = document.getElementById('dashboard-panel').classList.contains('active') ||
+                document.getElementById('login-card').classList.contains('visible');
+
+            if (isZoomed) {
+                if (window.app && window.app.logout) window.app.logout();
+                return;
+            }
+
+            const f = document.getElementById('flash-overlay'), isFrozen = document.body.classList.toggle('light-mode');
+            state.landing = { active: false, showHandle: false };
+            document.getElementById('login-card').classList.remove('visible');
+            document.getElementById('dashboard-panel').classList.remove('active');
+            state.cameraPos = [0, 0, getResponsiveZ()];
+            f.style.backgroundColor = isFrozen ? 'white' : 'black';
+            document.body.style.backgroundColor = '';
+            f.classList.remove('active');
+            void f.offsetWidth;
+            f.classList.add('active');
+            setTimeout(() => f.classList.remove('active'), 0);
+            const btn = document.getElementById('freeze-btn');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
+            btn.style.opacity = '1';
+        }
         function getSurfaceColor(p, n, cones = state.cones) { const getI = (i) => { if (!cones[i].active) return 0; const diff = Vec3.sub(cones[i].pos, p); const distSq = Vec3.dot(diff, diff); const L = Vec3.normalize(diff); const wrap = Math.max(Vec3.dot(n, L) + 1.0, 0.0) / 2.0; const spread = Math.pow(wrap, 1.25); return spread * (1.0 / (1.0 + distSq * 0.05)); }; const d = [getI(0), getI(1), getI(2)]; const c = cones.map(x => x.color); let l = Vec3.add(Vec3.add(Vec3.scale(c[0], d[0]), Vec3.scale(c[1], d[1])), Vec3.scale(c[2], d[2])); const boost = (i, j) => { const sumD = d[i] + d[j] + 0.001; const factor = (2.0 * d[i] * d[j] / sumD); return Vec3.scale(Vec3.add(c[i], c[j]), factor); }; l = Vec3.add(l, boost(0, 1)); l = Vec3.add(l, boost(1, 2)); l = Vec3.add(l, boost(2, 0)); const minD = Math.min(d[0], Math.min(d[1], d[2])); const maxD = Math.max(d[0], Math.max(d[1], d[2])); let t = (minD - 0.15) / (0.40 - 0.15); t = Math.max(0.0, Math.min(1.0, t)); const maskBase = t * t * (3.0 - 2.0 * t); const variance = maxD - minD; const roundness = Math.exp(-variance * 10.0); const finalMask = maskBase * roundness; const whiteTarget = [1.0, 1.0, 1.0]; l = [l[0] * (1.0 - finalMask) + whiteTarget[0] * finalMask, l[1] * (1.0 - finalMask) + whiteTarget[1] * finalMask, l[2] * (1.0 - finalMask) + whiteTarget[2] * finalMask]; l = l.map(x => x * 1.2); return l.map(x => { const val = Math.min(Math.max(x, 0), 1); return val * val * (3.0 - 2.0 * val); }); }
         function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) { t.style.display = 'none'; return; } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return; } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return; } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return; } const hex = rgbToHex(...getSurfaceColor(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))), Vec3.normalize(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p))))))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}`; }); }
         window.resetSphereView = function () { const m = state.sphere.rotation, trace = m[0] + m[5] + m[10]; let angle = Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2))), axis = [1, 0, 0], diff = [m[6] - m[9], m[8] - m[2], m[1] - m[4]], sl = Math.sqrt(diff[0] ** 2 + diff[1] ** 2 + diff[2] ** 2); if (sl > 0.001) axis = [diff[0] / sl, diff[1] / sl, diff[2] / sl]; state.returning = { active: true, progress: 0, baseRotation: m, rotationAxis: axis, rotationAngle: -angle, startDist: Vec3.len(state.cameraPos), targetDist: getResponsiveZ(), coneStartPositions: state.cones.map(c => [...c.pos]) }; state.landing.active = false; state.landing.showHandle = false; };
