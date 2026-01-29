@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Color</title>
+    <title>Color (Debug Mode)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"></script>
     <!-- CSS Remains Exactly as provided -->
     <style>
@@ -205,6 +205,11 @@
             height: var(--sub-nav-height);
             z-index: 140;
             pointer-events: none;
+            transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        #sub-nav-layer.peek-slide {
+            transform: translateY(calc(100vh - var(--nav-height) - var(--sub-nav-height) - 50px + 1px));
         }
 
         .sub-header {
@@ -649,6 +654,10 @@
             pointer-events: auto;
             transition: width 0.3s, opacity 0.1s;
             z-index: 10;
+            background-image: none !important;
+
+            /* Ensure content is treated as text only */
+            content: attr(data-lock-owner);
         }
 
         .locked-line:hover::before {
@@ -993,123 +1002,83 @@
         // ARCHITECTURE LAYERS: Identity -> TrustedMesh -> StateStore -> UI
         // =================================================================================
 
-        class Identity {
-            constructor() {
-                this.sigKeyPair = null; this.aesKey = null; this.peerKeys = {};
-                this.locked = true; this.ready = false; this.encryptedBlob = null; this.currentPassword = null;
-                this.DEFAULT_PASS = "FFFFFF";
-            }
-            async init() {
-                if (this.ready) return;
-                const db = await this.openDB(); const tx = db.transaction(["keys"], "readwrite"); const store = tx.objectStore("keys");
-                const wrappedReq = store.get("wrapped_keys");
-                await new Promise(r => tx.oncomplete = r);
-                if (wrappedReq.result) {
-                    this.encryptedBlob = wrappedReq.result;
-                    if (await this.unlockWithPassword(this.DEFAULT_PASS, true)) this.updateUI("DEFAULT");
-                    else this.updateUI("LOCKED");
-                } else await this.generateNewKeys();
-            }
-            async generateNewKeys() {
-                const tempSig = await window.crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-521" }, true, ["sign", "verify"]);
-                const tempAes = await window.crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
-                const sigJWK = await window.crypto.subtle.exportKey("jwk", tempSig.privateKey);
-                const aesJWK = await window.crypto.subtle.exportKey("jwk", tempAes);
-                const pubJWK = await window.crypto.subtle.exportKey("jwk", tempSig.publicKey);
-                await this.saveWrappedKeys(this.DEFAULT_PASS, { aes: aesJWK, sig: sigJWK }, pubJWK);
-                await this.loadKeysToMemory(sigJWK, aesJWK, pubJWK);
-                this.currentPassword = this.DEFAULT_PASS; this.locked = false; this.ready = true; this.updateUI("DEFAULT");
-            }
-            async saveWrappedKeys(password, keysJwkObj, pubKeyJwk) {
-                const salt = window.crypto.getRandomValues(new Uint8Array(16));
-                const wrapKey = await this.deriveKeyFromPass(password, salt);
-                const iv = window.crypto.getRandomValues(new Uint8Array(12));
-                const encryptedData = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, new TextEncoder().encode(JSON.stringify(keysJwkObj)));
-                this.encryptedBlob = { salt, iv, data: encryptedData, pubKey: pubKeyJwk };
-                const db = await this.openDB(); const tx = db.transaction(["keys"], "readwrite"); tx.objectStore("keys").put(this.encryptedBlob, "wrapped_keys"); await new Promise(r => tx.oncomplete = r);
-            }
-            async unlockWithPassword(password, silent = false) {
-                if (!this.encryptedBlob) return false;
-                try {
-                    const wrapKey = await this.deriveKeyFromPass(password, this.encryptedBlob.salt);
-                    const decryptedBytes = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv: this.encryptedBlob.iv }, wrapKey, this.encryptedBlob.data);
-                    const keysObj = JSON.parse(new TextDecoder().decode(decryptedBytes));
-                    await this.loadKeysToMemory(keysObj.sig, keysObj.aes, this.encryptedBlob.pubKey);
-                    this.currentPassword = password; this.locked = false; this.ready = true;
-                    if (!silent) { this.updateUI(password === this.DEFAULT_PASS ? "DEFAULT" : "SECURE"); if (window.app) window.app.connectAndPreview(window.location.hash || '#ffffff'); }
-                    return true;
-                } catch (e) { if (!silent) alert("Wrong Password"); return false; }
-            }
-            async loadKeysToMemory(sigJwk, aesJwk, pubJwk) {
-                this.aesKey = await window.crypto.subtle.importKey("jwk", aesJwk, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-                this.sigKeyPair = {
-                    privateKey: await window.crypto.subtle.importKey("jwk", sigJwk, { name: "ECDSA", namedCurve: "P-521" }, false, ["sign"]),
-                    publicKey: await window.crypto.subtle.importKey("jwk", pubJwk, { name: "ECDSA", namedCurve: "P-521" }, true, ["verify"])
-                };
-            }
-            async updatePassword(newPassword) {
-                if (this.locked || !newPassword) return;
-                try {
-                    await this.unlockWithPassword(this.currentPassword, true); // re-verify
-                    // export keys from memory is not possible (not extractable), so we rely on logic that we HAVE them. 
-                    // Actually, we must decrypt the BLOB again to get the JWKs to re-encrypt.
-                    const oldWrapKey = await this.deriveKeyFromPass(this.currentPassword, this.encryptedBlob.salt);
-                    const bytes = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv: this.encryptedBlob.iv }, oldWrapKey, this.encryptedBlob.data);
-                    const keysObj = JSON.parse(new TextDecoder().decode(bytes));
-                    await this.saveWrappedKeys(newPassword, keysObj, this.encryptedBlob.pubKey);
-                    this.currentPassword = newPassword; this.updateUI("SECURE");
-                } catch (e) { alert("Update failed"); }
-            }
-            async deriveKeyFromPass(password, salt) {
-                const enc = new TextEncoder();
-                const keyMaterial = await window.crypto.subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]);
-                return window.crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-            }
-            async openDB() { return new Promise((resolve, reject) => { const req = indexedDB.open("sys_security", 2); req.onupgradeneeded = e => { if (!e.target.result.objectStoreNames.contains("keys")) e.target.result.createObjectStore("keys"); }; req.onsuccess = e => resolve(e.target.result); }); }
-            updateUI(status) {
-                const el = document.getElementById('security-status'), btn = document.getElementById('btn-security-apply'), input = document.getElementById('master-pass');
-                if (status === "LOCKED") { el.innerHTML = "STATUS: <b style='color:red'>LOCKED</b>"; btn.innerText = "UNLOCK"; input.value = ""; }
-                else if (status === "DEFAULT") { el.innerHTML = "STATUS: <b style='color:orange'>UNSECURED (DEFAULT)</b>"; btn.innerText = "UPDATE PASSWORD"; input.value = this.DEFAULT_PASS; }
-                else { el.innerHTML = "STATUS: <b style='color:#00e676'>SECURED</b>"; btn.innerText = "UPDATE PASSWORD"; input.value = ""; input.placeholder = "Type new password..."; }
-            }
-            async getPublicKeyData() { if (!this.ready || this.locked) return null; return await window.crypto.subtle.exportKey("jwk", this.sigKeyPair.publicKey); }
-            async storePeerKey(peerId, jwkData) { try { const key = await window.crypto.subtle.importKey("jwk", jwkData, { name: "ECDSA", namedCurve: "P-521" }, true, ["verify"]); this.peerKeys[peerId] = key; return true; } catch (e) { return false; } }
-            async sign(dataString) { if (!this.ready || this.locked) return null; const s = await window.crypto.subtle.sign({ name: "ECDSA", hash: "SHA-512" }, this.sigKeyPair.privateKey, new TextEncoder().encode(dataString)); return btoa(String.fromCharCode(...new Uint8Array(s))); }
-            async verify(peerId, dataString, signatureBase64) { if (!this.peerKeys[peerId]) return false; try { return await window.crypto.subtle.verify({ name: "ECDSA", hash: "SHA-512" }, this.peerKeys[peerId], Uint8Array.from(atob(signatureBase64), c => c.charCodeAt(0)), new TextEncoder().encode(dataString)); } catch (e) { return false; } }
-            async encryptContent(text) { if (!this.ready || this.locked) throw new Error("Keystore Locked"); const iv = window.crypto.getRandomValues(new Uint8Array(12)); const c = await window.crypto.subtle.encrypt({ name: "AES-GCM", iv }, this.aesKey, new TextEncoder().encode(text)); const p = new Uint8Array(iv.length + c.byteLength); p.set(iv, 0); p.set(new Uint8Array(c), 12); return p.buffer; }
-            async decryptContent(packedBuffer) { if (!this.ready || this.locked) return "🔒 LOCKED"; try { const p = new Uint8Array(packedBuffer), iv = p.slice(0, 12), c = p.slice(12); const d = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv }, this.aesKey, c); return new TextDecoder().decode(d); } catch (e) { return "--- CORRUPT ---"; } }
-        }
+
 
         class ColorDB {
             constructor() { this.name = 'color'; }
-            async _open(hex = null) { return new Promise((res, rej) => { const req = indexedDB.open(this.name); req.onupgradeneeded = () => { }; req.onsuccess = e => { const db = e.target.result; if (hex && !db.objectStoreNames.contains(hex)) { const v = db.version + 1; db.close(); const upg = indexedDB.open(this.name, v); upg.onupgradeneeded = evt => { const d = evt.target.result; if (!d.objectStoreNames.contains(hex)) d.createObjectStore(hex).createIndex('owner', 'owner', { unique: false }); }; upg.onsuccess = evt => res(evt.target.result); } else res(db); }; }); }
-            async saveLine(hex, index, content, ownerHex, signature) {
-                if (!window.app?.identity?.ready) await window.app?.identity?.init();
-                const encryptedContent = await window.app.identity.encryptContent(content);
-                const db = await this._open(hex);
-                return new Promise(res => {
-                    const tx = db.transaction([hex], 'readwrite'), store = tx.objectStore(hex);
-                    store.put(parseInt(index), "cursor");
-                    if (!content || content.trim() === '') store.delete(parseInt(index));
-                    else store.put({ content: encryptedContent, owner: ownerHex, updated: Date.now(), signature: signature }, parseInt(index));
-                    tx.oncomplete = () => res(true); tx.onerror = () => res(false);
+            async init() { return; } // No-op, worker handles init on demand but better to init early? TrustedMesh uses init.
+            async _open(hex) {
+                await window.app.identity._call('db_init', { roomHex: hex });
+            }
+            // Proxy methods
+            async saveLine(hex, index, content, ownerHex) {
+                // Note: saveLine is now ONLY called by StateStore.handleLocalUpdate for local changes, BUT
+                // we changed the plan: StateStore calls db_write_local directly on identity.
+                // So this method might be deprecated/unused if we update StateStore.
+                // However, sticking to the plan: "Refactor ColorDB to be a pure proxy"
+                // StateStore was: await this.db.saveLine(this.roomId, index, content, ownerHex, signature);
+                // But strictly, local update logic is: Sign -> Encrypt -> Save.
+                // Remote update logic is: Verify -> Encrypt -> Save.
+                // Calls to saveLine from Main Thread are mostly legacy if we move logic to worker.
+                // Let's implement specific proxies.
+                console.warn("ColorDB.saveLine called - should use identity.db_write_local");
+            }
+            async getCursor(hex) { return window.app.identity._call('db_read_cursor', { roomHex: hex }); }
+            async getRange(hex, min, max) { return window.app.identity._call('db_read_range', { roomHex: hex, min, max }); }
+            async getSpecific(hex, keys) {
+                return window.app.identity._call('db_read_specific', { roomHex: hex, keys });
+            }
+            async getAllRooms() {
+                return window.app.identity._call('db_get_all_rooms', {});
+            }
+            async saveSignature(hex, signature) {
+                return window.app.identity._call('saveSignature', { roomHex: hex, signature });
+            }
+            async getLastEdited(hex) {
+                return new Promise((resolve, reject) => {
+                    const req = indexedDB.open('color');
+                    req.onsuccess = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains(hex)) { db.close(); resolve(0); return; }
+                        const tx = db.transaction([hex], 'readonly');
+                        const store = tx.objectStore(hex);
+                        let maxTs = 0;
+                        let lastIndex = 0;
+
+                        const cursorReq = store.openCursor();
+                        cursorReq.onsuccess = (ev) => {
+                            const cursor = ev.target.result;
+                            if (cursor) {
+                                if (cursor.value.updated > maxTs) {
+                                    maxTs = cursor.value.updated;
+                                    lastIndex = parseInt(cursor.key);
+                                }
+                                cursor.continue();
+                            } else {
+                                db.close();
+                                resolve(lastIndex);
+                            }
+                        };
+                        cursorReq.onerror = () => { db.close(); resolve(0); };
+                    };
+                    req.onerror = () => resolve(0);
                 });
             }
-            async getCursor(hex) { const db = await this._open(hex); if (!db.objectStoreNames.contains(hex)) return 0; return new Promise(res => { const req = db.transaction([hex], 'readonly').objectStore(hex).get("cursor"); req.onsuccess = () => res(req.result || 0); }); }
-            async _processRow(row) { if (row?.content instanceof ArrayBuffer) { if (!window.app?.identity?.ready) await window.app?.identity?.init(); row.content = await window.app.identity.decryptContent(row.content); } return row; }
-            async getRange(hex, min, max) { const db = await this._open(hex); if (!db.objectStoreNames.contains(hex)) return {}; return new Promise(res => { const req = db.transaction([hex], 'readonly').objectStore(hex).openCursor(IDBKeyRange.bound(min, max)); const result = {}; req.onsuccess = async e => { const cursor = e.target.result; if (cursor) { result[cursor.key] = await this._processRow(cursor.value); cursor.continue(); } else res(result); }; }); }
-            async getSpecific(hex, keys) { const db = await this._open(hex); if (!db.objectStoreNames.contains(hex)) return {}; return new Promise(res => { const tx = db.transaction([hex], 'readonly').objectStore(hex); const results = {}; let pending = keys.length; if (!pending) res({}); keys.forEach(k => { const idx = parseInt(k.replace(hex, ''), 10); if (isNaN(idx)) { pending--; return; } tx.get(idx).onsuccess = async e => { if (e.target.result) results[idx] = await this._processRow(e.target.result); if (--pending === 0) res(results); }; }); }); }
-            async getAllRooms() { const db = await this._open(); return Array.from(db.objectStoreNames).map(hex => ({ hex })); }
-            async saveSignature(hex, signature) { const db = await this._open(hex); const tx = db.transaction([hex], 'readwrite'); tx.objectStore(hex).put({ ...signature, created: Date.now() }, 'signature'); }
-            init() { return this._open(); }
+            async roomExists(hex) {
+                return window.app.identity._call('db_has_room', { roomHex: hex });
+            }
         }
         window.ColorDB = ColorDB;
 
         class TrustedMesh {
             constructor(roomId, identity) {
+                this.roomHex = roomId.replace('color-', '');
                 this.room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, roomId);
                 this.identity = identity;
                 this.handlers = new Map();
+
+                // CRITICAL: The "VIP List"
+                this.verifiedPeers = new Set();
 
                 // Actions
                 const [sendFrag, onFrag] = this.room.makeAction('fragment');
@@ -1118,46 +1087,95 @@
                 const [sendId, onId] = this.room.makeAction('identity');
                 this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId;
 
-                // 1. Identity Handshake
+                // 1. Identity Handshake (Sending my ID when I meet someone)
                 this.room.onPeerJoin(async (pid) => {
+                    console.log(`%c[P2P] Peer Joined: ${pid}`, 'color: cyan; font-weight: bold;');
                     const jwk = await this.identity.getPublicKeyData();
-                    this.rawSendId({ color: window.app.user.color, pubKey: jwk }, pid);
+
+                    // We send what we have. If it's PENDING, the other side ignores us (correctly).
+                    // The 'broadcastIdentity' function below handles the "I finished mining" update.
+                    const token = window.app.user.proofToken || "PENDING";
+
+                    this.rawSendId({
+                        color: window.app.user.color,
+                        pubKey: jwk,
+                        cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
+                        minedToken: token
+                    }, pid);
+
                     this.emit('peer-join', pid);
                 });
-                onId((data, pid) => {
-                    if (data?.pubKey) this.identity.storePeerKey(pid, data.pubKey);
-                    this.emit('peer-identity', data, pid);
+
+                // 2. RECEIVE IDENTITY HANDSHAKE (The Bouncer Logic)
+                onId(async (data, pid) => {
+                    if (data.minedToken && data.minedToken !== "PENDING") {
+                        // Verify the token in the worker
+                        const isValid = await this.identity._call('validate_peer', {
+                            peerId: data.minedToken,
+                            roomHex: this.roomHex
+                        });
+
+                        if (isValid) {
+                            console.log(`%c[P2P] ✅ Peer verified: ${pid}`, 'color: #00e676;');
+                            this.verifiedPeers.add(pid); // Add to VIP list
+                            if (data.pubKey) this.identity.storePeerKey(pid, data.pubKey);
+                            this.emit('peer-identity', data, pid);
+                        } else {
+                            console.warn(`[P2P] ❌ Peer verification failed for ${pid}`);
+                        }
+                    } else {
+                        console.log(`[P2P] Peer ${pid} is not ready yet (Token: ${data.minedToken})`);
+                    }
                 });
 
-                // 2. Verified Data Pipeline
+                // 3. Verified Data Pipeline (DEBUGGING ADDED HERE)
                 onFrag(async (fragMap, pid) => {
-                    if (!this.identity.peerKeys[pid]) return; // Drop unknown peers
-                    const verifiedData = {};
-                    for (const [key, item] of Object.entries(fragMap)) {
-                        // VERIFY SIGNATURE
-                        if (item.signature && await this.identity.verify(pid, item.content || "", item.signature)) {
-                            verifiedData[key] = item;
-                        } else {
-                            console.warn(`[TrustedMesh] Dropped invalid sig from ${pid} on line ${key}`);
-                        }
+                    // This log answers "What is the original peer doing?"
+                    // If you see "BLOCKED", it means the handshake failed or hasn't happened yet.
+
+                    if (!this.verifiedPeers.has(pid)) {
+                        console.warn(`[P2P] 🛑 BLOCKED packet from ${pid}: Peer not verified.`);
+                        return; // REJECT DATA
                     }
+
+                    console.log(`[P2P] 📦 Processing verified packet from ${pid}`, fragMap);
+
+                    if (!this.roomHex) return;
+                    const verifiedData = await this.identity._call('db_verify_remote', {
+                        fragments: fragMap,
+                        roomHex: this.roomHex,
+                        peerId: pid
+                    });
+
                     if (Object.keys(verifiedData).length > 0) this.emit('fragment', verifiedData, pid);
                 });
 
-                // 3. Passthrough actions
+                // Passthrough actions
                 onLock((d, p) => this.emit('lock', d, p));
                 onReq((d, p) => this.emit('req', d, p));
                 this.room.onPeerLeave(p => this.emit('peer-leave', p));
             }
 
-            // AUTO-SIGNING SENDER
-            async broadcastFragment(fragMap) {
-                const signedMap = {};
-                for (const [k, v] of Object.entries(fragMap)) {
-                    const sig = await this.identity.sign(v.content || "");
-                    signedMap[k] = { ...v, signature: sig };
+            // NEW FUNCTION: Call this when mining finishes!
+            async broadcastIdentity() {
+                const token = window.app.user.proofToken;
+                const jwk = await this.identity.getPublicKeyData();
+                if (token && jwk) {
+                    console.log(`%c[P2P] 📡 Broadcasting NEW Identity to all peers`, 'color: orange;');
+                    this.rawSendId({
+                        color: window.app.user.color,
+                        pubKey: jwk,
+                        // Parse the current line ID to get the integer index
+                        cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
+                        minedToken: token
+                    });
                 }
-                this.rawSendFrag(signedMap);
+            }
+
+            async broadcastFragment(fragMap) {
+                // FIX: Do not re-sign. The StateStore/Worker has already signed 
+                // the payload with the required (index:timestamp:owner:content) format.
+                this.rawSendFrag(fragMap);
             }
 
             broadcastLock(data) { this.rawSendLock(data); }
@@ -1167,54 +1185,66 @@
             on(e, cb) { if (!this.handlers.has(e)) this.handlers.set(e, []); this.handlers.get(e).push(cb); }
             emit(e, ...args) { this.handlers.get(e)?.forEach(cb => cb(...args)); }
         }
-
         class StateStore {
-            constructor(db, mesh, myColor) {
-                this.db = db; this.mesh = mesh; this.myColor = myColor;
-                this.lines = new Map();
-                this.dbName = null;
+            constructor(db, mesh, identity) {
+                this.db = db;
+                this.mesh = mesh;
+                this.identity = identity;
+                this.roomId = null;
+                this.listeners = []; // Simple event system
 
-                // Bind Network Events
-                this.mesh.on('fragment', (data, pid) => this.mergeRemote(data, pid));
+                // Bind Network Events immediately
+                this.mesh.on('fragment', (data, pid) => this.handleRemoteUpdate(data, pid));
             }
-            setRoom(hex) { this.dbName = hex; }
-            async mergeRemote(fragMap, pid) {
-                const roomHex = this.dbName;
+
+            setRoom(hex) {
+                this.roomId = hex;
+            }
+
+            subscribe(callback) {
+                this.listeners.push(callback);
+            }
+
+            emitChange(index, content, owner) {
+                this.listeners.forEach(cb => cb(index, content, owner));
+            }
+
+            // HANDLE REMOTE DATA
+            async handleRemoteUpdate(fragMap, pid) {
+                if (!this.roomId) return;
                 const indices = Object.keys(fragMap).map(k => parseInt(k)).sort((a, b) => a - b);
-                // Update Local DB and UI
                 for (const idx of indices) {
                     const item = fragMap[idx];
-                    // LWW (Simple version: we just accept verified remote for now)
-                    // In a real robust LWW we would check timestamps against local
-                    const newContent = item.content;
-                    const newOwner = item.owner || roomHex;
-
-                    // Save to DB (Verified by Mesh already)
-                    await this.db.saveLine(roomHex, idx, newContent, newOwner, item.signature);
-
+                    // Already Verified & Saved by Worker (TrustedMesh called db_verify_remote)
                     // Notify UI
-                    window.app.renderUpdate(idx, newContent, newOwner);
+                    this.emitChange(idx, item.content, item.owner);
                 }
             }
-            async updateLine(index, content) {
-                const owner = this.myColor.replace('#', '');
-                // 1. Sign
-                const sig = await window.app.identity.sign(content || "");
-                // 2. Save DB
-                await this.db.saveLine(this.dbName, index, content, owner, sig);
-                // 3. Broadcast
-                this.mesh.broadcastFragment({ [index]: { content, owner, updated: Date.now(), signature: sig } }); // mesh handles wrapping signature? No, mesh helper expects object.
-                // Actually TrustedMesh helper 'broadcastFragment' recalculates signature. 
-                // Optimization: Pass the signature we just made to avoid double-signing?
-                // For simplicity/cleanliness, let TrustedMesh do its job of signing outgoing data.
-                // We just pass raw data to TrustedMesh.
-                // WAIT: DB needs signature too. 
+
+            // HANDLE LOCAL USER INPUT
+            async handleLocalUpdate(index, content, userColor) {
+                if (!this.roomId) return;
+                const ownerHex = userColor.replace('#', '');
+                const roomHex = this.roomId.replace('color-', '');
+
+                // Call worker
+                const result = await this.identity._call('db_write_local', { roomHex, index, content, owner: ownerHex });
+
+                // Broadcast payload includes the timestamp (result.updated)
+                this.mesh.broadcastFragment({
+                    [index]: {
+                        content: result.content,
+                        owner: result.owner,
+                        signature: result.signature,
+                        updated: result.updated // Critical for verification
+                    }
+                });
             }
         }
 
         class EditorApp {
             constructor() {
-                this.identity = new Identity();
+                this.identity = new SecureIdentity();
                 this.db = new ColorDB();
                 this.mesh = null;
                 this.ui = Object.fromEntries(['display', 'chat-container', 'minimap', 'peer-count', 'tools', 'room-status', 'login-btn', 'user-badge', 'login-card', 'dashboard-panel', 'hover-trigger', 'top-nav', 'sub-nav-layer'].map(id => [id.replace(/-./g, x => x[1].toUpperCase()), document.getElementById(id)]));
@@ -1230,6 +1260,7 @@
                 this.currentLineId = null;
                 this.isFresh = true;
                 this.saveTimeout = null;
+                this.store = null;
 
                 // Init Systems
                 Promise.all([this.identity.init(), this.db.init()]).then(async () => {
@@ -1293,10 +1324,14 @@
                     if (el.id && (!visibleOnly || (el.offsetTop + el.offsetHeight > top && el.offsetTop < bot))) {
                         const meta = this.parseId(el.id);
                         if (meta) {
-                            d[meta.index] = {
-                                content: el.innerHTML,
-                                owner: el.getAttribute('data-lock-owner') || roomHex
-                            };
+                            const content = el.innerHTML;
+                            // Only send if substantial content exists
+                            if (content && content !== '<br>' && content.trim().length > 0) {
+                                d[meta.index] = {
+                                    content: content,
+                                    owner: el.getAttribute('data-lock-owner') || roomHex
+                                };
+                            }
                         }
                     }
                 });
@@ -1344,7 +1379,7 @@
                     this.isFresh = true;
                     this.focusLine(50);
                 } else {
-                    this.db.getCursor(roomHex).then(idx => {
+                    this.db.getLastEdited(roomHex).then(idx => {
                         this.focusLine(idx);
                     });
                 }
@@ -1360,12 +1395,13 @@
                 if (this.mesh) { this.mesh.leave(); this.mesh = null; }
 
                 this.ui.loginBtn.classList.remove('hidden');
-                const db = await this.db._open();
-                const exists = db.objectStoreNames.contains(cleanHex);
+                // Ensure worker has init
+                await this.db._open();
+                const exists = await this.db.roomExists(cleanHex);
 
                 if (exists) {
                     this.ui.roomStatus.innerText = "Loading...";
-                    const centerIndex = await this.db.getCursor(cleanHex);
+                    const centerIndex = await this.db.getLastEdited(cleanHex);
                     const data = await this.db.getRange(cleanHex, centerIndex - 50, centerIndex + 50);
                     await this.renderFromLocalDB(data, centerIndex);
                     this.ui.roomStatus.innerText = "READY";
@@ -1391,45 +1427,76 @@
                 this.isFresh = false;
             }
 
+
             joinNetwork() {
                 this.mesh = new TrustedMesh(this.roomId, this.identity);
+                this.store = new StateStore(this.db, this.mesh, this.identity);
+                this.store.setRoom(this.roomId.replace('color-', ''));
+
+                this.store.subscribe((index, content, owner) => {
+                    this.renderUpdate(index, content, owner);
+                });
 
                 this.mesh.on('peer-join', (pid) => {
                     this.updateStatus();
+                    // REMOVED: Do not broadcast fragments here. It is too early.
+                    // The peer is not verified yet, so they will block our data.
                     if (this.currentLineId) this.mesh.broadcastLock({ lineId: this.currentLineId, userColor: this.user.color });
-                    const frags = this.getFragments(true);
-                    if (Object.keys(frags).length) this.mesh.broadcastFragment(frags);
                 });
 
                 this.mesh.on('peer-leave', () => { this.updateStatus(); this.reapplyVisualLocks(); });
-                this.mesh.on('peer-identity', (data, pid) => { this.peerColors[pid] = data?.color || '#ffffff'; });
+
+                // --- MOVED SYNC LOGIC HERE ---
+                this.mesh.on('peer-identity', (data, pid) => {
+                    this.peerColors[pid] = data?.color || '#ffffff';
+
+                    // IF WE ARE THE NEW USER (Fresh session) AND PEER SENT A CURSOR
+                    if (this.isFresh && typeof data.cursor === 'number') {
+                        console.log(`[EditorApp] 🎯 Peer is at line ${data.cursor}. Syncing range...`);
+
+                        // 1. Wipe and Render Empty Lines (Center - 50 to Center + 50)
+                        // This function creates the DOM elements but they are empty/editable by default
+                        this.renderInitialState({}, data.cursor);
+                        this.isFresh = false;
+
+                        // 2. Calculate the IDs we just generated
+                        const start = data.cursor - 50;
+                        const end = data.cursor + 50;
+                        const missingKeys = [];
+                        const roomHex = this.roomId.replace('color-', '');
+
+                        for (let i = start; i <= end; i++) {
+                            missingKeys.push(roomHex + i);
+                        }
+
+                        // 3. Ask OP: "Do you have content for these lines?"
+                        console.log(`[P2P] 📥 Requesting data for ${missingKeys.length} lines...`);
+                        this.mesh.requestSync(missingKeys);
+                    }
+                });
 
                 this.mesh.on('lock', (data, pid) => {
                     this.activeLocks[pid] = { lineId: data.lineId, ts: Date.now(), color: data.userColor };
                     this.reapplyVisualLocks();
                 });
 
-                this.mesh.on('fragment', (verifiedData, pid) => {
-                    const roomHex = this.roomId.replace('color-', '');
-                    for (const [idx, item] of Object.entries(verifiedData)) {
-                        this.renderUpdate(parseInt(idx), item.content, item.owner || roomHex);
-                        this.db.saveLine(roomHex, idx, item.content, item.owner, item.signature);
-                    }
-                });
-
                 this.mesh.on('req', async (keys, pid) => {
                     const roomHex = this.roomId.replace('color-', '');
+
                     if (keys && Array.isArray(keys)) {
+                        // The peer is asking: "Do you have content for these specific line IDs?"
                         const payload = await this.db.getSpecific(roomHex, keys);
-                        if (Object.keys(payload).length) this.mesh.broadcastFragment(payload);
-                    } else {
-                        const frags = this.getFragments(false);
-                        if (Object.keys(frags).length) this.mesh.broadcastFragment(frags);
+
+                        // If we have content (payload has keys), we send it.
+                        // If we DON'T have content (payload is empty), we send nothing.
+                        // Since the peer already generated empty lines, they simply remain open/editable.
+                        if (Object.keys(payload).length > 0) {
+                            this.mesh.broadcastFragment(payload);
+                        }
                     }
                 });
 
                 setInterval(() => this.updateStatus(), 1000);
-                setTimeout(() => { if (this.mesh) this.mesh.requestSync(null); }, 1000);
             }
 
             renderUpdate(index, newContent, newOwner) {
@@ -1466,13 +1533,16 @@
                 if (!this.ui.dashboardPanel.classList.contains('active')) return;
                 const meta = this.parseId(lineId);
                 if (!meta) return;
-                const el = document.getElementById(lineId);
-                const content = el.innerText.trim().length > 0 ? el.innerHTML : null;
-                const owner = this.user.color.replace('#', '');
 
-                const sig = await this.identity.sign(content || "");
-                await this.db.saveLine(this.roomId.replace('color-', ''), meta.index, content, owner, sig);
-                if (this.mesh) this.mesh.broadcastFragment({ [meta.index]: { content, owner } });
+                const el = document.getElementById(lineId);
+                if (!el) return;
+                const content = el.innerText.trim().length > 0 ? el.innerHTML : null;
+                console.log("[EditorApp] triggerSave", lineId, content);
+
+                // Delegate to Store (which handles DB save + Network broadcast)
+                if (this.store) {
+                    await this.store.handleLocalUpdate(meta.index, content, this.user.color);
+                }
             }
 
             bindEvents() {
@@ -1494,23 +1564,79 @@
                 this.ui.chatContainer.addEventListener('scroll', () => this.checkBuffers());
                 const resizeObserver = new ResizeObserver(() => { requestAnimationFrame(() => this.renderMinimap()); });
                 resizeObserver.observe(this.ui.chatContainer);
-                document.getElementById('status-toggle').addEventListener('click', () => this.togglePeek());
+                document.getElementById('status-toggle').addEventListener('click', () => {
+                    if (!this.ui.dashboardPanel.classList.contains('active')) return;
+
+                    if (this.peeking) {
+                        // Exiting peek mode - zoom sphere back in
+                        this.togglePeek();
+                        if (window.state) {
+                            const targetZ = window.state.landing?.targetDist || 1.25;
+                            window.state.returning = {
+                                active: true,
+                                progress: 0,
+                                baseRotation: [...window.state.sphere.rotation],
+                                rotationAxis: [1, 0, 0],
+                                rotationAngle: 0,
+                                keepRotation: true,
+                                startDist: window.state.cameraPos[2],
+                                targetDist: targetZ,
+                                coneStartPositions: window.state.cones.map(c => [...c.pos])
+                            };
+                        }
+                    } else {
+                        // Entering peek mode - zoom sphere out
+                        if (window.resetSphereView) window.resetSphereView(false, true);
+                        if (window.state) window.state.renderPath = false;
+                        this.togglePeek();
+                    }
+                });
 
                 document.querySelectorAll('.nav-item').forEach(item => {
                     item.addEventListener('click', () => {
                         const targetId = item.getAttribute('data-target');
+                        // Inside bindEvents() -> nav-item click listener
                         if (targetId === 'connect') {
-                            this.togglePeek();
-                            if (this.peeking) {
-                                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); item.classList.add('active');
-                                document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
-                            } else {
-                                this.ui.dashboardPanel.classList.remove('peek-mode');
-                                document.querySelector('.nav-item[data-target="home"]')?.click();
-                            }
+                            // If already in peek mode (connect tab active), do nothing
+                            if (this.peeking) return;
+
+                            // 1. Force sphere zoom out animation
+                            if (window.resetSphereView) window.resetSphereView(false, true); // false = zoom out, true = keep rotation
+
+                            // 2. Hide path
+                            if (window.state) window.state.renderPath = false;
+
+                            // 3. Enter peek mode (not a toggle)
+                            this.peeking = true;
+                            this.ui.dashboardPanel.classList.add('peek-mode');
+                            this.updatePeekState(1);
+
+                            // 4. Update nav state
+                            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                            item.classList.add('active');
+                            document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
                             return;
                         }
-                        if (this.peeking) this.togglePeek();
+                        if (this.peeking) {
+                            this.togglePeek();
+                            // Slide sub-nav back up
+                            document.getElementById('sub-nav-layer')?.classList.remove('peek-slide');
+                            // Zoom sphere back in when leaving connect/signature tab using fast returning animation
+                            if (window.state) {
+                                const targetZ = window.state.landing?.targetDist || 1.25;
+                                window.state.returning = {
+                                    active: true,
+                                    progress: 0,
+                                    baseRotation: [...window.state.sphere.rotation],
+                                    rotationAxis: [1, 0, 0],
+                                    rotationAngle: 0,
+                                    keepRotation: true,
+                                    startDist: window.state.cameraPos[2],
+                                    targetDist: targetZ,
+                                    coneStartPositions: window.state.cones.map(c => [...c.pos])
+                                };
+                            }
+                        }
                         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); item.classList.add('active');
                         document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'));
                         document.getElementById('view-' + targetId)?.classList.add('active');
@@ -1533,21 +1659,75 @@
                     document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
                     document.getElementById('header-settings').classList.add('active');
                 });
+                // Inside bindEvents() -> sub-tab click listener
                 document.querySelectorAll('.sub-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
                         const group = tab.getAttribute('data-group'), target = tab.getAttribute('data-tab');
-                        document.querySelectorAll(`.sub-tab[data-group="${group}"]`).forEach(t => t.classList.remove('active')); tab.classList.add('active');
+
+                        // --- ADDED LOGIC FOR SIGNATURES ---
+                        if (target === 'signatures') {
+                            // 1. Force sphere zoom out animation (same as connect tab)
+                            if (window.resetSphereView) window.resetSphereView(false, true); // false = zoom out, true = keep rotation
+
+                            // 2. Show the sphere (Peek Mode)
+                            if (!this.peeking) {
+                                this.peeking = true;
+                                this.ui.dashboardPanel.classList.add('peek-mode');
+                                // Slide sub-nav down with the dashboard
+                                document.getElementById('sub-nav-layer')?.classList.add('peek-slide');
+                                this.updatePeekState(1);
+                            }
+
+                            // 3. Load and Show Path
+                            if (window.state) {
+                                window.state.renderPath = true;
+                                // Load the current signature path into the renderer
+                                if (window.state.interactionSignature && window.state.interactionSignature.path.length > 0) {
+                                    window.state.pathPoints = [...window.state.interactionSignature.path];
+                                }
+                            }
+                        } else {
+                            // If clicking other settings tabs, slide back up and hide path
+                            if (window.state) window.state.renderPath = false;
+                            // Slide sub-nav back up when leaving signature tab
+                            if (this.peeking) {
+                                this.togglePeek();
+                                document.getElementById('sub-nav-layer')?.classList.remove('peek-slide');
+                                // Zoom sphere back in
+                                if (window.state) {
+                                    const targetZ = window.state.landing?.targetDist || 1.25;
+                                    window.state.returning = {
+                                        active: true,
+                                        progress: 0,
+                                        baseRotation: [...window.state.sphere.rotation],
+                                        rotationAxis: [1, 0, 0],
+                                        rotationAngle: 0,
+                                        keepRotation: true,
+                                        startDist: window.state.cameraPos[2],
+                                        targetDist: targetZ,
+                                        coneStartPositions: window.state.cones.map(c => [...c.pos])
+                                    };
+                                }
+                            }
+                        }
+                        // ----------------------------------
+
+                        document.querySelectorAll(`.sub-tab[data-group="${group}"]`).forEach(t => t.classList.remove('active'));
+                        tab.classList.add('active');
                         document.querySelector(`.content-view.active`)?.querySelectorAll('.settings-pane, .apps-pane').forEach(p => p.classList.remove('active'));
                         document.querySelector(`.content-view.active #tab-${target}`)?.classList.add('active');
                     });
                 });
 
                 window.addEventListener('mousemove', e => {
-                    if (!this.ui.dashboardPanel.classList.contains('active') || this.ui.dashboardPanel.classList.contains('revealed') || this.ui.dashboardPanel.classList.contains('step-down') || this.ui.dashboardPanel.classList.contains('peek-mode')) {
+                    if (!this.ui.dashboardPanel.classList.contains('active') || this.ui.dashboardPanel.classList.contains('step-down') || this.ui.dashboardPanel.classList.contains('peek-mode')) {
                         if (!this.peeking) this.ui.dashboardPanel.style.transform = ''; return;
                     }
                     if (e.clientY < 33) {
-                        if (e.clientY <= 33) { this.ui.dashboardPanel.classList.add('revealed'); this.ui.topNav.classList.add('visible'); this.ui.dashboardPanel.style.transform = ''; }
+                        this.ui.dashboardPanel.classList.add('revealed'); this.ui.topNav.classList.add('visible'); this.ui.dashboardPanel.style.transform = '';
+                    } else if (e.clientY > 100 && this.ui.dashboardPanel.classList.contains('revealed')) {
+                        // Hide nav when mouse moves below nav area
+                        this.ui.dashboardPanel.classList.remove('revealed'); this.ui.topNav.classList.remove('visible');
                     }
                 });
 
@@ -1667,17 +1847,55 @@
             }
 
             updateStatus() {
-                if (!this.mesh) return
+                if (!this.mesh) return;
                 const peers = Object.values(this.mesh.getPeers()).filter(p => p.dc?.readyState === 'open').length;
+
                 if (peers > 0) {
-                    this.ui.loginBtn.innerHTML = "<span>JOIN</span>"; this.ui.loginBtn.classList.remove('hidden');
-                    this.ui.roomStatus.innerText = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
-                    this.ui.peerCount.innerText = `${peers} visitor${peers > 1 ? 's' : ''}`; this.ui.dot.classList.add('on');
+                    if (!this.minedForSession) {
+                        this.minedForSession = true;
+                        const roomHex = this.roomId.replace('color-', '');
+                        console.log("%c[MINING] Starting mining...", "color: orange;");
+
+                        this.identity._call('generate_token', { roomHex }).then(token => {
+                            console.log("%c[MINING] Proof Generated: " + token, "color: orange; font-weight: bold;");
+                            this.user.proofToken = token;
+
+                            if (this.mesh) {
+                                // 1. Announce we are ready
+                                this.mesh.broadcastIdentity();
+                                // 2. ASK FOR DATA (The missing link)
+                                console.log("[P2P] ⏳ Ready. Waiting for peer cursor...");
+                                //this.mesh.requestSync(null);
+                            }
+
+                            this.updateStatus();
+                        }).catch(err => {
+                            console.error("Mining failed:", err);
+                            this.minedForSession = false;
+                        });
+                    }
+
+                    if (this.user.proofToken) {
+                        this.ui.loginBtn.innerHTML = "<span>JOIN</span>";
+                        this.ui.loginBtn.classList.remove('hidden');
+                        this.ui.roomStatus.innerText = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
+                        this.ui.peerCount.innerText = `${peers} visitor${peers > 1 ? 's' : ''}`;
+                        this.ui.dot.classList.add('on');
+                    } else {
+                        this.ui.loginBtn.innerHTML = "<span style='font-size:0.7rem'>VERIFYING...</span>";
+                        this.ui.loginBtn.classList.remove('hidden');
+                        this.ui.roomStatus.innerText = "GENERATING PROOF...";
+                        this.ui.peerCount.innerText = "Connecting...";
+                        this.ui.dot.classList.remove('on');
+                    }
                 } else {
-                    this.ui.roomStatus.innerText = "COLOR AVAILABLE"; this.ui.peerCount.innerText = "Offline";
-                    this.ui.loginBtn.innerHTML = "<span>LOGIN</span>"; this.ui.dot.classList.remove('on');
+                    this.ui.roomStatus.innerText = "COLOR AVAILABLE";
+                    this.ui.peerCount.innerText = "Offline";
+                    this.ui.loginBtn.innerHTML = "<span>LOGIN</span>";
+                    this.ui.dot.classList.remove('on');
                 }
             }
+
             togglePeek() {
                 if (!this.ui.dashboardPanel.classList.contains('active')) return;
                 this.peeking = !this.peeking;
@@ -1695,7 +1913,17 @@
                 document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
                 if (this.mesh) { this.mesh.leave(); this.mesh = null; }
                 this.ui.display.innerHTML = ''; this.ui.minimap.innerHTML = ''; this.activeLocks = {};
+
+                // Reset nav and subnav to home state for next login
+                document.getElementById('sub-nav-layer')?.classList.remove('peek-slide');
+                document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                document.querySelector('.nav-item[data-target="home"]')?.classList.add('active');
+                document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'));
+                document.getElementById('view-home')?.classList.add('active');
+
                 if (window.updateVisitedFromDB) window.updateVisitedFromDB();
+                this.minedForSession = false;
             }
 
             renderInitialState(data, centerIndex) {
@@ -1718,6 +1946,8 @@
                         sel.addRange(range);
                         this.ui.display.focus();
                         this.currentLineId = domId;
+
+                        this.checkBuffers();
                     }
                 });
             }
@@ -1725,58 +1955,104 @@
             checkBuffers() {
                 if (this.bufferCheckPending) return;
                 this.bufferCheckPending = true;
+
                 requestAnimationFrame(async () => {
                     const c = this.ui.chatContainer;
                     const { scrollTop: st, scrollHeight: sh, clientHeight: ch } = c;
                     const children = this.ui.display.children;
                     if (children.length === 0) { this.bufferCheckPending = false; return; }
+
                     const firstMeta = this.parseId(children[0].id);
                     const lastMeta = this.parseId(children[children.length - 1].id);
                     if (!firstMeta || !lastMeta) { this.bufferCheckPending = false; return; }
-                    const firstIndex = firstMeta.index, lastIndex = lastMeta.index;
+
+                    const firstIndex = firstMeta.index;
+                    const lastIndex = lastMeta.index;
                     const roomHex = this.roomId.replace('color-', '');
 
+                    const keysToRequest = [];
+
+                    // --- SCROLL UP (PREPEND) ---
                     if (st < 100) {
                         const oldHeight = sh;
-                        const start = firstIndex - 10, end = firstIndex - 1;
-                        const dbData = await this.db.getRange(roomHex, start, end);
-                        let html = '', missing = [];
+                        const start = firstIndex - 10;
+                        const end = firstIndex - 1;
+
+                        let html = '';
                         for (let i = start; i <= end; i++) {
-                            const row = dbData[i];
-                            html += this.reconstructLine(roomHex + i, row?.content, row?.owner);
-                            if (!row) missing.push(roomHex + i);
+                            // Create empty line
+                            html += this.reconstructLine(roomHex + i, null, null);
+                            // Add ID to request list
+                            keysToRequest.push(roomHex + i);
                         }
+
                         this.ui.display.insertAdjacentHTML('afterbegin', html);
                         if (c.scrollHeight > 0) c.scrollTop = st + (c.scrollHeight - oldHeight);
-                        if (this.mesh && missing.length) this.mesh.requestSync(missing);
                     }
+
+                    // --- SCROLL DOWN (APPEND) ---
                     if (sh - st - ch < 100) {
-                        const start = lastIndex + 1, end = lastIndex + 10;
-                        const dbData = await this.db.getRange(roomHex, start, end);
-                        let html = '', missing = [];
+                        const start = lastIndex + 1;
+                        const end = lastIndex + 10;
+
+                        let html = '';
                         for (let i = start; i <= end; i++) {
-                            const row = dbData[i];
-                            html += this.reconstructLine(roomHex + i, row?.content, row?.owner);
-                            if (!row) missing.push(roomHex + i);
+                            // Create empty line
+                            html += this.reconstructLine(roomHex + i, null, null);
+                            // Add ID to request list
+                            keysToRequest.push(roomHex + i);
                         }
+
                         this.ui.display.insertAdjacentHTML('beforeend', html);
-                        if (this.mesh && missing.length) this.mesh.requestSync(missing);
                     }
+
+                    // --- CLEANUP (Keep DOM light) ---
                     if (children.length > 250) {
-                        if (st > sh / 2) { for (let i = 0; i < 50; i++) children[0].remove(); } else { for (let i = 0; i < 50; i++) children[children.length - 1].remove(); }
+                        if (st > sh / 2) {
+                            for (let i = 0; i < 50; i++) children[0].remove();
+                        } else {
+                            for (let i = 0; i < 50; i++) children[children.length - 1].remove();
+                        }
                     }
+
+                    // --- NETWORK REQUEST ---
+                    // If we generated new lines, ask the peer if they have data for them
+                    if (this.mesh && keysToRequest.length > 0) {
+                        this.mesh.requestSync(keysToRequest);
+                    }
+
                     this.bufferCheckPending = false;
                 });
             }
 
             sanitize(str) { return DOMPurify.sanitize(str, { ALLOWED_TAGS: ['b', 'i', 'u', 'a', 'br', 'div', 'span'], ALLOWED_ATTR: ['href', 'style', 'class', 'target'] }); }
+
+            // Inside EditorApp class
+
             reapplyVisualLocks() {
-                document.querySelectorAll('.locked-line').forEach(el => { el.classList.remove('locked-line'); el.style.removeProperty('--lock-color'); el.removeAttribute('data-lock-owner'); });
+                document.querySelectorAll('.locked-line').forEach(el => {
+                    el.classList.remove('locked-line');
+                    el.style.removeProperty('--lock-color');
+                    el.removeAttribute('data-lock-owner');
+                });
+
                 const now = Date.now();
+                // HEX VALIDATION REGEX
+                const hexRegex = /^#[0-9a-fA-F]{6}$/i;
+
                 for (const [pid, lock] of Object.entries(this.activeLocks)) {
                     if (now - lock.ts > 60000) continue;
+
+                    // SECURITY CHECK: CSS INJECTION
+                    if (!lock.color || !hexRegex.test(lock.color)) continue;
+
                     const el = document.getElementById(lock.lineId);
-                    if (el) { el.classList.add('locked-line'); el.style.setProperty('--lock-color', lock.color); el.contentEditable = "false"; el.setAttribute('data-lock-owner', lock.color); }
+                    if (el) {
+                        el.classList.add('locked-line');
+                        el.style.setProperty('--lock-color', lock.color);
+                        el.contentEditable = "false";
+                        el.setAttribute('data-lock-owner', lock.color);
+                    }
                 }
                 this.renderMinimap();
             }
@@ -1791,6 +2067,549 @@
             async runSequencedScan() { for (const rId of this.visitedRooms) { try { const r = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, rId); await new Promise(res => setTimeout(() => { window.postMessage({ type: 'handle-ready', hex: rId.replace('color-', '#'), count: Object.keys(r.getPeers()).length }, '*'); r.leave(); res(); }, 1000)); } catch (e) { } } }
         }
 
+        // 1. The Worker Logic (Stringified) 
+
+        const WORKER_SOURCE = `
+const DEFAULT_PASS = "FFFFFF";
+let _keyPair = null;
+let _aesKey = null;
+let _peerKeys = {};
+let _encryptedBlob = null;
+let _locked = true;
+let _currentPassword = null;
+
+// --- POW for Sybil Protection ---
+const DIFFICULTY_PREFIX = "0000"; 
+
+async function computeProof(roomHex) {
+    console.log("Worker starting proof computation...");
+    const encoder = new TextEncoder();
+    let nonce = 0;
+    while (true) {
+        nonce++;
+        // Combine room, a timestamp (rounded to the hour so it expires), and the nonce
+        const hourStamp = Math.floor(Date.now() / 3600000); 
+        const attempt = roomHex + hourStamp + nonce;
+        
+        const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(attempt));
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        if (hashHex.startsWith(DIFFICULTY_PREFIX)) {
+            return hourStamp + "_" + nonce;
+        }
+        // Yield occasionally
+        if (nonce % 1000 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+}
+
+async function isValidPeer(peerId, roomHex) {
+    console.log("Worker verifying peer:", peerId);
+    if (!peerId || !peerId.includes('_')) return false;
+    const [hourStamp, nonce] = peerId.split('_');
+    
+    // 1. Check if the token is expired (older than 1-2 hours)
+    const currentHour = Math.floor(Date.now() / 3600000);
+    if (Math.abs(currentHour - parseInt(hourStamp)) > 1) return false;
+
+    // 2. Validate Proof of Work
+    const encoder = new TextEncoder();
+    const attempt = roomHex + hourStamp + nonce;
+    const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(attempt));
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    return hashHex.startsWith(DIFFICULTY_PREFIX);
+}
+
+// --- DB Helpers ---
+function openKeyDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open("sys_security", 2);
+        req.onupgradeneeded = e => { if (!e.target.result.objectStoreNames.contains("keys")) e.target.result.createObjectStore("keys"); };
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror = e => reject(e);
+    });
+}
+
+function openColorDB(hex = null) {
+    return new Promise((res, rej) => {
+        const req = indexedDB.open('color');
+        req.onupgradeneeded = () => { };
+        req.onerror = e => rej(e);
+        req.onsuccess = e => {
+            const db = e.target.result;
+            if (!db) { rej("DB failed to open"); return; }
+            
+            if (hex && !db.objectStoreNames.contains(hex)) {
+                const v = db.version + 1;
+                db.close();
+                const upg = indexedDB.open('color', v);
+                upg.onupgradeneeded = evt => {
+                    const d = evt.target.result;
+                    if (!d.objectStoreNames.contains(hex)) d.createObjectStore(hex).createIndex('owner', 'owner', { unique: false });
+                };
+                upg.onerror = evt => rej(evt);
+                upg.onsuccess = evt => res(evt.target.result);
+            } else {
+                res(db);
+            }
+        };
+    });
+}
+
+// --- Crypto Helpers ---
+async function deriveKeyFromPass(password, salt) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+async function loadKeysToMemory(sigJWK, aesJWK, pubJWK) {
+    _aesKey = await crypto.subtle.importKey("jwk", aesJWK, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    _keyPair = {
+        privateKey: await crypto.subtle.importKey("jwk", sigJWK, { name: "ECDSA", namedCurve: "P-521" }, false, ["sign"]),
+        publicKey: await crypto.subtle.importKey("jwk", pubJWK, { name: "ECDSA", namedCurve: "P-521" }, true, ["verify"])
+    };
+    _locked = false;
+}
+
+async function saveWrappedKeys(password, keysJwkObj, pubKeyJwk) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const wrapKey = await deriveKeyFromPass(password, salt);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encryptedData = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, new TextEncoder().encode(JSON.stringify(keysJwkObj)));
+    _encryptedBlob = { salt, iv, data: encryptedData, pubKey: pubKeyJwk };
+    const db = await openKeyDB();
+    const tx = db.transaction(["keys"], "readwrite");
+    tx.objectStore("keys").put(_encryptedBlob, "wrapped_keys");
+    await new Promise(r => tx.oncomplete = r);
+    
+    db.close(); 
+}
+
+async function encrypt(data) {
+    if (_locked) throw new Error("Locked");
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const c = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, _aesKey, new TextEncoder().encode(data));
+    const p = new Uint8Array(iv.length + c.byteLength);
+    p.set(iv, 0); p.set(new Uint8Array(c), 12);
+    return p.buffer;
+}
+
+async function decrypt(buffer) {
+    if (_locked) return "🔒";
+    try {
+        const p2 = new Uint8Array(buffer);
+        const iv2 = p2.slice(0, 12);
+        const c2 = p2.slice(12);
+        const d = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv2 }, _aesKey, c2);
+        return new TextDecoder().decode(d);
+    } catch(e) { return "--- CORRUPT ---"; }
+}
+
+async function sign(data) {
+     if (_locked) throw new Error("Locked");
+     const buf = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-512" }, _keyPair.privateKey, new TextEncoder().encode(data));
+     return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+
+async function verify(key, content, signature) {
+    return await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-512" }, key, Uint8Array.from(atob(signature), c => c.charCodeAt(0)), new TextEncoder().encode(content));
+}
+
+// --- Key Management Actions ---
+async function init() {
+    const db = await openKeyDB();
+    const tx = db.transaction(["keys"], "readwrite"); // Request access
+    const req = tx.objectStore("keys").get("wrapped_keys");
+    
+    // Wait for the DB to give us the data
+    await new Promise(r => tx.oncomplete = r);
+    
+    // --- THE FIX: Close connection IMMEDIATELY so the next reload isn't blocked ---
+    const result = req.result;
+    db.close(); 
+    // -----------------------------------------------------------------------------
+
+    if (result) {
+        _encryptedBlob = result;
+        // If we have keys, try to unlock with default
+        try { 
+            await unlock(DEFAULT_PASS); 
+            return "DEFAULT"; 
+        } catch(e) { 
+            return "LOCKED"; 
+        }
+    } else {
+        // If no keys exist, make new ones
+        await generate(); 
+        return "DEFAULT";
+    }
+}
+
+async function generate() {
+    const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-521" }, true, ["sign", "verify"]);
+    const kAes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const sigJWK = await crypto.subtle.exportKey("jwk", kSig.privateKey);
+    const pubJWK = await crypto.subtle.exportKey("jwk", kSig.publicKey);
+    const aesJWK = await crypto.subtle.exportKey("jwk", kAes);
+    await saveWrappedKeys(DEFAULT_PASS, { aes: aesJWK, sig: sigJWK }, pubJWK);
+    _currentPassword = DEFAULT_PASS;
+    await loadKeysToMemory(sigJWK, aesJWK, pubJWK);
+}
+
+async function unlock(password) {
+    if (!_encryptedBlob) throw new Error("No keys");
+    const wrapKey = await deriveKeyFromPass(password, _encryptedBlob.salt);
+    try {
+        const decryptedBytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: _encryptedBlob.iv }, wrapKey, _encryptedBlob.data);
+        const keysObj = JSON.parse(new TextDecoder().decode(decryptedBytes));
+        await loadKeysToMemory(keysObj.sig, keysObj.aes, _encryptedBlob.pubKey);
+        _currentPassword = password;
+    } catch(e) { throw new Error("Wrong Password"); }
+}
+
+async function updatePass(newPassword) {
+     if (_locked) throw new Error("Locked");
+     const oldWrapKey = await deriveKeyFromPass(_currentPassword, _encryptedBlob.salt);
+     const bytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: _encryptedBlob.iv }, oldWrapKey, _encryptedBlob.data);
+     const keysObj = JSON.parse(new TextDecoder().decode(bytes));
+     await saveWrappedKeys(newPassword, keysObj, _encryptedBlob.pubKey);
+     _currentPassword = newPassword;
+}
+
+// --- DB Logic ---
+async function db_write_local({ roomHex, index, content, owner }) {
+    if (_locked) throw new Error("Locked");
+    
+    // 1. TIMESTAMP
+    const ts = Date.now();
+    // 2. CANONICAL PAYLOAD (Using concatenation to avoid backtick issues)
+    const safeContent = content || "";
+    const payload = index + ":" + ts + ":" + owner + ":" + safeContent;
+    
+
+    const signature = await sign(payload);
+    const encrypted = await encrypt(content);
+    const db = await openColorDB(roomHex);
+     return new Promise((resolve, reject) => {
+        const tx = db.transaction([roomHex], 'readwrite');
+        const store = tx.objectStore(roomHex);
+        
+        const record = { 
+            content: encrypted, 
+            owner: owner, 
+            updated: ts, 
+            signature: signature 
+        };
+
+        if (!content || content.trim() === '') store.delete(parseInt(index));
+        else store.put(record, parseInt(index));
+        
+        tx.oncomplete = () => { 
+            db.close(); 
+            resolve({ index, content, owner, signature, updated: ts }); 
+        };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+}
+
+async function db_verify_remote_batch({ fragments, roomHex, peerId }) {
+    console.log('[Worker] 🧐 Verifying batch from ' + peerId, fragments);
+
+    if (!_peerKeys[peerId]) {
+        console.warn('[Worker] ❌ REJECTED: No public key found for ' + peerId);
+        return {};
+    }
+
+    const db = await openColorDB(roomHex);
+    const tx = db.transaction([roomHex], 'readwrite');
+    const store = tx.objectStore(roomHex);
+    const verified = {};
+    
+    for (const idxString of Object.keys(fragments)) {
+        const index = parseInt(idxString);
+        const item = fragments[idxString];
+        
+        // RECONSTRUCT PAYLOAD
+        const safeContent = item.content || "";
+        const payload = index + ":" + item.updated + ":" + item.owner + ":" + safeContent;
+
+        try {
+            const isValid = await verify(_peerKeys[peerId], payload, item.signature);
+            if (!isValid) {
+                console.warn('[Worker] ❌ Invalid Signature for index ' + index);
+                continue;
+            }
+
+            const existing = await new Promise(r => {
+                const req = store.get(index);
+                req.onsuccess = () => r(req.result);
+                req.onerror = () => r(null);
+            });
+
+            if (existing && existing.updated >= item.updated) {
+                 console.warn('[Worker] ⚠️ Old Data for ' + index);
+                 continue;
+            }
+            if (existing && existing.owner && existing.owner !== item.owner) {
+                console.warn('[Worker] 🔒 Permission Denied for ' + index);
+                continue;
+            }
+
+            // ACCEPT
+            if (item.content && item.content.trim() !== '') {
+                const enc = await encrypt(item.content);
+                store.put({ 
+                    content: enc, 
+                    owner: item.owner, 
+                    updated: item.updated, 
+                    signature: item.signature 
+                }, index);
+            } else {
+                store.delete(index);
+            }
+            verified[index] = item;
+        } catch(e) {
+            console.error('[Worker] Error processing ' + index, e);
+        }
+    }
+    
+    await new Promise(r => {
+        tx.oncomplete = () => { db.close(); r(); };
+        tx.onerror = () => { db.close(); r(); };
+    });
+    
+    console.log('[Worker] ✅ Finished. Verified count: ' + Object.keys(verified).length);
+    return verified;
+}
+
+async function db_read_range({ roomHex, min, max }) {
+    const db = await openColorDB(roomHex);
+    if (!db.objectStoreNames.contains(roomHex)) { db.close(); return {}; }
+    const raw = {};
+    await new Promise(r => {
+        const req = db.transaction([roomHex], 'readonly').objectStore(roomHex).openCursor(IDBKeyRange.bound(min, max));
+        req.onsuccess = e => {
+            const cursor = e.target.result;
+            if (cursor) { raw[cursor.key] = cursor.value; cursor.continue(); } else r();
+        }
+        req.onerror = () => r();
+    });
+    db.close();
+    const result = {};
+    for (const k in raw) {
+        const row = raw[k];
+        if (row.content instanceof ArrayBuffer) row.content = await decrypt(row.content);
+        result[k] = row;
+    }
+    return result;
+}
+
+async function db_read_specific({ roomHex, keys }) {
+     const db = await openColorDB(roomHex);
+     if (!db.objectStoreNames.contains(roomHex)) { db.close(); return {}; }
+     const tx = db.transaction([roomHex], 'readonly');
+     const store = tx.objectStore(roomHex);
+     const results = {};
+     await Promise.all(keys.map(k => new Promise(resolve => {
+         const idx = parseInt(k.replace(roomHex, ''), 10);
+         if (isNaN(idx)) { resolve(); return; }
+         const req = store.get(idx);
+         req.onsuccess = async e => {
+             const row = e.target.result;
+             if (row) {
+                if (row.content instanceof ArrayBuffer) row.content = await decrypt(row.content);
+                results[idx] = row;
+             }
+             resolve();
+         };
+         req.onerror = () => resolve();
+     })));
+     db.close();
+     return results;
+}
+
+// Action Handler
+self.onmessage = async (e) => {
+    const { id, action, data } = e.data;
+    try {
+        let res;
+        switch(action) {
+            case 'init': res = await init(); break;
+            case 'unlock': await unlock(data); res = "SUCCESS"; break;
+            case 'generate': await generate(); res = "DEFAULT"; break;
+            case 'updatePassword': await updatePass(data); res = "SUCCESS"; break;
+            case 'getPublicKey': res = _locked ? null : await crypto.subtle.exportKey("jwk", _keyPair.publicKey); break;
+            case 'storePeerKey': 
+                try {
+                    _peerKeys[data.peerId] = await crypto.subtle.importKey("jwk", data.jwk, { name: "ECDSA", namedCurve: "P-521" }, true, ["verify"]);
+                    res = true;
+                } catch(e) { res = false; }
+                break;
+            case 'db_init': 
+                const dbInit = await openColorDB(data.roomHex); 
+                dbInit.close(); 
+                res = true; 
+                break;
+            case 'db_write_local': res = await db_write_local(data); break;
+            case 'db_verify_remote': res = await db_verify_remote_batch(data); break;
+            case 'db_read_range': res = await db_read_range(data); break;
+            case 'db_read_specific': res = await db_read_specific(data); break;
+            case 'db_has_room':
+                 const dbHas = await openColorDB();
+                 res = dbHas.objectStoreNames.contains(data.roomHex);
+                 dbHas.close();
+                 break;
+            case 'db_get_all_rooms':
+                 const dbAll = await openColorDB();
+                 res = Array.from(dbAll.objectStoreNames).map(hex => ({ hex }));
+                 dbAll.close();
+                 break;
+            case 'db_read_cursor': 
+                 const dbCursor = await openColorDB(data.roomHex);
+                 res = await new Promise(r => {
+                     const tx = dbCursor.transaction([data.roomHex], 'readonly');
+                     const req = tx.objectStore(data.roomHex).get("cursor");
+                     req.onsuccess = () => r(req.result || 0);
+                     req.onerror = () => r(0);
+                 });
+                 dbCursor.close();
+                 break;
+             case 'db_wipe':
+                 const dbs = await indexedDB.databases();
+                 for (const d of dbs) await indexedDB.deleteDatabase(d.name);
+                 res = true;
+                 break;
+             case 'saveSignature':
+                if (_locked) break;
+                const sdb = await openColorDB(data.roomHex);
+                const stx = sdb.transaction([data.roomHex], 'readwrite');
+                stx.objectStore(data.roomHex).put({ ...data.signature, created: Date.now() }, 'signature');
+                stx.oncomplete = () => sdb.close();
+                stx.onerror = () => sdb.close();
+                res = true;
+                break;
+            // Compatibility
+            case 'sign': res = await sign(data); break;
+            case 'encrypt': res = await encrypt(data); break;
+            case 'decrypt': res = await decrypt(data); break;
+            case 'generate_token': res = await computeProof(data.roomHex); break;
+            case 'validate_peer': res = await isValidPeer(data.peerId, data.roomHex); break;
+        }
+        self.postMessage({ id, result: res });
+    } catch(err) {
+        self.postMessage({ id, error: err.message });
+    }
+};
+`;
+
+        // 2. The Class that your App uses
+        class SecureIdentity {
+            constructor() {
+                const blob = new Blob([WORKER_SOURCE], { type: "text/javascript" });
+                this.worker = new Worker(window.URL.createObjectURL(blob));
+                this.callbacks = {};
+                this.ready = false;
+                this.locked = true;
+                this.DEFAULT_PASS = "FFFFFF";
+
+                this.worker.onmessage = (e) => {
+                    const { id, result, error } = e.data;
+                    if (this.callbacks[id]) {
+                        if (error) this.callbacks[id].reject(new Error(error));
+                        else this.callbacks[id].resolve(result);
+                        delete this.callbacks[id];
+                    }
+                };
+            }
+
+            _call(action, data, transfer = []) {
+                return new Promise((resolve, reject) => {
+                    const id = Math.random().toString(36).slice(2);
+                    this.callbacks[id] = { resolve, reject };
+                    this.worker.postMessage({ id, action, data }, transfer);
+                });
+            }
+
+            updateUI(status) {
+                const el = document.getElementById('security-status'), btn = document.getElementById('btn-security-apply'), input = document.getElementById('master-pass');
+                if (status === "LOCKED") {
+                    this.locked = true; this.ready = true;
+                    el.innerHTML = "STATUS: <b style='color:red'>LOCKED</b>"; btn.innerText = "UNLOCK"; input.value = "";
+                }
+                else if (status === "DEFAULT") {
+                    this.locked = false; this.ready = true;
+                    el.innerHTML = "STATUS: <b style='color:orange'>UNSECURED (DEFAULT)</b>"; btn.innerText = "UPDATE PASSWORD"; input.value = this.DEFAULT_PASS;
+                }
+                else {
+                    this.locked = false; this.ready = true;
+                    el.innerHTML = "STATUS: <b style='color:#00e676'>SECURED</b>"; btn.innerText = "UPDATE PASSWORD"; input.value = ""; input.placeholder = "Type new password...";
+                }
+            }
+
+            async init() {
+                try {
+                    const status = await this._call('init');
+                    this.updateUI(status);
+                } catch (e) { console.error(e); }
+            }
+
+            async unlockWithPassword(password, silent = false) {
+                try {
+                    const res = await this._call('unlock', password);
+                    if (res === "SUCCESS") {
+                        this.updateUI(password === this.DEFAULT_PASS ? "DEFAULT" : "SECURE");
+                        if (window.app) window.app.connectAndPreview(window.location.hash || '#ffffff');
+                        return true;
+                    }
+                    return false;
+                } catch (e) {
+                    if (!silent) alert("Wrong Password");
+                    return false;
+                }
+            }
+
+            async updatePassword(newPassword) {
+                if (this.locked || !newPassword) return;
+                try {
+                    await this._call('updatePassword', newPassword);
+                    this.updateUI("SECURE");
+                } catch (e) { alert("Update failed"); }
+            }
+
+            async getPublicKeyData() {
+                if (!this.ready || this.locked) return null;
+                return this._call('getPublicKey');
+            }
+
+            async storePeerKey(peerId, jwk) {
+                return this._call('storePeerKey', { peerId, jwk });
+            }
+
+            async sign(text) {
+                if (!this.ready || this.locked) return null;
+                return this._call('sign', text);
+            }
+
+            async verify(peerId, content, signature) {
+                return this._call('verify', { peerId, content, signature });
+            }
+
+            async encryptContent(text) {
+                if (!this.ready || this.locked) throw new Error("Keystore Locked");
+                return this._call('encrypt', text);
+            }
+
+            async decryptContent(packedBuffer) {
+                if (!this.ready || this.locked) return "🔒 LOCKED";
+                try {
+                    return await this._call('decrypt', packedBuffer);
+                } catch (e) { return "--- CORRUPT ---"; }
+            }
+        }
+
         window.app = new EditorApp();
         document.getElementById('btn-security-apply').addEventListener('click', async () => {
             const pass = document.getElementById('master-pass').value;
@@ -1803,7 +2622,7 @@
         let storageScope = window.localStorage; document.getElementById('login-btn').addEventListener('click', async () => { if (document.getElementById('login-btn').innerText === 'LOGIN') { try { storageScope.setItem("lastSphereColor", document.getElementById('color-hex').innerText); } catch (e) { } } if (window.enterRoomUI) window.enterRoomUI(); });
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) };
         const Mat4 = { perspective: (f, a, n, fr) => { const nf = 1 / (n - fr), f_t = 1 / Math.tan(f / 2); return [f_t / a, 0, 0, 0, 0, f_t, 0, 0, 0, 0, (fr + n) * nf, -1, 0, 0, 2 * fr * n * nf, 0] }, lookAt: (e, c, u) => { const z = Vec3.normalize(Vec3.sub(e, c)), x = Vec3.normalize(Vec3.cross(u, z)), y = Vec3.cross(z, x); return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -Vec3.dot(x, e), -Vec3.dot(y, e), -Vec3.dot(z, e), 1] }, multiply: (a, b) => [a[0] * b[0] + a[4] * b[1] + a[8] * b[2] + a[12] * b[3], a[1] * b[0] + a[5] * b[1] + a[9] * b[2] + a[13] * b[3], a[2] * b[0] + a[6] * b[1] + a[10] * b[2] + a[14] * b[3], a[3] * b[0] + a[7] * b[1] + a[11] * b[2] + a[15] * b[3], a[0] * b[4] + a[4] * b[5] + a[8] * b[6] + a[12] * b[7], a[1] * b[4] + a[5] * b[5] + a[9] * b[6] + a[13] * b[7], a[2] * b[4] + a[6] * b[5] + a[10] * b[6] + a[14] * b[7], a[3] * b[4] + a[7] * b[5] + a[11] * b[6] + a[15] * b[7], a[0] * b[8] + a[4] * b[9] + a[8] * b[10] + a[12] * b[11], a[1] * b[8] + a[5] * b[9] + a[9] * b[10] + a[13] * b[11], a[2] * b[8] + a[6] * b[9] + a[10] * b[10] + a[14] * b[11], a[3] * b[8] + a[7] * b[9] + a[11] * b[10] + a[15] * b[11], a[0] * b[12] + a[4] * b[13] + a[8] * b[14] + a[12] * b[15], a[1] * b[12] + a[5] * b[13] + a[9] * b[14] + a[13] * b[15], a[2] * b[12] + a[6] * b[13] + a[10] * b[14] + a[14] * b[15], a[3] * b[12] + a[7] * b[13] + a[11] * b[14] + a[15] * b[15]], rotationX: r => [1, 0, 0, 0, 0, Math.cos(r), Math.sin(r), 0, 0, -Math.sin(r), Math.cos(r), 0, 0, 0, 0, 1], translation: v => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1], scale: v => [v[0], 0, 0, 0, 0, v[1], 0, 0, 0, 0, v[2], 0, 0, 0, 0, 1], rotationAxis: (a, r) => { const c = Math.cos(r), s = Math.sin(r), t = 1 - c, x = a[0], y = a[1], z = a[2]; return [t * x * x + c, t * x * y + z * s, t * x * z - y * s, 0, t * x * y - z * s, t * y * y + c, t * y * z + x * s, 0, t * x * z + y * s, t * y * z - x * s, t * z * z + c, 0, 0, 0, 0, 1] }, identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
-        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathStartPos: null, interactionSignature: { type: 'click', path: [] } };
+        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathStartPos: null, renderPath: false, interactionSignature: { type: 'click', path: [] } };
         window.state = state;
         function rgbToHex(r, g, b) { return '#' + [r, g, b].map(x => Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).padStart(2, '0')).join(''); }
         function hexToRgbNormalized(hex) { const bigint = parseInt(hex.replace(/^#/, '').replace(/^([a-f\d])([a-f\d])([a-f\d])$/i, '$1$1$2$2$3$3'), 16); return [(bigint >> 16 & 255) / 255, (bigint >> 8 & 255) / 255, (bigint & 255) / 255]; }
@@ -1823,8 +2642,21 @@
 
             state.canvas.addEventListener('mousedown', onMouseDown); window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp); state.canvas.addEventListener('touchstart', (e) => { e.preventDefault(); onMouseDown(e.touches[0]) }, { passive: false }); state.canvas.addEventListener('touchmove', (e) => { e.preventDefault(); onMouseMove(e.touches[0]) }, { passive: false }); state.canvas.addEventListener('touchend', (e) => { e.preventDefault(); onMouseUp(e.changedTouches[0]) }); document.getElementById('freeze-btn').addEventListener('click', toggleFreeze);
             document.getElementById('debug-btn').onclick = function () { state.debugMode = !state.debugMode; this.classList.toggle('active', state.debugMode); this.innerText = state.debugMode ? "DEBUG ON" : "DEBUG OFF"; document.getElementById('debug-panel').classList.toggle('visible', state.debugMode); };
-            document.getElementById('reset-btn').onclick = async () => { if (confirm("Permanently wipe all local data?")) { localStorage.clear(); try { const dbs = await window.indexedDB.databases(); for (const db of dbs) { await window.indexedDB.deleteDatabase(db.name); } } catch (e) { } window.location.reload(); } };
-            state.cones.forEach((c, i) => { const el = document.getElementById(`data-${i}`); if (!el) return; el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`; const title = document.getElementById(`title-${i}`); title.addEventListener('click', (e) => { if (!document.body.classList.contains('light-mode')) { e.stopPropagation(); state.cones[i].active = !state.cones[i].active; } });['x', 'y', 'z'].forEach((ax, idx) => document.getElementById(`${ax}-${i}`).addEventListener('mousedown', (e) => { if (!document.body.classList.contains('light-mode')) { e.preventDefault(); e.stopPropagation(); state.valueScrub = { active: true, coneIndex: i, coordIndex: idx, startY: e.clientY }; } })); state.uiCache[i] = { title, x: document.getElementById(`x-${i}`), y: document.getElementById(`y-${i}`), z: document.getElementById(`z-${i}`), lastPos: [null, null, null], lastActive: null }; });
+            document.getElementById('reset-btn').onclick = async () => {
+                if (confirm("Permanently wipe all local data?")) {
+                    // 1. Clear Storage
+                    localStorage.clear();
+
+                    // 2. Wipe Databases (Robust Method)
+                    const DB_NAMES = ['color', 'sys_security'];
+                    for (const name of DB_NAMES) {
+                        try { window.indexedDB.deleteDatabase(name); } catch (e) { }
+                    }
+
+                    // 3. CLEAN RELOAD: Redirect to base URL (removes #hex)
+                    window.location.href = window.location.origin + window.location.pathname;
+                }
+            }; state.cones.forEach((c, i) => { const el = document.getElementById(`data-${i}`); if (!el) return; el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`; const title = document.getElementById(`title-${i}`); title.addEventListener('click', (e) => { if (!document.body.classList.contains('light-mode')) { e.stopPropagation(); state.cones[i].active = !state.cones[i].active; } });['x', 'y', 'z'].forEach((ax, idx) => document.getElementById(`${ax}-${i}`).addEventListener('mousedown', (e) => { if (!document.body.classList.contains('light-mode')) { e.preventDefault(); e.stopPropagation(); state.valueScrub = { active: true, coneIndex: i, coordIndex: idx, startY: e.clientY }; } })); state.uiCache[i] = { title, x: document.getElementById(`x-${i}`), y: document.getElementById(`y-${i}`), z: document.getElementById(`z-${i}`), lastPos: [null, null, null], lastActive: null }; });
             setupColorTooltip(); if (window.location.hash && window.location.hash.length > 1) { const matchPos = findPositionFromColor(window.location.hash); if (matchPos) triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(window.location.hash), true); }
             requestAnimationFrame(loop);
         }
@@ -1839,9 +2671,112 @@
         function calculateConePosition(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)), dist = Math.sqrt(Vec3.dot(p, p)), R = 1.2; if (dist <= R) return Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(R * R - Vec3.dot(p, p)))); const axis = Vec3.cross(Vec3.normalize(r.o), r.d); return Vec3.scale(transformPos(Vec3.normalize(r.o), Mat4.rotationAxis(Vec3.normalize(Vec3.len(axis) < .001 ? [1, 0, 0] : axis), Math.acos(R / Vec3.len(r.o)) + (dist - R))), R); }
         function transformPos(p, m) { return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]]; }
         function projectToScreen(worldPos) { const m = state.vpMatrix, x = worldPos[0], y = worldPos[1], z = worldPos[2], clipX = x * m[0] + y * m[4] + z * m[8] + m[12], clipY = x * m[1] + y * m[5] + z * m[9] + m[13], clipW = x * m[3] + y * m[7] + z * m[11] + m[15]; if (clipW <= 0) return null; return { x: (clipX / clipW + 1) * state.canvas.width / 2, y: (1 - clipY / clipW) * state.canvas.height / 2 }; }
-        function onMouseDown(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav')) return; if (state.valueScrub.active) return; const rect = state.canvas.getBoundingClientRect(); state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top, down: true }; state.clickData = { startX: state.mouse.x, startY: state.mouse.y, startTime: Date.now() }; state.interactionSignature = { type: 'click', path: [] }; state.pathPoints = []; state.pathStartPos = null; if (document.body.classList.contains('light-mode')) { state.inertia.val = 0; let clickedExisting = false; for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((state.mouse.x - sp.x) ** 2 + (state.mouse.y - sp.y) ** 2) < 20) { clickedExisting = true; break; } } const p = getTargetPos(state.mouse.x, state.mouse.y); const r = getMouseRay(state.mouse.x, state.mouse.y); const hit = Vec3.dot(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))), Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)))) <= 1; if (hit) { state.interaction = { mode: 'zoom', hasTouchedSphere: true, startZ: state.cameraPos[2], startMouse: { x: state.mouse.x, y: state.mouse.y } }; const m = state.sphere.rotation; const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]]); const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100]; state.pathPoints = [rounded]; state.interactionSignature.path = [rounded]; startDragLogic(p, clickedExisting); } else { state.interaction = { mode: 'waiting', hasTouchedSphere: false }; state.handle.active = false; state.dragStart.active = false; } state.hasRotated = true; } }
+        function onMouseDown(e) {
+            if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav')) return;
+            if (state.valueScrub.active) return;
+            const rect = state.canvas.getBoundingClientRect();
+            state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top, down: true };
+            state.clickData = { startX: state.mouse.x, startY: state.mouse.y, startTime: Date.now() };
+
+            // --- EDITED SECTION START ---
+            // Initialize signature as 'click' with empty path
+            state.interactionSignature = { type: 'click', path: [] };
+            state.pathPoints = [];
+            state.pathStartPos = null;
+            // --- EDITED SECTION END ---
+
+            if (document.body.classList.contains('light-mode')) {
+                state.inertia.val = 0;
+                let clickedExisting = false;
+                for (let h of state.historyHandles) {
+                    const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation));
+                    if (sp && Math.sqrt((state.mouse.x - sp.x) ** 2 + (state.mouse.y - sp.y) ** 2) < 20) {
+                        clickedExisting = true;
+                        break;
+                    }
+                }
+                const p = getTargetPos(state.mouse.x, state.mouse.y);
+                const r = getMouseRay(state.mouse.x, state.mouse.y);
+                const hit = Vec3.dot(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))), Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)))) <= 1;
+
+                if (hit) {
+                    state.interaction = { mode: 'zoom', hasTouchedSphere: true, startZ: state.cameraPos[2], startMouse: { x: state.mouse.x, y: state.mouse.y } };
+                    const m = state.sphere.rotation;
+                    const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]]);
+                    const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100];
+
+                    // --- EDITED SECTION START ---
+                    // Store the initial point. If user releases immediately, it's a click with 1 point.
+                    // If they drag, this is the start of the path.
+                    state.pathPoints = [rounded];
+                    state.interactionSignature.path = [rounded];
+                    // --- EDITED SECTION END ---
+
+                    startDragLogic(p, clickedExisting);
+                } else {
+                    state.interaction = { mode: 'waiting', hasTouchedSphere: false };
+                    state.handle.active = false;
+                    state.dragStart.active = false;
+                }
+                state.hasRotated = true;
+            }
+        }
         function startDragLogic(p, clickedExisting) { state.dragStart = { active: true, mouseDir: Vec3.normalize(p), sphereRotation: [...state.sphere.rotation], conePositions: state.cones.map(c => [...c.pos]), lastTrackPos: p }; if (!clickedExisting) { state.handle = { active: true, pos: p, color: getSurfaceColor(p, Vec3.normalize(p)) }; } }
-        function onMouseMove(e) { const r = state.canvas.getBoundingClientRect(); state.mouse.x = e.clientX - r.left; state.mouse.y = e.clientY - r.top; if (state.mouse.down && state.interaction && state.interaction.mode === 'waiting') { const ray = getMouseRay(state.mouse.x, state.mouse.y); const closest = Vec3.add(ray.o, Vec3.scale(ray.d, Vec3.dot(Vec3.sub([0, 0, 0], ray.o), ray.d))); const onSphere = Vec3.dot(closest, closest) <= 1; if (onSphere) { const p = getTargetPos(state.mouse.x, state.mouse.y); state.interaction.mode = 'normal'; state.interaction.hasTouchedSphere = true; state.interactionSignature.type = 'drag'; const m = state.sphere.rotation; const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]]); const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100]; state.pathPoints = [rounded]; state.interactionSignature.path = [rounded]; startDragLogic(p, false); } } if (state.mouse.down && state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active) { const m = state.sphere.rotation; const localCenterPos = [m[2], m[6], m[10]]; const lastPoint = state.pathPoints[state.pathPoints.length - 1]; if (!lastPoint || Vec3.dist(localCenterPos, lastPoint) > 0.01) { const normalized = Vec3.normalize(localCenterPos); const rounded = [Math.round(normalized[0] * 100) / 100, Math.round(normalized[1] * 100) / 100, Math.round(normalized[2] * 100) / 100]; state.pathPoints.push(rounded); state.interactionSignature.type = 'drag'; state.interactionSignature.path.push(rounded); } if (state.pathPoints.length > 500) state.pathPoints.shift(); if (state.interactionSignature.path.length > 500) state.interactionSignature.path.shift(); } }
+        function onMouseMove(e) {
+            const r = state.canvas.getBoundingClientRect();
+            state.mouse.x = e.clientX - r.left;
+            state.mouse.y = e.clientY - r.top;
+
+            // Logic for dragging onto the sphere from outside
+            if (state.mouse.down && state.interaction && state.interaction.mode === 'waiting') {
+                const ray = getMouseRay(state.mouse.x, state.mouse.y);
+                const closest = Vec3.add(ray.o, Vec3.scale(ray.d, Vec3.dot(Vec3.sub([0, 0, 0], ray.o), ray.d)));
+                const onSphere = Vec3.dot(closest, closest) <= 1;
+                if (onSphere) {
+                    const p = getTargetPos(state.mouse.x, state.mouse.y);
+                    state.interaction.mode = 'normal';
+                    state.interaction.hasTouchedSphere = true;
+
+                    // --- EDITED SECTION START ---
+                    state.interactionSignature.type = 'drag'; // Switch to drag
+                    const m = state.sphere.rotation;
+                    const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]]);
+                    const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100];
+
+                    state.pathPoints = [rounded];
+                    state.interactionSignature.path = [rounded]; // Initialize path
+                    // --- EDITED SECTION END ---
+
+                    startDragLogic(p, false);
+                }
+            }
+
+            // Logic for continuous dragging
+            if (state.mouse.down && state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active) {
+                const m = state.sphere.rotation;
+                const localCenterPos = [m[2], m[6], m[10]];
+                const lastPoint = state.pathPoints[state.pathPoints.length - 1];
+
+                // Check distance to avoid saving duplicate points if mouse hasn't moved enough
+                if (!lastPoint || Vec3.dist(localCenterPos, lastPoint) > 0.01) {
+                    const normalized = Vec3.normalize(localCenterPos);
+                    const rounded = [Math.round(normalized[0] * 100) / 100, Math.round(normalized[1] * 100) / 100, Math.round(normalized[2] * 100) / 100];
+
+                    // --- EDITED SECTION START ---
+                    state.pathPoints.push(rounded);
+
+                    // Update the Signature Data
+                    state.interactionSignature.type = 'drag'; // Confirm it is a drag
+                    state.interactionSignature.path.push(rounded); // Add point to path
+                    // --- EDITED SECTION END ---
+                }
+
+                if (state.pathPoints.length > 500) state.pathPoints.shift();
+
+                // Keep signature path reasonable size too
+                if (state.interactionSignature.path.length > 1000) state.interactionSignature.path.shift();
+            }
+        }
         function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return; } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const col = getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = rgbToHex(col[0], col[1], col[2]); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, false); setTimeout(() => { state.pathPoints = []; state.pathStartPos = null; }, 500); return; } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { try { localStorage.setItem("lastSphereColor", h.hex); } catch (e) { } triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true); return; } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false); } } } state.pathPoints = []; state.pathStartPos = null; }
         function triggerLanding(norm, pos, col, fromUrl = false) { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const cam = Vec3.normalize(state.cameraPos), axis = Vec3.cross(norm, cam), dot = Vec3.dot(norm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (window.connectAndPreview) window.connectAndPreview(hex, fromUrl); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1'; }, 200); }, 1000); }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4; }
@@ -1872,8 +2807,35 @@
         }
         function getSurfaceColor(p, n, cones = state.cones) { const getI = (i) => { if (!cones[i].active) return 0; const diff = Vec3.sub(cones[i].pos, p); const distSq = Vec3.dot(diff, diff); const L = Vec3.normalize(diff); const wrap = Math.max(Vec3.dot(n, L) + 1.0, 0.0) / 2.0; const spread = Math.pow(wrap, 1.25); return spread * (1.0 / (1.0 + distSq * 0.05)); }; const d = [getI(0), getI(1), getI(2)]; const c = cones.map(x => x.color); let l = Vec3.add(Vec3.add(Vec3.scale(c[0], d[0]), Vec3.scale(c[1], d[1])), Vec3.scale(c[2], d[2])); const boost = (i, j) => { const sumD = d[i] + d[j] + 0.001; const factor = (2.0 * d[i] * d[j] / sumD); return Vec3.scale(Vec3.add(c[i], c[j]), factor); }; l = Vec3.add(l, boost(0, 1)); l = Vec3.add(l, boost(1, 2)); l = Vec3.add(l, boost(2, 0)); const minD = Math.min(d[0], Math.min(d[1], d[2])); const maxD = Math.max(d[0], Math.max(d[1], d[2])); let t = (minD - 0.15) / (0.40 - 0.15); t = Math.max(0.0, Math.min(1.0, t)); const maskBase = t * t * (3.0 - 2.0 * t); const variance = maxD - minD; const roundness = Math.exp(-variance * 10.0); const finalMask = maskBase * roundness; const whiteTarget = [1.0, 1.0, 1.0]; l = [l[0] * (1.0 - finalMask) + whiteTarget[0] * finalMask, l[1] * (1.0 - finalMask) + whiteTarget[1] * finalMask, l[2] * (1.0 - finalMask) + whiteTarget[2] * finalMask]; l = l.map(x => x * 1.2); return l.map(x => { const val = Math.min(Math.max(x, 0), 1); return val * val * (3.0 - 2.0 * val); }); }
         function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) { t.style.display = 'none'; return; } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return; } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return; } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return; } const hex = rgbToHex(...getSurfaceColor(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))), Vec3.normalize(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p))))))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}`; }); }
-        window.resetSphereView = function () { const m = state.sphere.rotation, trace = m[0] + m[5] + m[10]; let angle = Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2))), axis = [1, 0, 0], diff = [m[6] - m[9], m[8] - m[2], m[1] - m[4]], sl = Math.sqrt(diff[0] ** 2 + diff[1] ** 2 + diff[2] ** 2); if (sl > 0.001) axis = [diff[0] / sl, diff[1] / sl, diff[2] / sl]; state.returning = { active: true, progress: 0, baseRotation: m, rotationAxis: axis, rotationAngle: -angle, startDist: Vec3.len(state.cameraPos), targetDist: getResponsiveZ(), coneStartPositions: state.cones.map(c => [...c.pos]) }; state.landing.active = false; state.landing.showHandle = false; };
-        function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])); } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05; } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]); } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ]; } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true; } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = ''; } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false; } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false; } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t); } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = "#FFFFFF"; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = ''; } } let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ]; } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx]; } }); }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np; } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95); } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2); } }); } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) }; } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95; } } if (state.device && state.pipelines.sphere && state.msaaTexture) { const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => { state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0); state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);[0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); }); state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0; state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere); const pass = encoder.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp } }); pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount); return pass; }; const drawCones = (pass) => { pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16'); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { if (c.active) { let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity()); state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set([...c.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount); } }); } else { let bindIdx = 4; if (state.handle.active || state.landing.showHandle) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...state.handle.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount); } state.historyHandles.forEach(h => { const wp = transformPos(h.pos, state.sphere.rotation); if (wp[2] > -0.5) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...h.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++; } }); if (state.pathPoints.length > 1 && (state.dragStart.active || state.landing.active)) { const pathVerts = pathToVertices(state.pathPoints, state.sphere.rotation); if (pathVerts && pathVerts.length > 0) { if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) { if (state.buffers.pathVertex) state.buffers.pathVertex.destroy(); state.buffers.pathVertex = state.device.createBuffer({ size: Math.max(pathVerts.byteLength, 1024 * 12), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST }); } state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts); state.uniforms.cone.set(state.vpMatrix, 0); state.uniforms.cone.set([1, 1, 1, 1], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setPipeline(state.pipelines.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.setVertexBuffer(0, state.buffers.pathVertex); pass.draw(pathVerts.length / 3); } } } }; if (renderBackgroundLayer) { const bgEncoder = state.device.createCommandEncoder(); const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0])); const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard'); bgPass.end(); state.device.queue.submit([bgEncoder.finish()]); const fgEncoder = state.device.createCommandEncoder(); const fgPass = drawSphere(fgEncoder, state.vpMatrix, 'load', 'discard'); drawCones(fgPass); fgPass.end(); state.device.queue.submit([fgEncoder.finish()]); } else { const encoder = state.device.createCommandEncoder(); const pass = drawSphere(encoder, state.vpMatrix, 'clear', 'discard'); drawCones(pass); pass.end(); state.device.queue.submit([encoder.finish()]); } } requestAnimationFrame(loop); }
+        window.resetSphereView = function (animateIn = false, keepRotation = false) {
+            const m = state.sphere.rotation;
+            const trace = m[0] + m[5] + m[10];
+            let angle = Math.acos(Math.max(-1, Math.min(1, (trace - 1) / 2)));
+            let axis = [1, 0, 0];
+            const diff = [m[6] - m[9], m[8] - m[2], m[1] - m[4]];
+            const sl = Math.sqrt(diff[0] ** 2 + diff[1] ** 2 + diff[2] ** 2);
+            if (sl > 0.001) axis = [diff[0] / sl, diff[1] / sl, diff[2] / sl];
+
+            // Determine Start Distance: 
+            // If animateIn is true, start far away (15.0) to zoom in. 
+            // Otherwise use current position (smooth reset).
+            const startDist = animateIn ? 15.0 : Vec3.len(state.cameraPos);
+
+            state.returning = {
+                active: true,
+                progress: 0,
+                baseRotation: m,
+                rotationAxis: axis,
+                rotationAngle: keepRotation ? 0 : -angle,
+                keepRotation: keepRotation,
+                startDist: startDist, // <--- Updated
+                targetDist: getResponsiveZ(),
+                coneStartPositions: state.cones.map(c => [...c.pos])
+            };
+            state.landing.active = false;
+            state.landing.showHandle = false;
+        };
+        function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])); } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05; } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]); } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ]; } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true; } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = ''; } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false; } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false; } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t); } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = "#FFFFFF"; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = ''; } } } let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ]; } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx]; } }); }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np; } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95); } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2); } }); } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) }; } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95; } } if (state.device && state.pipelines.sphere && state.msaaTexture) { const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => { state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0); state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);[0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); }); state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0; state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere); const pass = encoder.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp } }); pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount); return pass; }; const drawCones = (pass) => { pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16'); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { if (c.active) { let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity()); state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set([...c.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount); } }); } else { let bindIdx = 4; if (state.handle.active || state.landing.showHandle) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...state.handle.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount); } state.historyHandles.forEach(h => { const wp = transformPos(h.pos, state.sphere.rotation); if (wp[2] > -0.5) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...h.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++; } }); if (state.pathPoints.length > 1 && (state.dragStart.active || state.landing.active || state.renderPath)) { const pathVerts = pathToVertices(state.pathPoints, state.sphere.rotation); if (pathVerts && pathVerts.length > 0) { if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) { if (state.buffers.pathVertex) state.buffers.pathVertex.destroy(); state.buffers.pathVertex = state.device.createBuffer({ size: Math.max(pathVerts.byteLength, 1024 * 12), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST }); } state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts); state.uniforms.cone.set(state.vpMatrix, 0); state.uniforms.cone.set([1, 1, 1, 1], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setPipeline(state.pipelines.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.setVertexBuffer(0, state.buffers.pathVertex); pass.draw(pathVerts.length / 3); } } } }; if (renderBackgroundLayer) { const bgEncoder = state.device.createCommandEncoder(); const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0])); const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard'); bgPass.end(); state.device.queue.submit([bgEncoder.finish()]); const fgEncoder = state.device.createCommandEncoder(); const fgPass = drawSphere(fgEncoder, state.vpMatrix, 'load', 'discard'); drawCones(fgPass); fgPass.end(); state.device.queue.submit([fgEncoder.finish()]); } else { const encoder = state.device.createCommandEncoder(); const pass = drawSphere(encoder, state.vpMatrix, 'clear', 'discard'); drawCones(pass); pass.end(); state.device.queue.submit([encoder.finish()]); } } requestAnimationFrame(loop); }
         init();
         window.updateVisitedFromDB = async function () { const rooms = await (new window.ColorDB()).getAllRooms(); state.historyHandles = []; if (rooms?.length) { rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }); }); } };
         window.addEventListener("message", (e) => { if (e.data === "getSphereColor") e.source.postMessage(storageScope.getItem("lastSphereColor") || "#ff0000", e.origin); if (e.data?.type === 'handle-ready') { const hex = e.data.hex, pos = findPositionFromColor(hex); if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: e.data.count }); const d = document.createElement('div'); d.className = 'debug-room-item ' + (e.data.count > 0 ? 'active' : ''); d.innerHTML = `<span>${hex}</span> <span class="count">${e.data.count} peer(s)</span>`; document.getElementById('debug-rooms').appendChild(d); } } });
