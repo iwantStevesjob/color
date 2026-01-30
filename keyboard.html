@@ -3,230 +3,526 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mobile Keyboard with Swipe-to-Highlight</title>
+    <title>Ergonomic Split Keyboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            touch-action: pan-y;
-        }
-        #editor {
+        /* Hide scrollbar */
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        
+        body, html {
+            height: 100%;
             width: 100%;
-            height: 200px;
-            border: 1px solid #ccc;
-            padding: 10px;
-            margin-bottom: 20px;
-            overflow-y: auto;
-            -webkit-user-select: none;
-            user-select: none;
+            overflow: hidden;
+            touch-action: none;
+            background-color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         }
-        #keyboard {
-            display: none;
-            position: fixed;
+
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            position: relative;
+        }
+
+        /* The Editor Area */
+        #editor {
+            flex-grow: 1;
+            width: 100%;
+            padding: 2rem;
+            font-size: 1.25rem;
+            line-height: 1.6;
+            outline: none;
+            overflow-y: auto;
+            color: #333;
+            /* The Fortress of Attributes to stop Native Keyboard */
+            inputmode: none; 
+            white-space: pre-wrap;
+            cursor: text;
+            -webkit-user-modify: read-write-plaintext-only;
+            caret-color: #2563eb; /* Blue cursor for visibility */
+        }
+
+        #editor:empty:before {
+            content: 'Tap here to start typing...';
+            color: #ccc;
+        }
+
+        /* Keyboard Container */
+        #keyboard-container {
+            width: 100%;
+            background-color: rgba(255, 255, 255, 0.98);
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.03);
+            transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+            padding-bottom: env(safe-area-inset-bottom);
+            padding-top: 0.5rem;
+            z-index: 50;
+            position: absolute;
             bottom: 0;
             left: 0;
+            right: 0;
+        }
+
+        .keyboard-hidden {
+            transform: translateY(100%);
+        }
+
+        .key-row {
+            display: flex;
+            justify-content: center;
             width: 100%;
-            background-color: #f0f0f0;
-            padding: 10px;
-            box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
+            margin-bottom: 6px;
+            padding: 0 4px;
         }
-        .keyboard-row {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 5px;
+
+        /* The Gap/Buffer Logic */
+        .split-spacer {
+            width: 0;
+            transition: width 0.3s ease;
+            flex-shrink: 0;
         }
+
+        /* Landscape Mode: Engage Split Layout */
+        @media (orientation: landscape) {
+            .split-spacer {
+                width: 35vw; /* Generous thumb buffer */
+            }
+            #keyboard-container {
+                padding-top: 1rem;
+            }
+        }
+
         .key {
-            width: 30px;
-            height: 40px;
-            margin: 2px;
-            background-color: #fff;
-            border: 1px solid #ccc;
-            border-radius: 5px;
+            flex: 1;
+            height: 46px; /* slightly taller for thumb comfort */
+            margin: 0 3px;
+            border-radius: 6px;
             display: flex;
-            justify-content: center;
             align-items: center;
-            font-size: 16px;
+            justify-content: center;
+            font-size: 1.2rem;
+            font-weight: 400;
+            color: #1f2937;
+            background: #f3f4f6;
             cursor: pointer;
             user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+            position: relative;
         }
-        .key:active {
-            background-color: #e0e0e0;
+
+        /* Active State (Touch feedback) */
+        .key.active-key {
+            background-color: #d1d5db !important;
+            transform: translateY(1px);
+            box-shadow: none;
         }
-        .key-wide {
-            width: 60px;
+
+        /* Special Keys */
+        .key-special {
+            background: #e5e7eb;
+            color: #4b5563;
+            font-size: 0.9rem;
+            flex: 1.5;
+            font-weight: 500;
         }
-        .key-extra-wide {
-            width: 90px;
+
+        .key-space {
+            flex: 4;
+            background: #f3f4f6;
         }
-        .highlighted {
-            background-color: yellow;
+        
+        /* Floating Close Button */
+        #close-keyboard {
+            position: absolute;
+            top: 1.5rem;
+            right: 1.5rem;
+            background: #fff;
+            padding: 0.6rem;
+            border-radius: 50%;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            z-index: 40;
         }
+        #close-keyboard.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        #close-keyboard:active {
+            transform: scale(0.9);
+        }
+
+        /* Popup for key press (optional, mobile style) */
+        .key-popup {
+            position: absolute;
+            top: -50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 45px;
+            background: #1f2937;
+            color: #fff;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.1s;
+        }
+        .key-popup::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 5px;
+            border-style: solid;
+            border-color: #1f2937 transparent transparent transparent;
+        }
+        .key.active-key .key-popup {
+            opacity: 1;
+        }
+
     </style>
 </head>
 <body>
-    <div id="editor" contenteditable="true" inputmode="none" readonly>
-        Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam auctor, nunc id aliquet tincidunt, nisi nunc tincidunt nunc, nec tincidunt nunc nunc id nunc. Sed euismod, nunc id aliquet tincidunt, nisi nunc tincidunt nunc, nec tincidunt nunc nunc id nunc. Sed euismod, nunc id aliquet tincidunt, nisi nunc tincidunt nunc, nec tincidunt nunc nunc id nunc.
+
+<div id="app-container">
+    <button id="close-keyboard">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="#444" viewBox="0 0 256 256"><path d="M208.49,191.51a12,12,0,0,1-17,17L128,145,64.49,208.49a12,12,0,0,1-17-17L111,128,47.49,64.49a12,12,0,0,1,17-17L128,111l63.51-63.52a12,12,0,0,1,17,17L145,128Z"></path></svg>
+    </button>
+
+    <!-- 
+      Aggressive attribute stacking to prevent native keyboard.
+      inputmode="none" is the standard, but autocomplete/autocorrect help 
+      ensure the browser doesn't try to help.
+    -->
+    <div id="editor" 
+         contenteditable="true" 
+         inputmode="none" 
+         spellcheck="false" 
+         autocomplete="off" 
+         autocorrect="off" 
+         autocapitalize="off"></div>
+
+    <div id="keyboard-container" class="keyboard-hidden">
+        <div id="keys-wrapper"></div>
     </div>
-    <div id="keyboard">
-        <!-- Keyboard layout remains the same -->
-    </div>
+</div>
 
-    <script>
-        const editor = document.getElementById('editor');
-        const keyboard = document.getElementById('keyboard');
-        const keys = document.querySelectorAll('.key');
-        let isKeyboardVisible = false;
-        let isHighlighting = false;
-        let lastTouchX = 0;
+<script>
+    // --- Configuration ---
+    const layout = [
+        { 
+            left: ['q', 'w', 'e', 'r', 't'], 
+            right: ['y', 'u', 'i', 'o', 'p'] 
+        },
+        { 
+            left: ['a', 's', 'd', 'f', 'g'], 
+            right: ['h', 'j', 'k', 'l'] 
+        },
+        { 
+            left: ['shift', 'z', 'x', 'c', 'v'], 
+            right: ['b', 'n', 'm', 'backspace'] 
+        },
+        {
+            left: ['123', ','],
+            right: ['.', 'return'],
+            space: true
+        }
+    ];
 
-        editor.addEventListener('focus', showKeyboard);
-        editor.addEventListener('click', showKeyboard);
-        editor.addEventListener('touchstart', showKeyboard);
-        document.addEventListener('click', handleDocumentClick);
+    const symbolLayout = [
+        { 
+            left: ['1', '2', '3', '4', '5'], 
+            right: ['6', '7', '8', '9', '0'] 
+        },
+        { 
+            left: ['@', '#', '$', '&', '*'], 
+            right: ['(', ')', '-', '+', '='] 
+        },
+        { 
+            left: ['abc', '%', '"', '\'', ':'], 
+            right: [';', '/', '!', '?', 'backspace'] 
+        },
+        {
+            left: ['abc', ','],
+            right: ['.', 'return'],
+            space: true
+        }
+    ];
 
-        function showKeyboard() {
-            keyboard.style.display = 'block';
+    // --- State ---
+    let isShifted = false;
+    let isSymbolMode = false;
+    let isKeyboardVisible = false;
+
+    // --- Elements ---
+    const editor = document.getElementById('editor');
+    const keyboardContainer = document.getElementById('keyboard-container');
+    const keysWrapper = document.getElementById('keys-wrapper');
+    const closeBtn = document.getElementById('close-keyboard');
+    const appContainer = document.getElementById('app-container');
+
+    // --- Keyboard Generation ---
+    function renderKeyboard() {
+        keysWrapper.innerHTML = '';
+        const currentLayout = isSymbolMode ? symbolLayout : layout;
+
+        currentLayout.forEach((row) => {
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'key-row';
+
+            if (row.space) {
+                row.left.forEach(key => rowDiv.appendChild(createKey(key)));
+                
+                // Left Space
+                const spaceLeft = createKey('space');
+                spaceLeft.classList.add('key-space');
+                rowDiv.appendChild(spaceLeft);
+
+                // Buffer
+                const spacer = document.createElement('div');
+                spacer.className = 'split-spacer';
+                rowDiv.appendChild(spacer);
+
+                // Right Space
+                const spaceRight = createKey('space');
+                spaceRight.classList.add('key-space');
+                rowDiv.appendChild(spaceRight);
+
+                row.right.forEach(key => rowDiv.appendChild(createKey(key)));
+            } else {
+                row.left.forEach(key => rowDiv.appendChild(createKey(key)));
+
+                // Buffer
+                const spacer = document.createElement('div');
+                spacer.className = 'split-spacer';
+                rowDiv.appendChild(spacer);
+
+                row.right.forEach(key => rowDiv.appendChild(createKey(key)));
+            }
+
+            keysWrapper.appendChild(rowDiv);
+        });
+    }
+
+    function createKey(char) {
+        const key = document.createElement('div');
+        key.className = 'key';
+        key.dataset.action = char;
+
+        let label = char;
+        if (!isSymbolMode && char.length === 1) {
+            label = isShifted ? char.toUpperCase() : char;
+        }
+        
+        if (char === 'backspace') {
+            label = '⌫';
+            key.classList.add('key-special');
+        } else if (char === 'shift') {
+            label = isShifted ? '⬆' : '⇧';
+            key.classList.add('key-special');
+            if (isShifted) key.style.background = '#d1d5db';
+        } else if (char === 'return') {
+            label = '↵';
+            key.classList.add('key-special');
+        } else if (char === 'space') {
+            label = '';
+        } else if (char === '123') {
+            label = '?123';
+            key.classList.add('key-special');
+        } else if (char === 'abc') {
+            label = 'ABC';
+            key.classList.add('key-special');
+        }
+
+        key.innerText = label;
+
+        // Visual Popups (optional aesthetic)
+        if (char.length === 1 && char !== ' ') {
+            const popup = document.createElement('div');
+            popup.className = 'key-popup';
+            popup.innerText = label;
+            key.appendChild(popup);
+        }
+
+        // --- Touch Handling ---
+        const handleTouchStart = (e) => {
+            e.preventDefault(); // Stop native behaviors
+            e.stopPropagation();
+            key.classList.add('active-key');
+            handleInput(char);
+        };
+
+        const handleTouchEnd = (e) => {
+            e.preventDefault();
+            key.classList.remove('active-key');
+        };
+
+        key.addEventListener('touchstart', handleTouchStart, {passive: false});
+        key.addEventListener('touchend', handleTouchEnd);
+        key.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            handleInput(char);
+            key.classList.add('active-key');
+            setTimeout(() => key.classList.remove('active-key'), 100);
+        });
+
+        return key;
+    }
+
+    // --- Input Logic ---
+    function handleInput(char) {
+        // Ensure we don't accidentally summon the keyboard by raw focusing
+        // but we need to restore selection range if lost.
+        
+        if (char === 'shift') {
+            isShifted = !isShifted;
+            renderKeyboard();
+            return;
+        }
+
+        if (char === '123' || char === 'abc') {
+            isSymbolMode = !isSymbolMode;
+            isShifted = false;
+            renderKeyboard();
+            return;
+        }
+
+        if (char === 'backspace') {
+            document.execCommand('delete');
+            return;
+        }
+
+        if (char === 'return') {
+            document.execCommand('insertLineBreak');
+            return;
+        }
+
+        if (char === 'space') {
+            document.execCommand('insertText', false, ' ');
+            return;
+        }
+
+        let textToInsert = char;
+        if (!isSymbolMode && textToInsert.length === 1) {
+            textToInsert = isShifted ? textToInsert.toUpperCase() : textToInsert;
+        }
+        
+        document.execCommand('insertText', false, textToInsert);
+
+        if (isShifted) {
+            isShifted = false;
+            renderKeyboard();
+        }
+        
+        // Ensure caret is visible
+        scrollToCaret();
+    }
+
+    function scrollToCaret() {
+        // Basic logic to keep typing in view
+        const selection = window.getSelection();
+        if (selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+            // If rect is off screen or close to bottom (under keyboard), scroll
+            // This is complex to get perfect, but basic ScrollIntoView works
+            // range.commonAncestorContainer.parentElement.scrollIntoView({behavior: "smooth", block: "nearest"});
+        }
+    }
+
+    // --- Keyboard Visibility & Native Blocking ---
+
+    function showKeyboard() {
+        if (!isKeyboardVisible) {
             isKeyboardVisible = true;
-            editor.removeAttribute('readonly');
+            keyboardContainer.classList.remove('keyboard-hidden');
+            closeBtn.classList.add('visible');
+            // Adjust editor bottom padding so text isn't hidden behind keyboard
+            // We approximate keyboard height
+            editor.style.paddingBottom = "50vh"; 
         }
+    }
 
-        function hideKeyboard() {
-            keyboard.style.display = 'none';
-            isKeyboardVisible = false;
-            editor.setAttribute('readonly', '');
-        }
+    function hideKeyboard() {
+        isKeyboardVisible = false;
+        keyboardContainer.classList.add('keyboard-hidden');
+        closeBtn.classList.remove('visible');
+        editor.style.paddingBottom = "2rem";
+        editor.blur(); // actually remove focus
+    }
 
-        function handleDocumentClick(e) {
-            if (!editor.contains(e.target) && !keyboard.contains(e.target)) {
-                hideKeyboard();
+    closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        hideKeyboard();
+    });
+
+    // --- THE CRITICAL FIX FOR ANDROID ---
+    
+    // 1. Intercept Touch Start on Editor
+    editor.addEventListener('touchstart', (e) => {
+        // Prevent default stops the native focus event that triggers the keyboard
+        e.preventDefault();
+        
+        // But we MUST place the caret manually
+        if (e.changedTouches && e.changedTouches.length > 0) {
+            const touch = e.changedTouches[0];
+            let range;
+            
+            // Standard method
+            if (document.caretRangeFromPoint) {
+                range = document.caretRangeFromPoint(touch.clientX, touch.clientY);
+            } 
+            // Webkit fallback
+            else if (document.caretPositionFromPoint) {
+                const pos = document.caretPositionFromPoint(touch.clientX, touch.clientY);
+                range = document.createRange();
+                range.setStart(pos.offsetNode, pos.offset);
+                range.collapse(true);
             }
-        }
 
-        // Swipe-to-highlight functionality
-        editor.addEventListener('touchstart', handleTouchStart);
-        editor.addEventListener('touchmove', handleTouchMove);
-        editor.addEventListener('touchend', handleTouchEnd);
-
-        function handleTouchStart(e) {
-            isHighlighting = false;
-            lastTouchX = e.touches[0].clientX;
-        }
-
-        function handleTouchMove(e) {
-            const currentTouchX = e.touches[0].clientX;
-            const diff = Math.abs(currentTouchX - lastTouchX);
-            if (diff > 10 && currentTouchX < lastTouchX) {
-                isHighlighting = true;
-                highlightTextAtPoint(e.touches[0]);
-            }
-            lastTouchX = currentTouchX;
-        }
-
-        function handleTouchEnd() {
-            isHighlighting = false;
-        }
-
-        function highlightTextAtPoint(touch) {
-            const range = document.caretRangeFromPoint(touch.clientX, touch.clientY);
             if (range) {
                 const selection = window.getSelection();
-                if (!selection.isCollapsed) {
-                    selection.extend(range.startContainer, range.startOffset);
-                } else {
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }
-
-                if (isHighlighting) {
-                    const span = document.createElement('span');
-                    span.className = 'highlighted';
-                    try {
-                        range.surroundContents(span);
-                    } catch (e) {
-                        console.error("Cannot highlight across element boundaries");
-                    }
-                }
-            }
-        }
-
-        keys.forEach(key => {
-            key.addEventListener('touchstart', handleKeyPress);
-            key.addEventListener('mousedown', handleKeyPress);
-        });
-
-        function handleKeyPress(e) {
-            e.preventDefault();
-            const keyText = e.target.textContent;
-            switch (keyText) {
-                case 'Shift':
-                    toggleShift();
-                    break;
-                case 'Backspace':
-                    deleteCharacter();
-                    break;
-                case 'Space':
-                    insertText(' ');
-                    break;
-                case 'Enter':
-                    insertText('\n');
-                    break;
-                case '123':
-                    // Toggle numbers and symbols (not implemented)
-                    break;
-                default:
-                    insertText(keyText);
-            }
-            editor.focus();
-        }
-
-        function insertText(text) {
-            const selection = window.getSelection();
-            if (selection.rangeCount > 0) {
-                const range = selection.getRangeAt(0);
-                range.deleteContents();
-                range.insertNode(document.createTextNode(text));
-                range.collapse(false);
                 selection.removeAllRanges();
                 selection.addRange(range);
-            } else {
-                editor.innerHTML += text;
             }
         }
+        
+        showKeyboard();
+    }, { passive: false });
 
-        function deleteCharacter() {
-            const selection = window.getSelection();
-            if (selection.rangeCount > 0) {
-                const range = selection.getRangeAt(0);
-                if (range.collapsed && range.startOffset > 0) {
-                    range.setStart(range.startContainer, range.startOffset - 1);
-                }
-                range.deleteContents();
+    // 2. Intercept Click (for mouse or if touch falls through)
+    editor.addEventListener('click', (e) => {
+        // Usually handled by touchstart on mobile, but for desktop testing
+        showKeyboard();
+    });
+
+    // 3. Resize Guard
+    // If the window resizes significantly (meaning native keyboard likely popped up), 
+    // force blur the editor to close it.
+    let initialHeight = window.innerHeight;
+    window.addEventListener('resize', () => {
+        if (window.innerHeight < initialHeight * 0.75) {
+            // Screen shrunk by 25%+ -> Likely keyboard
+            if (document.activeElement === editor) {
+                editor.blur();
+                // Refocus logic is tricky because it might loop. 
+                // We just blur to hide native KB. Our JS keyboard is overlay.
             }
         }
+    });
 
-        function toggleShift() {
-            keys.forEach(key => {
-                if (key.textContent.length === 1 && key.textContent.match(/[a-z]/i)) {
-                    key.textContent = key.textContent === key.textContent.toLowerCase() ?
-                        key.textContent.toUpperCase() : key.textContent.toLowerCase();
-                }
-            });
-        }
+    // Initial render
+    renderKeyboard();
 
-        // Prevent default keyboard from showing up
-        editor.addEventListener('touchstart', (e) => {
-            if (!isKeyboardVisible) {
-                e.preventDefault();
-                showKeyboard();
-            }
-        });
-
-        document.addEventListener('touchstart', (e) => {
-            if (isKeyboardVisible && !editor.contains(e.target) && !keyboard.contains(e.target)) {
-                e.preventDefault();
-            }
-        });
-    </script>
+</script>
 </body>
 </html>
+
+
