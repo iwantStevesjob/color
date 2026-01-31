@@ -4,8 +4,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Color</title>
+    <title>Color (Debug Mode)</title>
+    <!-- Existing DOMPurify -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"></script>
+
+    <!-- NEW: QR Generation and Scanning Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+    <!-- CSS Remains Exactly as provided -->
     <style>
         :root {
             --bg-color: #000;
@@ -279,6 +286,28 @@
             cursor: default;
         }
 
+        /* Create App Button (Matches Login Button Style) */
+        #create-app-btn {
+            position: absolute;
+            right: 40px;
+            top: 45px;
+            background: var(--text-color);
+            color: var(--bg-color);
+            padding: 8px 30px;
+            font-size: 1rem;
+            font-weight: 700;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: 'Inter', sans-serif;
+            text-transform: uppercase;
+            z-index: 10;
+        }
+
+        #create-app-btn:hover {
+            opacity: 0.8;
+        }
+
         #dashboard-panel {
             position: fixed;
             bottom: 0;
@@ -309,6 +338,126 @@
 
         #dashboard-panel.active.peek-mode {
             transform: translateY(calc(100% - 50px));
+        }
+
+        #dashboard-panel.active.half-peek {
+            transform: translateY(calc(100% - 60vh));
+        }
+
+        #sub-nav-layer.half-slide {
+            transform: translateY(calc(100vh - var(--nav-height) - var(--sub-nav-height) - 60vh + 1px));
+        }
+
+        /* Connect Options Styles */
+        .connect-options {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            padding: 20px;
+            flex-wrap: wrap;
+        }
+
+        .connect-option {
+            padding: 16px 28px;
+            background: transparent;
+            border: 1.5px solid rgba(0, 0, 0, 0.2);
+            border-radius: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 0.5px;
+            color: #333;
+        }
+
+        .connect-option:hover {
+            background: rgba(0, 0, 0, 0.06);
+            border-color: rgba(0, 0, 0, 0.35);
+        }
+
+        /* User Badge Hover Tooltip */
+        #user-badge {
+            position: relative;
+            cursor: pointer;
+        }
+
+        #user-badge::after {
+            content: attr(data-hex);
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            margin-left: 8px;
+            color: #999;
+            font-size: 0.7rem;
+            font-weight: 600;
+            font-family: 'Menlo', monospace;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease;
+        }
+
+        #user-badge:hover::after {
+            opacity: 1;
+        }
+
+        /* User Profile Styles */
+        .user-profile {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            padding: 20px;
+        }
+
+        .user-hex-display {
+            font-size: 3.5rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: -2px;
+            /* Color set dynamically via JS based on luminance */
+        }
+
+        .user-stats {
+            display: flex;
+            gap: 40px;
+            margin-top: 20px;
+        }
+
+        /* Connect Panel Title - Distinct from page-title */
+        .connect-panel-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 0 0 15px 0;
+            text-align: center;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .stat-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            opacity: 0.6;
+            color: #333;
         }
 
         .content-view {
@@ -500,6 +649,74 @@
             cursor: pointer;
         }
 
+        /* Connect Content Layer */
+        #connect-content-layer {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 300px;
+            z-index: 50;
+            pointer-events: none;
+            display: none;
+            text-align: center;
+        }
+
+        #connect-content-layer.visible {
+            display: block;
+            pointer-events: auto;
+        }
+
+        .connect-view {
+            display: none;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.9rem;
+            line-height: 1.5;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .connect-view.active {
+            display: flex;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .connect-view p {
+            margin-bottom: 20px;
+        }
+
+        /* QR Specific Styles */
+        #qr-display-container {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            margin-bottom: 15px;
+        }
+
+        .action-btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 1px;
+            backdrop-filter: blur(5px);
+            transition: all 0.2s;
+            margin-top: 10px;
+        }
+
+        .action-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+        }
+
         #reset-btn:hover {
             background: #900;
         }
@@ -654,8 +871,6 @@
             transition: width 0.3s, opacity 0.1s;
             z-index: 10;
             background-image: none !important;
-
-            /* Ensure content is treated as text only */
             content: attr(data-lock-owner);
         }
 
@@ -769,6 +984,64 @@
             .cone-data:last-child {
                 border-bottom: none;
             }
+
+            /* Mobile Nav Visibility */
+            #top-nav {
+                gap: 15px;
+                padding: 0 10px;
+            }
+
+            .nav-item {
+                font-size: 0.7rem;
+                letter-spacing: 0.5px;
+            }
+
+            #settings-btn {
+                width: 40px;
+                height: 40px;
+                margin-right: 10px;
+            }
+
+            /* Mobile Connect Options */
+            .connect-options {
+                gap: 12px;
+                padding: 15px;
+            }
+
+            .connect-option {
+                width: 85px;
+                height: 85px;
+                font-size: 0.55rem;
+            }
+
+            .connect-option span:first-child {
+                font-size: 1.5rem;
+            }
+
+            /* Mobile Profile Display */
+            .user-hex-display {
+                font-size: 2.5rem;
+            }
+
+            .user-stats {
+                gap: 25px;
+            }
+
+            .stat-value {
+                font-size: 1.2rem;
+            }
+
+            .stat-label {
+                font-size: 0.6rem;
+            }
+
+            /* Half-peek sub-header centering */
+            #header-connect .page-title,
+            #header-profile .page-title {
+                font-size: 1.3rem;
+                text-align: center;
+                padding: 0 20px;
+            }
         }
 
         .dummy-content {
@@ -789,6 +1062,24 @@
     <canvas id="gpu-canvas"></canvas>
     <div id="flash-overlay"></div>
     <div id="hover-trigger"></div>
+
+    <!-- Connect Content Layer (Hidden by default) -->
+    <div id="connect-content-layer">
+        <!-- View 1: Display QR -->
+        <div id="view-qr" class="connect-view">
+            <div id="qr-display-container"></div>
+            <p style="margin:10px 0 20px 0; font-size: 0.8rem; opacity: 0.8; font-weight: 600;">SCAN TO JOIN INSTANTLY
+            </p>
+            <button id="btn-scan-mode" class="action-btn">I WANT TO SCAN</button>
+        </div>
+        <!-- View 2: Scan QR -->
+        <div id="view-scanner" class="connect-view">
+            <div id="qr-reader"
+                style="width: 250px; height: 250px; background: #000; border-radius: 10px; overflow: hidden; margin-bottom: 20px; border: 2px solid rgba(255,255,255,0.3);">
+            </div>
+            <button id="btn-cancel-scan" class="action-btn">CANCEL</button>
+        </div>
+    </div>
 
     <nav id="top-nav">
         <div class="nav-item active" data-target="home">Home</div>
@@ -830,6 +1121,7 @@
     <div id="sub-nav-layer">
         <div id="header-apps" class="sub-header">
             <h1 class="page-title">APPS</h1>
+            <button id="create-app-btn">CREATE</button>
             <div class="tabs-row">
                 <div class="sub-tab active" data-tab="discover" data-group="apps">DISCOVER</div>
                 <div class="sub-tab" data-tab="installed" data-group="apps">INSTALLED</div>
@@ -843,6 +1135,33 @@
                 <div class="sub-tab" data-tab="connections" data-group="settings">CONNECTIONS</div>
                 <div class="sub-tab" data-tab="signatures" data-group="settings">SIGNATURES</div>
                 <div class="sub-tab" data-tab="raw" data-group="settings">RAW DATA</div>
+            </div>
+        </div>
+        <div id="header-connect" class="sub-header">
+            <div class="connect-panel-title">How would you like to connect?</div>
+            <div class="connect-options">
+                <div class="connect-option" data-connect-type="qr">QR Code</div>
+                <div class="connect-option" data-connect-type="nearby">Nearby</div>
+                <div class="connect-option" data-connect-type="topic">Topic</div>
+            </div>
+        </div>
+        <div id="header-profile" class="sub-header">
+            <div class="user-profile">
+                <div class="user-hex-display" id="profile-hex">#FFFFFF</div>
+                <div class="user-stats">
+                    <div class="stat-item">
+                        <div class="stat-value" id="stat-connections">0</div>
+                        <div class="stat-label">Connections</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="stat-trust">0</div>
+                        <div class="stat-label">Trust</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="stat-coins">0</div>
+                        <div class="stat-label">Coins</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -908,7 +1227,7 @@
 
     <script type="module">
         const TRACKERS = ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebtorrent.com', 'wss://tracker.btorrent.xyz'];
-        const OFFER_POOL_SIZE = 10;
+        const OFFER_POOL_SIZE = 3;
         const OFFER_TTL = 57_333;
         const ANNOUNCE_INTERVAL = 33_333;
         const ICE_TIMEOUT = 5000;
@@ -1001,25 +1320,13 @@
         // ARCHITECTURE LAYERS: Identity -> TrustedMesh -> StateStore -> UI
         // =================================================================================
 
-
-
         class ColorDB {
             constructor() { this.name = 'color'; }
-            async init() { return; } // No-op, worker handles init on demand but better to init early? TrustedMesh uses init.
+            async init() { return; }
             async _open(hex) {
                 await window.app.identity._call('db_init', { roomHex: hex });
             }
-            // Proxy methods
             async saveLine(hex, index, content, ownerHex) {
-                // Note: saveLine is now ONLY called by StateStore.handleLocalUpdate for local changes, BUT
-                // we changed the plan: StateStore calls db_write_local directly on identity.
-                // So this method might be deprecated/unused if we update StateStore.
-                // However, sticking to the plan: "Refactor ColorDB to be a pure proxy"
-                // StateStore was: await this.db.saveLine(this.roomId, index, content, ownerHex, signature);
-                // But strictly, local update logic is: Sign -> Encrypt -> Save.
-                // Remote update logic is: Verify -> Encrypt -> Save.
-                // Calls to saveLine from Main Thread are mostly legacy if we move logic to worker.
-                // Let's implement specific proxies.
                 console.warn("ColorDB.saveLine called - should use identity.db_write_local");
             }
             async getCursor(hex) { return window.app.identity._call('db_read_cursor', { roomHex: hex }); }
@@ -1079,6 +1386,10 @@
                 // CRITICAL: The "VIP List"
                 this.verifiedPeers = new Set();
 
+                // NEW: Secrets Management for QR Fast-Pass
+                this.outgoingQrSecret = null;
+                this.expectedQrSecret = null;
+
                 // Actions
                 const [sendFrag, onFrag] = this.room.makeAction('fragment');
                 const [sendLock, onLock] = this.room.makeAction('lock');
@@ -1090,16 +1401,15 @@
                 this.room.onPeerJoin(async (pid) => {
                     console.log(`%c[P2P] Peer Joined: ${pid}`, 'color: cyan; font-weight: bold;');
                     const jwk = await this.identity.getPublicKeyData();
-
-                    // We send what we have. If it's PENDING, the other side ignores us (correctly).
-                    // The 'broadcastIdentity' function below handles the "I finished mining" update.
                     const token = window.app.user.proofToken || "PENDING";
 
                     this.rawSendId({
                         color: window.app.user.color,
                         pubKey: jwk,
                         cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
-                        minedToken: token
+                        minedToken: token,
+                        // NEW: Include secret if we are the guest
+                        qrSecret: this.outgoingQrSecret
                     }, pid);
 
                     this.emit('peer-join', pid);
@@ -1107,31 +1417,36 @@
 
                 // 2. RECEIVE IDENTITY HANDSHAKE (The Bouncer Logic)
                 onId(async (data, pid) => {
-                    if (data.minedToken && data.minedToken !== "PENDING") {
-                        // Verify the token in the worker
-                        const isValid = await this.identity._call('validate_peer', {
+                    let isVerified = false;
+
+                    // CHECK 1: The QR Fast-Pass (Option C)
+                    // If they have the secret we generated, verify them INSTANTLY.
+                    if (this.expectedQrSecret && data.qrSecret === this.expectedQrSecret) {
+                        console.log(`%c[P2P] 🎟️ VIP Ticket Accepted for ${pid}`, 'color: gold; font-weight: bold;');
+                        isVerified = true;
+                    }
+                    // CHECK 2: The Standard Mining Check (Fallback)
+                    else if (data.minedToken && data.minedToken !== "PENDING") {
+                        isVerified = await this.identity._call('validate_peer', {
                             peerId: data.minedToken,
                             roomHex: this.roomHex
                         });
-
-                        if (isValid) {
-                            console.log(`%c[P2P] ✅ Peer verified: ${pid}`, 'color: #00e676;');
-                            this.verifiedPeers.add(pid); // Add to VIP list
-                            if (data.pubKey) this.identity.storePeerKey(pid, data.pubKey);
-                            this.emit('peer-identity', data, pid);
-                        } else {
-                            console.warn(`[P2P] ❌ Peer verification failed for ${pid}`);
-                        }
                     } else {
                         console.log(`[P2P] Peer ${pid} is not ready yet (Token: ${data.minedToken})`);
                     }
+
+                    if (isVerified) {
+                        console.log(`%c[P2P] ✅ Peer verified: ${pid}`, 'color: #00e676;');
+                        this.verifiedPeers.add(pid);
+                        if (data.pubKey) this.identity.storePeerKey(pid, data.pubKey);
+                        this.emit('peer-identity', data, pid);
+                    } else if (data.minedToken && data.minedToken !== "PENDING") {
+                        console.warn(`[P2P] ❌ Peer verification failed for ${pid}`);
+                    }
                 });
 
-                // 3. Verified Data Pipeline (DEBUGGING ADDED HERE)
+                // 3. Verified Data Pipeline
                 onFrag(async (fragMap, pid) => {
-                    // This log answers "What is the original peer doing?"
-                    // If you see "BLOCKED", it means the handshake failed or hasn't happened yet.
-
                     if (!this.verifiedPeers.has(pid)) {
                         console.warn(`[P2P] 🛑 BLOCKED packet from ${pid}: Peer not verified.`);
                         return; // REJECT DATA
@@ -1166,14 +1481,13 @@
                         pubKey: jwk,
                         // Parse the current line ID to get the integer index
                         cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
-                        minedToken: token
+                        minedToken: token,
+                        qrSecret: this.outgoingQrSecret
                     });
                 }
             }
 
             async broadcastFragment(fragMap) {
-                // FIX: Do not re-sign. The StateStore/Worker has already signed 
-                // the payload with the required (index:timestamp:owner:content) format.
                 this.rawSendFrag(fragMap);
             }
 
@@ -1183,6 +1497,10 @@
             leave() { this.room.leave(); }
             on(e, cb) { if (!this.handlers.has(e)) this.handlers.set(e, []); this.handlers.get(e).push(cb); }
             emit(e, ...args) { this.handlers.get(e)?.forEach(cb => cb(...args)); }
+
+            // NEW: Helper methods
+            setExpectedSecret(secret) { this.expectedQrSecret = secret; }
+            setOutgoingSecret(secret) { this.outgoingQrSecret = secret; }
         }
         class StateStore {
             constructor(db, mesh, identity) {
@@ -1214,8 +1532,6 @@
                 const indices = Object.keys(fragMap).map(k => parseInt(k)).sort((a, b) => a - b);
                 for (const idx of indices) {
                     const item = fragMap[idx];
-                    // Already Verified & Saved by Worker (TrustedMesh called db_verify_remote)
-                    // Notify UI
                     this.emitChange(idx, item.content, item.owner);
                 }
             }
@@ -1260,6 +1576,8 @@
                 this.isFresh = true;
                 this.saveTimeout = null;
                 this.store = null;
+                this.halfPeekMode = null;
+                this.pendingVipTicket = null; // New state for Guest QR flow
 
                 // Init Systems
                 Promise.all([this.identity.init(), this.db.init()]).then(async () => {
@@ -1324,7 +1642,6 @@
                         const meta = this.parseId(el.id);
                         if (meta) {
                             const content = el.innerHTML;
-                            // Only send if substantial content exists
                             if (content && content !== '<br>' && content.trim().length > 0) {
                                 d[meta.index] = {
                                     content: content,
@@ -1389,6 +1706,7 @@
                 this.roomId = 'color-' + cleanHex;
                 this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff';
                 this.ui.userBadge.style.backgroundColor = this.user.color;
+                this.ui.userBadge.setAttribute('data-hex', this.user.color.toUpperCase());
                 this.user.id = 'user_' + this.user.color.replace('#', '');
 
                 if (this.mesh) { this.mesh.leave(); this.mesh = null; }
@@ -1429,6 +1747,13 @@
 
             joinNetwork() {
                 this.mesh = new TrustedMesh(this.roomId, this.identity);
+
+                // NEW: Check for pending VIP Ticket (Guest Mode)
+                if (this.pendingVipTicket) {
+                    this.mesh.setOutgoingSecret(this.pendingVipTicket);
+                    this.pendingVipTicket = null; // Clear after assignment
+                }
+
                 this.store = new StateStore(this.db, this.mesh, this.identity);
                 this.store.setRoom(this.roomId.replace('color-', ''));
 
@@ -1438,27 +1763,21 @@
 
                 this.mesh.on('peer-join', (pid) => {
                     this.updateStatus();
-                    // REMOVED: Do not broadcast fragments here. It is too early.
-                    // The peer is not verified yet, so they will block our data.
                     if (this.currentLineId) this.mesh.broadcastLock({ lineId: this.currentLineId, userColor: this.user.color });
                 });
 
                 this.mesh.on('peer-leave', () => { this.updateStatus(); this.reapplyVisualLocks(); });
 
-                // --- MOVED SYNC LOGIC HERE ---
                 this.mesh.on('peer-identity', (data, pid) => {
                     this.peerColors[pid] = data?.color || '#ffffff';
 
                     // IF WE ARE THE NEW USER (Fresh session) AND PEER SENT A CURSOR
                     if (this.isFresh && typeof data.cursor === 'number') {
                         console.log(`[EditorApp] 🎯 Peer is at line ${data.cursor}. Syncing range...`);
-
-                        // 1. Wipe and Render Empty Lines (Center - 50 to Center + 50)
-                        // This function creates the DOM elements but they are empty/editable by default
+                        this.pendingFocusLine = data.cursor;
                         this.renderInitialState({}, data.cursor);
                         this.isFresh = false;
 
-                        // 2. Calculate the IDs we just generated
                         const start = data.cursor - 50;
                         const end = data.cursor + 50;
                         const missingKeys = [];
@@ -1467,9 +1786,6 @@
                         for (let i = start; i <= end; i++) {
                             missingKeys.push(roomHex + i);
                         }
-
-                        // 3. Ask OP: "Do you have content for these lines?"
-                        console.log(`[P2P] 📥 Requesting data for ${missingKeys.length} lines...`);
                         this.mesh.requestSync(missingKeys);
                     }
                 });
@@ -1481,14 +1797,8 @@
 
                 this.mesh.on('req', async (keys, pid) => {
                     const roomHex = this.roomId.replace('color-', '');
-
                     if (keys && Array.isArray(keys)) {
-                        // The peer is asking: "Do you have content for these specific line IDs?"
                         const payload = await this.db.getSpecific(roomHex, keys);
-
-                        // If we have content (payload has keys), we send it.
-                        // If we DON'T have content (payload is empty), we send nothing.
-                        // Since the peer already generated empty lines, they simply remain open/editable.
                         if (Object.keys(payload).length > 0) {
                             this.mesh.broadcastFragment(payload);
                         }
@@ -1526,6 +1836,11 @@
                     const amOwner = (newOwner === myHex);
                     el.contentEditable = (isEmpty || amOwner) ? 'true' : 'false';
                 }
+
+                if (this.pendingFocusLine !== undefined && index === this.pendingFocusLine) {
+                    this.focusLine(this.pendingFocusLine);
+                    this.pendingFocusLine = undefined;
+                }
             }
 
             async triggerSave(lineId) {
@@ -1538,7 +1853,6 @@
                 const content = el.innerText.trim().length > 0 ? el.innerHTML : null;
                 console.log("[EditorApp] triggerSave", lineId, content);
 
-                // Delegate to Store (which handles DB save + Network broadcast)
                 if (this.store) {
                     await this.store.handleLocalUpdate(meta.index, content, this.user.color);
                 }
@@ -1567,7 +1881,6 @@
                     if (!this.ui.dashboardPanel.classList.contains('active')) return;
 
                     if (this.peeking) {
-                        // Exiting peek mode - zoom sphere back in
                         this.togglePeek();
                         if (window.state) {
                             const targetZ = window.state.landing?.targetDist || 1.25;
@@ -1584,43 +1897,54 @@
                             };
                         }
                     } else {
-                        // Entering peek mode - zoom sphere out
                         if (window.resetSphereView) window.resetSphereView(false, true);
                         if (window.state) window.state.renderPath = false;
                         this.togglePeek();
                     }
                 });
 
+                // NEW: Bind QR Action Buttons
+                document.getElementById('btn-scan-mode').addEventListener('click', () => {
+                    this.startScanning();
+                });
+                document.getElementById('btn-cancel-scan').addEventListener('click', () => {
+                    // Return to QR display view
+                    document.querySelectorAll('.connect-view').forEach(el => el.classList.remove('active'));
+                    document.getElementById('view-qr').classList.add('active');
+                    // Note: Camera stop logic is handled inside startScanning wrapper if implemented robustly, 
+                    // or we rely on the library to clean up. In a production app we'd track the scanner instance.
+                    // For this snippet, the next startScanning call will re-init.
+                });
+
                 document.querySelectorAll('.nav-item').forEach(item => {
                     item.addEventListener('click', () => {
                         const targetId = item.getAttribute('data-target');
-                        // Inside bindEvents() -> nav-item click listener
                         if (targetId === 'connect') {
-                            // If already in peek mode (connect tab active), do nothing
-                            if (this.peeking) return;
+                            if (this.peeking || this.halfPeekMode === 'connect') return;
 
-                            // 1. Force sphere zoom out animation
-                            if (window.resetSphereView) window.resetSphereView(false, true); // false = zoom out, true = keep rotation
+                            if (this.halfPeekMode) {
+                                this.exitHalfPeek();
+                            }
 
-                            // 2. Hide path
-                            if (window.state) window.state.renderPath = false;
+                            this.halfPeekMode = 'connect';
+                            this.ui.dashboardPanel.classList.add('half-peek');
+                            this.ui.subNavLayer.classList.add('half-slide');
 
-                            // 3. Enter peek mode (not a toggle)
-                            this.peeking = true;
-                            this.ui.dashboardPanel.classList.add('peek-mode');
-                            this.updatePeekState(1);
+                            document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
+                            document.getElementById('header-connect')?.classList.add('active');
 
-                            // 4. Update nav state
+                            this.ui.topNav.classList.add('visible');
+
                             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                             item.classList.add('active');
-                            document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
                             return;
+                        }
+                        if (this.halfPeekMode) {
+                            this.exitHalfPeek();
                         }
                         if (this.peeking) {
                             this.togglePeek();
-                            // Slide sub-nav back up
                             document.getElementById('sub-nav-layer')?.classList.remove('peek-slide');
-                            // Zoom sphere back in when leaving connect/signature tab using fast returning animation
                             if (window.state) {
                                 const targetZ = window.state.landing?.targetDist || 1.25;
                                 window.state.returning = {
@@ -1658,41 +1982,31 @@
                     document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
                     document.getElementById('header-settings').classList.add('active');
                 });
-                // Inside bindEvents() -> sub-tab click listener
                 document.querySelectorAll('.sub-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
                         const group = tab.getAttribute('data-group'), target = tab.getAttribute('data-tab');
 
-                        // --- ADDED LOGIC FOR SIGNATURES ---
                         if (target === 'signatures') {
-                            // 1. Force sphere zoom out animation (same as connect tab)
-                            if (window.resetSphereView) window.resetSphereView(false, true); // false = zoom out, true = keep rotation
+                            if (window.resetSphereView) window.resetSphereView(false, true);
 
-                            // 2. Show the sphere (Peek Mode)
                             if (!this.peeking) {
                                 this.peeking = true;
                                 this.ui.dashboardPanel.classList.add('peek-mode');
-                                // Slide sub-nav down with the dashboard
                                 document.getElementById('sub-nav-layer')?.classList.add('peek-slide');
                                 this.updatePeekState(1);
                             }
 
-                            // 3. Load and Show Path
                             if (window.state) {
                                 window.state.renderPath = true;
-                                // Load the current signature path into the renderer
                                 if (window.state.interactionSignature && window.state.interactionSignature.path.length > 0) {
                                     window.state.pathPoints = [...window.state.interactionSignature.path];
                                 }
                             }
                         } else {
-                            // If clicking other settings tabs, slide back up and hide path
                             if (window.state) window.state.renderPath = false;
-                            // Slide sub-nav back up when leaving signature tab
                             if (this.peeking) {
                                 this.togglePeek();
                                 document.getElementById('sub-nav-layer')?.classList.remove('peek-slide');
-                                // Zoom sphere back in
                                 if (window.state) {
                                     const targetZ = window.state.landing?.targetDist || 1.25;
                                     window.state.returning = {
@@ -1709,7 +2023,6 @@
                                 }
                             }
                         }
-                        // ----------------------------------
 
                         document.querySelectorAll(`.sub-tab[data-group="${group}"]`).forEach(t => t.classList.remove('active'));
                         tab.classList.add('active');
@@ -1718,34 +2031,93 @@
                     });
                 });
 
-                window.addEventListener('mousemove', e => {
-                    if (!this.ui.dashboardPanel.classList.contains('active') || this.ui.dashboardPanel.classList.contains('step-down') || this.ui.dashboardPanel.classList.contains('peek-mode')) {
-                        if (!this.peeking) this.ui.dashboardPanel.style.transform = ''; return;
+                document.querySelectorAll('.connect-option').forEach(option => {
+                    option.addEventListener('click', () => {
+                        const connectType = option.getAttribute('data-connect-type');
+                        this.enterFullPeek(connectType);
+                    });
+                });
+
+                this.ui.userBadge.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (!this.ui.dashboardPanel.classList.contains('active')) return;
+
+                    const currentRoomHex = window.location.hash.replace('#', '').toLowerCase();
+                    const userHex = this.user.color.replace('#', '').toLowerCase();
+
+                    const isOwnRoom = currentRoomHex === userHex;
+
+                    if (isOwnRoom) {
+                        if (this.halfPeekMode === 'profile') {
+                            this.exitHalfPeek();
+                            return;
+                        }
+                        this.showProfileHalfPeek();
+                    } else {
+                        window.location.hash = userHex;
+                        if (window.connectAndPreview) {
+                            window.connectAndPreview('#' + userHex, true);
+                        }
                     }
-                    if (e.clientY < 33) {
-                        this.ui.dashboardPanel.classList.add('revealed'); this.ui.topNav.classList.add('visible'); this.ui.dashboardPanel.style.transform = '';
-                    } else if (e.clientY > 100 && this.ui.dashboardPanel.classList.contains('revealed')) {
-                        // Hide nav when mouse moves below nav area
-                        this.ui.dashboardPanel.classList.remove('revealed'); this.ui.topNav.classList.remove('visible');
+                });
+
+                window.addEventListener('mousemove', e => {
+                    if (!this.ui.dashboardPanel.classList.contains('active') || this.ui.dashboardPanel.classList.contains('step-down') || this.ui.dashboardPanel.classList.contains('peek-mode') || this.ui.dashboardPanel.classList.contains('half-peek')) {
+                        if (!this.peeking && !this.halfPeekMode) this.ui.dashboardPanel.style.transform = ''; return;
+                    }
+
+                    const sliverHeight = 10;
+                    const showheight = 18;
+                    const hintZoneEnd = 25;
+
+                    if (e.clientY <= showheight) {
+                        this.ui.dashboardPanel.classList.add('revealed');
+                        this.ui.topNav.classList.add('visible');
+                        this.ui.dashboardPanel.style.transform = '';
+                    } else if (e.clientY > sliverHeight && e.clientY <= hintZoneEnd) {
+                        if (!this.ui.dashboardPanel.classList.contains('revealed')) {
+                            const progress = 1 - ((e.clientY - sliverHeight) / (hintZoneEnd - sliverHeight));
+                            const hintOffset = sliverHeight + (progress * 20);
+                            this.ui.dashboardPanel.style.transform = `translateY(${hintOffset}px)`;
+                        }
+                    } else if (e.clientY > hintZoneEnd) {
+                        if (!this.ui.dashboardPanel.classList.contains('revealed')) {
+                            this.ui.dashboardPanel.style.transform = '';
+                        }
+                        if (e.clientY > 100 && this.ui.dashboardPanel.classList.contains('revealed')) {
+                            this.ui.dashboardPanel.classList.remove('revealed');
+                            this.ui.topNav.classList.remove('visible');
+                            this.ui.dashboardPanel.style.transform = '';
+                        }
                     }
                 });
 
                 let ts = 0, isDrag = false;
-                window.addEventListener('touchstart', e => { ts = e.touches[0].clientY; if (this.ui.dashboardPanel.classList.contains('active') && (ts < 150 || this.peeking)) isDrag = true; }, { passive: true });
+                window.addEventListener('touchstart', e => { ts = e.touches[0].clientY; if (this.ui.dashboardPanel.classList.contains('active') && (ts < 150 || this.peeking || this.halfPeekMode)) isDrag = true; }, { passive: true });
                 window.addEventListener('touchmove', e => {
                     if (!isDrag) return;
                     const currentY = e.touches[0].clientY;
                     const delta = currentY - ts;
                     const navHeight = 90;
+                    const halfPeekPos = window.innerHeight * 0.33;
                     const maxDrag = window.innerHeight - 50;
 
-                    if (delta > 0 && !this.peeking) {
+                    if (delta > 0 && !this.peeking && !this.halfPeekMode) {
                         this.ui.dashboardPanel.style.transform = `translateY(${delta}px)`;
                         if (delta > navHeight) {
                             const range = maxDrag - navHeight;
                             const prog = Math.min(1, (delta - navHeight) / range);
                             if (window.state && window.state.peeking) { window.state.peeking.active = true; window.state.peeking.value = prog; }
                         }
+                    }
+
+                    if (delta > 0 && this.halfPeekMode && !this.peeking) {
+                        const currentPos = halfPeekPos + delta;
+                        this.ui.dashboardPanel.style.transform = `translateY(calc(100% - 33vh + ${delta}px))`;
+                    }
+
+                    if (delta < 0 && this.halfPeekMode && !this.peeking) {
+                        this.ui.dashboardPanel.style.transform = `translateY(calc(100% - 33vh + ${delta}px))`;
                     }
 
                     if (delta < 0 && this.peeking) {
@@ -1758,8 +2130,37 @@
                 }, { passive: true });
                 window.addEventListener('touchend', e => {
                     if (!isDrag) return; isDrag = false; this.ui.dashboardPanel.style.transform = '';
-                    if (this.peeking && e.changedTouches[0].clientY < window.innerHeight * 0.7) { this.peeking = false; this.ui.dashboardPanel.classList.remove('peek-mode'); this.updatePeekState(0); }
-                    else if (!this.peeking && e.changedTouches[0].clientY > window.innerHeight * 0.3) { this.peeking = true; this.ui.dashboardPanel.classList.add('peek-mode'); this.updatePeekState(1); }
+                    const endY = e.changedTouches[0].clientY;
+                    const halfPeekThreshold = window.innerHeight * 0.5;
+
+                    if (this.peeking && endY < window.innerHeight * 0.5) {
+                        this.peeking = false;
+                        this.ui.dashboardPanel.classList.remove('peek-mode');
+                        this.updatePeekState(0);
+                    }
+                    else if (this.halfPeekMode) {
+                        if (endY > window.innerHeight * 0.7) {
+                            this.enterFullPeek();
+                        } else if (endY < window.innerHeight * 0.25) {
+                            this.exitHalfPeek();
+                        }
+                    }
+                    else if (!this.peeking && !this.halfPeekMode) {
+                        if (endY > window.innerHeight * 0.5) {
+                            this.peeking = true;
+                            this.ui.dashboardPanel.classList.add('peek-mode');
+                            this.updatePeekState(1);
+                        } else if (endY > window.innerHeight * 0.25) {
+                            this.halfPeekMode = 'connect';
+                            this.ui.dashboardPanel.classList.add('half-peek');
+                            this.ui.subNavLayer.classList.add('half-slide');
+                            document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
+                            document.getElementById('header-connect')?.classList.add('active');
+                            this.ui.topNav.classList.add('visible');
+                            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                            document.querySelector('.nav-item[data-target="connect"]')?.classList.add('active');
+                        }
+                    }
                 });
 
                 document.addEventListener('selectionchange', () => {
@@ -1773,7 +2174,6 @@
                 });
 
                 document.getElementById('display').addEventListener('keydown', (e) => {
-                    // 1. Backspace Protection (Your original code)
                     if (e.key === 'Backspace') {
                         const sel = window.getSelection();
                         if (sel.rangeCount) {
@@ -1794,45 +2194,26 @@
                         }
                     }
 
-                    // 2. Enter Logic (Modified to fix Double-Enter bug)
                     if (e.key === 'Enter') {
                         e.preventDefault();
                         const sel = window.getSelection();
                         if (sel.rangeCount) {
                             const range = sel.getRangeAt(0);
                             const br = document.createElement('br');
-
-                            // 1. Delete any selected text
                             range.deleteContents();
-
-                            // 2. Insert the BR
                             range.insertNode(br);
-
-                            // 3. Move the cursor range to immediately after the inserted BR
                             range.setStartAfter(br);
                             range.setEndAfter(br);
-
-                            // 4. THE FIX: Check nextSibling but ignore empty text nodes
-                            // When inserting in a text node, the DOM splits, leaving an empty text node after the BR.
                             let next = br.nextSibling;
                             if (next && next.nodeType === 3 && next.length === 0) {
                                 next = next.nextSibling;
                             }
-
-                            // If there is no real content after the break, add the phantom BR
-                            // so the browser renders the new line and holds the cursor open
                             if (!next) {
                                 br.parentNode.appendChild(document.createElement('br'));
                             }
-
-                            // 5. Update selection
                             sel.removeAllRanges();
                             sel.addRange(range);
-
-                            // 6. Force Input Event for saving
                             e.target.dispatchEvent(new Event('input', { bubbles: true }));
-
-                            // 7. Scroll into view (keeps cursor visible if at bottom of screen)
                             const anchor = sel.anchorNode;
                             const element = anchor.nodeType === 1 ? anchor : anchor.parentElement;
                             if (element) {
@@ -1860,11 +2241,8 @@
                             this.user.proofToken = token;
 
                             if (this.mesh) {
-                                // 1. Announce we are ready
                                 this.mesh.broadcastIdentity();
-                                // 2. ASK FOR DATA (The missing link)
                                 console.log("[P2P] ⏳ Ready. Waiting for peer cursor...");
-                                //this.mesh.requestSync(null);
                             }
 
                             this.updateStatus();
@@ -1900,21 +2278,162 @@
                 this.peeking = !this.peeking;
                 this.ui.dashboardPanel.classList.toggle('peek-mode', this.peeking);
                 this.updatePeekState(this.peeking ? 1 : 0);
+                document.getElementById('connect-content-layer')?.classList.remove('visible');
             }
             updatePeekState(val) { if (window.state?.peeking) { window.state.peeking.active = val > 0; window.state.peeking.value = val; } }
 
+            exitHalfPeek() {
+                if (!this.halfPeekMode) return;
+                this.halfPeekMode = null;
+                this.ui.dashboardPanel.classList.remove('half-peek');
+                this.ui.subNavLayer.classList.remove('half-slide');
+                document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
+                document.getElementById('connect-content-layer')?.classList.remove('visible');
+            }
+
+            enterFullPeek(connectType = null) {
+                this.ui.dashboardPanel.classList.remove('half-peek');
+                this.ui.subNavLayer.classList.remove('half-slide');
+                this.halfPeekMode = null;
+
+                if (window.state) window.state.renderPath = false;
+
+                this.peeking = true;
+                this.ui.dashboardPanel.classList.add('peek-mode');
+
+                document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
+
+                const contentLayer = document.getElementById('connect-content-layer');
+                if (contentLayer) {
+                    contentLayer.querySelectorAll('.connect-view').forEach(el => el.classList.remove('active'));
+
+                    if (connectType === 'qr') {
+                        contentLayer.classList.add('visible');
+                        document.getElementById('view-qr')?.classList.add('active');
+
+                        // NEW: Generate QR Code for Host Mode
+                        const qrContainer = document.getElementById('qr-display-container');
+                        qrContainer.innerHTML = ''; // Clear previous
+
+                        // 1. Generate VIP Secret
+                        const secret = Math.random().toString(36).substring(2, 8);
+
+                        // 2. Register Secret with Mesh
+                        if (this.mesh) this.mesh.setExpectedSecret(secret);
+
+                        // 3. Create Payload (Room Hex + Secret)
+                        const roomHex = this.user.color.replace('#', '');
+                        const payload = JSON.stringify({ h: roomHex, s: secret });
+
+                        // 4. Render QR
+                        new QRCode(qrContainer, {
+                            text: payload,
+                            width: 250,
+                            height: 250,
+                            colorDark: "#000000",
+                            colorLight: "#ffffff",
+                            correctLevel: QRCode.CorrectLevel.L
+                        });
+
+                    } else {
+                        contentLayer.classList.remove('visible');
+                    }
+                }
+
+                if (connectType) {
+                    this.selectedConnectType = connectType;
+                }
+            }
+
+            // NEW: Scan Logic (Guest Mode)
+            startScanning() {
+                // Switch to scanner view
+                document.querySelectorAll('.connect-view').forEach(el => el.classList.remove('active'));
+                document.getElementById('view-scanner').classList.add('active');
+
+                const html5QrCode = new Html5Qrcode("qr-reader");
+
+                html5QrCode.start(
+                    { facingMode: "environment" },
+                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    (decodedText, decodedResult) => {
+                        html5QrCode.stop().then(() => {
+                            this.handleScannedData(decodedText);
+                        }).catch(err => console.error("Stop failed", err));
+                    },
+                    (errorMessage) => {
+                        // ignore parse errors
+                    }
+                ).catch(err => {
+                    console.error("Camera failed", err);
+                    alert("Camera access required to scan.");
+                });
+            }
+
+            handleScannedData(jsonString) {
+                try {
+                    const data = JSON.parse(jsonString);
+                    // Expect format: { h: "hexcolor", s: "secret" }
+                    if (data.h && data.s) {
+                        console.log("QR Scan Success:", data);
+
+                        // 1. Store ticket for the upcoming connection
+                        this.pendingVipTicket = data.s;
+
+                        // 2. Hide scanner UI
+                        this.togglePeek(); // Close the peek panel
+
+                        // 3. Connect to the room
+                        this.connectAndPreview('#' + data.h, true);
+                    }
+                } catch (e) {
+                    alert("Invalid QR Code Format");
+                }
+            }
+
+            showProfileHalfPeek() {
+                if (this.peeking) {
+                    this.togglePeek();
+                }
+                if (this.halfPeekMode) {
+                    this.exitHalfPeek();
+                }
+
+                this.halfPeekMode = 'profile';
+                this.ui.dashboardPanel.classList.add('half-peek');
+                this.ui.subNavLayer.classList.add('half-slide');
+
+                document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
+                document.getElementById('header-profile')?.classList.add('active');
+
+                const profileHex = document.getElementById('profile-hex');
+                if (profileHex) {
+                    profileHex.textContent = this.user.color.toUpperCase();
+                    const hex = this.user.color.replace('#', '');
+                    const r = parseInt(hex.substr(0, 2), 16) / 255;
+                    const g = parseInt(hex.substr(2, 2), 16) / 255;
+                    const b = parseInt(hex.substr(4, 2), 16) / 255;
+                    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+                    profileHex.style.color = luminance > 0.5 ? 'black' : 'white';
+                }
+
+                this.ui.topNav.classList.add('visible');
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            }
+
             logout() {
                 if (window.resetSphereView) window.resetSphereView();
-                this.ui.dashboardPanel.classList.remove('active', 'revealed', 'step-down', 'peek-mode'); this.ui.dashboardPanel.style.transform = '';
-                this.peeking = false; this.updatePeekState(0);
+                this.ui.dashboardPanel.classList.remove('active', 'revealed', 'step-down', 'peek-mode', 'half-peek'); this.ui.dashboardPanel.style.transform = '';
+                this.peeking = false; this.halfPeekMode = null; this.updatePeekState(0);
                 this.ui.loginCard.classList.remove('visible'); this.ui.topNav.classList.remove('visible');
                 this.ui.hoverTrigger.style.display = 'none'; this.ui.loginBtn.classList.remove('hidden');
                 document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>';
                 if (this.mesh) { this.mesh.leave(); this.mesh = null; }
                 this.ui.display.innerHTML = ''; this.ui.minimap.innerHTML = ''; this.activeLocks = {};
 
-                // Reset nav and subnav to home state for next login
-                document.getElementById('sub-nav-layer')?.classList.remove('peek-slide');
+                document.getElementById('connect-content-layer')?.classList.remove('visible');
+
+                document.getElementById('sub-nav-layer')?.classList.remove('peek-slide', 'half-slide');
                 document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
                 document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                 document.querySelector('.nav-item[data-target="home"]')?.classList.add('active');
@@ -1971,7 +2490,6 @@
 
                     const keysToRequest = [];
 
-                    // --- SCROLL UP (PREPEND) ---
                     if (st < 100) {
                         const oldHeight = sh;
                         const start = firstIndex - 10;
@@ -1979,9 +2497,7 @@
 
                         let html = '';
                         for (let i = start; i <= end; i++) {
-                            // Create empty line
                             html += this.reconstructLine(roomHex + i, null, null);
-                            // Add ID to request list
                             keysToRequest.push(roomHex + i);
                         }
 
@@ -1989,23 +2505,19 @@
                         if (c.scrollHeight > 0) c.scrollTop = st + (c.scrollHeight - oldHeight);
                     }
 
-                    // --- SCROLL DOWN (APPEND) ---
                     if (sh - st - ch < 100) {
                         const start = lastIndex + 1;
                         const end = lastIndex + 10;
 
                         let html = '';
                         for (let i = start; i <= end; i++) {
-                            // Create empty line
                             html += this.reconstructLine(roomHex + i, null, null);
-                            // Add ID to request list
                             keysToRequest.push(roomHex + i);
                         }
 
                         this.ui.display.insertAdjacentHTML('beforeend', html);
                     }
 
-                    // --- CLEANUP (Keep DOM light) ---
                     if (children.length > 250) {
                         if (st > sh / 2) {
                             for (let i = 0; i < 50; i++) children[0].remove();
@@ -2014,8 +2526,6 @@
                         }
                     }
 
-                    // --- NETWORK REQUEST ---
-                    // If we generated new lines, ask the peer if they have data for them
                     if (this.mesh && keysToRequest.length > 0) {
                         this.mesh.requestSync(keysToRequest);
                     }
@@ -2026,8 +2536,6 @@
 
             sanitize(str) { return DOMPurify.sanitize(str, { ALLOWED_TAGS: ['b', 'i', 'u', 'a', 'br', 'div', 'span'], ALLOWED_ATTR: ['href', 'style', 'class', 'target'] }); }
 
-            // Inside EditorApp class
-
             reapplyVisualLocks() {
                 document.querySelectorAll('.locked-line').forEach(el => {
                     el.classList.remove('locked-line');
@@ -2036,13 +2544,11 @@
                 });
 
                 const now = Date.now();
-                // HEX VALIDATION REGEX
                 const hexRegex = /^#[0-9a-fA-F]{6}$/i;
 
                 for (const [pid, lock] of Object.entries(this.activeLocks)) {
                     if (now - lock.ts > 60000) continue;
 
-                    // SECURITY CHECK: CSS INJECTION
                     if (!lock.color || !hexRegex.test(lock.color)) continue;
 
                     const el = document.getElementById(lock.lineId);
@@ -2066,8 +2572,7 @@
             async runSequencedScan() { for (const rId of this.visitedRooms) { try { const r = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, rId); await new Promise(res => setTimeout(() => { window.postMessage({ type: 'handle-ready', hex: rId.replace('color-', '#'), count: Object.keys(r.getPeers()).length }, '*'); r.leave(); res(); }, 1000)); } catch (e) { } } }
         }
 
-        // 1. The Worker Logic (Stringified) 
-
+        // 1. The Worker Logic
         const WORKER_SOURCE = `
 const DEFAULT_PASS = "FFFFFF";
 let _keyPair = null;
@@ -2077,51 +2582,39 @@ let _encryptedBlob = null;
 let _locked = true;
 let _currentPassword = null;
 
-// --- POW for Sybil Protection ---
 const DIFFICULTY_PREFIX = "0000"; 
 
 async function computeProof(roomHex) {
-    console.log("Worker starting proof computation...");
     const encoder = new TextEncoder();
     let nonce = 0;
     while (true) {
         nonce++;
-        // Combine room, a timestamp (rounded to the hour so it expires), and the nonce
         const hourStamp = Math.floor(Date.now() / 3600000); 
         const attempt = roomHex + hourStamp + nonce;
-        
         const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(attempt));
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        
         if (hashHex.startsWith(DIFFICULTY_PREFIX)) {
             return hourStamp + "_" + nonce;
         }
-        // Yield occasionally
         if (nonce % 1000 === 0) await new Promise(r => setTimeout(r, 0));
     }
 }
 
 async function isValidPeer(peerId, roomHex) {
-    console.log("Worker verifying peer:", peerId);
     if (!peerId || !peerId.includes('_')) return false;
     const [hourStamp, nonce] = peerId.split('_');
-    
-    // 1. Check if the token is expired (older than 1-2 hours)
     const currentHour = Math.floor(Date.now() / 3600000);
     if (Math.abs(currentHour - parseInt(hourStamp)) > 1) return false;
 
-    // 2. Validate Proof of Work
     const encoder = new TextEncoder();
     const attempt = roomHex + hourStamp + nonce;
     const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(attempt));
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
     return hashHex.startsWith(DIFFICULTY_PREFIX);
 }
 
-// --- DB Helpers ---
 function openKeyDB() {
     return new Promise((resolve, reject) => {
         const req = indexedDB.open("sys_security", 2);
@@ -2139,7 +2632,6 @@ function openColorDB(hex = null) {
         req.onsuccess = e => {
             const db = e.target.result;
             if (!db) { rej("DB failed to open"); return; }
-            
             if (hex && !db.objectStoreNames.contains(hex)) {
                 const v = db.version + 1;
                 db.close();
@@ -2157,7 +2649,6 @@ function openColorDB(hex = null) {
     });
 }
 
-// --- Crypto Helpers ---
 async function deriveKeyFromPass(password, salt) {
     const enc = new TextEncoder();
     const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]);
@@ -2183,7 +2674,6 @@ async function saveWrappedKeys(password, keysJwkObj, pubKeyJwk) {
     const tx = db.transaction(["keys"], "readwrite");
     tx.objectStore("keys").put(_encryptedBlob, "wrapped_keys");
     await new Promise(r => tx.oncomplete = r);
-    
     db.close(); 
 }
 
@@ -2217,23 +2707,16 @@ async function verify(key, content, signature) {
     return await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-512" }, key, Uint8Array.from(atob(signature), c => c.charCodeAt(0)), new TextEncoder().encode(content));
 }
 
-// --- Key Management Actions ---
 async function init() {
     const db = await openKeyDB();
-    const tx = db.transaction(["keys"], "readwrite"); // Request access
+    const tx = db.transaction(["keys"], "readwrite");
     const req = tx.objectStore("keys").get("wrapped_keys");
-    
-    // Wait for the DB to give us the data
     await new Promise(r => tx.oncomplete = r);
-    
-    // --- THE FIX: Close connection IMMEDIATELY so the next reload isn't blocked ---
     const result = req.result;
     db.close(); 
-    // -----------------------------------------------------------------------------
 
     if (result) {
         _encryptedBlob = result;
-        // If we have keys, try to unlock with default
         try { 
             await unlock(DEFAULT_PASS); 
             return "DEFAULT"; 
@@ -2241,7 +2724,6 @@ async function init() {
             return "LOCKED"; 
         }
     } else {
-        // If no keys exist, make new ones
         await generate(); 
         return "DEFAULT";
     }
@@ -2278,34 +2760,25 @@ async function updatePass(newPassword) {
      _currentPassword = newPassword;
 }
 
-// --- DB Logic ---
 async function db_write_local({ roomHex, index, content, owner }) {
     if (_locked) throw new Error("Locked");
-    
-    // 1. TIMESTAMP
     const ts = Date.now();
-    // 2. CANONICAL PAYLOAD (Using concatenation to avoid backtick issues)
     const safeContent = content || "";
     const payload = index + ":" + ts + ":" + owner + ":" + safeContent;
-    
-
     const signature = await sign(payload);
     const encrypted = await encrypt(content);
     const db = await openColorDB(roomHex);
      return new Promise((resolve, reject) => {
         const tx = db.transaction([roomHex], 'readwrite');
         const store = tx.objectStore(roomHex);
-        
         const record = { 
             content: encrypted, 
             owner: owner, 
             updated: ts, 
             signature: signature 
         };
-
         if (!content || content.trim() === '') store.delete(parseInt(index));
         else store.put(record, parseInt(index));
-        
         tx.oncomplete = () => { 
             db.close(); 
             resolve({ index, content, owner, signature, updated: ts }); 
@@ -2315,49 +2788,27 @@ async function db_write_local({ roomHex, index, content, owner }) {
 }
 
 async function db_verify_remote_batch({ fragments, roomHex, peerId }) {
-    console.log('[Worker] 🧐 Verifying batch from ' + peerId, fragments);
-
-    if (!_peerKeys[peerId]) {
-        console.warn('[Worker] ❌ REJECTED: No public key found for ' + peerId);
-        return {};
-    }
-
+    if (!_peerKeys[peerId]) return {};
     const db = await openColorDB(roomHex);
     const tx = db.transaction([roomHex], 'readwrite');
     const store = tx.objectStore(roomHex);
     const verified = {};
-    
     for (const idxString of Object.keys(fragments)) {
         const index = parseInt(idxString);
         const item = fragments[idxString];
-        
-        // RECONSTRUCT PAYLOAD
         const safeContent = item.content || "";
         const payload = index + ":" + item.updated + ":" + item.owner + ":" + safeContent;
-
         try {
             const isValid = await verify(_peerKeys[peerId], payload, item.signature);
-            if (!isValid) {
-                console.warn('[Worker] ❌ Invalid Signature for index ' + index);
-                continue;
-            }
-
+            if (!isValid) continue;
             const existing = await new Promise(r => {
                 const req = store.get(index);
                 req.onsuccess = () => r(req.result);
                 req.onerror = () => r(null);
             });
+            if (existing && existing.updated >= item.updated) continue;
+            if (existing && existing.owner && existing.owner !== item.owner) continue;
 
-            if (existing && existing.updated >= item.updated) {
-                 console.warn('[Worker] ⚠️ Old Data for ' + index);
-                 continue;
-            }
-            if (existing && existing.owner && existing.owner !== item.owner) {
-                console.warn('[Worker] 🔒 Permission Denied for ' + index);
-                continue;
-            }
-
-            // ACCEPT
             if (item.content && item.content.trim() !== '') {
                 const enc = await encrypt(item.content);
                 store.put({ 
@@ -2370,17 +2821,12 @@ async function db_verify_remote_batch({ fragments, roomHex, peerId }) {
                 store.delete(index);
             }
             verified[index] = item;
-        } catch(e) {
-            console.error('[Worker] Error processing ' + index, e);
-        }
+        } catch(e) { }
     }
-    
     await new Promise(r => {
         tx.oncomplete = () => { db.close(); r(); };
         tx.onerror = () => { db.close(); r(); };
     });
-    
-    console.log('[Worker] ✅ Finished. Verified count: ' + Object.keys(verified).length);
     return verified;
 }
 
@@ -2430,7 +2876,6 @@ async function db_read_specific({ roomHex, keys }) {
      return results;
 }
 
-// Action Handler
 self.onmessage = async (e) => {
     const { id, action, data } = e.data;
     try {
@@ -2490,7 +2935,6 @@ self.onmessage = async (e) => {
                 stx.onerror = () => sdb.close();
                 res = true;
                 break;
-            // Compatibility
             case 'sign': res = await sign(data); break;
             case 'encrypt': res = await encrypt(data); break;
             case 'decrypt': res = await decrypt(data); break;
@@ -2616,7 +3060,6 @@ self.onmessage = async (e) => {
             else if (confirm("Update master password?")) await window.app.identity.updatePassword(pass);
         });
     </script>
-    <!-- WebGPU Logic Remains Exactly as provided -->
     <script type="module">
         let storageScope = window.localStorage; document.getElementById('login-btn').addEventListener('click', async () => { if (document.getElementById('login-btn').innerText === 'LOGIN') { try { storageScope.setItem("lastSphereColor", document.getElementById('color-hex').innerText); } catch (e) { } } if (window.enterRoomUI) window.enterRoomUI(); });
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) };
@@ -2643,16 +3086,11 @@ self.onmessage = async (e) => {
             document.getElementById('debug-btn').onclick = function () { state.debugMode = !state.debugMode; this.classList.toggle('active', state.debugMode); this.innerText = state.debugMode ? "DEBUG ON" : "DEBUG OFF"; document.getElementById('debug-panel').classList.toggle('visible', state.debugMode); };
             document.getElementById('reset-btn').onclick = async () => {
                 if (confirm("Permanently wipe all local data?")) {
-                    // 1. Clear Storage
                     localStorage.clear();
-
-                    // 2. Wipe Databases (Robust Method)
                     const DB_NAMES = ['color', 'sys_security'];
                     for (const name of DB_NAMES) {
                         try { window.indexedDB.deleteDatabase(name); } catch (e) { }
                     }
-
-                    // 3. CLEAN RELOAD: Redirect to base URL (removes #hex)
                     window.location.href = window.location.origin + window.location.pathname;
                 }
             }; state.cones.forEach((c, i) => { const el = document.getElementById(`data-${i}`); if (!el) return; el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`; const title = document.getElementById(`title-${i}`); title.addEventListener('click', (e) => { if (!document.body.classList.contains('light-mode')) { e.stopPropagation(); state.cones[i].active = !state.cones[i].active; } });['x', 'y', 'z'].forEach((ax, idx) => document.getElementById(`${ax}-${i}`).addEventListener('mousedown', (e) => { if (!document.body.classList.contains('light-mode')) { e.preventDefault(); e.stopPropagation(); state.valueScrub = { active: true, coneIndex: i, coordIndex: idx, startY: e.clientY }; } })); state.uiCache[i] = { title, x: document.getElementById(`x-${i}`), y: document.getElementById(`y-${i}`), z: document.getElementById(`z-${i}`), lastPos: [null, null, null], lastActive: null }; });
@@ -2671,18 +3109,20 @@ self.onmessage = async (e) => {
         function transformPos(p, m) { return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]]; }
         function projectToScreen(worldPos) { const m = state.vpMatrix, x = worldPos[0], y = worldPos[1], z = worldPos[2], clipX = x * m[0] + y * m[4] + z * m[8] + m[12], clipY = x * m[1] + y * m[5] + z * m[9] + m[13], clipW = x * m[3] + y * m[7] + z * m[11] + m[15]; if (clipW <= 0) return null; return { x: (clipX / clipW + 1) * state.canvas.width / 2, y: (1 - clipY / clipW) * state.canvas.height / 2 }; }
         function onMouseDown(e) {
-            if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav')) return;
+            if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return;
             if (state.valueScrub.active) return;
+
+            const dashboardActive = document.getElementById('dashboard-panel')?.classList.contains('active');
+            const loginCardVisible = document.getElementById('login-card')?.classList.contains('visible');
+            if (dashboardActive || loginCardVisible) return;
+
             const rect = state.canvas.getBoundingClientRect();
             state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top, down: true };
             state.clickData = { startX: state.mouse.x, startY: state.mouse.y, startTime: Date.now() };
 
-            // --- EDITED SECTION START ---
-            // Initialize signature as 'click' with empty path
             state.interactionSignature = { type: 'click', path: [] };
             state.pathPoints = [];
             state.pathStartPos = null;
-            // --- EDITED SECTION END ---
 
             if (document.body.classList.contains('light-mode')) {
                 state.inertia.val = 0;
@@ -2704,12 +3144,8 @@ self.onmessage = async (e) => {
                     const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]]);
                     const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100];
 
-                    // --- EDITED SECTION START ---
-                    // Store the initial point. If user releases immediately, it's a click with 1 point.
-                    // If they drag, this is the start of the path.
                     state.pathPoints = [rounded];
                     state.interactionSignature.path = [rounded];
-                    // --- EDITED SECTION END ---
 
                     startDragLogic(p, clickedExisting);
                 } else {
@@ -2726,7 +3162,6 @@ self.onmessage = async (e) => {
             state.mouse.x = e.clientX - r.left;
             state.mouse.y = e.clientY - r.top;
 
-            // Logic for dragging onto the sphere from outside
             if (state.mouse.down && state.interaction && state.interaction.mode === 'waiting') {
                 const ray = getMouseRay(state.mouse.x, state.mouse.y);
                 const closest = Vec3.add(ray.o, Vec3.scale(ray.d, Vec3.dot(Vec3.sub([0, 0, 0], ray.o), ray.d)));
@@ -2736,51 +3171,40 @@ self.onmessage = async (e) => {
                     state.interaction.mode = 'normal';
                     state.interaction.hasTouchedSphere = true;
 
-                    // --- EDITED SECTION START ---
-                    state.interactionSignature.type = 'drag'; // Switch to drag
+                    state.interactionSignature.type = 'drag';
                     const m = state.sphere.rotation;
                     const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]]);
                     const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100];
 
                     state.pathPoints = [rounded];
-                    state.interactionSignature.path = [rounded]; // Initialize path
-                    // --- EDITED SECTION END ---
+                    state.interactionSignature.path = [rounded];
 
                     startDragLogic(p, false);
                 }
             }
 
-            // Logic for continuous dragging
             if (state.mouse.down && state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active) {
                 const m = state.sphere.rotation;
                 const localCenterPos = [m[2], m[6], m[10]];
                 const lastPoint = state.pathPoints[state.pathPoints.length - 1];
 
-                // Check distance to avoid saving duplicate points if mouse hasn't moved enough
                 if (!lastPoint || Vec3.dist(localCenterPos, lastPoint) > 0.01) {
                     const normalized = Vec3.normalize(localCenterPos);
                     const rounded = [Math.round(normalized[0] * 100) / 100, Math.round(normalized[1] * 100) / 100, Math.round(normalized[2] * 100) / 100];
 
-                    // --- EDITED SECTION START ---
                     state.pathPoints.push(rounded);
-
-                    // Update the Signature Data
-                    state.interactionSignature.type = 'drag'; // Confirm it is a drag
-                    state.interactionSignature.path.push(rounded); // Add point to path
-                    // --- EDITED SECTION END ---
+                    state.interactionSignature.type = 'drag';
+                    state.interactionSignature.path.push(rounded);
                 }
 
                 if (state.pathPoints.length > 500) state.pathPoints.shift();
-
-                // Keep signature path reasonable size too
                 if (state.interactionSignature.path.length > 1000) state.interactionSignature.path.shift();
             }
         }
-        function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return; } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const col = getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = rgbToHex(col[0], col[1], col[2]); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, false); setTimeout(() => { state.pathPoints = []; state.pathStartPos = null; }, 500); return; } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { try { localStorage.setItem("lastSphereColor", h.hex); } catch (e) { } triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true); return; } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false); } } } state.pathPoints = []; state.pathStartPos = null; }
+        function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return; } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const col = getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = rgbToHex(col[0], col[1], col[2]); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, false); setTimeout(() => { state.pathPoints = []; state.pathStartPos = null; }, 500); return; } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { try { localStorage.setItem("lastSphereColor", h.hex); } catch (e) { } triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true); return; } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false); } } } state.pathPoints = []; state.pathStartPos = null; }
         function triggerLanding(norm, pos, col, fromUrl = false) { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const cam = Vec3.normalize(state.cameraPos), axis = Vec3.cross(norm, cam), dot = Vec3.dot(norm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (window.connectAndPreview) window.connectAndPreview(hex, fromUrl); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1'; }, 200); }, 1000); }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4; }
         function toggleFreeze() {
-            // Check if we are in "Zoomed In" mode (either fully logged in OR just looking at the login card)
             const isZoomed = document.getElementById('dashboard-panel').classList.contains('active') ||
                 document.getElementById('login-card').classList.contains('visible');
 
@@ -2805,7 +3229,7 @@ self.onmessage = async (e) => {
             btn.style.opacity = '1';
         }
         function getSurfaceColor(p, n, cones = state.cones) { const getI = (i) => { if (!cones[i].active) return 0; const diff = Vec3.sub(cones[i].pos, p); const distSq = Vec3.dot(diff, diff); const L = Vec3.normalize(diff); const wrap = Math.max(Vec3.dot(n, L) + 1.0, 0.0) / 2.0; const spread = Math.pow(wrap, 1.25); return spread * (1.0 / (1.0 + distSq * 0.05)); }; const d = [getI(0), getI(1), getI(2)]; const c = cones.map(x => x.color); let l = Vec3.add(Vec3.add(Vec3.scale(c[0], d[0]), Vec3.scale(c[1], d[1])), Vec3.scale(c[2], d[2])); const boost = (i, j) => { const sumD = d[i] + d[j] + 0.001; const factor = (2.0 * d[i] * d[j] / sumD); return Vec3.scale(Vec3.add(c[i], c[j]), factor); }; l = Vec3.add(l, boost(0, 1)); l = Vec3.add(l, boost(1, 2)); l = Vec3.add(l, boost(2, 0)); const minD = Math.min(d[0], Math.min(d[1], d[2])); const maxD = Math.max(d[0], Math.max(d[1], d[2])); let t = (minD - 0.15) / (0.40 - 0.15); t = Math.max(0.0, Math.min(1.0, t)); const maskBase = t * t * (3.0 - 2.0 * t); const variance = maxD - minD; const roundness = Math.exp(-variance * 10.0); const finalMask = maskBase * roundness; const whiteTarget = [1.0, 1.0, 1.0]; l = [l[0] * (1.0 - finalMask) + whiteTarget[0] * finalMask, l[1] * (1.0 - finalMask) + whiteTarget[1] * finalMask, l[2] * (1.0 - finalMask) + whiteTarget[2] * finalMask]; l = l.map(x => x * 1.2); return l.map(x => { const val = Math.min(Math.max(x, 0), 1); return val * val * (3.0 - 2.0 * val); }); }
-        function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav')) { t.style.display = 'none'; return; } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return; } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return; } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return; } const hex = rgbToHex(...getSurfaceColor(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))), Vec3.normalize(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p))))))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}`; }); }
+        function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return; } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return; } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return; } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return; } const hex = rgbToHex(...getSurfaceColor(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))), Vec3.normalize(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p))))))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}`; }); }
         window.resetSphereView = function (animateIn = false, keepRotation = false) {
             const m = state.sphere.rotation;
             const trace = m[0] + m[5] + m[10];
@@ -2815,9 +3239,6 @@ self.onmessage = async (e) => {
             const sl = Math.sqrt(diff[0] ** 2 + diff[1] ** 2 + diff[2] ** 2);
             if (sl > 0.001) axis = [diff[0] / sl, diff[1] / sl, diff[2] / sl];
 
-            // Determine Start Distance: 
-            // If animateIn is true, start far away (15.0) to zoom in. 
-            // Otherwise use current position (smooth reset).
             const startDist = animateIn ? 15.0 : Vec3.len(state.cameraPos);
 
             state.returning = {
@@ -2827,7 +3248,7 @@ self.onmessage = async (e) => {
                 rotationAxis: axis,
                 rotationAngle: keepRotation ? 0 : -angle,
                 keepRotation: keepRotation,
-                startDist: startDist, // <--- Updated
+                startDist: startDist,
                 targetDist: getResponsiveZ(),
                 coneStartPositions: state.cones.map(c => [...c.pos])
             };
