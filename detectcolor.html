@@ -8,34 +8,35 @@
         body {
             margin: 0;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
             height: 100vh;
-            background-color: #222;
+            background-color: #111;
             font-family: sans-serif;
-            overflow: hidden;
+            overflow: hidden; /* Prevents scrollbars */
         }
 
-        /* Container for video and overlay */
+        /* Container acts as the 'frame' for everything */
         #camera-container {
             position: relative;
             width: 100%;
-            max-width: 600px;
-            aspect-ratio: 9/16; /* Typical mobile aspect ratio */
+            height: 100%; /* Full screen for mobile feel */
+            max-width: 600px; /* Limit width on desktop */
+            max-height: 90vh; /* Don't be taller than screen */
+            aspect-ratio: 9/16; 
             background: #000;
-            overflow: hidden;
             border-radius: 12px;
+            overflow: hidden;
             box-shadow: 0 4px 20px rgba(0,0,0,0.5);
         }
 
         video {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: cover; /* Ensures video fills the box */
         }
 
-        /* The Crosshair (Pure CSS) */
+        /* The Crosshair */
         .crosshair {
             position: absolute;
             top: 50%;
@@ -43,45 +44,53 @@
             transform: translate(-50%, -50%);
             width: 20px;
             height: 20px;
-            pointer-events: none; /* Let clicks pass through */
+            pointer-events: none;
+            z-index: 10;
         }
         .crosshair::before, .crosshair::after {
             content: '';
             position: absolute;
-            background: rgba(255, 255, 255, 0.8);
-            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 4px rgba(0,0,0,0.8);
         }
-        /* Vertical line */
-        .crosshair::before {
-            top: 0; left: 9px; width: 2px; height: 100%;
-        }
-        /* Horizontal line */
-        .crosshair::after {
-            top: 9px; left: 0; width: 100%; height: 2px;
-        }
+        .crosshair::before { top: 0; left: 9px; width: 2px; height: 100%; }
+        .crosshair::after { top: 9px; left: 0; width: 100%; height: 2px; }
 
-        /* Color Info Box */
+        /* Color Info Box - Now Floating ON TOP of video */
         #color-info {
-            margin-top: 20px;
-            padding: 15px 30px;
-            background: #333;
+            position: absolute;
+            bottom: 30px; /* Float 30px from bottom of video */
+            left: 50%;
+            transform: translateX(-50%); /* Center horizontally */
+            
+            padding: 12px 24px;
+            background: rgba(0, 0, 0, 0.75); /* Semi-transparent black */
+            backdrop-filter: blur(5px); /* Blurs the video behind the box */
             color: white;
             border-radius: 50px;
-            text-align: center;
-            font-size: 1.5rem;
-            font-weight: bold;
+            border: 1px solid rgba(255,255,255,0.2);
+            
             display: flex;
             align-items: center;
             gap: 15px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            z-index: 20; /* Ensure it's above video */
+            white-space: nowrap;
         }
 
         #swatch {
-            width: 40px;
-            height: 40px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             border: 2px solid #fff;
             background-color: #000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+        }
+        
+        #hex-code {
+            font-family: monospace;
+            font-size: 1.2rem;
+            font-weight: bold;
+            letter-spacing: 1px;
         }
     </style>
 </head>
@@ -93,14 +102,15 @@
         
         <!-- The Crosshair overlay -->
         <div class="crosshair"></div>
-        
-        <!-- Hidden canvas for processing pixel data -->
-        <canvas id="canvas" style="display:none;"></canvas>
-    </div>
 
-    <div id="color-info">
-        <div id="swatch"></div>
-        <span id="hex-code">Scanning...</span>
+        <!-- The Floating Info Box (Moved inside container) -->
+        <div id="color-info">
+            <div id="swatch"></div>
+            <span id="hex-code">Scanning...</span>
+        </div>
+        
+        <!-- Hidden canvas for processing -->
+        <canvas id="canvas" style="display:none;"></canvas>
     </div>
 
     <script>
@@ -110,63 +120,52 @@
         const hexDisplay = document.getElementById('hex-code');
         const swatch = document.getElementById('swatch');
 
-        // 1. Access the camera
         async function startCamera() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
+                // Constraints: prefer rear camera, but don't fail if not available
+                const constraints = {
                     video: { 
-                        facingMode: "environment", // Request rear camera
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
+                        facingMode: "environment",
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
                     }
-                });
+                };
+                
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
             } catch (err) {
                 console.error("Error accessing camera:", err);
-                hexDisplay.innerText = "Camera Error";
+                hexDisplay.innerText = "Error";
+                alert("Please allow camera access to use this feature.");
             }
         }
 
-        // 2. Convert RGB to Hex helper function
         function rgbToHex(r, g, b) {
             return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
         }
 
-        // 3. The loop: Draw video to canvas -> Read pixel -> Update UI
         function scanColor() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                // Set canvas size to match video size (only needs to be done once technically, but safe here)
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
 
-                // Draw the current video frame onto the hidden canvas
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                // Get the center pixel coordinates
+                // Get center pixel
                 const centerX = Math.floor(canvas.width / 2);
                 const centerY = Math.floor(canvas.height / 2);
-
-                // Get pixel data (Red, Green, Blue, Alpha)
                 const pixelData = ctx.getImageData(centerX, centerY, 1, 1).data;
-                const r = pixelData[0];
-                const g = pixelData[1];
-                const b = pixelData[2];
 
-                // Convert to Hex
-                const hex = rgbToHex(r, g, b);
+                const hex = rgbToHex(pixelData[0], pixelData[1], pixelData[2]);
 
-                // Update text and color swatch
+                // Update UI
                 hexDisplay.innerText = hex;
                 swatch.style.backgroundColor = hex;
             }
-
-            // Request the next animation frame to keep the loop running
             requestAnimationFrame(scanColor);
         }
 
-        // Start everything
         startCamera().then(() => {
-            // Wait for video to start playing before we start scanning
             video.addEventListener('play', () => {
                 requestAnimationFrame(scanColor);
             });
