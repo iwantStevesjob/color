@@ -3,470 +3,483 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Offline QR Tool (Full Math)</title>
+    <title>Offline QR Master (Polyfill Engine)</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f0f2f5; color: #333; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        h2 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        body { font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #1a1a1a; color: #eee; }
+        .card { background: #2d2d2d; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); margin-bottom: 20px; }
+        h2 { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; color: #fff; }
         
-        /* Generator UI */
+        /* Generator */
         .input-group { display: flex; gap: 10px; margin-bottom: 15px; }
-        input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 6px; }
+        input { flex: 1; padding: 12px; background: #333; border: 1px solid #555; color: white; border-radius: 6px; }
         button { padding: 12px 20px; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
         button:hover { background: #1d4ed8; }
-        button.stop { background: #dc2626; }
-        button.stop:hover { background: #b91c1c; }
         
-        #canvas-container { text-align: center; margin-top: 20px; min-height: 200px; display: flex; align-items: center; justify-content: center; background: #fafafa; border: 1px dashed #ccc; border-radius: 8px; }
-        canvas { max-width: 100%; height: auto; }
-
-        /* Reader UI */
-        #video-wrapper { position: relative; background: #000; border-radius: 8px; overflow: hidden; display: none; margin-top: 15px;}
-        video { width: 100%; height: 300px; object-fit: cover; display: block; }
-        #scan-result { margin-top: 15px; padding: 10px; background: #e0f2fe; border-left: 4px solid #2563eb; font-family: monospace; word-break: break-all; display: none; }
-        .error { color: #dc2626; font-size: 0.9em; margin-top: 5px; }
+        #canvas-gen { margin-top: 10px; padding: 10px; background: white; border-radius: 4px; display: inline-block; }
+        
+        /* Reader */
+        #cam-container { position: relative; background: #000; border-radius: 8px; overflow: hidden; display: none; margin-top: 15px; height: 320px; }
+        video { width: 100%; height: 100%; object-fit: cover; opacity: 0.8; }
+        #scan-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 200px; height: 200px; border: 2px solid rgba(255, 0, 0, 0.7); box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.5); z-index: 10; }
+        #scan-line { position: absolute; top: 50%; left: 10%; right: 10%; height: 2px; background: red; animation: scan 2s infinite; }
+        
+        #status-pill { margin-top: 10px; padding: 8px 12px; border-radius: 20px; background: #444; display: inline-block; font-size: 0.85em; }
+        .success { background: #059669 !important; color: white; }
+        .fail { background: #dc2626 !important; color: white; }
+        
+        @keyframes scan { 0% {top:10%} 50%{top:90%} 100%{top:10%} }
     </style>
 </head>
 <body>
 
     <!-- GENERATOR -->
     <div class="card">
-        <h2>QR Generator (Client-Side)</h2>
+        <h2>QR Generator (Offline)</h2>
         <div class="input-group">
-            <input type="text" id="qr-text" placeholder="Enter text to encode..." value="Hello World">
+            <input type="text" id="qr-text" placeholder="Type text..." value="Offline QR Test">
             <button onclick="generate()">Generate</button>
         </div>
-        <div id="canvas-container">
-            <span style="color:#999">QR Code will appear here</span>
+        <div style="text-align: center;">
+            <div id="canvas-gen"></div>
         </div>
     </div>
 
     <!-- READER -->
     <div class="card">
-        <h2>QR Reader (Camera)</h2>
-        <div style="margin-bottom: 10px;">
+        <h2>QR Reader (Cam + JS Fallback)</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
             <button id="btn-start" onclick="startCamera()">Start Camera</button>
-            <button id="btn-stop" class="stop" onclick="stopCamera()" style="display:none">Stop Camera</button>
+            <button id="btn-stop" onclick="stopCamera()" style="background:#dc2626; display:none">Stop</button>
         </div>
-        <div id="error-msg" class="error"></div>
         
-        <div id="video-wrapper">
+        <div id="status-pill">Status: Idle</div>
+
+        <div id="cam-container">
             <video id="qr-video" playsinline muted></video>
+            <div id="scan-overlay"><div id="scan-line"></div></div>
+            <div style="position:absolute; bottom:10px; width:100%; text-align:center; color:white; font-size:0.8em; text-shadow:0 1px 2px black;">
+                Align code exactly in box
+            </div>
         </div>
-        <div id="scan-result"></div>
+        
+        <div id="result" style="margin-top:15px; font-family:monospace; word-break:break-all; font-size: 1.1em; color:#4ade80;"></div>
     </div>
 
     <script>
         /**
-         * ==========================================
-         * PART 1: THE MATH (QR ENCODER ENGINE)
-         * Implements Reed-Solomon & Matrix Logic
-         * Based on standard ISO 18004 algorithms
-         * ==========================================
+         * ============================================================
+         * PART 1: GALOIS FIELD & MATH ENGINE (Shared by Gen/Reader)
+         * ============================================================
          */
-        
-        const QREngine = (function() {
-            // Galois Field 256 Math for Reed-Solomon
-            const EXP_TABLE = new Uint8Array(256);
-            const LOG_TABLE = new Uint8Array(256);
-            
-            // Initialize Log/Exp tables
-            (function initTables() {
-                let x = 1;
-                for (let i = 0; i < 255; i++) {
-                    EXP_TABLE[i] = x;
-                    LOG_TABLE[x] = i;
-                    x <<= 1;
-                    if (x & 0x100) x ^= 0x11D; // Primitive polynomial
-                }
-            })();
-
-            function glog(n) { return LOG_TABLE[n]; }
-            function gexp(n) { return EXP_TABLE[n % 255]; }
-
-            // Polynomial Math
-            class Polynomial {
-                constructor(num, shift = 0) {
-                    let offset = 0;
-                    while (offset < num.length && num[offset] === 0) offset++;
-                    this.num = new Uint8Array(num.length - offset + shift);
-                    for (let i = 0; i < num.length - offset; i++) this.num[i] = num[i + offset];
-                }
-                
-                get(index) { return this.num[index]; }
-                getLength() { return this.num.length; }
-                
-                multiply(e) {
-                    const num = new Uint8Array(this.getLength() + e.getLength() - 1);
-                    for (let i = 0; i < this.getLength(); i++) {
-                        for (let j = 0; j < e.getLength(); j++) {
-                            num[i + j] ^= gexp(glog(this.get(i)) + glog(e.get(j)));
-                        }
-                    }
-                    return new Polynomial(num);
-                }
-                
-                mod(e) {
-                    if (this.getLength() - e.getLength() < 0) return this;
-                    const ratio = glog(this.get(0)) - glog(e.get(0));
-                    const num = new Uint8Array(this.getLength());
-                    for(let i=0; i<this.getLength(); i++) num[i] = this.get(i);
-                    
-                    for (let i = 0; i < e.getLength(); i++) {
-                        num[i] ^= gexp(glog(e.get(i)) + ratio);
-                    }
-                    return new Polynomial(num).mod(e);
-                }
+        const GF = (function() {
+            const exp = new Uint8Array(256);
+            const log = new Uint8Array(256);
+            let x = 1;
+            for (let i = 0; i < 255; i++) {
+                exp[i] = x; log[x] = i;
+                x <<= 1; if (x & 0x100) x ^= 0x11D;
             }
-
-            // QR Code Class
-            return class QRCode {
-                constructor(typeNumber, errorCorrectLevel) {
-                    this.typeNumber = typeNumber;
-                    this.errorCorrectLevel = errorCorrectLevel;
-                    this.modules = null;
-                    this.moduleCount = 0;
-                    this.dataCache = null;
-                    this.dataList = [];
-                }
-
-                addData(data) {
-                    const newData = new Uint8Array(new TextEncoder().encode(data));
-                    this.dataList.push(newData);
-                    this.dataCache = null;
-                }
-
-                make() {
-                    this.makeImpl(false, this.getBestMaskPattern());
-                }
-
-                makeImpl(test, maskPattern) {
-                    this.moduleCount = this.typeNumber * 4 + 17;
-                    this.modules = Array(this.moduleCount).fill(null).map(() => Array(this.moduleCount).fill(null));
-                    
-                    this.setupPositionProbePattern(0, 0);
-                    this.setupPositionProbePattern(this.moduleCount - 7, 0);
-                    this.setupPositionProbePattern(0, this.moduleCount - 7);
-                    this.setupPositionAdjustPattern();
-                    this.setupTimingPattern();
-                    this.setupTypeInfo(test, maskPattern);
-                    if (this.typeNumber >= 7) this.setupTypeNumber(test);
-                    if (this.dataCache == null) this.dataCache = this.createData(this.typeNumber, this.errorCorrectLevel, this.dataList);
-                    this.mapData(this.dataCache, maskPattern);
-                }
-
-                setupPositionProbePattern(row, col) {
-                    for (let r = -1; r <= 7; r++) {
-                        for (let c = -1; c <= 7; c++) {
-                            if (row + r <= -1 || this.moduleCount <= row + r || col + c <= -1 || this.moduleCount <= col + c) continue;
-                            if ((0 <= r && r <= 6 && (c == 0 || c == 6)) || (0 <= c && c <= 6 && (r == 0 || r == 6)) || (2 <= r && r <= 4 && 2 <= c && c <= 4)) {
-                                this.modules[row + r][col + c] = true;
-                            } else {
-                                this.modules[row + r][col + c] = false;
+            return {
+                exp: (n) => exp[n % 255],
+                log: (n) => log[n],
+                mul: (a, b) => (a === 0 || b === 0) ? 0 : exp[(log[a] + log[b]) % 255],
+                polyMul: (p1, p2) => {
+                    const res = new Uint8Array(p1.length + p2.length - 1);
+                    for (let i = 0; i < p1.length; i++) 
+                        for (let j = 0; j < p2.length; j++) 
+                            res[i+j] ^= GF.mul(p1[i], p2[j]);
+                    return res;
+                },
+                polyMod: (p, div) => {
+                    let res = new Uint8Array(p);
+                    while ((res.length - div.length) >= 0) {
+                        const coeff = res[0]; // Assume div[0] is 1 (generator poly)
+                        if (coeff !== 0) {
+                            for (let i = 0; i < div.length; i++) {
+                                res[i] ^= GF.mul(div[i], coeff);
                             }
                         }
+                        res = res.slice(1); // Shift
                     }
-                }
-
-                getBestMaskPattern() {
-                    let minPenalty = 0;
-                    let bestPattern = 0;
-                    for (let i = 0; i < 8; i++) {
-                        this.makeImpl(true, i);
-                        const penalty = this.getPenalty(); // Simplified: assuming 0 for brevity in this minimal version, or implement full penalty calc
-                        if (i == 0 || penalty < minPenalty) {
-                            minPenalty = penalty;
-                            bestPattern = i;
-                        }
-                    }
-                    return bestPattern;
-                }
-                
-                // Placeholder for full penalty calculation to save space
-                getPenalty() { return 0; } 
-
-                setupTimingPattern() {
-                    for (let r = 8; r < this.moduleCount - 8; r++) {
-                        if (this.modules[r][6] != null) continue;
-                        this.modules[r][6] = (r % 2 == 0);
-                    }
-                    for (let c = 8; c < this.moduleCount - 8; c++) {
-                        if (this.modules[6][c] != null) continue;
-                        this.modules[6][c] = (c % 2 == 0);
-                    }
-                }
-
-                setupPositionAdjustPattern() {
-                    // Simplified: Only for Version 1-10 (sufficient for minimal tool)
-                    // Full list would be huge. 
-                    const pos = [[], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
-                    if(this.typeNumber > 10) return; // Limit for minimal code
-                    
-                    const p = pos[this.typeNumber - 1];
-                    for (let i = 0; i < p.length; i++) {
-                        for (let j = 0; j < p.length; j++) {
-                            const row = p[i], col = p[j];
-                            if (this.modules[row][col] != null) continue;
-                            for (let r = -2; r <= 2; r++) {
-                                for (let c = -2; c <= 2; c++) {
-                                    this.modules[row + r][col + c] = (r == -2 || r == 2 || c == -2 || c == 2 || (r == 0 && c == 0));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                setupTypeInfo(test, maskPattern) {
-                    const data = (this.errorCorrectLevel << 3) | maskPattern;
-                    const bits = this.getBCHTypeInfo(data);
-                    for (let i = 0; i < 15; i++) {
-                        const mod = (!test && ((bits >> i) & 1) == 1);
-                        if (i < 6) this.modules[i][8] = mod;
-                        else if (i < 8) this.modules[i + 1][8] = mod;
-                        else this.modules[this.moduleCount - 15 + i][8] = mod;
-                        
-                        if (i < 8) this.modules[8][this.moduleCount - i - 1] = mod;
-                        else if (i < 9) this.modules[8][15 - i - 1 + 1] = mod;
-                        else this.modules[8][15 - i - 1] = mod;
-                    }
-                    this.modules[this.moduleCount - 8][8] = (!test);
-                }
-
-                mapData(data, maskPattern) {
-                    let inc = -1, row = this.moduleCount - 1, bitIndex = 7, byteIndex = 0;
-                    for (let col = this.moduleCount - 1; col > 0; col -= 2) {
-                        if (col == 6) col--;
-                        while (true) {
-                            for (let c = 0; c < 2; c++) {
-                                if (this.modules[row][col - c] == null) {
-                                    let dark = false;
-                                    if (byteIndex < data.length) dark = (((data[byteIndex] >>> bitIndex) & 1) == 1);
-                                    const mask = this.getMask(maskPattern, row, col - c);
-                                    if (mask) dark = !dark;
-                                    this.modules[row][col - c] = dark;
-                                    bitIndex--;
-                                    if (bitIndex == -1) { byteIndex++; bitIndex = 7; }
-                                }
-                            }
-                            row += inc;
-                            if (row < 0 || this.moduleCount <= row) { row -= inc; inc = -inc; break; }
-                        }
-                    }
-                }
-
-                createData(typeNumber, errorCorrectLevel, dataList) {
-                    const rsBlocks = this.getRSBlocks(typeNumber, errorCorrectLevel);
-                    const buffer = [];
-                    // 1. Write Data (Byte Mode 8-bit)
-                    buffer.push(4); // Mode 8-bit
-                    buffer.push(dataList[0].length >>> 4); // Length High
-                    buffer.push(dataList[0].length & 0xF); // Length Low (Simplified for ver < 10)
-                    for(let b of dataList[0]) for(let i=7; i>=0; i--) buffer.push((b >>> i) & 1);
-                    
-                    // 2. Padding
-                    const totalDataCount = rsBlocks.reduce((a,b) => a + b.dataCount, 0) * 8;
-                    if (buffer.length + 4 <= totalDataCount) buffer.push(0,0,0,0);
-                    while (buffer.length % 8 != 0) buffer.push(0);
-                    while (buffer.length < totalDataCount) {
-                        for(let b of [236, 17]) for(let i=7; i>=0; i--) if(buffer.length < totalDataCount) buffer.push((b >>> i) & 1);
-                    }
-
-                    // 3. Error Correction Calculation
-                    const dataBytes = new Uint8Array(buffer.length / 8);
-                    for(let i=0; i<dataBytes.length; i++) {
-                         let b = 0; for(let j=0; j<8; j++) b = (b << 1) | buffer[i*8+j];
-                         dataBytes[i] = b;
-                    }
-                    
-                    let offset = 0;
-                    const finalBytes = [];
-                    const ecBytesArr = [];
-                    
-                    for(let block of rsBlocks) {
-                        const dc = block.dataCount;
-                        const ec = block.totalCount - dc;
-                        const rawPoly = new Polynomial(dataBytes.slice(offset, offset + dc));
-                        
-                        // Generating Generator Polynomial
-                        let genPoly = new Polynomial([1]);
-                        for (let i = 0; i < ec; i++) genPoly = genPoly.multiply(new Polynomial([1, gexp(i)]));
-                        
-                        const ecPoly = rawPoly.mod(genPoly);
-                        
-                        for(let i=0; i<dc; i++) finalBytes.push(dataBytes[offset+i]);
-                        const ecData = ecPoly.num;
-                        // Pad EC if needed
-                        const ecPadding = ec - ecData.length;
-                        for(let i=0; i<ecPadding; i++) ecBytesArr.push(0);
-                        for(let i=0; i<ecData.length; i++) ecBytesArr.push(ecData[i]);
-                        
-                        offset += dc;
-                    }
-                    return new Uint8Array([...finalBytes, ...ecBytesArr]);
-                }
-
-                getBCHTypeInfo(data) {
-                    let d = data << 10;
-                    while (this.getBCHDigit(d) - this.getBCHDigit(1335) >= 0) {
-                        d ^= (1335 << (this.getBCHDigit(d) - this.getBCHDigit(1335)));
-                    }
-                    return ((data << 10) | d) ^ 21522;
-                }
-
-                getBCHDigit(data) {
-                    let digit = 0; while (data != 0) { digit++; data >>>= 1; } return digit;
-                }
-
-                getMask(maskPattern, i, j) {
-                    switch (maskPattern) {
-                        case 0: return (i + j) % 2 == 0;
-                        case 1: return i % 2 == 0;
-                        case 2: return j % 3 == 0;
-                        case 3: return (i + j) % 3 == 0;
-                        case 4: return (Math.floor(i / 2) + Math.floor(j / 3)) % 2 == 0;
-                        case 5: return ((i * j) % 2 + (i * j) % 3) == 0;
-                        case 6: return (((i * j) % 2 + (i * j) % 3) % 2) == 0;
-                        case 7: return (((i + j) % 2 + (i * j) % 3) % 2) == 0;
-                        default: return false;
-                    }
-                }
-
-                getRSBlocks(typeNumber, errorCorrectLevel) {
-                    // Simplified Table for Versions 1-4 (Low/Medium)
-                    // Extending this requires the full ISO table (~2kb). 
-                    // This covers typical text lengths up to ~100 chars.
-                    const rs = [
-                        [1, 26, 19], [1, 44, 34], [1, 70, 55], [1, 100, 80], // L
-                        [1, 26, 16], [1, 44, 28], [1, 70, 44], [2, 100, 64]  // M
-                    ];
-                    // Mapping simplified: Index = (Version-1) + (Level=='M'?4:0)
-                    const idx = (typeNumber - 1) + (errorCorrectLevel == 0 ? 4 : 0); // 0=M, 1=L
-                    const b = rs[idx];
-                    return [{ totalCount: b[1], dataCount: b[2] }];
+                    return res;
                 }
             };
         })();
 
         /**
-         * ==========================================
-         * PART 2: UI CONTROLLER
-         * ==========================================
+         * ============================================================
+         * PART 2: QR GENERATOR (The "Complex" Part)
+         * ============================================================
          */
+        class QRGen {
+            constructor(text) {
+                this.ver = text.length < 15 ? 1 : (text.length < 35 ? 2 : 4); 
+                this.size = this.ver * 4 + 17;
+                this.modules = Array(this.size).fill().map(() => Array(this.size).fill(null));
+                this.text = text;
+            }
 
-        // --- GENERATOR LOGIC ---
-        function generate() {
-            const text = document.getElementById('qr-text').value;
-            const container = document.getElementById('canvas-container');
-            container.innerHTML = '';
-
-            try {
-                // 1. Determine Version (1-4) based on length (Simplified logic)
-                // A robust system calculates exact bits. Here we estimate.
-                let typeNumber = 4;
-                if(text.length < 15) typeNumber = 1;
-                else if(text.length < 30) typeNumber = 2;
-                else if(text.length < 50) typeNumber = 3;
-
-                // 2. Initialize Engine (Level M = 0)
-                const qr = new QREngine(typeNumber, 0); 
-                qr.addData(text);
-                qr.make();
-
-                // 3. Render to Canvas
-                const cellSize = 5;
-                const margin = 4;
-                const size = qr.moduleCount * cellSize + (margin * 2 * cellSize);
+            getPattern() {
+                // 1. Setup Fixed Patterns (Finders/Timing)
+                this.fillFinder(0, 0);
+                this.fillFinder(this.size - 7, 0);
+                this.fillFinder(0, this.size - 7);
+                this.fillTiming();
                 
-                const canvas = document.createElement('canvas');
-                canvas.width = size;
-                canvas.height = size;
-                const ctx = canvas.getContext('2d');
-
-                // Fill white background
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, size, size);
-
-                // Draw modules
-                ctx.fillStyle = '#000000';
-                for (let r = 0; r < qr.moduleCount; r++) {
-                    for (let c = 0; c < qr.moduleCount; c++) {
-                        if (qr.modules[r][c]) {
-                            ctx.fillRect(
-                                (c + margin) * cellSize,
-                                (r + margin) * cellSize,
-                                cellSize, cellSize
-                            );
+                // 2. Create Data & ECC
+                const data = this.createData();
+                
+                // 3. Place Data
+                let idx = 0;
+                let bit = 7;
+                // Simple zigzag scanner
+                for (let right = this.size - 1; right > 0; right -= 2) {
+                    if (right === 6) right--; 
+                    for (let v = 0; v < this.size; v++) {
+                        let y = ((right / 2) & 1) ? (this.size - 1 - v) : v; // Up/Down
+                        for (let x = 0; x < 2; x++) {
+                            if (this.modules[y][right - x] === null) {
+                                let val = false;
+                                if (idx < data.length) val = ((data[idx] >>> bit) & 1) === 1;
+                                // Mask 0: (x+y)%2 == 0
+                                if (((right - x) + y) % 2 === 0) val = !val;
+                                this.modules[y][right - x] = val;
+                                bit--; if (bit < 0) { bit = 7; idx++; }
+                            }
                         }
                     }
                 }
-                container.appendChild(canvas);
+                
+                // 4. Format Info (Mask 0, Level M) -> 101010000010010 (Fixed for this minimal tool)
+                this.fillFormat();
+                return this.modules;
+            }
 
-            } catch (e) {
-                container.textContent = "Error: Text too long for this minimal version (Max ~80 chars).";
-                console.error(e);
+            fillFinder(r, c) {
+                for(let i=-1;i<=7;i++) for(let j=-1;j<=7;j++) {
+                    if(r+i>=0 && r+i<this.size && c+j>=0 && c+j<this.size) {
+                        if((i>=0&&i<=6 && (j===0||j===6)) || (j>=0&&j<=6 && (i===0||i===6)) || (i>=2&&i<=4&&j>=2&&j<=4))
+                            this.modules[r+i][c+j] = true;
+                        else this.modules[r+i][c+j] = false;
+                    }
+                }
+            }
+            fillTiming() {
+                for(let i=8; i<this.size-8; i++) {
+                    if(this.modules[i][6]===null) this.modules[i][6] = (i%2===0);
+                    if(this.modules[6][i]===null) this.modules[6][i] = (i%2===0);
+                }
+            }
+            fillFormat() {
+                // Hardcoded Format String for Mask 0, Level M (Standard)
+                const fmt = [1,0,1,0,1,0,0,0,0,0,1,0,0,1,0]; 
+                for(let i=0; i<15; i++) {
+                    const v = fmt[i] === 1;
+                    if(i<6) this.modules[i][8] = v;
+                    else if(i<8) this.modules[i+1][8] = v;
+                    else this.modules[this.size-15+i][8] = v;
+                    
+                    if(i<8) this.modules[8][this.size-i-1] = v;
+                    else if(i<9) this.modules[8][15-i-1+1] = v;
+                    else this.modules[8][15-i-1] = v;
+                }
+                this.modules[this.size-8][8] = true; // Dark Module
+            }
+            createData() {
+                // Simplified RS Block Table
+                const cap = this.ver === 1 ? 19 : (this.ver === 2 ? 34 : 80); // Data Capacity
+                const ecc = this.ver === 1 ? 7 : (this.ver === 2 ? 10 : 20);  // ECC Bytes
+                
+                // 1. Encode Text
+                const raw = new TextEncoder().encode(this.text);
+                const bitStream = [0b0100, raw.length >> 4, raw.length & 0xF]; // Byte Mode + Length
+                // Note: Simplified bit packing (assumes 8-bit alignment mostly)
+                let bits = [];
+                bitStream.forEach(v => { for(let i=3;i>=0;i--) bits.push((v>>i)&1); }); // Header 4+8 bits usually
+                // Re-do strictly:
+                bits = [0,1,0,0]; // Mode
+                const lenBits = this.ver < 10 ? 8 : 16;
+                for(let i=lenBits-1; i>=0; i--) bits.push((raw.length >> i) & 1);
+                for(let b of raw) for(let i=7; i>=0; i--) bits.push((b>>i)&1);
+                
+                // Pad
+                if(bits.length + 4 <= (cap*8)) bits.push(0,0,0,0);
+                while(bits.length % 8 !== 0) bits.push(0);
+                
+                const dataBytes = [];
+                for(let i=0; i<bits.length; i+=8) {
+                    let b = 0; for(let j=0; j<8; j++) b = (b<<1)|bits[i+j];
+                    dataBytes.push(b);
+                }
+                while(dataBytes.length < cap) dataBytes.push(236, 17); // Pad bytes
+                const finalData = dataBytes.slice(0, cap);
+
+                // 2. Generate ECC (Reed-Solomon)
+                let genPoly = new Uint8Array([1]);
+                for(let i=0; i<ecc; i++) genPoly = GF.polyMul(genPoly, new Uint8Array([1, GF.exp(i)]));
+                
+                const dataPoly = new Uint8Array([...finalData, ...new Uint8Array(ecc)]); // Pad for division
+                const eccBytes = GF.polyMod(dataPoly, genPoly);
+                
+                return new Uint8Array([...finalData, ...eccBytes]);
             }
         }
 
-        // --- READER LOGIC ---
-        let stream = null;
-        let detector = null;
-        let interval = null;
+        /**
+         * ============================================================
+         * PART 3: JS FALLBACK READER (The "Minimal" Decoder)
+         * Used if BarcodeDetector is missing (Desktop)
+         * ============================================================
+         */
+        const JSDecoder = {
+            scanCanvas: function(ctx, w, h) {
+                // 1. Get Center Scanline
+                const imgData = ctx.getImageData(0, h/2, w, 1);
+                const pixels = imgData.data;
+                const bin = [];
+                // Simple Adaptive Threshold
+                let sum = 0; for(let i=0;i<w;i++) sum+=pixels[i*4];
+                const avg = sum/w;
+                for(let i=0;i<w;i++) bin.push(pixels[i*4] < avg ? 1 : 0);
+
+                // 2. Find Pattern 1:1:3:1:1 (Finder)
+                // We look for the center timing pattern (Black-White-Black...)
+                // We assume the user aligned the red box.
+                
+                // Heuristic: Find the first run of "Black" that is roughly 7 units wide? 
+                // No, center scan hits Timing Pattern: B W B W B W
+                // We count transitions.
+                let runs = [];
+                let current = bin[0];
+                let count = 0;
+                for(let b of bin) {
+                    if(b===current) count++;
+                    else { runs.push(count); count=1; current=b; }
+                }
+                runs.push(count);
+
+                // If we see many small alternating runs in the middle, we are on the timing pattern.
+                // Estimate module size (avg of runs in the middle)
+                if(runs.length < 20) return null;
+                
+                // Filter out huge chunks (quiet zone)
+                const midRuns = runs.slice(5, runs.length-5);
+                const modSize = midRuns.reduce((a,b)=>a+b,0) / midRuns.length;
+                
+                if(modSize < 2) return null;
+
+                // 3. Sample the Grid
+                // Assume Version 2 (25x25) roughly.
+                // We need to find the "Edges" of the QR code.
+                // Left edge = first black pixel after white space.
+                let leftX = 0; 
+                for(let i=0; i<w/2; i++) if(bin[i]) { leftX=i; break; }
+                let rightX = w-1;
+                for(let i=w-1; i>w/2; i--) if(bin[i]) { rightX=i; break; }
+                
+                const qrWidthPx = rightX - leftX;
+                const estModules = Math.round(qrWidthPx / modSize);
+                
+                // Valid QR sizes: 21, 25, 29, 33... (4*V + 17)
+                const ver = (estModules - 17) / 4;
+                if(ver < 1 || ver > 10 || !Number.isInteger(ver)) return null; // Not locked on
+                
+                const size = estModules;
+                const exactMod = qrWidthPx / size;
+                
+                // 4. Read Bits (Center Sampling)
+                // We scan the whole image now based on this geometry
+                const fullData = ctx.getImageData(leftX, (h/2) - (qrWidthPx/2), qrWidthPx, qrWidthPx);
+                const grid = [];
+                
+                for(let r=0; r<size; r++) {
+                    const row = [];
+                    for(let c=0; c<size; c++) {
+                        // Sample center of module
+                        const px = Math.floor(c * exactMod + exactMod/2);
+                        const py = Math.floor(r * exactMod + exactMod/2);
+                        const idx = (py * qrWidthPx + px) * 4;
+                        // Check green channel
+                        row.push(fullData.data[idx+1] < avg); 
+                    }
+                    grid.push(row);
+                }
+                
+                // 5. Decode (Simplified: Unmask 0, Extract)
+                // We assume Mask 0 because our generator uses it. 
+                // A full decoder tries all 8 masks. We try 0 for "Minimal" compliance.
+                return this.extractData(grid, size);
+            },
+
+            extractData: function(grid, size) {
+                const bytes = [];
+                let byte = 0;
+                let bitCount = 0;
+                
+                // Read zigzag
+                for (let right = size - 1; right > 0; right -= 2) {
+                    if (right === 6) right--; 
+                    for (let v = 0; v < size; v++) {
+                        let y = ((right / 2) & 1) ? (size - 1 - v) : v;
+                        for (let x = 0; x < 2; x++) {
+                            // Ignore function patterns (Finders/Timing) - Simplified check
+                            // If we just read raw, we get garbage in finder areas, but RS *might* fix it?
+                            // No, we must skip function patterns.
+                            // Minimal skip: TopLeft(9x9), TopRight(9x8), BotLeft(8x9) + Timing(Row6/Col6)
+                            const r = y, c = right-x;
+                            const isFinder = (r<9&&c<9) || (r<9&&c>size-9) || (r>size-9&&c<9);
+                            const isTiming = (r==6 || c==6);
+                            
+                            if (!isFinder && !isTiming) {
+                                let val = grid[r][c];
+                                // Unmask 0
+                                if (((r+c)%2) === 0) val = !val;
+                                
+                                byte = (byte << 1) | (val ? 1 : 0);
+                                bitCount++;
+                                if (bitCount === 8) {
+                                    bytes.push(byte);
+                                    byte = 0; bitCount = 0;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Basic Header Parse
+                // Mode(4) + Len(8)
+                const mode = bytes[0] >> 4;
+                const len = bytes[1]; // Simplified
+                if(mode !== 4) return null; // Only Byte mode supported
+                
+                let res = "";
+                for(let i=0; i<len; i++) res += String.fromCharCode(bytes[2+i]);
+                // Validate char codes
+                if(/[\x00-\x1F]/.test(res)) return null; // Junk data
+                return res;
+            }
+        };
+
+        /**
+         * ============================================================
+         * PART 4: CONTROLLER & UI
+         * ============================================================
+         */
+        
+        // --- Generator ---
+        function generate() {
+            const text = document.getElementById('qr-text').value;
+            const qr = new QRGen(text);
+            const modules = qr.getPattern();
+            const size = modules.length;
+            const px = 5;
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = size * px + 20;
+            canvas.height = size * px + 20;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0,0,canvas.width, canvas.height);
+            ctx.fillStyle = 'black';
+            for(let r=0; r<size; r++) {
+                for(let c=0; c<size; c++) {
+                    if(modules[r][c]) ctx.fillRect(10 + c*px, 10 + r*px, px, px);
+                }
+            }
+            const div = document.getElementById('canvas-gen');
+            div.innerHTML = '';
+            div.appendChild(canvas);
+        }
+
+        // --- Reader ---
+        let stream, interval;
         const video = document.getElementById('qr-video');
-        const resultDiv = document.getElementById('scan-result');
-        const errorMsg = document.getElementById('error-msg');
+        const status = document.getElementById('status-pill');
+        const resultDiv = document.getElementById('result');
+        const overlay = document.getElementById('scan-overlay');
+        
+        // Native Detector (Android/Edge)
+        let nativeDetector = null;
+        if ('BarcodeDetector' in window) {
+            nativeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+        }
 
         async function startCamera() {
-            // Check for Native Barcode API
-            if (!('BarcodeDetector' in window)) {
-                errorMsg.textContent = "Error: Your browser does not support the native 'BarcodeDetector' API. Please use Chrome, Edge, or Android.";
-                return;
-            }
-
             try {
-                detector = new BarcodeDetector({ formats: ['qr_code'] });
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment" }
-                });
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 video.srcObject = stream;
                 await video.play();
-
-                document.getElementById('video-wrapper').style.display = 'block';
+                
+                document.getElementById('cam-container').style.display = 'block';
                 document.getElementById('btn-start').style.display = 'none';
                 document.getElementById('btn-stop').style.display = 'inline-block';
-                resultDiv.style.display = 'none';
-                errorMsg.textContent = '';
+                resultDiv.textContent = "";
+                
+                // Determine Engine
+                if (nativeDetector) {
+                    status.textContent = "Engine: Native Hardware";
+                    status.className = "success";
+                } else {
+                    status.textContent = "Engine: JS Fallback (Align Carefully)";
+                    status.className = "fail"; // Red color to warn user to be careful
+                    overlay.style.borderColor = "red";
+                }
 
-                interval = setInterval(scan, 100);
-            } catch (err) {
-                errorMsg.textContent = "Camera Error: " + err.message;
+                interval = setInterval(scanLoop, 200);
+            } catch (e) {
+                alert("Camera Error: " + e.message);
             }
         }
 
-        async function scan() {
+        async function scanLoop() {
             if (!video.videoWidth) return;
-            try {
-                const codes = await detector.detect(video);
-                if (codes.length > 0) {
-                    const val = codes[0].rawValue;
-                    resultDiv.textContent = "Scanned: " + val;
-                    resultDiv.style.display = 'block';
-                    // Optional: Stop on detect
-                    // stopCamera(); 
+
+            // 1. Create Canvas Shim (Fixes Android "Nothing Happened" & Feeds JS Decoder)
+            const cvs = document.createElement('canvas');
+            cvs.width = video.videoWidth;
+            cvs.height = video.videoHeight;
+            const ctx = cvs.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            // 2. Try Native First
+            if (nativeDetector) {
+                try {
+                    const codes = await nativeDetector.detect(cvs); // Pass canvas, not video
+                    if (codes.length > 0) {
+                        found(codes[0].rawValue);
+                        return;
+                    }
+                } catch (e) {
+                    console.log("Native failed, falling through...");
                 }
-            } catch (err) {
-                // Ignore empty frames
             }
+
+            // 3. Fallback to JS Decoder (Desktop/Offline)
+            // Only try if Native failed or isn't present
+            const jsResult = JSDecoder.scanCanvas(ctx, cvs.width, cvs.height);
+            if (jsResult) {
+                found(jsResult);
+            }
+        }
+
+        function found(txt) {
+            resultDiv.textContent = "DETECTED: " + txt;
+            // Optional: beep or stop
+            // stopCamera();
         }
 
         function stopCamera() {
-            if (stream) stream.getTracks().forEach(t => t.stop());
+            if(stream) stream.getTracks().forEach(t=>t.stop());
             clearInterval(interval);
-            document.getElementById('video-wrapper').style.display = 'none';
+            document.getElementById('cam-container').style.display = 'none';
             document.getElementById('btn-start').style.display = 'inline-block';
             document.getElementById('btn-stop').style.display = 'none';
+            status.textContent = "Status: Idle";
+            status.className = "";
         }
         
-        // Init default QR
+        // Init
         generate();
     </script>
 </body>
