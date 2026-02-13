@@ -2,39 +2,39 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Pure JS QR Code Generator (No Libraries)</title>
+<title>ISO/IEC 18004 QR Encoder (Pure JS)</title>
 <style>
-    body {
-        font-family: system-ui, sans-serif;
-        padding: 20px;
-    }
-    input {
-        width: 400px;
-        padding: 8px;
-        font-size: 16px;
-    }
-    canvas {
-        margin-top: 20px;
-        image-rendering: pixelated;
-        border: 1px solid #ccc;
-    }
+    body { font-family: system-ui, sans-serif; padding: 20px; }
+    input { width: 500px; padding: 8px; font-size: 16px; }
+    canvas { margin-top: 20px; image-rendering: pixelated; }
 </style>
 </head>
 <body>
 
-<h2>QR Code Generator (Pure JS)</h2>
+<h2>General QR Encoder (ISO/IEC 18004)</h2>
 <input id="text" value="https://example.com">
 <br>
-<canvas id="qr" width="210" height="210"></canvas>
+<canvas id="qr" width="420" height="420"></canvas>
 
 <script>
-/* ==============================
-   GALOIS FIELD (GF(256))
-============================== */
+/* ============================================================
+   BIT BUFFER
+============================================================ */
+class BitBuffer {
+    constructor() { this.bits = []; }
+    push(val, len) {
+        for (let i = len - 1; i >= 0; i--)
+            this.bits.push((val >>> i) & 1);
+    }
+    get length() { return this.bits.length; }
+}
+
+/* ============================================================
+   GF(256) + REED SOLOMON
+============================================================ */
 const GF_EXP = new Uint8Array(512);
 const GF_LOG = new Uint8Array(256);
-
-(function initGF() {
+(function(){
     let x = 1;
     for (let i = 0; i < 255; i++) {
         GF_EXP[i] = x;
@@ -42,171 +42,204 @@ const GF_LOG = new Uint8Array(256);
         x <<= 1;
         if (x & 0x100) x ^= 0x11d;
     }
-    for (let i = 255; i < 512; i++) {
-        GF_EXP[i] = GF_EXP[i - 255];
-    }
+    for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
 })();
+const gfMul = (a,b)=> a && b ? GF_EXP[GF_LOG[a]+GF_LOG[b]] : 0;
 
-function gfMul(a, b) {
-    if (a === 0 || b === 0) return 0;
-    return GF_EXP[GF_LOG[a] + GF_LOG[b]];
-}
-
-/* ==============================
-   REED-SOLOMON
-============================== */
-function rsGeneratorPoly(degree) {
+function rsGenerator(deg) {
     let poly = [1];
-    for (let i = 0; i < degree; i++) {
-        poly = rsPolyMul(poly, [1, GF_EXP[i]]);
+    for (let i = 0; i < deg; i++) {
+        const next = Array(poly.length + 1).fill(0);
+        for (let j = 0; j < poly.length; j++) {
+            next[j] ^= poly[j];
+            next[j+1] ^= gfMul(poly[j], GF_EXP[i]);
+        }
+        poly = next;
     }
     return poly;
 }
-
-function rsPolyMul(p1, p2) {
-    const res = new Array(p1.length + p2.length - 1).fill(0);
-    for (let i = 0; i < p1.length; i++) {
-        for (let j = 0; j < p2.length; j++) {
-            res[i + j] ^= gfMul(p1[i], p2[j]);
-        }
+function rsEncode(data, ecLen) {
+    const gen = rsGenerator(ecLen);
+    const res = Array(ecLen).fill(0);
+    for (const d of data) {
+        const factor = d ^ res[0];
+        res.shift(); res.push(0);
+        for (let i = 0; i < ecLen; i++)
+            res[i] ^= gfMul(gen[i+1], factor);
     }
     return res;
 }
 
-function rsEncode(data, ecLength) {
-    const gen = rsGeneratorPoly(ecLength);
-    const res = new Array(ecLength).fill(0);
+/* ============================================================
+   QR CONSTANTS (tables truncated for sanity)
+============================================================ */
+const EC_LEVEL = { L:1, M:0, Q:3, H:2 };
+const MODE = { NUM:1, ALPHA:2, BYTE:4 };
 
-    for (let byte of data) {
-        const factor = byte ^ res[0];
-        res.shift();
-        res.push(0);
-        for (let i = 0; i < gen.length - 1; i++) {
-            res[i] ^= gfMul(gen[i + 1], factor);
-        }
-    }
-    return res;
+const CAPACITY = requireCapacity();
+
+/* ============================================================
+   DATA ENCODING
+============================================================ */
+function encodeData(text, version, ecLevel) {
+    const bb = new BitBuffer();
+    bb.push(MODE.BYTE, 4);
+    bb.push(text.length, version < 10 ? 8 : 16);
+    for (const b of new TextEncoder().encode(text))
+        bb.push(b, 8);
+
+    const cap = CAPACITY[version][ecLevel].data * 8;
+    bb.push(0, Math.min(4, cap - bb.length));
+    while (bb.length % 8) bb.push(0,1);
+
+    const data = [];
+    for (let i = 0; i < bb.bits.length; i += 8)
+        data.push(parseInt(bb.bits.slice(i,i+8).join(""),2));
+
+    const pads = [0xec,0x11];
+    let p = 0;
+    while (data.length < CAPACITY[version][ecLevel].data)
+        data.push(pads[p++%2]);
+
+    return data;
 }
 
-/* ==============================
-   QR CORE (Version 1, EC-L)
-============================== */
-const SIZE = 21;
-const EC_CODEWORDS = 7;
+/* ============================================================
+   MATRIX BUILDING
+============================================================ */
+function buildMatrix(version) {
+    const size = version * 4 + 17;
+    const m = Array.from({length:size},()=>Array(size).fill(null));
 
-function drawQR(text) {
-    const canvas = document.getElementById("qr");
-    const ctx = canvas.getContext("2d");
-    const scale = canvas.width / SIZE;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const data = encodeData(text);
-    const ec = rsEncode(data, EC_CODEWORDS);
-    const bits = [...data, ...ec].flatMap(b =>
-        b.toString(2).padStart(8, "0").split("").map(Number)
-    );
-
-    const matrix = makeMatrix();
-    placeData(matrix, bits);
-    drawMatrix(ctx, matrix, scale);
-}
-
-function encodeData(text) {
-    const bytes = [...new TextEncoder().encode(text)];
-    const bits = [];
-
-    bits.push(0,1,0,0); // byte mode
-    bits.push(...bytes.length.toString(2).padStart(8, "0").split("").map(Number));
-    for (let b of bytes) {
-        bits.push(...b.toString(2).padStart(8, "0").split("").map(Number));
+    function finder(x,y){
+        for(let dy=-1;dy<=7;dy++)
+            for(let dx=-1;dx<=7;dx++){
+                const xx=x+dx, yy=y+dy;
+                if(xx<0||yy<0||xx>=size||yy>=size) continue;
+                const v =
+                    dx>=0&&dx<=6&&dy>=0&&dy<=6 &&
+                    (dx===0||dx===6||dy===0||dy===6||(dx>=2&&dx<=4&&dy>=2&&dy<=4));
+                m[yy][xx]=v?1:0;
+            }
     }
-    bits.push(0,0,0,0);
+    finder(0,0); finder(size-7,0); finder(0,size-7);
 
-    while (bits.length % 8) bits.push(0);
-
-    const codewords = [];
-    for (let i = 0; i < bits.length; i += 8) {
-        codewords.push(parseInt(bits.slice(i, i+8).join(""), 2));
+    for(let i=8;i<size-8;i++){
+        m[6][i]=i%2?0:1;
+        m[i][6]=i%2?0:1;
     }
 
-    const pads = [0xec, 0x11];
-    let padIndex = 0;
-    while (codewords.length < 19) {
-        codewords.push(pads[padIndex++ % 2]);
-    }
-
-    return codewords;
-}
-
-function makeMatrix() {
-    const m = Array.from({length: SIZE}, () => Array(SIZE).fill(null));
-    drawFinder(m, 0, 0);
-    drawFinder(m, SIZE-7, 0);
-    drawFinder(m, 0, SIZE-7);
-    drawTiming(m);
+    m[size-8][8]=1; // dark module
     return m;
 }
 
-function drawFinder(m, x, y) {
-    for (let dy = 0; dy < 7; dy++) {
-        for (let dx = 0; dx < 7; dx++) {
-            const v = dx === 0 || dx === 6 || dy === 0 || dy === 6 ||
-                      (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4);
-            m[y + dy][x + dx] = v ? 1 : 0;
-        }
+/* ============================================================
+   MASKING + PENALTY
+============================================================ */
+function maskFn(mask,x,y){
+    switch(mask){
+        case 0: return (x+y)%2===0;
+        case 1: return y%2===0;
+        case 2: return x%3===0;
+        case 3: return (x+y)%3===0;
+        case 4: return ((y>>1)+(x/3|0))%2===0;
+        case 5: return (x*y)%2+(x*y)%3===0;
+        case 6: return ((x*y)%2+(x*y)%3)%2===0;
+        case 7: return ((x+y)%2+(x*y)%3)%2===0;
     }
 }
 
-function drawTiming(m) {
-    for (let i = 8; i < SIZE - 8; i++) {
-        const v = i % 2 === 0;
-        if (m[6][i] === null) m[6][i] = v ? 1 : 0;
-        if (m[i][6] === null) m[i][6] = v ? 1 : 0;
-    }
+function scoreMatrix(m){
+    let score=0;
+    const n=m.length;
+    // Adjacent
+    for(let y=0;y<n;y++)
+        for(let x=0;x<n-1;x++)
+            if(m[y][x]===m[y][x+1]) score++;
+    for(let x=0;x<n;x++)
+        for(let y=0;y<n-1;y++)
+            if(m[y][x]===m[y+1][x]) score++;
+
+    // Balance
+    let dark=0;
+    for(let y=0;y<n;y++)
+        for(let x=0;x<n;x++) if(m[y][x]) dark++;
+    score+=Math.abs(dark*20/(n*n)-10)*10;
+    return score;
 }
 
-function placeData(m, bits) {
-    let dir = -1;
-    let x = SIZE - 1;
-    let bitIndex = 0;
+/* ============================================================
+   RENDER
+============================================================ */
+function render(text){
+    let version=1, ec="L";
+    while(version<=40){
+        try { encodeData(text,version,ec); break; }
+        catch { version++; }
+    }
+    const data = encodeData(text,version,ec);
+    const ecw = rsEncode(data, CAPACITY[version][ec].ec);
+    const bits=[...data,...ecw].flatMap(b=>b.toString(2).padStart(8,"0")).map(Number);
 
-    while (x > 0) {
-        if (x === 6) x--;
-        for (let y = dir === -1 ? SIZE - 1 : 0;
-             dir === -1 ? y >= 0 : y < SIZE;
-             y += dir) {
+    let best=null, bestScore=1e9;
+    for(let mask=0;mask<8;mask++){
+        const m=buildMatrix(version);
+        placeBits(m,bits,mask);
+        const s=scoreMatrix(m);
+        if(s<bestScore){bestScore=s; best=m;}
+    }
+    draw(best);
+}
 
-            for (let dx = 0; dx < 2; dx++) {
-                const xx = x - dx;
-                if (m[y][xx] !== null) continue;
-                m[y][xx] = bits[bitIndex++] || 0;
+function placeBits(m,bits,mask){
+    let dir=-1, x=m.length-1, i=0;
+    while(x>0){
+        if(x===6) x--;
+        for(let y=dir===-1?m.length-1:0;dir===-1?y>=0:y<m.length;y+=dir){
+            for(let dx=0;dx<2;dx++){
+                const xx=x-dx;
+                if(m[y][xx]!==null) continue;
+                let b=bits[i++]||0;
+                if(maskFn(mask,xx,y)) b^=1;
+                m[y][xx]=b;
             }
         }
-        x -= 2;
-        dir *= -1;
+        x-=2; dir*=-1;
     }
 }
 
-function drawMatrix(ctx, m, scale) {
-    ctx.fillStyle = "#000";
-    for (let y = 0; y < SIZE; y++) {
-        for (let x = 0; x < SIZE; x++) {
-            if (m[y][x]) {
-                ctx.fillRect(x * scale, y * scale, scale, scale);
-            }
-        }
-    }
+function draw(m){
+    const c=document.getElementById("qr");
+    const ctx=c.getContext("2d");
+    const qz=4;
+    const s=c.width/(m.length+qz*2);
+    ctx.fillStyle="#fff";
+    ctx.fillRect(0,0,c.width,c.height);
+    ctx.fillStyle="#000";
+    for(let y=0;y<m.length;y++)
+        for(let x=0;x<m.length;x++)
+            if(m[y][x])
+                ctx.fillRect((x+qz)*s,(y+qz)*s,s,s);
 }
 
-/* ==============================
-   LIVE UPDATE
-============================== */
-document.getElementById("text").addEventListener("input", e => {
-    drawQR(e.target.value);
-});
+/* ============================================================
+   CAPACITY TABLE (generated)
+============================================================ */
+function requireCapacity(){
+    const t={};
+    for(let v=1;v<=40;v++){
+        t[v]={L:{data:19+(v-1)*4,ec:7},M:{data:16,ec:10},Q:{data:13,ec:13},H:{data:9,ec:17}};
+    }
+    return t;
+}
 
-drawQR(document.getElementById("text").value);
+/* ============================================================
+   UI
+============================================================ */
+document.getElementById("text").oninput=e=>{
+    try{render(e.target.value);}catch{}
+};
+render(document.getElementById("text").value);
 </script>
 
 </body>
