@@ -5,9 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Color</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.8/purify.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" type="text/javascript"></script>
 
     <!-- CSS Remains Exactly as provided -->
     <style>
@@ -1054,6 +1054,49 @@
             font-size: 3rem;
             letter-spacing: -1px;
         }
+
+        .settings-group {
+            margin-top: 20px;
+            background: rgba(0, 0, 0, 0.05);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        .settings-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .settings-input {
+            width: 100%;
+            background: #fff;
+            border: 1px solid #ccc;
+            color: #000;
+            padding: 12px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            font-family: 'Menlo', monospace;
+            font-size: 0.9rem;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        .settings-input:focus {
+            border-color: #333;
+            outline: none;
+        }
+
+        .settings-hint {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: -5px;
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 
@@ -1195,6 +1238,23 @@
             </div>
             <div id="tab-connections" class="settings-pane">
                 <h2>Network Connections</h2>
+                <div class="settings-group">
+                    <h3 style="margin-top:0; margin-bottom: 10px; font-size: 1rem;">How to get a Free TURN Server</h3>
+                    <ol
+                        style="font-size: 0.85rem; line-height: 1.5; padding-left: 20px; color: #444; margin-bottom: 20px;">
+                        <li>Go to <a href="https://metered.ca/stun-turn" target="_blank"
+                                style="color: #0066cc; text-decoration: none; font-weight: bold;">Metered.ca
+                                STUN/TURN</a> and create a free account.</li>
+                        <li>Give your app a name and hit "Create App".</li>
+                        <li>Copy and paste your custom <strong>App Name</strong> and <strong>API Key</strong> into the
+                            fields below.</li>
+                    </ol>
+
+                    <label class="settings-label">Metered.ca App Name</label>
+                    <input type="text" id="turn-app-name" class="settings-input" placeholder="e.g. yourappname">
+                    <label class="settings-label">Metered.ca API Key</label>
+                    <input type="password" id="turn-api-key" class="settings-input" placeholder="e.g. at_xxx...">
+                </div>
             </div>
             <div id="tab-signatures" class="settings-pane">
                 <h2>Cryptographic Signatures</h2>
@@ -1225,12 +1285,42 @@
     </div>
 
     <script type="module">
-        const TRACKERS = ['wss://tracker.webtorrent.dev', 'wss://tracker.openwebtorrent.com', 'wss://tracker.btorrent.xyz'];
+        const TRACKERS = ['wss://relay.rollcall.network', 'wss://tracker.webtorrent.dev', 'wss://tracker.openwebtorrent.com', 'wss://tracker.btorrent.xyz'];
         const OFFER_POOL_SIZE = 12;
         const OFFER_TTL = 57_333;
         const ANNOUNCE_INTERVAL = 33_333;
         const ICE_TIMEOUT = 5000;
-        const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun2.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] };
+        let cachedRTCConfig = null;
+        let rtcConfigFetchTime = 0;
+
+        async function getRTCConfig() {
+            if (cachedRTCConfig && (Date.now() - rtcConfigFetchTime < 1000 * 60 * 60 * 12)) {
+                return cachedRTCConfig;
+            }
+
+            const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun2.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] };
+            const appName = localStorage.getItem('turnAppName');
+            const apiKey = localStorage.getItem('turnApiKey');
+
+            if (appName && apiKey) {
+                try {
+                    const response = await fetch(`https://${appName}.metered.live/api/v1/turn/credentials?apiKey=${apiKey}`);
+                    if (response.ok) {
+                        const iceServers = await response.json();
+                        config.iceServers = iceServers;
+                    } else {
+                        console.warn("Failed to fetch TURN credentials from Metered.ca");
+                    }
+                } catch (e) {
+                    console.error("Error fetching TURN credentials:", e);
+                }
+            }
+
+            cachedRTCConfig = config;
+            rtcConfigFetchTime = Date.now();
+            return config;
+        }
+
         const charSet = '0123456789AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
         const genId = n => Array(n).fill().map(() => charSet[Math.floor(Math.random() * charSet.length)]).join('');
         const encoder = new TextEncoder();
@@ -1239,22 +1329,32 @@
 
         function waitForIce(pc) { return Promise.race([new Promise(resolve => { const checkState = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', checkState); resolve(); } }; pc.addEventListener('icegatheringstatechange', checkState); checkState(); }), new Promise(resolve => setTimeout(resolve, ICE_TIMEOUT))]).then(() => ({ type: pc.localDescription.type, sdp: pc.localDescription.sdp.replace(/a=ice-options:trickle\s\n/g, '') })); }
 
-        function createPeerConnection(isInitiator, onDataChannel, connectedPeersRef = null, peerLeaveCallbacksRef = null) {
-            const pc = new RTCPeerConnection(RTC_CONFIG);
+        async function createPeerConnection(isInitiator, onDataChannel, connectedPeersRef = null, peerLeaveCallbacksRef = null, onIceFailedRef = null, peerId = null) {
+            const config = await getRTCConfig();
+            const pc = new RTCPeerConnection(config);
             let dc = null;
             if (isInitiator) { dc = pc.createDataChannel('data'); dc.binaryType = 'arraybuffer'; } else { pc.ondatachannel = e => { dc = e.channel; dc.binaryType = 'arraybuffer'; onDataChannel?.(dc); }; }
-            pc.onconnectionstatechange = () => { if (pc.connectionState === 'closed' && connectedPeersRef) for (const [peerId, peer] of Object.entries(connectedPeersRef)) if (peer.pc === pc) { delete connectedPeersRef[peerId]; peerLeaveCallbacksRef?.forEach(cb => cb(peerId)); break; } };
+            pc.onconnectionstatechange = () => { if (pc.connectionState === 'closed' && connectedPeersRef) for (const [pId, peer] of Object.entries(connectedPeersRef)) if (peer.pc === pc) { delete connectedPeersRef[pId]; peerLeaveCallbacksRef?.forEach(cb => cb(pId)); break; } };
+            pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'failed' && onIceFailedRef && peerId) onIceFailedRef(peerId); };
             return { pc, dc };
         }
-        async function createOffer(connectedPeersRef = null, peerLeaveCallbacksRef = null) { const { pc, dc } = createPeerConnection(true, null, connectedPeersRef, peerLeaveCallbacksRef); const offerId = genId(20); await pc.setLocalDescription(await pc.createOffer()); const offer = await waitForIce(pc); return { pc, dc, offer, offerId, created: Date.now() }; }
+        async function createOffer(connectedPeersRef = null, peerLeaveCallbacksRef = null, onIceFailedRef = null) { const { pc, dc } = await createPeerConnection(true, null, connectedPeersRef, peerLeaveCallbacksRef, onIceFailedRef); const offerId = genId(20); await pc.setLocalDescription(await pc.createOffer()); const offer = await waitForIce(pc); return { pc, dc, offer, offerId, created: Date.now() }; }
 
         function joinRoom(config, roomId) {
-            const connectedPeers = {}, pendingOffers = {}, handledOffers = new Set(), trackerSockets = {}, peerJoinCallbacks = [], peerLeaveCallbacks = [], actionHandlers = {}, announceIntervals = [];
+            const connectedPeers = {}, pendingOffers = {}, handledOffers = new Set(), trackerSockets = {}, peerJoinCallbacks = [], peerLeaveCallbacks = [], peerDiscoverCallbacks = [], peerErrorCallbacks = [], actionHandlers = {}, announceIntervals = [];
             let offerPool = [], infoHash = null, isLeaving = false, readyResolve;
+            let syncEnabled = false;
+            let discoveredPeers = new Set();
             const readyPromise = new Promise(resolve => { readyResolve = resolve; });
 
-            async function fillOfferPool() { const needed = OFFER_POOL_SIZE - offerPool.length; if (needed > 0) offerPool.push(...await Promise.all(Array(needed).fill().map(() => createOffer(connectedPeers, peerLeaveCallbacks)))); }
-            function getOffersFromPool(n) { const now = Date.now(); offerPool = offerPool.filter(o => now - o.created <= OFFER_TTL); const taken = offerPool.splice(0, n); fillOfferPool(); return taken; }
+            async function fillOfferPool() { const needed = OFFER_POOL_SIZE - offerPool.length; if (needed > 0) offerPool.push(...await Promise.all(Array(needed).fill().map(() => createOffer(connectedPeers, peerLeaveCallbacks, (pid) => peerErrorCallbacks.forEach(cb => cb(pid)))))); }
+            async function getOffersFromPoolAsync(n) {
+                if (offerPool.length === 0) fillOfferPool();
+                while (offerPool.length === 0 && !isLeaving) await new Promise(r => setTimeout(r, 100));
+                if (isLeaving) return [];
+                const now = Date.now(); offerPool = offerPool.filter(o => now - o.created <= OFFER_TTL);
+                const taken = offerPool.splice(0, n); fillOfferPool(); return taken;
+            }
             function setupDataChannel(dc, peerId) {
                 const handleOpen = () => peerJoinCallbacks.forEach(cb => cb(peerId));
                 if (dc.readyState === 'open') handleOpen(); else dc.onopen = handleOpen;
@@ -1269,6 +1369,7 @@
                 if (isLeaving) return;
                 const ws = new WebSocket(url); trackerSockets[url] = ws;
                 ws.onopen = () => startAnnouncing(ws, url);
+                ws.onerror = (e) => { console.warn(`Tracker connection error to ${url}:`, e); };
                 ws.onmessage = e => { try { const data = JSON.parse(e.data); if (data) handleTrackerMessage(ws, data); } catch (err) { } };
                 ws.onclose = () => { delete trackerSockets[url]; if (!isLeaving) setTimeout(() => connectToTracker(url), 5000); };
             }
@@ -1276,9 +1377,11 @@
                 await readyPromise;
                 const announce = async () => {
                     if (ws.readyState !== WebSocket.OPEN || isLeaving || !infoHash) return;
-                    const offers = getOffersFromPool(3);
-                    if (offers.length === 0) return;
-                    for (const o of offers) { pendingOffers[o.offerId] = { pc: o.pc, dc: o.dc, created: o.created }; setTimeout(() => { if (pendingOffers[o.offerId]) { pendingOffers[o.offerId].pc.close(); delete pendingOffers[o.offerId]; } }, OFFER_TTL); }
+                    const offers = syncEnabled ? await getOffersFromPoolAsync(3) : [];
+                    if (syncEnabled && offers.length === 0) return;
+                    if (syncEnabled) {
+                        for (const o of offers) { pendingOffers[o.offerId] = { pc: o.pc, dc: o.dc, created: o.created }; setTimeout(() => { if (pendingOffers[o.offerId]) { pendingOffers[o.offerId].pc.close(); delete pendingOffers[o.offerId]; } }, OFFER_TTL); }
+                    }
                     ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, numwant: OFFER_POOL_SIZE, offers: offers.map(o => ({ offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp } })) }));
                 };
                 await announce(); announceIntervals.push(setInterval(announce, ANNOUNCE_INTERVAL));
@@ -1286,13 +1389,21 @@
             async function handleTrackerMessage(ws, data) {
                 await readyPromise;
                 if (data.info_hash !== infoHash || data.peer_id === selfId) return;
+
+                if (data.peer_id && !discoveredPeers.has(data.peer_id)) {
+                    discoveredPeers.add(data.peer_id);
+                    peerDiscoverCallbacks.forEach(cb => cb(data.peer_id));
+                }
+
+                if (!syncEnabled) return;
+
                 if (data.offer && data.offer_id) {
                     if (handledOffers.has(data.offer_id) || connectedPeers[data.peer_id]) return;
                     handledOffers.add(data.offer_id);
                     if (Object.values(pendingOffers).some(p => p.peerId === data.peer_id) && selfId > data.peer_id) return;
                     try {
                         const peerEntry = { pc: null, dc: null }; connectedPeers[data.peer_id] = peerEntry;
-                        const { pc, dc } = createPeerConnection(false, channel => { if (connectedPeers[data.peer_id]) connectedPeers[data.peer_id].dc = channel; else connectedPeers[data.peer_id] = { pc: pc, dc: channel }; setupDataChannel(channel, data.peer_id); }, connectedPeers, peerLeaveCallbacks);
+                        const { pc, dc } = await createPeerConnection(false, channel => { if (connectedPeers[data.peer_id]) connectedPeers[data.peer_id].dc = channel; else connectedPeers[data.peer_id] = { pc: pc, dc: channel }; setupDataChannel(channel, data.peer_id); }, connectedPeers, peerLeaveCallbacks, (pid) => peerErrorCallbacks.forEach(cb => cb(pid)), data.peer_id);
                         peerEntry.pc = pc; await pc.setRemoteDescription(new RTCSessionDescription(data.offer)); await pc.setLocalDescription(await pc.createAnswer());
                         ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer: await waitForIce(pc) }));
                     } catch (err) { delete connectedPeers[data.peer_id]; }
@@ -1302,15 +1413,35 @@
                     if (!pending || connectedPeers[data.peer_id]) return;
                     try {
                         connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc }; setupDataChannel(pending.dc, data.peer_id);
+                        pending.pc.oniceconnectionstatechange = () => { if (pending.pc.iceConnectionState === 'failed') peerErrorCallbacks.forEach(cb => cb(data.peer_id)); };
                         await pending.pc.setRemoteDescription(new RTCSessionDescription(data.answer)); delete pendingOffers[data.offer_id];
                     } catch (err) { pending.pc.close(); delete pendingOffers[data.offer_id]; delete connectedPeers[data.peer_id]; }
                 }
             }
             TRACKERS.forEach(url => connectToTracker(url));
-            (async () => { infoHash = await sha1Hash(config.appId + roomId); await fillOfferPool(); readyResolve(); setInterval(fillOfferPool, OFFER_TTL); })();
+            (async () => {
+                infoHash = await sha1Hash(config.appId + roomId);
+                readyResolve(); // Resolve immediately to unblock tracker announce
+                await fillOfferPool();
+                setInterval(fillOfferPool, OFFER_TTL);
+            })();
             return {
                 makeAction(name) { if (!actionHandlers[name]) actionHandlers[name] = []; return [(data, target) => sendToAllPeers(name, data, target), cb => actionHandlers[name].push(cb)]; },
                 onPeerJoin(cb) { peerJoinCallbacks.push(cb); }, onPeerLeave(cb) { peerLeaveCallbacks.push(cb); }, getPeers() { return connectedPeers; },
+                onPeerDiscover(cb) { peerDiscoverCallbacks.push(cb); }, onPeerError(cb) { peerErrorCallbacks.push(cb); },
+                getDiscoveredPeers() { return discoveredPeers; },
+                enableSync() {
+                    if (!syncEnabled) {
+                        syncEnabled = true;
+                        Object.values(trackerSockets).forEach(async ws => {
+                            if (ws.readyState === WebSocket.OPEN) {
+                                const offers = await getOffersFromPoolAsync(3);
+                                for (const o of offers) { pendingOffers[o.offerId] = { pc: o.pc, dc: o.dc, created: o.created }; setTimeout(() => { if (pendingOffers[o.offerId]) { pendingOffers[o.offerId].pc.close(); delete pendingOffers[o.offerId]; } }, OFFER_TTL); }
+                                ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, numwant: OFFER_POOL_SIZE, offers: offers.map(o => ({ offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp } })) }));
+                            }
+                        });
+                    }
+                },
                 leave() { isLeaving = true; announceIntervals.forEach(clearInterval); Object.values(trackerSockets).forEach(ws => ws.close()); Object.values(connectedPeers).forEach(p => p.pc.close()); Object.values(pendingOffers).forEach(p => p.pc.close()); offerPool.forEach(o => o.pc.close()); }
             };
         }
@@ -1389,6 +1520,14 @@
                 this.outgoingQrSecret = null;
                 this.expectedQrSecret = null;
 
+                this.room.onPeerDiscover((pid) => {
+                    this.emit('peer-discover', pid);
+                });
+
+                this.room.onPeerError((pid) => {
+                    this.emit('peer-error', pid);
+                });
+
                 // Actions
                 const [sendFrag, onFrag] = this.room.makeAction('fragment');
                 const [sendLock, onLock] = this.room.makeAction('lock');
@@ -1424,6 +1563,11 @@
                         console.log(`%c[P2P] 🎟️ VIP Ticket Accepted for ${pid}`, 'color: gold; font-weight: bold;');
                         isVerified = true;
                     }
+                    // CHECK 1.5: The Room Owner (Original Peer)
+                    else if (data.color && data.color.replace('#', '').toLowerCase() === this.roomHex.toLowerCase()) {
+                        console.log(`%c[P2P] 👑 Room Owner verified automatically: ${pid}`, 'color: #00e676; font-weight: bold;');
+                        isVerified = true;
+                    }
                     // CHECK 2: The Standard Mining Check (Fallback)
                     else if (data.minedToken && data.minedToken !== "PENDING") {
                         isVerified = await this.identity._call('validate_peer', {
@@ -1437,7 +1581,7 @@
                     if (isVerified) {
                         console.log(`%c[P2P] ✅ Peer verified: ${pid}`, 'color: #00e676;');
                         this.verifiedPeers.add(pid);
-                        if (data.pubKey) this.identity.storePeerKey(pid, data.pubKey);
+                        if (data.pubKey) await this.identity.storePeerKey(pid, data.pubKey);
                         this.emit('peer-identity', data, pid);
                     } else if (data.minedToken && data.minedToken !== "PENDING") {
                         console.warn(`[P2P] ❌ Peer verification failed for ${pid}`);
@@ -1493,6 +1637,8 @@
             broadcastLock(data) { this.rawSendLock(data); }
             requestSync(keys) { this.rawSendReq(keys); }
             getPeers() { return this.room.getPeers(); }
+            getDiscoveredPeers() { return this.room.getDiscoveredPeers(); }
+            enableSync() { this.room.enableSync(); }
             leave() { this.room.leave(); }
             on(e, cb) { if (!this.handlers.has(e)) this.handlers.set(e, []); this.handlers.get(e).push(cb); }
             emit(e, ...args) { this.handlers.get(e)?.forEach(cb => cb(...args)); }
@@ -1700,6 +1846,39 @@
                 }
             }
 
+            startMining() {
+                if (this.minedForSession || this.miningInProgress) return;
+                const cleanHex = this.roomId.replace('color-', '').toLowerCase();
+                const userHex = this.user.color.replace('#', '').toLowerCase();
+
+                if (cleanHex === userHex) {
+                    this.minedForSession = true;
+                    if (this.mesh) this.mesh.enableSync();
+                    return;
+                }
+
+                this.miningInProgress = true;
+                console.log("%c[MINING] Starting mining...", "color: orange;");
+                this.identity._call('generate_token', { roomHex: cleanHex }).then(token => {
+                    console.log("%c[MINING] Proof Generated: " + token, "color: orange; font-weight: bold;");
+                    this.user.proofToken = token;
+                    this.minedForSession = true;
+                    this.miningInProgress = false;
+
+                    if (this.mesh) {
+                        this.mesh.broadcastIdentity();
+                        this.mesh.enableSync();
+                        console.log("[P2P] ⏳ Ready. Waiting for peer cursor...");
+                    }
+
+                    this.updateStatus();
+                }).catch(err => {
+                    console.error("Mining failed:", err);
+                    this.miningInProgress = false;
+                    this.updateStatus();
+                });
+            }
+
             async connectAndPreview(hex, fromUrl = false) {
                 const cleanHex = hex.replace('#', '').toLowerCase();
                 this.roomId = 'color-' + cleanHex;
@@ -1713,28 +1892,37 @@
                 this.ui.loginBtn.classList.remove('hidden');
                 // Ensure worker has init
                 await this.db._open();
+
                 const exists = await this.db.roomExists(cleanHex);
 
                 if (exists) {
-                    this.ui.roomStatus.innerText = "Loading...";
+                    this.ui.roomStatus.textContent = "Loading...";
                     const centerIndex = await this.db.getLastEdited(cleanHex);
                     const data = await this.db.getRange(cleanHex, centerIndex - 50, centerIndex + 50);
                     await this.renderFromLocalDB(data, centerIndex);
-                    this.ui.roomStatus.innerText = "READY";
+                    this.ui.roomStatus.textContent = "READY";
                     this.joinNetwork();
                     if (fromUrl && window.state?.landing) {
                         window.state.landing.shouldAutoEnter = true;
                         if (window.state.landing.progress >= 1 && window.enterRoomUI) window.enterRoomUI();
                     }
                 } else {
-                    this.ui.roomStatus.innerText = "Checking Network...";
+                    this.ui.roomStatus.textContent = "Checking Network...";
                     this.joinNetwork();
+
+                    // Only say COLOR AVAILABLE if we didn't discover any peers in 8 seconds (accounts for mobile latency).
                     setTimeout(() => {
-                        if (!this.ui.display.querySelector('.editor-line')) {
-                            this.renderInitialState({}, 0);
-                            if (this.ui.loginBtn.textContent !== "JOIN") this.ui.roomStatus.innerText = "COLOR AVAILABLE";
+                        const discoveredPeers = this.mesh?.getDiscoveredPeers()?.size || 0;
+                        if (discoveredPeers === 0 && this.ui.roomStatus.textContent === "Checking Network...") {
+                            this.ui.roomStatus.textContent = "COLOR AVAILABLE";
                         }
-                    }, 3000);
+                    }, 8000);
+                }
+
+                if (fromUrl) {
+                    this.startMining();
+                } else {
+                    if (this.mesh) this.mesh.enableSync();
                 }
             }
 
@@ -1758,6 +1946,14 @@
 
                 this.store.subscribe((index, content, owner) => {
                     this.renderUpdate(index, content, owner);
+                });
+
+                this.mesh.on('peer-discover', (pid) => {
+                    this.updateStatus();
+                });
+
+                this.mesh.on('peer-error', (pid) => {
+                    this.updateStatus(true);
                 });
 
                 this.mesh.on('peer-join', (pid) => {
@@ -2231,49 +2427,53 @@
                 document.getElementById('btn-link').onclick = () => { const u = prompt("URL:"); if (u) document.execCommand('createLink', false, u); };
             }
 
-            updateStatus() {
+            updateStatus(isError = false) {
                 if (!this.mesh) return;
-                const peers = Object.values(this.mesh.getPeers()).filter(p => p.dc?.readyState === 'open').length;
+                const discoveredPeers = this.mesh.getDiscoveredPeers()?.size || 0;
+                const connectedPeers = Object.values(this.mesh.getPeers()).filter(p => p.dc?.readyState === 'open').length;
+                const cleanHex = this.roomId.replace('color-', '').toLowerCase();
+                const userHex = this.user.color.replace('#', '').toLowerCase();
+                const isFounder = cleanHex === userHex;
 
-                if (peers > 0) {
-                    if (!this.minedForSession) {
-                        this.minedForSession = true;
-                        const roomHex = this.roomId.replace('color-', '');
-                        console.log("%c[MINING] Starting mining...", "color: orange;");
+                if (isError && connectedPeers === 0) {
+                    this.ui.roomStatus.textContent = "TURN SERVER REQUIRED (NAT BLOCKED)";
+                    this.ui.roomStatus.style.color = "red";
+                    this.ui.peerCount.innerText = "Connection Failed";
+                    this.ui.dot.classList.remove('on');
+                    return;
+                }
 
-                        this.identity._call('generate_token', { roomHex }).then(token => {
-                            console.log("%c[MINING] Proof Generated: " + token, "color: orange; font-weight: bold;");
-                            this.user.proofToken = token;
-
-                            if (this.mesh) {
-                                this.mesh.broadcastIdentity();
-                                console.log("[P2P] ⏳ Ready. Waiting for peer cursor...");
-                            }
-
-                            this.updateStatus();
-                        }).catch(err => {
-                            console.error("Mining failed:", err);
-                            this.minedForSession = false;
-                        });
-                    }
-
-                    if (this.user.proofToken) {
-                        this.ui.loginBtn.innerHTML = "<span>JOIN</span>";
-                        this.ui.loginBtn.classList.remove('hidden');
-                        this.ui.roomStatus.innerText = `${peers} PEER${peers > 1 ? 'S' : ''} ONLINE`;
-                        this.ui.peerCount.innerText = `${peers} visitor${peers > 1 ? 's' : ''}`;
-                        this.ui.dot.classList.add('on');
-                    } else {
+                if (discoveredPeers > 0) {
+                    // Update UI immediately for discovery before mining completes
+                    if (!this.user.proofToken && !isFounder) {
+                        this.startMining();
+                        this.ui.roomStatus.textContent = `${discoveredPeers} PEER${discoveredPeers > 1 ? 'S' : ''} ONLINE`;
+                        this.ui.roomStatus.style.color = "";
+                        this.ui.peerCount.innerText = "Generating Proof...";
                         this.ui.loginBtn.innerHTML = "<span style='font-size:0.7rem'>VERIFYING...</span>";
-                        this.ui.loginBtn.classList.remove('hidden');
-                        this.ui.roomStatus.innerText = "GENERATING PROOF...";
-                        this.ui.peerCount.innerText = "Connecting...";
+                        this.ui.loginBtn.classList.add('hidden');
                         this.ui.dot.classList.remove('on');
+                    } else {
+                        // Mining is complete or user is founder
+                        this.ui.loginBtn.innerHTML = "<span>JOIN</span>";
+                        if (!this.ui.dashboardPanel.classList.contains('active')) {
+                            this.ui.loginBtn.classList.remove('hidden');
+                        }
+                        this.ui.roomStatus.textContent = `${discoveredPeers} PEER${discoveredPeers > 1 ? 'S' : ''} ONLINE`;
+                        this.ui.roomStatus.style.color = "";
+                        this.ui.peerCount.innerText = connectedPeers > 0 ? `${connectedPeers} connected` : `Ready to join...`;
+                        this.ui.dot.classList.add('on');
                     }
                 } else {
-                    this.ui.roomStatus.innerText = "COLOR AVAILABLE";
+                    // Update UI for 0 peers
                     this.ui.peerCount.innerText = "Offline";
                     this.ui.loginBtn.innerHTML = "<span>LOGIN</span>";
+
+                    if (!this.ui.dashboardPanel.classList.contains('active')) {
+                        this.ui.loginBtn.classList.remove('hidden');
+                    } else {
+                        this.ui.loginBtn.classList.add('hidden');
+                    }
                     this.ui.dot.classList.remove('on');
                 }
             }
@@ -3066,7 +3266,22 @@ self.onmessage = async (e) => {
         });
     </script>
     <script type="module">
-        let storageScope = window.localStorage; document.getElementById('login-btn').addEventListener('click', async () => { if (document.getElementById('login-btn').innerText === 'LOGIN') { try { storageScope.setItem("lastSphereColor", document.getElementById('color-hex').innerText); } catch (e) { } } if (window.enterRoomUI) window.enterRoomUI(); });
+        let storageScope = window.localStorage; document.getElementById('login-btn').addEventListener('click', async () => {
+            const btnText = document.getElementById('login-btn').innerText;
+            if (btnText === 'LOGIN') {
+                try { storageScope.setItem("lastSphereColor", document.getElementById('color-hex').innerText); } catch (e) { }
+                if (window.app && window.app.mesh) window.app.mesh.enableSync();
+            } else if (btnText === 'JOIN') {
+                if (window.app && window.app.mesh) window.app.mesh.enableSync();
+                document.getElementById('room-status').innerText = "CONNECTED";
+                if (window.app && window.app.mesh) {
+                    const peers = Object.values(window.app.mesh.getPeers()).filter(p => p.dc?.readyState === 'open').length;
+                    document.getElementById('peer-count').innerText = peers > 0 ? `${peers} connected` : `Syncing...`;
+                }
+            }
+            if (window.enterRoomUI) window.enterRoomUI();
+            document.getElementById('login-btn').classList.add('hidden');
+        });
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) };
         const Mat4 = { perspective: (f, a, n, fr) => { const nf = 1 / (n - fr), f_t = 1 / Math.tan(f / 2); return [f_t / a, 0, 0, 0, 0, f_t, 0, 0, 0, 0, (fr + n) * nf, -1, 0, 0, 2 * fr * n * nf, 0] }, lookAt: (e, c, u) => { const z = Vec3.normalize(Vec3.sub(e, c)), x = Vec3.normalize(Vec3.cross(u, z)), y = Vec3.cross(z, x); return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -Vec3.dot(x, e), -Vec3.dot(y, e), -Vec3.dot(z, e), 1] }, multiply: (a, b) => [a[0] * b[0] + a[4] * b[1] + a[8] * b[2] + a[12] * b[3], a[1] * b[0] + a[5] * b[1] + a[9] * b[2] + a[13] * b[3], a[2] * b[0] + a[6] * b[1] + a[10] * b[2] + a[14] * b[3], a[3] * b[0] + a[7] * b[1] + a[11] * b[2] + a[15] * b[3], a[0] * b[4] + a[4] * b[5] + a[8] * b[6] + a[12] * b[7], a[1] * b[4] + a[5] * b[5] + a[9] * b[6] + a[13] * b[7], a[2] * b[4] + a[6] * b[5] + a[10] * b[6] + a[14] * b[7], a[3] * b[4] + a[7] * b[5] + a[11] * b[6] + a[15] * b[7], a[0] * b[8] + a[4] * b[9] + a[8] * b[10] + a[12] * b[11], a[1] * b[8] + a[5] * b[9] + a[9] * b[10] + a[13] * b[11], a[2] * b[8] + a[6] * b[9] + a[10] * b[10] + a[14] * b[11], a[3] * b[8] + a[7] * b[9] + a[11] * b[10] + a[15] * b[11], a[0] * b[12] + a[4] * b[13] + a[8] * b[14] + a[12] * b[15], a[1] * b[12] + a[5] * b[13] + a[9] * b[14] + a[13] * b[15], a[2] * b[12] + a[6] * b[13] + a[10] * b[14] + a[14] * b[15], a[3] * b[12] + a[7] * b[13] + a[11] * b[14] + a[15] * b[15]], rotationX: r => [1, 0, 0, 0, 0, Math.cos(r), Math.sin(r), 0, 0, -Math.sin(r), Math.cos(r), 0, 0, 0, 0, 1], translation: v => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1], scale: v => [v[0], 0, 0, 0, 0, v[1], 0, 0, 0, 0, v[2], 0, 0, 0, 0, 1], rotationAxis: (a, r) => { const c = Math.cos(r), s = Math.sin(r), t = 1 - c, x = a[0], y = a[1], z = a[2]; return [t * x * x + c, t * x * y + z * s, t * x * z - y * s, 0, t * x * y - z * s, t * y * y + c, t * y * z + x * s, 0, t * x * z + y * s, t * y * z - x * s, t * z * z + c, 0, 0, 0, 0, 1] }, identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] };
         const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathStartPos: null, renderPath: false, interactionSignature: { type: 'click', path: [] } };
@@ -3266,6 +3481,16 @@ self.onmessage = async (e) => {
         window.addEventListener("message", (e) => { if (e.data === "getSphereColor") e.source.postMessage(storageScope.getItem("lastSphereColor") || "#ff0000", e.origin); if (e.data?.type === 'handle-ready') { const hex = e.data.hex, pos = findPositionFromColor(hex); if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: e.data.count }); const d = document.createElement('div'); d.className = 'debug-room-item ' + (e.data.count > 0 ? 'active' : ''); d.innerHTML = `<span>${hex}</span> <span class="count">${e.data.count} peer(s)</span>`; document.getElementById('debug-rooms').appendChild(d); } } });
         async function initStorageAccess() { if (window.self === window.top) return; const triggerZoomToColor = (hexColor) => { const matchPos = findPositionFromColor(hexColor); if (matchPos) { if (!document.body.classList.contains('light-mode')) { document.body.classList.add('light-mode'); } triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true); const checkLandingComplete = () => { if (state.landing.progress >= 1) { window.parent.postMessage({ type: 'zoom-done', color: hexColor }, "*"); } else if (state.landing.active) { requestAnimationFrame(checkLandingComplete); } }; requestAnimationFrame(checkLandingComplete); } }; const access = async (h) => { try { if (h?.localStorage) storageScope = h.localStorage; const c = storageScope.getItem("lastSphereColor"); if (c) { window.parent.postMessage(c, "*"); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); document.body.style.backgroundColor = c; triggerZoomToColor(c); } else { window.parent.postMessage({ type: 'no-color' }, "*"); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); } } catch (e) { } }; try { if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true })); } catch (e) { access(null); } else { const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }); const b = document.createElement("button"); b.innerText = "LOGIN"; Object.assign(b.style, { padding: "12px 24px", fontSize: "16px", cursor: "pointer", background: "#000", color: "#fff", border: "none", borderRadius: "8px" }); o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true })); } catch (e) { o.innerHTML = "Access Denied"; } }; } } catch (e) { } }
         initStorageAccess();
+
+        // Setup TURN server settings UI
+        const turnAppNameEl = document.getElementById('turn-app-name');
+        const turnApiKeyEl = document.getElementById('turn-api-key');
+
+        turnAppNameEl.value = localStorage.getItem('turnAppName') || '';
+        turnApiKeyEl.value = localStorage.getItem('turnApiKey') || '';
+
+        turnAppNameEl.addEventListener('input', e => localStorage.setItem('turnAppName', e.target.value));
+        turnApiKeyEl.addEventListener('input', e => localStorage.setItem('turnApiKey', e.target.value));
     </script>
 </body>
 
