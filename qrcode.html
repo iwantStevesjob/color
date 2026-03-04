@@ -330,6 +330,10 @@
             toggleScannerBtn.classList.replace('hover:bg-slate-800', 'hover:bg-blue-700');
         }
 
+        // Precompute valid format strings for Error Correction Level L to allow fuzzy matching
+        const VALID_FORMATS = [];
+        for (let m = 0; m < 8; m++) VALID_FORMATS.push(getFormatBits(1, m));
+
         function scanFrame() {
             if (!videoStream || camVideo.readyState !== camVideo.HAVE_ENOUGH_DATA) return;
             
@@ -346,7 +350,7 @@
             const data = imgData.data;
             const bin = new Uint8Array(w * h);
             
-            // Dynamic Midpoint Thresholding (Handles shadows/light spots better)
+            // Dynamic Midpoint Thresholding
             let minLuma = 255, maxLuma = 0;
             for (let i = 0; i < data.length; i += 4) {
                 const luma = (data[i] * 299 + data[i+1] * 587 + data[i+2] * 114) / 1000;
@@ -361,63 +365,73 @@
                 bin[i] = luma < threshold ? 1 : 0;
             }
 
-            // Pyramid Sliding Window Geometry Search
-            const minSize = Math.floor(Math.min(w, h) * 0.35);
-            const maxSize = Math.floor(Math.min(w, h) * 0.85);
-            const stepSize = Math.floor(Math.min(w, h) * 0.05);
-            const stepPos = Math.floor(Math.min(w, h) * 0.02);
+            // Pyramid Sliding Window with Rotational Sweeps
+            const minSize = Math.floor(Math.min(w, h) * 0.4);
+            const maxSize = Math.floor(Math.min(w, h) * 0.9);
+            const stepSize = Math.floor(Math.min(w, h) * 0.08);
+            const stepPos = Math.floor(Math.min(w, h) * 0.04);
+            
+            // Allow up to ~20 degrees of rotation tolerance
+            const angles = [0, 0.08, -0.08, 0.17, -0.17, 0.26, -0.26, 0.35, -0.35];
 
             for (let size = maxSize; size >= minSize; size -= stepSize) {
-                // Search grid tightly grouped around center
-                for (let cx = w/2 - stepPos*4; cx <= w/2 + stepPos*4; cx += stepPos) {
-                    for (let cy = h/2 - stepPos*4; cy <= h/2 + stepPos*4; cy += stepPos) {
-                        const startX = cx - size/2;
-                        const startY = cy - size/2;
-                        const decodedText = tryDecode(startX, startY, size, bin, w, h);
-                        
-                        if (decodedText) {
-                            input.value = decodedText;
-                            generateQR(decodedText);
-                            stopScanner();
+                for (let cx = w/2 - stepPos*3; cx <= w/2 + stepPos*3; cx += stepPos) {
+                    for (let cy = h/2 - stepPos*3; cy <= h/2 + stepPos*3; cy += stepPos) {
+                        for (let angle of angles) {
+                            const decodedText = tryDecode(cx, cy, size, angle, bin, w, h);
                             
-                            // Visual success feedback
-                            input.classList.add('ring-4', 'ring-emerald-400', 'bg-emerald-50');
-                            setTimeout(() => input.classList.remove('ring-4', 'ring-emerald-400', 'bg-emerald-50'), 1000);
-                            return; 
+                            if (decodedText) {
+                                input.value = decodedText;
+                                generateQR(decodedText);
+                                stopScanner();
+                                
+                                input.classList.add('ring-4', 'ring-emerald-400', 'bg-emerald-50');
+                                setTimeout(() => input.classList.remove('ring-4', 'ring-emerald-400', 'bg-emerald-50'), 1000);
+                                return; 
+                            }
                         }
                     }
                 }
             }
         }
 
-        function tryDecode(startX, startY, boxSize, bin, imgWidth, imgHeight) {
+        function tryDecode(cx, cy, boxSize, angle, bin, imgWidth, imgHeight) {
             const modSize = boxSize / 33;
-            const matrix = [];
+            const cosA = Math.cos(angle);
+            const sinA = Math.sin(angle);
             
-            // 1. Map and Sample Grid (Majority vote for noise reduction)
+            // Helper to sample 5-point cross for noise reduction with affine rotation
+            function getDarkCount(x, y) {
+                const modX = x - 16;
+                const modY = y - 16;
+                const px = Math.floor(cx + (modX * cosA - modY * sinA) * modSize);
+                const py = Math.floor(cy + (modX * sinA + modY * cosA) * modSize);
+                
+                if (px < 1 || px >= imgWidth - 1 || py < 1 || py >= imgHeight - 1) return -1;
+                
+                let darks = 0;
+                if (bin[py * imgWidth + px]) darks++;
+                if (bin[(py-1) * imgWidth + px]) darks++;
+                if (bin[(py+1) * imgWidth + px]) darks++;
+                if (bin[py * imgWidth + (px-1)]) darks++;
+                if (bin[py * imgWidth + (px+1)]) darks++;
+                return darks;
+            }
+
+            // 1. FAST REJECTION (Check the 3 finders before building array)
+            // Center of finders must be mostly dark
+            if (getDarkCount(3, 3) < 3 || getDarkCount(29, 3) < 3 || getDarkCount(3, 29) < 3) return null;
+            // Immediate white borders must be mostly light (< 3 darks)
+            if (getDarkCount(3, 7) > 2 || getDarkCount(7, 3) > 2 || getDarkCount(29, 7) > 2) return null;
+
+            // 2. Build the full matrix if finders matched
+            const matrix = [];
             for (let y = 0; y < 33; y++) {
                 matrix[y] = [];
                 for (let x = 0; x < 33; x++) {
-                    const px = Math.floor(startX + x * modSize + modSize / 2);
-                    const py = Math.floor(startY + y * modSize + modSize / 2);
-                    
-                    if (px < 0 || px >= imgWidth || py < 0 || py >= imgHeight) return null;
-
-                    let darks = 0;
-                    for(let dy=-1; dy<=1; dy++) {
-                        for(let dx=-1; dx<=1; dx++) {
-                            if (bin[(py+dy)*imgWidth + (px+dx)]) darks++;
-                        }
-                    }
-                    matrix[y][x] = darks > 4 ? 1 : 0;
+                    matrix[y][x] = getDarkCount(x, y) >= 3 ? 1 : 0;
                 }
             }
-
-            // 2. Fast Pattern Rejection (Check Centers and Inner Rings of Finders)
-            if (matrix[3][3] !== 1 || matrix[3][29] !== 1 || matrix[29][3] !== 1) return null;
-            if (matrix[3][1] !== 0 || matrix[3][5] !== 0) return null; 
-            if (matrix[3][27] !== 0 || matrix[3][31] !== 0) return null; 
-            if (matrix[29][1] !== 0 || matrix[29][5] !== 0) return null;
 
             // 3. Extract Format Metadata (Top-Left)
             let fmtBits = 0;
@@ -425,10 +439,24 @@
             const fys = [8,8,8,8,8,8,8,8,7,5,4,3,2,1,0];
             for(let i=0; i<15; i++) fmtBits = (fmtBits << 1) | matrix[fys[i]][fxs[i]];
             
-            fmtBits ^= 0x5412;
-            const maskPattern = (fmtBits >> 10) & 0x7;
+            // 4. Hamming-Distance Error Correction for Format Bits
+            let bestDist = 15;
+            let maskPattern = -1;
+            for (let m = 0; m < 8; m++) {
+                let dist = 0;
+                let diff = fmtBits ^ VALID_FORMATS[m];
+                while (diff > 0) {
+                    dist += diff & 1;
+                    diff >>= 1;
+                }
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    maskPattern = m;
+                }
+            }
+            if (bestDist > 4) return null; // Survived up to 4 bit errors
 
-            // 4. Unmask the Data
+            // 5. Unmask the Data
             let unmasked = [];
             for (let y = 0; y < 33; y++) {
                 unmasked[y] = [];
@@ -448,7 +476,7 @@
                 }
             }
 
-            // 5. Zig-Zag Data Extraction (Bypass Reserved Zones)
+            // 6. Zig-Zag Data Extraction
             let bits = [];
             let direction = -1;
             let x = 32;
@@ -474,10 +502,10 @@
                 direction *= -1;
             }
 
-            // 6. Byte Decryption
+            // 7. Byte Decryption
             if (bits.length < 12) return null;
             let mode = (bits[0]<<3) | (bits[1]<<2) | (bits[2]<<1) | bits[3];
-            if (mode !== 4) return null; // Accept Byte mode only
+            if (mode !== 4) return null; 
 
             let len = 0;
             for (let i = 0; i < 8; i++) len = (len << 1) | bits[4 + i];
