@@ -3,38 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pro JS QR Scanner (True Perspective Solver)</title>
+    <title>Pro JS QR Engine (Gen & Scan)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style> body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; } </style>
+    <style>
+        body {
+            background-color: #f1f5f9;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        canvas {
+            image-rendering: pixelated;
+        }
+    </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4">
 
-    <div class="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl p-8 space-y-6 border border-slate-700">
+    <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6">
         <div class="text-center">
-            <h1 class="text-3xl font-bold text-white tracking-tight">Pro Engine V2</h1>
-            <p class="text-emerald-400 text-sm mt-1 font-mono">True Homography & Gaussian Elimination</p>
+            <h1 class="text-3xl font-bold text-slate-800 tracking-tight">QR Engine</h1>
+            <p class="text-slate-500 text-sm mt-1">100% Spec-Compliant Math + 3D Scanner</p>
         </div>
 
         <div class="space-y-2">
-            <label for="qrResult" class="block text-sm font-semibold text-slate-400">Decoded Payload</label>
-            <input type="text" id="qrResult" readonly placeholder="Awaiting complex scan..." class="w-full px-4 py-3 rounded-lg border border-slate-600 bg-slate-900 text-emerald-400 outline-none shadow-sm font-mono text-sm focus:ring-2 focus:ring-emerald-500 transition-all">
+            <label for="qrInput" class="block text-sm font-semibold text-slate-700">QR Content</label>
+            <input 
+                type="text" 
+                id="qrInput" 
+                placeholder="Type something..." 
+                class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm"
+                maxlength="78"
+            >
+            <div class="flex justify-between text-xs text-slate-400 font-medium px-1">
+                <span>Auto-updates as you type</span>
+                <span id="charCount">0 / 78 bytes</span>
+            </div>
         </div>
 
-        <div class="border-t border-slate-700 pt-6 space-y-4">
-            <button id="toggleScannerBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-3 rounded-lg transition-colors font-bold shadow-lg uppercase tracking-wider text-sm">
-                Initialize Optical Matrix
-            </button>
+        <div id="qrContainer" class="flex justify-center items-center py-6">
+            <canvas id="qrCanvas" class="shadow-md rounded-lg border-4 border-white"></canvas>
+        </div>
+
+        <div class="border-t border-slate-100 pt-6 space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-slate-800">Pro 3D Scanner</h2>
+                <button id="toggleScannerBtn" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors font-medium shadow-sm">
+                    Open Camera
+                </button>
+            </div>
             
-            <div id="scannerContainer" class="hidden flex-col items-center space-y-4 bg-black p-4 rounded-xl border border-slate-700">
-                <div class="relative w-full aspect-square bg-slate-900 rounded-lg overflow-hidden shadow-inner">
+            <div id="scannerContainer" class="hidden flex-col items-center space-y-3 bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-inner">
+                <div class="relative w-full aspect-square bg-black rounded-lg overflow-hidden">
                     <video id="camVideo" class="w-full h-full object-cover" autoplay playsinline></video>
-                    <div class="absolute inset-0 m-6 border-2 border-emerald-500/30 rounded-lg pointer-events-none flex items-center justify-center shadow-[0_0_0_9999px_rgba(0,0,0,0.8)]">
-                        <div class="absolute text-emerald-500/50 text-[10px] uppercase tracking-widest font-bold top-2">3D Tilt Compensator Active</div>
+                    <div class="absolute inset-0 m-6 border-2 border-emerald-500/50 rounded pointer-events-none flex items-center justify-center shadow-[0_0_0_9999px_rgba(0,0,0,0.7)]">
+                        <div class="absolute text-emerald-400 text-[10px] uppercase tracking-widest font-bold top-2">3D Homography Active</div>
                     </div>
                 </div>
                 
-                <div class="w-full flex justify-between items-center text-xs font-mono">
-                    <span id="scannerStatus" class="animate-pulse text-amber-400">Awaiting visual data...</span>
+                <div class="w-full flex justify-between items-center text-xs font-mono px-1">
+                    <span id="scannerStatus" class="animate-pulse text-amber-400">Initializing Engine...</span>
                     <span id="fpsCounter" class="text-emerald-400">0 FPS</span>
                 </div>
                 <canvas id="hiddenCanvas" class="hidden"></canvas>
@@ -43,7 +68,207 @@
     </div>
 
     <script>
-        // --- 1. THE UNCOMPROMISED WEB WORKER ---
+        // ==========================================================
+        // PART 1: ISO/IEC 18004 STANDARD QR GENERATOR
+        // ==========================================================
+        const QR_VERSION = 4;
+        const QR_SIZE = 33; 
+        const ECC_WORDS = 20; 
+        const TOTAL_WORDS = 100;
+        const DATA_WORDS = TOTAL_WORDS - ECC_WORDS; 
+
+        const GF_EXP = new Uint8Array(512);
+        const GF_LOG = new Uint8Array(256);
+
+        function initGF() {
+            let x = 1;
+            for (let i = 0; i < 255; i++) {
+                GF_EXP[i] = x; GF_LOG[x] = i;
+                x <<= 1;
+                if (x & 0x100) x ^= 0x11D;
+            }
+            for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
+        }
+
+        function gfMul(a, b) {
+            if (a === 0 || b === 0) return 0;
+            return GF_EXP[GF_LOG[a] + GF_LOG[b]];
+        }
+
+        function getGeneratorPoly(degree) {
+            let poly = new Uint8Array([1]);
+            for (let i = 0; i < degree; i++) {
+                let next = new Uint8Array(poly.length + 1);
+                for (let j = 0; j < poly.length; j++) next[j] = poly[j]; 
+                for (let j = 0; j < poly.length; j++) next[j + 1] ^= gfMul(poly[j], GF_EXP[i]);
+                poly = next;
+            }
+            return poly; 
+        }
+
+        function calculateECC(data, eccCount) {
+            const gen = getGeneratorPoly(eccCount);
+            let msg = new Uint8Array(data.length + eccCount);
+            msg.set(data);
+            for (let i = 0; i < data.length; i++) {
+                const coef = msg[i];
+                if (coef !== 0) {
+                    for (let j = 1; j < gen.length; j++) msg[i + j] ^= gfMul(gen[j], coef);
+                }
+            }
+            return msg.slice(data.length);
+        }
+
+        function getFormatBits(eccLevel, maskPattern) {
+            let data = (eccLevel << 3) | maskPattern; 
+            let rem = data;
+            for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+            return ((data << 10) | rem) ^ 0x5412; 
+        }
+
+        class QRMatrix {
+            constructor(size) {
+                this.size = size;
+                this.modules = Array(size).fill().map(() => Array(size).fill(false));
+                this.isReserved = Array(size).fill().map(() => Array(size).fill(false));
+            }
+
+            set(x, y, bit, reserved = false) {
+                this.modules[y][x] = bit;
+                if (reserved) this.isReserved[y][x] = true;
+            }
+
+            drawPattern(x, y, pattern) {
+                for (let i = 0; i < pattern.length; i++) {
+                    for (let j = 0; j < pattern[i].length; j++) this.set(x + j, y + i, pattern[i][j], true);
+                }
+            }
+
+            setupGrid() {
+                const finder = [
+                    [1,1,1,1,1,1,1], [1,0,0,0,0,0,1], [1,0,1,1,1,0,1], [1,0,1,1,1,0,1],
+                    [1,0,1,1,1,0,1], [1,0,0,0,0,0,1], [1,1,1,1,1,1,1]
+                ];
+                this.drawPattern(0, 0, finder);
+                this.drawPattern(this.size - 7, 0, finder);
+                this.drawPattern(0, this.size - 7, finder);
+
+                for (let i = 0; i < 8; i++) {
+                    this.set(7, i, 0, true); this.set(i, 7, 0, true);
+                    this.set(this.size-8, i, 0, true); this.set(this.size-1-i, 7, 0, true);
+                    this.set(7, this.size-1-i, 0, true); this.set(i, this.size-8, 0, true);
+                }
+
+                for (let i = 8; i < this.size - 8; i++) {
+                    this.set(i, 6, i % 2 === 0 ? 1 : 0, true);
+                    this.set(6, i, i % 2 === 0 ? 1 : 0, true);
+                }
+
+                const align = [[1,1,1,1,1], [1,0,0,0,1], [1,0,1,0,1], [1,0,0,0,1], [1,1,1,1,1]];
+                this.drawPattern(24, 24, align); 
+                this.set(8, this.size - 8, 1, true);
+
+                const formatBits = getFormatBits(1, 0); 
+                const copy1 = [[8,0], [8,1], [8,2], [8,3], [8,4], [8,5], [8,7], [8,8], [7,8], [5,8], [4,8], [3,8], [2,8], [1,8], [0,8]];
+                const copy2 = [[32,8], [31,8], [30,8], [29,8], [28,8], [27,8], [26,8], [25,8], [8,26], [8,27], [8,28], [8,29], [8,30], [8,31], [8,32]];
+
+                for (let i = 0; i < 15; i++) {
+                    const bit = (formatBits >> i) & 1;
+                    this.set(copy1[i][0], copy1[i][1], bit, true);
+                    this.set(copy2[i][0], copy2[i][1], bit, true);
+                }
+            }
+
+            fillData(bits) {
+                let bitIdx = 0, direction = -1, x = this.size - 1;
+                while (x > 0) {
+                    if (x === 6) x--; 
+                    for (let i = 0; i < this.size; i++) {
+                        const y = direction < 0 ? this.size - 1 - i : i;
+                        for (let j = 0; j < 2; j++) {
+                            const currX = x - j;
+                            if (!this.isReserved[y][currX]) {
+                                let bit = bitIdx < bits.length ? bits[bitIdx++] : 0;
+                                if ((currX + y) % 2 === 0) bit ^= 1;
+                                this.set(currX, y, bit);
+                            }
+                        }
+                    }
+                    x -= 2; direction *= -1;
+                }
+            }
+        }
+
+        function generateQR(text) {
+            if (!text) text = " ";
+            let bytes = new TextEncoder().encode(text);
+            if (bytes.length > 78) bytes = bytes.slice(0, 78);
+            document.getElementById('charCount').textContent = `${bytes.length} / 78 bytes`;
+
+            const bits = [0, 1, 0, 0];
+            const count = bytes.length;
+            for (let i = 7; i >= 0; i--) bits.push((count >> i) & 1);
+            for (let i = 0; i < count; i++) {
+                for (let j = 7; j >= 0; j--) bits.push((bytes[i] >> j) & 1);
+            }
+
+            const term = Math.min(4, DATA_WORDS * 8 - bits.length);
+            for (let i = 0; i < term; i++) bits.push(0);
+            while (bits.length % 8 !== 0) bits.push(0);
+            
+            let padIs236 = true;
+            while (bits.length < DATA_WORDS * 8) {
+                const pad = padIs236 ? 0b11101100 : 0b00010001;
+                for (let j = 7; j >= 0; j--) bits.push((pad >> j) & 1);
+                padIs236 = !padIs236;
+            }
+
+            const dataBytes = new Uint8Array(DATA_WORDS);
+            for (let i = 0; i < DATA_WORDS; i++) {
+                let b = 0;
+                for (let j = 0; j < 8; j++) b = (b << 1) | bits[i * 8 + j];
+                dataBytes[i] = b;
+            }
+            
+            const eccBytes = calculateECC(dataBytes, ECC_WORDS);
+            const finalBits = Array.from(bits);
+            for (let i = 0; i < eccBytes.length; i++) {
+                for (let j = 7; j >= 0; j--) finalBits.push((eccBytes[i] >> j) & 1);
+            }
+
+            const matrix = new QRMatrix(QR_SIZE);
+            matrix.setupGrid();
+            matrix.fillData(finalBits);
+            renderToCanvas(matrix);
+        }
+
+        function renderToCanvas(matrix) {
+            const canvas = document.getElementById('qrCanvas');
+            const ctx = canvas.getContext('2d');
+            const quietZone = 4, scale = 8, size = matrix.size;
+            
+            canvas.width = (size + quietZone * 2) * scale;
+            canvas.height = (size + quietZone * 2) * scale;
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#1e293b'; // Using a nice slate color for the code
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    if (matrix.modules[y][x]) ctx.fillRect((x + quietZone) * scale, (y + quietZone) * scale, scale, scale);
+                }
+            }
+        }
+
+        initGF();
+        const input = document.getElementById('qrInput');
+        input.addEventListener('input', (e) => generateQR(e.target.value));
+        generateQR("https://gemini.google.com");
+
+
+        // ==========================================================
+        // PART 2: PRO 3D HOMOGRAPHY SCANNER (WEB WORKER)
+        // ==========================================================
         const workerCode = `
             function adaptiveThreshold(data, width, height) {
                 const s = Math.floor(width / 8), t = 15; 
@@ -94,14 +319,12 @@
                 return { tl, tr, bl };
             }
 
-            // TRUE VISION: Hunt for the Alignment Pattern
             function findAlignmentPattern(bin, w, h, startX, startY, radius) {
                 let bestX = startX, bestY = startY, bestScore = 9999;
                 const searchArea = Math.floor(radius);
                 
                 for (let y = Math.max(0, startY - searchArea); y < Math.min(h, startY + searchArea); y++) {
                     for (let x = Math.max(0, startX - searchArea); x < Math.min(w, startX + searchArea); x++) {
-                        // Looking for a lone black pixel mass surrounded by white (simplified Alignment signature)
                         if (bin[y * w + x] === 1) {
                             let darks = 0;
                             for(let dy=-2; dy<=2; dy++) {
@@ -109,13 +332,11 @@
                                     if(y+dy>=0 && y+dy<h && x+dx>=0 && x+dx<w && bin[(y+dy)*w + (x+dx)] === 1) darks++;
                                 }
                             }
-                            // Ideal alignment center has dense darks, surrounded by light ring
                             const distToEst = Math.hypot(x - startX, y - startY);
                             const score = Math.abs(9 - darks) + (distToEst * 0.1); 
                             
                             if (score < bestScore) {
-                                bestScore = score;
-                                bestX = x; bestY = y;
+                                bestScore = score; bestX = x; bestY = y;
                             }
                         }
                     }
@@ -123,7 +344,6 @@
                 return { x: bestX, y: bestY };
             }
 
-            // TRUE MATH: 8x8 Gaussian Elimination for Perspective Transform Matrix
             function getPerspectiveTransform(src, dst) {
                 let A = [];
                 for (let i = 0; i < 4; i++) {
@@ -131,7 +351,6 @@
                     A.push([0, 0, 0, src[i].x, src[i].y, 1, -src[i].x * dst[i].y, -src[i].y * dst[i].y, dst[i].y]);
                 }
 
-                // Solve A * x = B using Gaussian elimination
                 const n = 8;
                 for (let i = 0; i < n; i++) {
                     let maxEl = Math.abs(A[i][i]), maxRow = i;
@@ -161,7 +380,6 @@
                 
                 for (let y = 0; y < dim; y++) {
                     for (let x = 0; x < dim; x++) {
-                        // Directly plug the logical grid coordinates (x,y) into our exact matrix
                         const den = g * x + h_mat * y + 1;
                         const tx = Math.floor((a * x + b * y + c) / den);
                         const ty = Math.floor((d * x + e * y + f) / den);
@@ -282,35 +500,23 @@
                 if (centers.length >= 3) {
                     const corners = orderCorners(centers.slice(0, 3));
                     if (corners) {
-                        // 1. Calculate the Affine Guess for the Alignment Pattern area
                         const estX = corners.tr.x + corners.bl.x - corners.tl.x;
                         const estY = corners.tr.y + corners.bl.y - corners.tl.y;
                         const moduleEstimate = (corners.tl.moduleSize + corners.tr.moduleSize + corners.bl.moduleSize) / 3;
                         
-                        // 2. Perform a local search for the TRUE Alignment Pattern
                         const alignRadius = moduleEstimate * 5; 
                         const alignCenter = findAlignmentPattern(binImage, width, height, estX, estY, alignRadius);
 
-                        // 3. Set up the logical grid (Version 4 QR Code is 33x33)
                         const srcCoords = [
-                            { x: 3, y: 3 },   // Top-Left Finder Logical Center
-                            { x: 29, y: 3 },  // Top-Right Finder Logical Center
-                            { x: 3, y: 29 },  // Bottom-Left Finder Logical Center
-                            { x: 26, y: 26 }  // Alignment Pattern Logical Center
+                            { x: 3, y: 3 }, { x: 29, y: 3 }, { x: 3, y: 29 }, { x: 26, y: 26 }
                         ];
 
-                        // 4. Set up the camera pixel coordinates found by computer vision
                         const dstCoords = [
-                            { x: corners.tl.x, y: corners.tl.y },
-                            { x: corners.tr.x, y: corners.tr.y },
-                            { x: corners.bl.x, y: corners.bl.y },
-                            { x: alignCenter.x, y: alignCenter.y }
+                            { x: corners.tl.x, y: corners.tl.y }, { x: corners.tr.x, y: corners.tr.y },
+                            { x: corners.bl.x, y: corners.bl.y }, { x: alignCenter.x, y: alignCenter.y }
                         ];
 
-                        // 5. Calculate Exact Homography Matrix mapping logic to pixels
                         const transform = getPerspectiveTransform(srcCoords, dstCoords);
-                        
-                        // 6. Pluck the grid mathematically
                         const unwarpedGrid = sampleWarpedGrid(binImage, width, height, transform, 33); 
                         
                         if (unwarpedGrid) {
@@ -318,21 +524,19 @@
                         }
                     }
                 }
-
                 self.postMessage({ success: !!result, data: result });
             }
         `;
 
-        // --- 2. MAIN UI THREAD ---
         const blob = new Blob([workerCode], { type: 'application/javascript' });
         const qrWorker = new Worker(URL.createObjectURL(blob));
 
         const toggleBtn = document.getElementById('toggleScannerBtn');
+        const scannerContainer = document.getElementById('scannerContainer');
         const camVideo = document.getElementById('camVideo');
         const hiddenCanvas = document.getElementById('hiddenCanvas');
         const ctx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
         
-        const qrResult = document.getElementById('qrResult');
         const fpsCounter = document.getElementById('fpsCounter');
         const statusText = document.getElementById('scannerStatus');
 
@@ -350,13 +554,16 @@
             }
 
             if (e.data.success) {
-                qrResult.value = e.data.data;
-                statusText.textContent = "3D Payload Decrypted!";
+                // FEED THE SCANNED DATA BACK INTO THE GENERATOR
+                const payload = e.data.data;
+                input.value = payload;
+                generateQR(payload);
+                
+                statusText.textContent = "Payload Captured!";
                 statusText.classList.replace('text-amber-400', 'text-emerald-400');
                 
-                // Visual success pulse
-                qrResult.classList.add('bg-emerald-900', 'text-white', 'border-emerald-400');
-                setTimeout(() => qrResult.classList.remove('bg-emerald-900', 'text-white', 'border-emerald-400'), 1500);
+                input.classList.add('ring-4', 'ring-emerald-400', 'bg-emerald-50');
+                setTimeout(() => input.classList.remove('ring-4', 'ring-emerald-400', 'bg-emerald-50'), 1500);
                 
                 stopScanner();
             }
@@ -366,14 +573,14 @@
             if (isScanning) { stopScanner(); return; }
 
             try {
-                document.getElementById('scannerContainer').classList.remove('hidden');
-                statusText.textContent = "Activating Hardware...";
+                scannerContainer.classList.remove('hidden');
+                statusText.textContent = "Booting Camera...";
                 
                 videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1080 }, height: { ideal: 1080 } } });
                 camVideo.srcObject = videoStream;
-                toggleBtn.textContent = 'Terminate Matrix';
-                toggleBtn.classList.replace('bg-emerald-600', 'bg-red-600');
-                toggleBtn.classList.replace('hover:bg-emerald-500', 'hover:bg-red-500');
+                toggleBtn.textContent = 'Close Camera';
+                toggleBtn.classList.replace('bg-blue-600', 'bg-red-600');
+                toggleBtn.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
                 
                 camVideo.onloadedmetadata = () => {
                     camVideo.play();
@@ -394,12 +601,12 @@
             isScanning = false;
             camVideo.srcObject = null;
             setTimeout(() => {
-                document.getElementById('scannerContainer').classList.add('hidden');
-                toggleBtn.textContent = 'Initialize Optical Matrix';
-                toggleBtn.classList.replace('bg-red-600', 'bg-emerald-600');
-                toggleBtn.classList.replace('hover:bg-red-500', 'hover:bg-emerald-500');
+                scannerContainer.classList.add('hidden');
+                toggleBtn.textContent = 'Open Camera';
+                toggleBtn.classList.replace('bg-red-600', 'bg-blue-600');
+                toggleBtn.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
                 statusText.classList.replace('text-emerald-400', 'text-amber-400');
-            }, 2000);
+            }, 1000);
         }
 
         function scanLoop() {
@@ -407,7 +614,7 @@
             if (!workerBusy && camVideo.readyState === camVideo.HAVE_ENOUGH_DATA) {
                 workerBusy = true;
                 
-                const roiSize = 500; // Expanded to catch wider tilts
+                const roiSize = 500; 
                 hiddenCanvas.width = roiSize; hiddenCanvas.height = roiSize;
                 const startX = (camVideo.videoWidth / 2) - (roiSize / 2);
                 const startY = (camVideo.videoHeight / 2) - (roiSize / 2);
