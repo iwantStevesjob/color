@@ -3,317 +3,386 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pure JS QR Code Generator</title>
+    <title>Pro JS QR Scanner (True Perspective Solver)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body {
-            background-color: #f1f5f9;
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        }
-        canvas {
-            image-rendering: pixelated;
-        }
-    </style>
+    <style> body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; } </style>
 </head>
 <body class="flex flex-col items-center justify-center min-h-screen p-4">
 
-    <div class="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 space-y-6">
+    <div class="max-w-md w-full bg-slate-800 rounded-2xl shadow-2xl p-8 space-y-6 border border-slate-700">
         <div class="text-center">
-            <h1 class="text-3xl font-bold text-slate-800 tracking-tight">QR Engine</h1>
-            <p class="text-slate-500 text-sm mt-1">100% Spec-Compliant Pure Math Generator</p>
+            <h1 class="text-3xl font-bold text-white tracking-tight">Pro Engine V2</h1>
+            <p class="text-emerald-400 text-sm mt-1 font-mono">True Homography & Gaussian Elimination</p>
         </div>
 
         <div class="space-y-2">
-            <label for="qrInput" class="block text-sm font-semibold text-slate-700">QR Content</label>
-            <input 
-                type="text" 
-                id="qrInput" 
-                placeholder="Type something..." 
-                class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm"
-                maxlength="78"
-            >
-            <div class="flex justify-between text-xs text-slate-400 font-medium px-1">
-                <span>Auto-updates as you type</span>
-                <span id="charCount">0 / 78 bytes</span>
-            </div>
+            <label for="qrResult" class="block text-sm font-semibold text-slate-400">Decoded Payload</label>
+            <input type="text" id="qrResult" readonly placeholder="Awaiting complex scan..." class="w-full px-4 py-3 rounded-lg border border-slate-600 bg-slate-900 text-emerald-400 outline-none shadow-sm font-mono text-sm focus:ring-2 focus:ring-emerald-500 transition-all">
         </div>
 
-        <div id="qrContainer" class="flex justify-center items-center py-6">
-            <canvas id="qrCanvas" class="shadow-md rounded-lg border-4 border-white"></canvas>
-        </div>
-
-        <!-- Custom JS Scanner Section -->
-        <div class="border-t border-slate-100 pt-6 space-y-4">
-            <div class="flex items-center justify-between">
-                <h2 class="text-lg font-semibold text-slate-800">Custom JS Scanner</h2>
-                <button id="toggleScannerBtn" class="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md transition-colors font-medium shadow-sm">
-                    Open Camera
-                </button>
-            </div>
+        <div class="border-t border-slate-700 pt-6 space-y-4">
+            <button id="toggleScannerBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-3 rounded-lg transition-colors font-bold shadow-lg uppercase tracking-wider text-sm">
+                Initialize Optical Matrix
+            </button>
             
-            <div id="scannerContainer" class="hidden flex-col items-center space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                <div class="relative w-full max-w-[250px] aspect-square bg-slate-900 rounded-lg overflow-hidden shadow-inner">
+            <div id="scannerContainer" class="hidden flex-col items-center space-y-4 bg-black p-4 rounded-xl border border-slate-700">
+                <div class="relative w-full aspect-square bg-slate-900 rounded-lg overflow-hidden shadow-inner">
                     <video id="camVideo" class="w-full h-full object-cover" autoplay playsinline></video>
-                    <!-- Targeting Reticle -->
-                    <div class="absolute inset-0 m-6 border-2 border-emerald-500/50 rounded pointer-events-none flex items-center justify-center bg-emerald-500/5">
-                        <div class="w-full h-full border border-white/20"></div>
-                        <div class="absolute text-white/70 text-[10px] uppercase tracking-widest font-bold bg-black/30 px-2 py-1 rounded">Center Upright</div>
+                    <div class="absolute inset-0 m-6 border-2 border-emerald-500/30 rounded-lg pointer-events-none flex items-center justify-center shadow-[0_0_0_9999px_rgba(0,0,0,0.8)]">
+                        <div class="absolute text-emerald-500/50 text-[10px] uppercase tracking-widest font-bold top-2">3D Tilt Compensator Active</div>
                     </div>
                 </div>
-                <p id="scannerStatus" class="text-xs text-slate-500 text-center animate-pulse">Initializing engine...</p>
-                <canvas id="scanCanvas" class="hidden"></canvas>
+                
+                <div class="w-full flex justify-between items-center text-xs font-mono">
+                    <span id="scannerStatus" class="animate-pulse text-amber-400">Awaiting visual data...</span>
+                    <span id="fpsCounter" class="text-emerald-400">0 FPS</span>
+                </div>
+                <canvas id="hiddenCanvas" class="hidden"></canvas>
             </div>
-        </div>
-
-        <div class="bg-emerald-50 border border-emerald-100 p-4 rounded-xl text-xs text-emerald-800 leading-relaxed shadow-sm">
-            <p class="font-semibold mb-1 flex items-center gap-1">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                Engine Validated
-            </p>
-            <p>Scanner now uses a pure-JavaScript sliding-window matrix decoder. No native browser APIs or third-party libraries required.</p>
         </div>
     </div>
 
     <script>
-        /**
-         * ISO/IEC 18004 Standard QR Code Implementation
-         */
-        const QR_VERSION = 4;
-        const QR_SIZE = 33; 
-        const ECC_WORDS = 20; 
-        const TOTAL_WORDS = 100;
-        const DATA_WORDS = TOTAL_WORDS - ECC_WORDS; 
-
-        // --- GENERATOR LOGIC (Galois Field & Matrices) ---
-        const GF_EXP = new Uint8Array(512);
-        const GF_LOG = new Uint8Array(256);
-
-        function initGF() {
-            let x = 1;
-            for (let i = 0; i < 255; i++) {
-                GF_EXP[i] = x;
-                GF_LOG[x] = i;
-                x <<= 1;
-                if (x & 0x100) x ^= 0x11D;
-            }
-            for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255];
-        }
-
-        function gfMul(a, b) {
-            if (a === 0 || b === 0) return 0;
-            return GF_EXP[GF_LOG[a] + GF_LOG[b]];
-        }
-
-        function getGeneratorPoly(degree) {
-            let poly = new Uint8Array([1]);
-            for (let i = 0; i < degree; i++) {
-                let next = new Uint8Array(poly.length + 1);
-                for (let j = 0; j < poly.length; j++) next[j] = poly[j]; 
-                for (let j = 0; j < poly.length; j++) next[j + 1] ^= gfMul(poly[j], GF_EXP[i]);
-                poly = next;
-            }
-            return poly; 
-        }
-
-        function calculateECC(data, eccCount) {
-            const gen = getGeneratorPoly(eccCount);
-            let msg = new Uint8Array(data.length + eccCount);
-            msg.set(data);
-
-            for (let i = 0; i < data.length; i++) {
-                const coef = msg[i];
-                if (coef !== 0) {
-                    for (let j = 1; j < gen.length; j++) msg[i + j] ^= gfMul(gen[j], coef);
-                }
-            }
-            return msg.slice(data.length);
-        }
-
-        function getFormatBits(eccLevel, maskPattern) {
-            let data = (eccLevel << 3) | maskPattern; 
-            let rem = data;
-            for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
-            return ((data << 10) | rem) ^ 0x5412; 
-        }
-
-        class QRMatrix {
-            constructor(size) {
-                this.size = size;
-                this.modules = Array(size).fill().map(() => Array(size).fill(false));
-                this.isReserved = Array(size).fill().map(() => Array(size).fill(false));
-            }
-
-            set(x, y, bit, reserved = false) {
-                this.modules[y][x] = bit;
-                if (reserved) this.isReserved[y][x] = true;
-            }
-
-            drawPattern(x, y, pattern) {
-                for (let i = 0; i < pattern.length; i++) {
-                    for (let j = 0; j < pattern[i].length; j++) {
-                        this.set(x + j, y + i, pattern[i][j], true);
+        // --- 1. THE UNCOMPROMISED WEB WORKER ---
+        const workerCode = `
+            function adaptiveThreshold(data, width, height) {
+                const s = Math.floor(width / 8), t = 15; 
+                const intImg = new Int32Array(width * height), bin = new Uint8Array(width * height);
+                for (let i = 0; i < width; i++) {
+                    let sum = 0;
+                    for (let j = 0; j < height; j++) {
+                        const idx = (j * width + i) * 4;
+                        const luma = (data[idx] * 299 + data[idx+1] * 587 + data[idx+2] * 114) / 1000;
+                        sum += luma;
+                        intImg[j * width + i] = i === 0 ? sum : intImg[j * width + i - 1] + sum;
                     }
                 }
+                for (let i = 0; i < width; i++) {
+                    for (let j = 0; j < height; j++) {
+                        const x1 = Math.max(i - s, 0), x2 = Math.min(i + s, width - 1);
+                        const y1 = Math.max(j - s, 0), y2 = Math.min(j + s, height - 1);
+                        const count = (x2 - x1) * (y2 - y1);
+                        const sum = intImg[y2 * width + x2] - (y1 > 0 ? intImg[(y1 - 1) * width + x2] : 0) - (x1 > 0 ? intImg[y2 * width + (x1 - 1)] : 0) + (y1 > 0 && x1 > 0 ? intImg[(y1 - 1) * width + (x1 - 1)] : 0);
+                        const luma = (data[(j * width + i) * 4] * 299 + data[(j * width + i) * 4 + 1] * 587 + data[(j * width + i) * 4 + 2] * 114) / 1000;
+                        bin[j * width + i] = (luma * count) < (sum * (100 - t) / 100) ? 1 : 0; 
+                    }
+                }
+                return bin;
             }
 
-            setupGrid() {
-                const finder = [
-                    [1,1,1,1,1,1,1], [1,0,0,0,0,0,1], [1,0,1,1,1,0,1], [1,0,1,1,1,0,1],
-                    [1,0,1,1,1,0,1], [1,0,0,0,0,0,1], [1,1,1,1,1,1,1]
-                ];
+            function checkRatio(counts) {
+                const total = counts.reduce((a, b) => a + b, 0);
+                if (total < 7) return false;
+                const m = total / 7, v = m / 2.0;
+                return Math.abs(m - counts[0]) < v && Math.abs(m - counts[1]) < v && Math.abs(3*m - counts[2]) < 3*v && Math.abs(m - counts[3]) < v && Math.abs(m - counts[4]) < v;
+            }
+
+            function orderCorners(c) {
+                if (c.length !== 3) return null;
+                const d01 = Math.hypot(c[0].x - c[1].x, c[0].y - c[1].y);
+                const d12 = Math.hypot(c[1].x - c[2].x, c[1].y - c[2].y);
+                const d02 = Math.hypot(c[0].x - c[2].x, c[0].y - c[2].y);
                 
-                this.drawPattern(0, 0, finder);
-                this.drawPattern(this.size - 7, 0, finder);
-                this.drawPattern(0, this.size - 7, finder);
-
-                for (let i = 0; i < 8; i++) {
-                    this.set(7, i, 0, true); this.set(i, 7, 0, true);
-                    this.set(this.size-8, i, 0, true); this.set(this.size-1-i, 7, 0, true);
-                    this.set(7, this.size-1-i, 0, true); this.set(i, this.size-8, 0, true);
+                let tl, tr, bl;
+                if (d01 >= d12 && d01 >= d02) { tl = c[2]; tr = c[0]; bl = c[1]; }
+                else if (d12 >= d01 && d12 >= d02) { tl = c[0]; tr = c[1]; bl = c[2]; }
+                else { tl = c[1]; tr = c[0]; bl = c[2]; }
+                
+                if ((tr.x - tl.x) * (bl.y - tl.y) - (tr.y - tl.y) * (bl.x - tl.x) < 0) {
+                    let temp = tr; tr = bl; bl = temp;
                 }
-
-                for (let i = 8; i < this.size - 8; i++) {
-                    this.set(i, 6, i % 2 === 0 ? 1 : 0, true);
-                    this.set(6, i, i % 2 === 0 ? 1 : 0, true);
-                }
-
-                const align = [[1,1,1,1,1], [1,0,0,0,1], [1,0,1,0,1], [1,0,0,0,1], [1,1,1,1,1]];
-                this.drawPattern(24, 24, align); 
-                this.set(8, this.size - 8, 1, true);
-
-                const formatBits = getFormatBits(1, 0); 
-                const copy1 = [[8,0], [8,1], [8,2], [8,3], [8,4], [8,5], [8,7], [8,8], [7,8], [5,8], [4,8], [3,8], [2,8], [1,8], [0,8]];
-                const copy2 = [[32,8], [31,8], [30,8], [29,8], [28,8], [27,8], [26,8], [25,8], [8,26], [8,27], [8,28], [8,29], [8,30], [8,31], [8,32]];
-
-                for (let i = 0; i < 15; i++) {
-                    const bit = (formatBits >> i) & 1;
-                    this.set(copy1[i][0], copy1[i][1], bit, true);
-                    this.set(copy2[i][0], copy2[i][1], bit, true);
-                }
+                return { tl, tr, bl };
             }
 
-            fillData(bits) {
-                let bitIdx = 0;
-                let direction = -1; 
-                let x = this.size - 1;
-
-                while (x > 0) {
-                    if (x === 6) x--; 
-                    for (let i = 0; i < this.size; i++) {
-                        const y = direction < 0 ? this.size - 1 - i : i;
-                        for (let j = 0; j < 2; j++) {
-                            const currX = x - j;
-                            if (!this.isReserved[y][currX]) {
-                                let bit = bitIdx < bits.length ? bits[bitIdx++] : 0;
-                                if ((currX + y) % 2 === 0) bit ^= 1;
-                                this.set(currX, y, bit);
+            // TRUE VISION: Hunt for the Alignment Pattern
+            function findAlignmentPattern(bin, w, h, startX, startY, radius) {
+                let bestX = startX, bestY = startY, bestScore = 9999;
+                const searchArea = Math.floor(radius);
+                
+                for (let y = Math.max(0, startY - searchArea); y < Math.min(h, startY + searchArea); y++) {
+                    for (let x = Math.max(0, startX - searchArea); x < Math.min(w, startX + searchArea); x++) {
+                        // Looking for a lone black pixel mass surrounded by white (simplified Alignment signature)
+                        if (bin[y * w + x] === 1) {
+                            let darks = 0;
+                            for(let dy=-2; dy<=2; dy++) {
+                                for(let dx=-2; dx<=2; dx++) {
+                                    if(y+dy>=0 && y+dy<h && x+dx>=0 && x+dx<w && bin[(y+dy)*w + (x+dx)] === 1) darks++;
+                                }
+                            }
+                            // Ideal alignment center has dense darks, surrounded by light ring
+                            const distToEst = Math.hypot(x - startX, y - startY);
+                            const score = Math.abs(9 - darks) + (distToEst * 0.1); 
+                            
+                            if (score < bestScore) {
+                                bestScore = score;
+                                bestX = x; bestY = y;
                             }
                         }
                     }
-                    x -= 2;
-                    direction *= -1;
                 }
-            }
-        }
-
-        function generateQR(text) {
-            if (!text) text = " ";
-            let bytes = new TextEncoder().encode(text);
-            if (bytes.length > 78) bytes = bytes.slice(0, 78);
-            document.getElementById('charCount').textContent = `${bytes.length} / 78 bytes`;
-
-            const bits = [0, 1, 0, 0];
-            const count = bytes.length;
-            for (let i = 7; i >= 0; i--) bits.push((count >> i) & 1);
-
-            for (let i = 0; i < count; i++) {
-                for (let j = 7; j >= 0; j--) bits.push((bytes[i] >> j) & 1);
+                return { x: bestX, y: bestY };
             }
 
-            const term = Math.min(4, DATA_WORDS * 8 - bits.length);
-            for (let i = 0; i < term; i++) bits.push(0);
-            while (bits.length % 8 !== 0) bits.push(0);
-            
-            let padIs236 = true;
-            while (bits.length < DATA_WORDS * 8) {
-                const pad = padIs236 ? 0b11101100 : 0b00010001;
-                for (let j = 7; j >= 0; j--) bits.push((pad >> j) & 1);
-                padIs236 = !padIs236;
-            }
-
-            const dataBytes = new Uint8Array(DATA_WORDS);
-            for (let i = 0; i < DATA_WORDS; i++) {
-                let b = 0;
-                for (let j = 0; j < 8; j++) b = (b << 1) | bits[i * 8 + j];
-                dataBytes[i] = b;
-            }
-            
-            const eccBytes = calculateECC(dataBytes, ECC_WORDS);
-            const finalBits = Array.from(bits);
-            for (let i = 0; i < eccBytes.length; i++) {
-                for (let j = 7; j >= 0; j--) finalBits.push((eccBytes[i] >> j) & 1);
-            }
-
-            const matrix = new QRMatrix(QR_SIZE);
-            matrix.setupGrid();
-            matrix.fillData(finalBits);
-            renderToCanvas(matrix);
-        }
-
-        function renderToCanvas(matrix) {
-            const canvas = document.getElementById('qrCanvas');
-            const ctx = canvas.getContext('2d');
-            const quietZone = 4, scale = 8, size = matrix.size;
-            
-            canvas.width = (size + quietZone * 2) * scale;
-            canvas.height = (size + quietZone * 2) * scale;
-            
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#000000';
-            for (let y = 0; y < size; y++) {
-                for (let x = 0; x < size; x++) {
-                    if (matrix.modules[y][x]) ctx.fillRect((x + quietZone) * scale, (y + quietZone) * scale, scale, scale);
+            // TRUE MATH: 8x8 Gaussian Elimination for Perspective Transform Matrix
+            function getPerspectiveTransform(src, dst) {
+                let A = [];
+                for (let i = 0; i < 4; i++) {
+                    A.push([src[i].x, src[i].y, 1, 0, 0, 0, -src[i].x * dst[i].x, -src[i].y * dst[i].x, dst[i].x]);
+                    A.push([0, 0, 0, src[i].x, src[i].y, 1, -src[i].x * dst[i].y, -src[i].y * dst[i].y, dst[i].y]);
                 }
+
+                // Solve A * x = B using Gaussian elimination
+                const n = 8;
+                for (let i = 0; i < n; i++) {
+                    let maxEl = Math.abs(A[i][i]), maxRow = i;
+                    for (let k = i + 1; k < n; k++) { 
+                        if (Math.abs(A[k][i]) > maxEl) { maxEl = Math.abs(A[k][i]); maxRow = k; } 
+                    }
+                    let tmp = A[maxRow]; A[maxRow] = A[i]; A[i] = tmp;
+                    for (let k = i + 1; k < n; k++) {
+                        let c = -A[k][i] / A[i][i];
+                        for (let j = i; j < n + 1; j++) {
+                            if (i === j) A[k][j] = 0; else A[k][j] += c * A[i][j];
+                        }
+                    }
+                }
+                
+                let transform = new Array(8).fill(0);
+                for (let i = n - 1; i >= 0; i--) {
+                    transform[i] = A[i][n] / A[i][i];
+                    for (let k = i - 1; k >= 0; k--) A[k][n] -= A[k][i] * transform[i];
+                }
+                return transform;
             }
-        }
 
-        initGF();
-        const input = document.getElementById('qrInput');
-        input.addEventListener('input', (e) => generateQR(e.target.value));
-        generateQR("https://gemini.google.com");
+            function sampleWarpedGrid(bin, w, h, transform, dim) {
+                const [a, b, c, d, e, f, g, h_mat] = transform;
+                const grid = Array(dim).fill().map(() => Array(dim).fill(0));
+                
+                for (let y = 0; y < dim; y++) {
+                    for (let x = 0; x < dim; x++) {
+                        // Directly plug the logical grid coordinates (x,y) into our exact matrix
+                        const den = g * x + h_mat * y + 1;
+                        const tx = Math.floor((a * x + b * y + c) / den);
+                        const ty = Math.floor((d * x + e * y + f) / den);
+                        
+                        if (tx < 0 || tx >= w || ty < 0 || ty >= h) return null;
+                        grid[y][x] = bin[ty * w + tx];
+                    }
+                }
+                return grid;
+            }
 
-        // --- CUSTOM PURE-JS SCANNER ENGINE ---
-        const toggleScannerBtn = document.getElementById('toggleScannerBtn');
-        const scannerContainer = document.getElementById('scannerContainer');
+            function decodeGrid(matrix) {
+                if (matrix[3][3] !== 1 || matrix[3][29] !== 1 || matrix[29][3] !== 1) return null;
+                if (matrix[3][1] !== 0 || matrix[3][5] !== 0 || matrix[3][27] !== 0) return null; 
+
+                let fmtBits = 0;
+                const fxs = [0,1,2,3,4,5,7,8,8,8,8,8,8,8,8], fys = [8,8,8,8,8,8,8,8,7,5,4,3,2,1,0];
+                for(let i=0; i<15; i++) fmtBits = (fmtBits << 1) | matrix[fys[i]][fxs[i]];
+                
+                fmtBits ^= 0x5412;
+                const maskPattern = (fmtBits >> 10) & 0x7;
+
+                let unmasked = [];
+                for (let y = 0; y < 33; y++) {
+                    unmasked[y] = [];
+                    for (let x = 0; x < 33; x++) {
+                        let maskBit = false;
+                        switch(maskPattern) {
+                            case 0: maskBit = (x + y) % 2 === 0; break;
+                            case 1: maskBit = y % 2 === 0; break;
+                            case 2: maskBit = x % 3 === 0; break;
+                            case 3: maskBit = (x + y) % 3 === 0; break;
+                            case 4: maskBit = (Math.floor(y / 2) + Math.floor(x / 3)) % 2 === 0; break;
+                            case 5: maskBit = ((x * y) % 2) + ((x * y) % 3) === 0; break;
+                            case 6: maskBit = (((x * y) % 2) + ((x * y) % 3)) % 2 === 0; break;
+                            case 7: maskBit = (((x + y) % 2) + ((x * y) % 3)) % 2 === 0; break;
+                        }
+                        unmasked[y][x] = matrix[y][x] ^ (maskBit ? 1 : 0);
+                    }
+                }
+
+                let bits = [], direction = -1, x = 32;
+                while (x > 0) {
+                    if (x === 6) x--; 
+                    for (let i = 0; i < 33; i++) {
+                        let y = direction < 0 ? 32 - i : i;
+                        for (let j = 0; j < 2; j++) {
+                            let cx = x - j, res = false;
+                            if (cx <= 8 && y <= 8) res = true;
+                            else if (cx >= 24 && y <= 8) res = true; 
+                            else if (cx <= 8 && y >= 24) res = true; 
+                            else if (cx === 6 || y === 6) res = true; 
+                            else if (cx >= 24 && cx <= 28 && y >= 24 && y <= 28) res = true;
+                            if (!res) bits.push(unmasked[y][cx]);
+                        }
+                    }
+                    x -= 2; direction *= -1;
+                }
+
+                if (bits.length < 12) return null;
+                let mode = (bits[0]<<3) | (bits[1]<<2) | (bits[2]<<1) | bits[3];
+                if (mode !== 4) return null; 
+
+                let len = 0;
+                for (let i = 0; i < 8; i++) len = (len << 1) | bits[4 + i];
+                if (len === 0 || len > 78 || 12 + len * 8 > bits.length) return null;
+
+                let bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    let b = 0;
+                    for (let j = 0; j < 8; j++) b = (b << 1) | bits[12 + i*8 + j];
+                    bytes[i] = b;
+                }
+
+                try { return new TextDecoder('utf-8', {fatal: true}).decode(bytes); } 
+                catch(e) { return null; }
+            }
+
+            self.onmessage = function(e) {
+                const { imgData, width, height } = e.data;
+                const binImage = adaptiveThreshold(imgData.data, width, height);
+
+                let centers = [];
+                for (let y = 0; y < height; y += 2) {
+                    let state = [0,0,0,0,0], cur = 0;
+                    for (let x = 0; x < width; x++) {
+                        if (binImage[y * width + x] === 1) {
+                            if (cur % 2 === 1) cur++;
+                            state[cur]++;
+                        } else {
+                            if (cur % 2 === 0) {
+                                if (cur === 4) {
+                                    if (checkRatio(state)) {
+                                        let cx = x - state[4] - state[3] - state[2]/2;
+                                        let isNew = true;
+                                        for(let c of centers) {
+                                            if (Math.hypot(c.x - cx, c.y - y) < state[2]) {
+                                                c.x = (c.x * c.w + cx) / (c.w + 1);
+                                                c.y = (c.y * c.w + y) / (c.w + 1);
+                                                c.w++; isNew = false; break;
+                                            }
+                                        }
+                                        if(isNew) centers.push({x: cx, y: y, w: 1, moduleSize: state.reduce((a,b)=>a+b)/7 });
+                                    }
+                                    state = [state[2], state[3], state[4], 1, 0];
+                                    cur = 3;
+                                } else {
+                                    cur++; state[cur]++;
+                                }
+                            } else state[cur]++;
+                        }
+                    }
+                }
+
+                let result = null;
+                centers.sort((a,b) => b.w - a.w);
+                
+                if (centers.length >= 3) {
+                    const corners = orderCorners(centers.slice(0, 3));
+                    if (corners) {
+                        // 1. Calculate the Affine Guess for the Alignment Pattern area
+                        const estX = corners.tr.x + corners.bl.x - corners.tl.x;
+                        const estY = corners.tr.y + corners.bl.y - corners.tl.y;
+                        const moduleEstimate = (corners.tl.moduleSize + corners.tr.moduleSize + corners.bl.moduleSize) / 3;
+                        
+                        // 2. Perform a local search for the TRUE Alignment Pattern
+                        const alignRadius = moduleEstimate * 5; 
+                        const alignCenter = findAlignmentPattern(binImage, width, height, estX, estY, alignRadius);
+
+                        // 3. Set up the logical grid (Version 4 QR Code is 33x33)
+                        const srcCoords = [
+                            { x: 3, y: 3 },   // Top-Left Finder Logical Center
+                            { x: 29, y: 3 },  // Top-Right Finder Logical Center
+                            { x: 3, y: 29 },  // Bottom-Left Finder Logical Center
+                            { x: 26, y: 26 }  // Alignment Pattern Logical Center
+                        ];
+
+                        // 4. Set up the camera pixel coordinates found by computer vision
+                        const dstCoords = [
+                            { x: corners.tl.x, y: corners.tl.y },
+                            { x: corners.tr.x, y: corners.tr.y },
+                            { x: corners.bl.x, y: corners.bl.y },
+                            { x: alignCenter.x, y: alignCenter.y }
+                        ];
+
+                        // 5. Calculate Exact Homography Matrix mapping logic to pixels
+                        const transform = getPerspectiveTransform(srcCoords, dstCoords);
+                        
+                        // 6. Pluck the grid mathematically
+                        const unwarpedGrid = sampleWarpedGrid(binImage, width, height, transform, 33); 
+                        
+                        if (unwarpedGrid) {
+                            result = decodeGrid(unwarpedGrid);
+                        }
+                    }
+                }
+
+                self.postMessage({ success: !!result, data: result });
+            }
+        `;
+
+        // --- 2. MAIN UI THREAD ---
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const qrWorker = new Worker(URL.createObjectURL(blob));
+
+        const toggleBtn = document.getElementById('toggleScannerBtn');
         const camVideo = document.getElementById('camVideo');
-        const scannerStatus = document.getElementById('scannerStatus');
-        const scanCanvas = document.getElementById('scanCanvas');
+        const hiddenCanvas = document.getElementById('hiddenCanvas');
+        const ctx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
         
-        let videoStream = null;
-        let scanInterval = null;
+        const qrResult = document.getElementById('qrResult');
+        const fpsCounter = document.getElementById('fpsCounter');
+        const statusText = document.getElementById('scannerStatus');
 
-        toggleScannerBtn.addEventListener('click', async () => {
-            if (videoStream) { stopScanner(); return; }
+        let videoStream = null, isScanning = false, workerBusy = false;
+        let framesProcessed = 0, lastFpsTime = performance.now();
+
+        qrWorker.onmessage = (e) => {
+            framesProcessed++;
+            workerBusy = false;
+            
+            const now = performance.now();
+            if (now - lastFpsTime >= 1000) {
+                fpsCounter.textContent = `${framesProcessed} FPS`;
+                framesProcessed = 0; lastFpsTime = now;
+            }
+
+            if (e.data.success) {
+                qrResult.value = e.data.data;
+                statusText.textContent = "3D Payload Decrypted!";
+                statusText.classList.replace('text-amber-400', 'text-emerald-400');
+                
+                // Visual success pulse
+                qrResult.classList.add('bg-emerald-900', 'text-white', 'border-emerald-400');
+                setTimeout(() => qrResult.classList.remove('bg-emerald-900', 'text-white', 'border-emerald-400'), 1500);
+                
+                stopScanner();
+            }
+        };
+
+        toggleBtn.addEventListener('click', async () => {
+            if (isScanning) { stopScanner(); return; }
 
             try {
-                scannerContainer.classList.remove('hidden');
-                scannerStatus.textContent = "Requesting camera...";
+                document.getElementById('scannerContainer').classList.remove('hidden');
+                statusText.textContent = "Activating Hardware...";
                 
-                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1080 }, height: { ideal: 1080 } } });
                 camVideo.srcObject = videoStream;
-                
-                toggleScannerBtn.textContent = 'Close Camera';
-                toggleScannerBtn.classList.replace('bg-blue-600', 'bg-slate-700');
-                toggleScannerBtn.classList.replace('hover:bg-blue-700', 'hover:bg-slate-800');
+                toggleBtn.textContent = 'Terminate Matrix';
+                toggleBtn.classList.replace('bg-emerald-600', 'bg-red-600');
+                toggleBtn.classList.replace('hover:bg-emerald-500', 'hover:bg-red-500');
                 
                 camVideo.onloadedmetadata = () => {
                     camVideo.play();
-                    scannerStatus.textContent = "Scanning... Hold steady";
-                    scanInterval = setInterval(scanFrame, 100); // 10 FPS sliding-window search
+                    isScanning = true;
+                    statusText.textContent = "Matrix Active: Computing Homography";
+                    requestAnimationFrame(scanLoop);
                 };
             } catch (err) {
-                scannerStatus.textContent = "Camera access denied.";
+                statusText.textContent = "Camera Access Blocked.";
             }
         });
 
@@ -322,183 +391,34 @@
                 videoStream.getTracks().forEach(track => track.stop());
                 videoStream = null;
             }
-            if (scanInterval) clearInterval(scanInterval);
+            isScanning = false;
             camVideo.srcObject = null;
-            scannerContainer.classList.add('hidden');
-            toggleScannerBtn.textContent = 'Open Camera';
-            toggleScannerBtn.classList.replace('bg-slate-700', 'bg-blue-600');
-            toggleScannerBtn.classList.replace('hover:bg-slate-800', 'hover:bg-blue-700');
+            setTimeout(() => {
+                document.getElementById('scannerContainer').classList.add('hidden');
+                toggleBtn.textContent = 'Initialize Optical Matrix';
+                toggleBtn.classList.replace('bg-red-600', 'bg-emerald-600');
+                toggleBtn.classList.replace('hover:bg-red-500', 'hover:bg-emerald-500');
+                statusText.classList.replace('text-emerald-400', 'text-amber-400');
+            }, 2000);
         }
 
-        function scanFrame() {
-            if (!videoStream || camVideo.readyState !== camVideo.HAVE_ENOUGH_DATA) return;
-            
-            const w = camVideo.videoWidth;
-            const h = camVideo.videoHeight;
-            if (w === 0 || h === 0) return;
+        function scanLoop() {
+            if (!isScanning) return;
+            if (!workerBusy && camVideo.readyState === camVideo.HAVE_ENOUGH_DATA) {
+                workerBusy = true;
+                
+                const roiSize = 500; // Expanded to catch wider tilts
+                hiddenCanvas.width = roiSize; hiddenCanvas.height = roiSize;
+                const startX = (camVideo.videoWidth / 2) - (roiSize / 2);
+                const startY = (camVideo.videoHeight / 2) - (roiSize / 2);
 
-            scanCanvas.width = w;
-            scanCanvas.height = h;
-            const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
-            ctx.drawImage(camVideo, 0, 0, w, h);
-            
-            const imgData = ctx.getImageData(0, 0, w, h);
-            const data = imgData.data;
-            const bin = new Uint8Array(w * h);
-            
-            // Dynamic Midpoint Thresholding (Handles shadows/light spots better)
-            let minLuma = 255, maxLuma = 0;
-            for (let i = 0; i < data.length; i += 4) {
-                const luma = (data[i] * 299 + data[i+1] * 587 + data[i+2] * 114) / 1000;
-                if (luma < minLuma) minLuma = luma;
-                if (luma > maxLuma) maxLuma = luma;
+                ctx.drawImage(camVideo, startX, startY, roiSize, roiSize, 0, 0, roiSize, roiSize);
+                const imgData = ctx.getImageData(0, 0, roiSize, roiSize);
+                
+                qrWorker.postMessage({ imgData, width: roiSize, height: roiSize });
             }
-            const threshold = minLuma + (maxLuma - minLuma) * 0.45; 
-
-            for (let i = 0; i < w * h; i++) {
-                const px = i * 4;
-                const luma = (data[px] * 299 + data[px+1] * 587 + data[px+2] * 114) / 1000;
-                bin[i] = luma < threshold ? 1 : 0;
-            }
-
-            // Pyramid Sliding Window Geometry Search
-            const minSize = Math.floor(Math.min(w, h) * 0.35);
-            const maxSize = Math.floor(Math.min(w, h) * 0.85);
-            const stepSize = Math.floor(Math.min(w, h) * 0.05);
-            const stepPos = Math.floor(Math.min(w, h) * 0.02);
-
-            for (let size = maxSize; size >= minSize; size -= stepSize) {
-                // Search grid tightly grouped around center
-                for (let cx = w/2 - stepPos*4; cx <= w/2 + stepPos*4; cx += stepPos) {
-                    for (let cy = h/2 - stepPos*4; cy <= h/2 + stepPos*4; cy += stepPos) {
-                        const startX = cx - size/2;
-                        const startY = cy - size/2;
-                        const decodedText = tryDecode(startX, startY, size, bin, w, h);
-                        
-                        if (decodedText) {
-                            input.value = decodedText;
-                            generateQR(decodedText);
-                            stopScanner();
-                            
-                            // Visual success feedback
-                            input.classList.add('ring-4', 'ring-emerald-400', 'bg-emerald-50');
-                            setTimeout(() => input.classList.remove('ring-4', 'ring-emerald-400', 'bg-emerald-50'), 1000);
-                            return; 
-                        }
-                    }
-                }
-            }
+            requestAnimationFrame(scanLoop);
         }
-
-        function tryDecode(startX, startY, boxSize, bin, imgWidth, imgHeight) {
-            const modSize = boxSize / 33;
-            const matrix = [];
-            
-            // 1. Map and Sample Grid (Majority vote for noise reduction)
-            for (let y = 0; y < 33; y++) {
-                matrix[y] = [];
-                for (let x = 0; x < 33; x++) {
-                    const px = Math.floor(startX + x * modSize + modSize / 2);
-                    const py = Math.floor(startY + y * modSize + modSize / 2);
-                    
-                    if (px < 0 || px >= imgWidth || py < 0 || py >= imgHeight) return null;
-
-                    let darks = 0;
-                    for(let dy=-1; dy<=1; dy++) {
-                        for(let dx=-1; dx<=1; dx++) {
-                            if (bin[(py+dy)*imgWidth + (px+dx)]) darks++;
-                        }
-                    }
-                    matrix[y][x] = darks > 4 ? 1 : 0;
-                }
-            }
-
-            // 2. Fast Pattern Rejection (Check Centers and Inner Rings of Finders)
-            if (matrix[3][3] !== 1 || matrix[3][29] !== 1 || matrix[29][3] !== 1) return null;
-            if (matrix[3][1] !== 0 || matrix[3][5] !== 0) return null; 
-            if (matrix[3][27] !== 0 || matrix[3][31] !== 0) return null; 
-            if (matrix[29][1] !== 0 || matrix[29][5] !== 0) return null;
-
-            // 3. Extract Format Metadata (Top-Left)
-            let fmtBits = 0;
-            const fxs = [0,1,2,3,4,5,7,8,8,8,8,8,8,8,8];
-            const fys = [8,8,8,8,8,8,8,8,7,5,4,3,2,1,0];
-            for(let i=0; i<15; i++) fmtBits = (fmtBits << 1) | matrix[fys[i]][fxs[i]];
-            
-            fmtBits ^= 0x5412;
-            const maskPattern = (fmtBits >> 10) & 0x7;
-
-            // 4. Unmask the Data
-            let unmasked = [];
-            for (let y = 0; y < 33; y++) {
-                unmasked[y] = [];
-                for (let x = 0; x < 33; x++) {
-                    let maskBit = false;
-                    switch(maskPattern) {
-                        case 0: maskBit = (x + y) % 2 === 0; break;
-                        case 1: maskBit = y % 2 === 0; break;
-                        case 2: maskBit = x % 3 === 0; break;
-                        case 3: maskBit = (x + y) % 3 === 0; break;
-                        case 4: maskBit = (Math.floor(y / 2) + Math.floor(x / 3)) % 2 === 0; break;
-                        case 5: maskBit = ((x * y) % 2) + ((x * y) % 3) === 0; break;
-                        case 6: maskBit = (((x * y) % 2) + ((x * y) % 3)) % 2 === 0; break;
-                        case 7: maskBit = (((x + y) % 2) + ((x * y) % 3)) % 2 === 0; break;
-                    }
-                    unmasked[y][x] = matrix[y][x] ^ (maskBit ? 1 : 0);
-                }
-            }
-
-            // 5. Zig-Zag Data Extraction (Bypass Reserved Zones)
-            let bits = [];
-            let direction = -1;
-            let x = 32;
-            
-            while (x > 0) {
-                if (x === 6) x--; 
-                for (let i = 0; i < 33; i++) {
-                    let y = direction < 0 ? 32 - i : i;
-                    for (let j = 0; j < 2; j++) {
-                        let currX = x - j;
-                        let reserved = false;
-                        
-                        if (currX <= 8 && y <= 8) reserved = true;
-                        else if (currX >= 24 && y <= 8) reserved = true; 
-                        else if (currX <= 8 && y >= 24) reserved = true; 
-                        else if (currX === 6 || y === 6) reserved = true; 
-                        else if (currX >= 24 && currX <= 28 && y >= 24 && y <= 28) reserved = true;
-                        
-                        if (!reserved) bits.push(unmasked[y][currX]);
-                    }
-                }
-                x -= 2;
-                direction *= -1;
-            }
-
-            // 6. Byte Decryption
-            if (bits.length < 12) return null;
-            let mode = (bits[0]<<3) | (bits[1]<<2) | (bits[2]<<1) | bits[3];
-            if (mode !== 4) return null; // Accept Byte mode only
-
-            let len = 0;
-            for (let i = 0; i < 8; i++) len = (len << 1) | bits[4 + i];
-            if (len === 0 || len > 78 || 12 + len * 8 > bits.length) return null;
-
-            let bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                let b = 0;
-                for (let j = 0; j < 8; j++) b = (b << 1) | bits[12 + i*8 + j];
-                bytes[i] = b;
-            }
-
-            try {
-                const text = new TextDecoder('utf-8', {fatal: true}).decode(bytes);
-                if (/^[\x20-\x7E]+$/.test(text) || text.length > 0) return text;
-            } catch(e) {
-                return null;
-            }
-            return null;
-        }
-
     </script>
 </body>
 </html>
