@@ -473,7 +473,7 @@
         }
 
         .settings-pane,
-        .apps-pane {
+        .blocks-pane {
             display: none;
             padding: 40px;
             color: #333;
@@ -482,7 +482,7 @@
         }
 
         .settings-pane.active,
-        .apps-pane.active {
+        .blocks-pane.active {
             display: block;
         }
 
@@ -1110,9 +1110,8 @@
         <!-- View 1: Display QR -->
         <div id="view-qr" class="connect-view">
             <div id="qr-display-container"></div>
-            <p style="margin:10px 0 20px 0; font-size: 0.8rem; opacity: 0.8; font-weight: 600;">SCAN TO JOIN INSTANTLY
-            </p>
-            <button id="btn-scan-mode" class="action-btn">I WANT TO SCAN</button>
+            <button id="btn-scan-mode" class="action-btn">SCAN QR</button>
+            <p id="btn-toggle-secure" style="cursor: pointer;">view more secure option</p>
         </div>
         <!-- View 2: Scan QR -->
         <div id="view-scanner" class="connect-view">
@@ -1125,7 +1124,7 @@
 
     <nav id="top-nav">
         <div class="nav-item active" data-target="home">Home</div>
-        <div class="nav-item" data-target="apps">BLOCKS</div>
+        <div class="nav-item" data-target="blocks">BLOCKS</div>
         <div class="nav-item" data-target="connect">CONNECT</div>
         <div id="settings-btn">
             <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" stroke="none">
@@ -1161,13 +1160,13 @@
     </div>
 
     <div id="sub-nav-layer">
-        <div id="header-apps" class="sub-header">
-            <h1 class="page-title">APPS</h1>
+        <div id="header-blocks" class="sub-header">
+            <h1 class="page-title">BLOCK</h1>
             <button id="create-app-btn">CREATE</button>
             <div class="tabs-row">
-                <div class="sub-tab active" data-tab="discover" data-group="apps">DISCOVER</div>
-                <div class="sub-tab" data-tab="installed" data-group="apps">INSTALLED</div>
-                <div class="sub-tab" data-tab="updates" data-group="apps">UPDATES</div>
+                <div class="sub-tab active" data-tab="discover" data-group="blocks">DISCOVER</div>
+                <div class="sub-tab" data-tab="installed" data-group="blocks">INSTALLED</div>
+                <div class="sub-tab" data-tab="updates" data-group="blocks">UPDATES</div>
             </div>
         </div>
         <div id="header-settings" class="sub-header">
@@ -1220,15 +1219,15 @@
             </div>
             <div id="minimap"></div>
         </div>
-        <div id="view-apps" class="content-view">
-            <div id="tab-discover" class="apps-pane active">
-                <h2>Discover Apps</h2>
-                <div class="dummy-content">APPS STORE</div>
+        <div id="view-blocks" class="content-view">
+            <div id="tab-discover" class="blocks-pane active">
+                <h2>Discover new</h2>
+                <div class="dummy-content">BUILDING BLOCK</div>
             </div>
-            <div id="tab-installed" class="apps-pane">
+            <div id="tab-installed" class="blocks-pane">
                 <h2>Installed</h2>
             </div>
-            <div id="tab-updates" class="apps-pane">
+            <div id="tab-updates" class="blocks-pane">
                 <h2>Updates</h2>
             </div>
         </div>
@@ -1442,7 +1441,13 @@
                         });
                     }
                 },
-                leave() { isLeaving = true; announceIntervals.forEach(clearInterval); Object.values(trackerSockets).forEach(ws => ws.close()); Object.values(connectedPeers).forEach(p => p.pc.close()); Object.values(pendingOffers).forEach(p => p.pc.close()); offerPool.forEach(o => o.pc.close()); }
+                leave() { isLeaving = true; announceIntervals.forEach(clearInterval); Object.values(trackerSockets).forEach(ws => ws.close()); Object.values(connectedPeers).forEach(p => p.pc.close()); Object.values(pendingOffers).forEach(p => p.pc.close()); offerPool.forEach(o => o.pc.close()); },
+                createManualOffer: async () => {
+                    const o = await createOffer(connectedPeers, peerLeaveCallbacks, (pid) => peerErrorCallbacks.forEach(cb => cb(pid)));
+                    pendingOffers[o.offerId] = { pc: o.pc, dc: o.dc, created: o.created };
+                    setTimeout(() => { if (pendingOffers[o.offerId]) { pendingOffers[o.offerId].pc.close(); delete pendingOffers[o.offerId]; } }, OFFER_TTL * 10);
+                    return { offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp }, peer_id: selfId, info_hash: infoHash };
+                }
             };
         }
 
@@ -1633,6 +1638,7 @@
             async broadcastFragment(fragMap) {
                 this.rawSendFrag(fragMap);
             }
+            async generateInvite() { return this.room.createManualOffer(); }
 
             broadcastLock(data) { this.rawSendLock(data); }
             requestSync(keys) { this.rawSendReq(keys); }
@@ -1773,7 +1779,12 @@
 
             // --- MISSING METHODS RESTORED ---
             tryAutoConnectFromHash() {
-                if (window.location.hash.length > 1) this.connectAndPreview(window.location.hash, true);
+                if (window.location.hash.length > 1) {
+                    const hashParts = window.location.hash.split('/').filter(Boolean);
+                    const hex = hashParts[0];
+                    const navPath = hashParts.slice(1);
+                    this.connectAndPreview(hex, true, navPath);
+                }
             }
 
             getFragments(visibleOnly = false) {
@@ -1797,6 +1808,40 @@
                     }
                 });
                 return d;
+            }
+
+            // --- AUTO NAVIGATION ---
+            applyNavPath(navPath) {
+                if (!navPath || navPath.length === 0) return;
+
+                const [mainTab, subTab] = navPath;
+
+                // 1. Click main nav item if valid
+                if (mainTab) {
+                    let targetNav = mainTab.toLowerCase();
+
+                    const navItem = document.querySelector(`.nav-item[data-target="${targetNav}"]`);
+                    // Or settings button
+                    if (targetNav === 'settings' || targetNav === 'setting') {
+                        document.getElementById('settings-btn')?.click();
+                    } else if (navItem) {
+                        navItem.click();
+                    }
+                }
+
+                // 2. Click sub tab if valid
+                if (subTab) {
+                    setTimeout(() => {
+                        let targetSub = subTab.toLowerCase();
+                        // Handle aliases (e.g. signature -> signatures)
+                        if (targetSub === 'signature') targetSub = 'signatures';
+
+                        const subTabEl = document.querySelector(`.sub-tab[data-tab="${targetSub}"]`);
+                        if (subTabEl) {
+                            subTabEl.click();
+                        }
+                    }, 50); // slight delay to let main tab DOM render
+                }
             }
 
             // --- CORE UI LOGIC ---
@@ -1833,7 +1878,15 @@
                     document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>';
                 }, 300);
 
+                // Set clean hash without the path details after we read it
                 window.location.hash = roomHex;
+
+                if (this.pendingNavPath) {
+                    this.ui.topNav.classList.add('visible');
+                    this.ui.dashboardPanel.classList.add('revealed');
+                    this.applyNavPath(this.pendingNavPath);
+                    this.pendingNavPath = null;
+                }
 
                 if (!this.ui.display.querySelector('.editor-line')) {
                     this.ui.display.innerHTML = this.createLines(101);
@@ -1879,8 +1932,9 @@
                 });
             }
 
-            async connectAndPreview(hex, fromUrl = false) {
+            async connectAndPreview(hex, fromUrl = false, navPath = null) {
                 const cleanHex = hex.replace('#', '').toLowerCase();
+                this.pendingNavPath = navPath;
                 this.roomId = 'color-' + cleanHex;
                 this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff';
                 this.ui.userBadge.style.backgroundColor = this.user.color;
@@ -2098,6 +2152,43 @@
                     }
                 });
 
+                document.getElementById('btn-toggle-secure').addEventListener('click', async () => {
+                    const qrContainer = document.getElementById('qr-display-container');
+                    const btnText = document.getElementById('btn-toggle-secure');
+
+                    if (!this.mesh) return;
+
+                    // Visual feedback
+                    qrContainer.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:#333;">Generating Secure Offer...</div>';
+                    btnText.style.display = 'none'; // Hide button while generating
+
+                    try {
+                        // Generate full WebRTC SDP offer
+                        const inviteData = await this.mesh.generateInvite();
+
+                        qrContainer.innerHTML = '';
+
+                        // Create High Density QR Code
+                        new QRCode(qrContainer, {
+                            text: JSON.stringify(inviteData),
+                            width: 250,
+                            height: 250,
+                            colorDark: "#000000",
+                            colorLight: "#ffffff",
+                            correctLevel: QRCode.CorrectLevel.L // Low error correction to maximize data capacity
+                        });
+
+                        btnText.innerText = "Offer Generated";
+                        btnText.style.display = 'block';
+                        btnText.style.textDecoration = 'none';
+                        btnText.style.cursor = 'default';
+                    } catch (e) {
+                        console.error(e);
+                        qrContainer.innerHTML = 'Error generating offer';
+                        btnText.style.display = 'block';
+                    }
+                });
+
                 // NEW: Bind QR Action Buttons
                 document.getElementById('btn-scan-mode').addEventListener('click', () => {
                     this.startScanning();
@@ -2132,6 +2223,11 @@
 
                             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
                             item.classList.add('active');
+
+                            const currentHashParts = window.location.hash.split('/').filter(Boolean);
+                            const hex = currentHashParts[0] || this.roomId?.replace('color-', '#') || '#ffffff';
+                            window.history.replaceState(null, null, `${hex}/connect`);
+
                             return;
                         }
                         if (this.halfPeekMode) {
@@ -2158,6 +2254,16 @@
                         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); item.classList.add('active');
                         document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'));
                         document.getElementById('view-' + targetId)?.classList.add('active');
+
+                        // Update URL hash
+                        const currentHashParts = window.location.hash.split('/').filter(Boolean);
+                        const hex = currentHashParts[0] || this.roomId?.replace('color-', '#') || '#ffffff';
+                        if (targetId === 'home') {
+                            window.history.replaceState(null, null, hex);
+                        } else {
+                            window.history.replaceState(null, null, `${hex}/${targetId}`);
+                        }
+
                         if (targetId === 'home') {
                             this.ui.dashboardPanel.classList.remove('step-down'); this.ui.dashboardPanel.classList.add('revealed');
                             document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
@@ -2176,10 +2282,20 @@
                     this.ui.dashboardPanel.classList.add('step-down');
                     document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
                     document.getElementById('header-settings').classList.add('active');
+
+                    // Update URL hash
+                    const currentHashParts = window.location.hash.split('/').filter(Boolean);
+                    const hex = currentHashParts[0] || this.roomId?.replace('color-', '#') || '#ffffff';
+                    window.history.replaceState(null, null, `${hex}/settings`);
                 });
                 document.querySelectorAll('.sub-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
                         const group = tab.getAttribute('data-group'), target = tab.getAttribute('data-tab');
+
+                        // Update URL hash
+                        const currentHashParts = window.location.hash.split('/').filter(Boolean);
+                        const hex = currentHashParts[0] || this.roomId?.replace('color-', '#') || '#ffffff';
+                        window.history.replaceState(null, null, `${hex}/${group}/${target}`);
 
                         if (target === 'signatures') {
                             if (window.resetSphereView) window.resetSphereView(false, true);
@@ -2221,7 +2337,7 @@
 
                         document.querySelectorAll(`.sub-tab[data-group="${group}"]`).forEach(t => t.classList.remove('active'));
                         tab.classList.add('active');
-                        document.querySelector(`.content-view.active`)?.querySelectorAll('.settings-pane, .apps-pane').forEach(p => p.classList.remove('active'));
+                        document.querySelector(`.content-view.active`)?.querySelectorAll('.settings-pane, .blocks-pane').forEach(p => p.classList.remove('active'));
                         document.querySelector(`.content-view.active #tab-${target}`)?.classList.add('active');
                     });
                 });
@@ -3290,7 +3406,7 @@ self.onmessage = async (e) => {
         function hexToRgbNormalized(hex) { const bigint = parseInt(hex.replace(/^#/, '').replace(/^([a-f\d])([a-f\d])([a-f\d])$/i, '$1$1$2$2$3$3'), 16); return [(bigint >> 16 & 255) / 255, (bigint >> 8 & 255) / 255, (bigint & 255) / 255]; }
         const gradientShaderWGSL = `struct Uniforms { mvp: mat4x4<f32>, model: mat4x4<f32>, normalMatrix: mat4x4<f32>, viewPos: vec3<f32>, l1: vec3<f32>, c1: vec3<f32>, l2: vec3<f32>, c2: vec3<f32>, l3: vec3<f32>, c3: vec3<f32>, debug: f32, }; @group(0) @binding(0) var<uniform> u: Uniforms; struct VI { @location(0) p: vec3<f32>, @location(1) n: vec3<f32> }; struct VO { @builtin(position) P: vec4<f32>, @location(0) vP: vec3<f32>, @location(1) vN: vec3<f32> }; @vertex fn vs_main(i: VI) -> VO { var o: VO; o.P = u.mvp * vec4<f32>(i.p, 1.0); o.vP = (u.model * vec4<f32>(i.p, 1.0)).xyz; o.vN = (u.normalMatrix * vec4<f32>(i.n, 0.0)).xyz; return o; } fn Contrast(x: vec3<f32>) -> vec3<f32> { return x * x * (3.0 - 2.0 * x); } fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp - fp, lp - fp); let L = normalize(lp - fp); let wrap = max(dot(N, L) + 1.0, 0.0) / 2.0; let spread = pow(wrap, 1.25); return spread * (1.0 / (1.0 + distSq * 0.05)); } @fragment fn fs_main(i: VO) -> @location(0) vec4<f32> { let N = normalize(i.vN); let raw_d1 = getI(u.l1, N, i.vP); let raw_d2 = getI(u.l2, N, i.vP); let raw_d3 = getI(u.l3, N, i.vP); let d1 = raw_d1 * max(u.c1.r, max(u.c1.g, u.c1.b)); let d2 = raw_d2 * max(u.c2.r, max(u.c2.g, u.c2.b)); let d3 = raw_d3 * max(u.c3.r, max(u.c3.g, u.c3.b)); var l = (u.c1 * d1) + (u.c2 * d2) + (u.c3 * d3); let ep = 0.001; l = l + ((u.c1 + u.c2) * 2.0 * d1 * d2 / (d1 + d2 + ep)); l = l + ((u.c2 + u.c3) * 2.0 * d2 * d3 / (d2 + d3 + ep)); l = l + ((u.c3 + u.c1) * 2.0 * d3 * d1 / (d3 + d1 + ep)); let min_i = min(d1, min(d2, d3)); let max_i = max(d1, max(d2, d3)); let mask_base = smoothstep(0.15, 0.40, min_i); let variance = max_i - min_i; let roundness = exp(-variance * 10.0); let final_mask = mask_base * roundness; l = mix(l, vec3(1.0), final_mask); l = l * 1.2; let contrasty = Contrast(clamp(l, vec3(0.0), vec3(1.0))); return vec4<f32>(contrasty, 1.0); }`;
         const solidShaderWGSL = `struct U{mvp:mat4x4<f32>,c:vec4<f32>};@group(0) @binding(0) var<uniform> u:U;@vertex fn vs_main(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32>{return u.mvp*vec4<f32>(p,1.0);}@fragment fn fs_main()->@location(0) vec4<f32>{return u.c;}`;
-        const defaultCones = [{ color: [1, 0, 0], pos: [0, .98, .69], active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], active: true }];
+        const defaultCones = [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: "RED", cssColor: "#ff4444", active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: "GREEN", cssColor: "#44ff44", active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: "BLUE", cssColor: "#4444ff", active: true }];
         function findPositionFromColor(targetHex) { const t = hexToRgbNormalized(targetHex); let bd = Infinity, bp = null; for (let la = 0; la <= 30; la++) for (let lo = 0; lo <= 30; lo++) { const th = la * Math.PI / 30, ph = lo * 2 * Math.PI / 30, pos = [Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)]; const c = getSurfaceColor(pos, pos, defaultCones), d = Math.sqrt((c[0] - t[0]) ** 2 + (c[1] - t[1]) ** 2 + (c[2] - t[2]) ** 2); if (d < bd) { bd = d; bp = pos; } if (d < 0.05) return bp; } return bp; }
         async function init() {
             if (window.self !== window.top) document.getElementById('debug-btn').style.display = 'none';
