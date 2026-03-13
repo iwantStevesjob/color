@@ -1729,6 +1729,7 @@
                 this.store = null;
                 this.halfPeekMode = null;
                 this.pendingVipTicket = null; // New state for Guest QR flow
+                this.isGuestScan = false;
 
                 // Init Systems
                 Promise.all([this.identity.init(), this.db.init()]).then(async () => {
@@ -1851,7 +1852,7 @@
 
                 const roomHex = this.roomId.replace('color-', '');
 
-                if (this.ui.loginBtn.textContent === "LOGIN") {
+                if (this.ui.loginBtn.textContent === "LOGIN" && !this.isGuestScan) {
                     this.user.color = '#' + roomHex;
                     this.ui.userBadge.style.backgroundColor = this.user.color;
                     localStorage.setItem('lastSphereColor', this.user.color);
@@ -2643,7 +2644,7 @@
                         if (this.mesh) this.mesh.setExpectedSecret(secret);
 
                         // 3. Create Payload (Room Hex + Secret)
-                        const roomHex = this.user.color.replace('#', '');
+                        const roomHex = (this.roomId || '').replace('color-', '') || this.user.color.replace('#', '');
                         const payload = JSON.stringify({ h: roomHex, s: secret });
 
                         // 4. Render QR
@@ -2694,18 +2695,44 @@
             handleScannedData(jsonString) {
                 try {
                     const data = JSON.parse(jsonString);
-                    // Expect format: { h: "hexcolor", s: "secret" }
                     if (data.h && data.s) {
                         console.log("QR Scan Success:", data);
 
-                        // 1. Store ticket for the upcoming connection
+                        // 1. Store ticket and set guest flag
                         this.pendingVipTicket = data.s;
+                        this.isGuestScan = true;
 
-                        // 2. Hide scanner UI
-                        this.togglePeek(); // Close the peek panel
+                        // 2. Hide scanner UI completely
+                        this.peeking = false;
+                        this.updatePeekState(0);
+                        this.ui.dashboardPanel.classList.remove('peek-mode', 'half-peek');
+                        document.getElementById('connect-content-layer')?.classList.remove('visible');
 
-                        // 3. Connect to the room
-                        this.connectAndPreview('#' + data.h, true);
+                        // Reset sub-headers to Home
+                        document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
+                        document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'));
+                        document.getElementById('view-home')?.classList.add('active');
+                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                        document.querySelector('.nav-item[data-target="home"]')?.classList.add('active');
+
+                        // 3. Trigger 3D rotation and connect
+                        const targetHex = '#' + data.h;
+                        const matchPos = window.findPositionFromColor ? window.findPositionFromColor(targetHex) : null;
+
+                        if (matchPos) {
+                            if (!document.body.classList.contains('light-mode')) {
+                                document.body.classList.add('light-mode');
+                            }
+                            // Triggers the 3D rotation and automatically calls connectAndPreview
+                            window.triggerLanding(Vec3.normalize(matchPos), matchPos, window.hexToRgbNormalized(targetHex), true);
+                        } else {
+                            // Fallback if 3D math isn't ready
+                            this.connectAndPreview(targetHex, true);
+                        }
+
+                        // 4. Slide the chat UI up immediately and update address bar
+                        this.enterRoomUI();
+                        window.location.hash = targetHex;
                     }
                 } catch (e) {
                     alert("Invalid QR Code Format");
@@ -3410,6 +3437,9 @@ self.onmessage = async (e) => {
         function findPositionFromColor(targetHex) { const t = hexToRgbNormalized(targetHex); let bd = Infinity, bp = null; for (let la = 0; la <= 30; la++) for (let lo = 0; lo <= 30; lo++) { const th = la * Math.PI / 30, ph = lo * 2 * Math.PI / 30, pos = [Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)]; const c = getSurfaceColor(pos, pos, defaultCones), d = Math.sqrt((c[0] - t[0]) ** 2 + (c[1] - t[1]) ** 2 + (c[2] - t[2]) ** 2); if (d < bd) { bd = d; bp = pos; } if (d < 0.05) return bp; } return bp; }
         async function init() {
             if (window.self !== window.top) document.getElementById('debug-btn').style.display = 'none';
+            window.findPositionFromColor = findPositionFromColor;
+            window.triggerLanding = triggerLanding;
+            window.hexToRgbNormalized = hexToRgbNormalized;
             state.canvas = document.getElementById('gpu-canvas'); if (!navigator.gpu) return alert("WebGPU not supported!"); const adapter = await navigator.gpu.requestAdapter(); state.device = await adapter.requestDevice(); state.context = state.canvas.getContext('webgpu'); state.presentationFormat = navigator.gpu.getPreferredCanvasFormat(); state.context.configure({ device: state.device, format: state.presentationFormat, alphaMode: 'premultiplied' });
 
             await createAssets();
@@ -3591,6 +3621,25 @@ self.onmessage = async (e) => {
             state.landing.active = false;
             state.landing.showHandle = false;
         };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])); } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05; } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]); } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ]; } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true; } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = ''; } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false; } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false; } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t); } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = "#FFFFFF"; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = ''; } } } let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ]; } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active; } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx]; } }); }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i; }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np; } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95); } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2); } }); } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) }; } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)); } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95; } } if (state.device && state.pipelines.sphere && state.msaaTexture) { const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => { state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0); state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);[0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8); }); state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0; state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere); const pass = encoder.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp } }); pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount); return pass; }; const drawCones = (pass) => { pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16'); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { if (c.active) { let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]; } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity()); state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set([...c.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount); } }); } else { let bindIdx = 4; if (state.handle.active || state.landing.showHandle) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...state.handle.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount); } state.historyHandles.forEach(h => { const wp = transformPos(h.pos, state.sphere.rotation); if (wp[2] > -0.5) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...h.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++; } }); if (state.pathPoints.length > 1 && (state.dragStart.active || state.landing.active || state.renderPath)) { const pathVerts = pathToVertices(state.pathPoints, state.sphere.rotation); if (pathVerts && pathVerts.length > 0) { if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) { if (state.buffers.pathVertex) state.buffers.pathVertex.destroy(); state.buffers.pathVertex = state.device.createBuffer({ size: Math.max(pathVerts.byteLength, 1024 * 12), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST }); } state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts); state.uniforms.cone.set(state.vpMatrix, 0); state.uniforms.cone.set([1, 1, 1, 1], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setPipeline(state.pipelines.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.setVertexBuffer(0, state.buffers.pathVertex); pass.draw(pathVerts.length / 3); } } } }; if (renderBackgroundLayer) { const bgEncoder = state.device.createCommandEncoder(); const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0])); const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard'); bgPass.end(); state.device.queue.submit([bgEncoder.finish()]); const fgEncoder = state.device.createCommandEncoder(); const fgPass = drawSphere(fgEncoder, state.vpMatrix, 'load', 'discard'); drawCones(fgPass); fgPass.end(); state.device.queue.submit([fgEncoder.finish()]); } else { const encoder = state.device.createCommandEncoder(); const pass = drawSphere(encoder, state.vpMatrix, 'clear', 'discard'); drawCones(pass); pass.end(); state.device.queue.submit([encoder.finish()]); } } requestAnimationFrame(loop); }
         init();
         window.updateVisitedFromDB = async function () { const rooms = await (new window.ColorDB()).getAllRooms(); state.historyHandles = []; if (rooms?.length) { rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }); }); } };
