@@ -2694,9 +2694,19 @@
 
             handleScannedData(jsonString) {
                 try {
-                    const data = JSON.parse(jsonString);
+                    const cleanString = typeof jsonString === 'string' ? jsonString.trim() : String(jsonString);
+                    console.log("Scanned QR raw payload:", cleanString);
+                    
+                    let data;
+                    try {
+                        data = JSON.parse(cleanString);
+                    } catch (e) {
+                        alert("Invalid QR Code Format.\nError: " + e.message + "\n\nPayload:\n" + cleanString.substring(0, 100));
+                        return;
+                    }
+
                     if (data.h && data.s) {
-                        console.log("QR Scan Success:", data);
+                        console.log("QR Scan Success (Simple):", data);
 
                         // 1. Store ticket and set guest flag
                         this.pendingVipTicket = data.s;
@@ -2733,9 +2743,30 @@
                         // 4. Slide the chat UI up immediately and update address bar
                         this.enterRoomUI();
                         window.location.hash = targetHex;
+                    } else if (data.type === 'offer') {
+                        console.log("QR Scan Success (Secure SDP Offer):", data);
+                        
+                        this.isGuestScan = true;
+                        this.peeking = false;
+                        this.updatePeekState(0);
+                        this.ui.dashboardPanel.classList.remove('peek-mode', 'half-peek');
+                        document.getElementById('connect-content-layer')?.classList.remove('visible');
+
+                        document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'));
+                        document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'));
+                        document.getElementById('view-home')?.classList.add('active');
+                        
+                        this.enterRoomUI();
+                        
+                        if (this.mesh) {
+                            this.mesh.acceptManualOffer(data); // Requires acceptManualOffer in peer.js logic if supported, handle if not
+                        }
+                    } else {
+                        alert("Unrecognized data format in QR code.\n\nPayload:\n" + cleanString.substring(0, 100));
                     }
                 } catch (e) {
-                    alert("Invalid QR Code Format");
+                    console.error("QR Processing Error:", e);
+                    alert("Error processing QR: " + e.message);
                 }
             }
 
