@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QWBP Serverless WebRTC</title>
+    <!-- Include QR Code Generator and Scanner -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        :root { --bg: #0f172a; --text: #f8fafc; --accent: #38bdf8; --panel: #1e293b; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.5; }
+        h1 { font-size: 1.5rem; text-align: center; color: var(--accent); margin-bottom: 5px; }
+        p.subtitle { text-align: center; opacity: 0.8; font-size: 0.9rem; margin-top: 0; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
+        @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+        .panel { background: var(--panel); border-radius: 12px; padding: 15px; display: flex; flex-direction: column; align-items: center; }
+        .panel h2 { margin-top: 0; font-size: 1.1rem; }
+        video { width: 100%; max-width: 300px; border-radius: 8px; background: #000; transform: scaleX(-1); }
+        canvas { max-width: 100%; border-radius: 8px; image-rendering: pixelated; }
+        .chat-box { grid-column: 1 / -1; background: var(--panel); padding: 15px; border-radius: 12px; }
+        #messages { height: 150px; overflow-y: auto; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; margin-bottom: 10px; font-family: monospace; font-size: 0.9rem; }
+        .input-group { display: flex; gap: 10px; }
+        input[type="text"] { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #475569; background: var(--bg); color: white; }
+        button { background: var(--accent); color: #000; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status { text-align: center; margin-top: 15px; font-weight: bold; padding: 10px; border-radius: 6px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); }
+    </style>
+</head>
+<body>
+
+    <h1>QWBP Protocol Demo</h1>
+    <p class="subtitle">QR-WebRTC Bootstrap Protocol • Zero Signaling Servers</p>
+
+    <div class="status" id="status-display">Initializing WebRTC...</div>
+
+    <div class="grid">
+        <div class="panel">
+            <h2>1. Scan Peer</h2>
+            <video id="video" autoplay playsinline></video>
+            <canvas id="scan-canvas" hidden></canvas>
+            <p style="font-size: 0.8rem; opacity: 0.8;">Point camera at other device</p>
+        </div>
+        <div class="panel">
+            <h2>2. Your QR Code</h2>
+            <canvas id="qr-canvas"></canvas>
+            <p style="font-size: 0.8rem; opacity: 0.8;">Gathering network data...</p>
+        </div>
+    </div>
+
+    <div class="chat-box">
+        <h2>Encrypted DataChannel</h2>
+        <div id="messages"></div>
+        <div class="input-group">
+            <input type="text" id="chat-input" placeholder="Type a message..." disabled>
+            <button id="chat-btn" disabled>Send</button>
+        </div>
+    </div>
+
+    <script>
+        // --- UI & State ---
+        const video = document.getElementById("video");
+        const scanCanvas = document.getElementById("scan-canvas");
+        const scanCtx = scanCanvas.getContext("2d");
+        const qrCanvas = document.getElementById("qr-canvas");
+        const msgs = document.getElementById("messages");
+        const chatInput = document.getElementById("chat-input");
+        const chatBtn = document.getElementById("chat-btn");
+        const statusDisplay = document.getElementById("status-display");
+
+        function log(msg, isChat = false) {
+            msgs.innerHTML += `<div style="color: ${isChat ? '#38bdf8' : '#94a3b8'}">${msg}</div>`;
+            msgs.scrollTop = msgs.scrollHeight;
+            if (!isChat) console.log(msg);
+        }
+        function updateStatus(text) { statusDisplay.innerText = text; }
+
+        // --- WebRTC Protocol State ---
+        let pc, dc;
+        let localData = { fingerprint: null, creds: null, candidates: [], sdpTemplate: "" };
+        let scanning = true;
+
+        // --- Core Application Logic ---
+        async function init() {
+            startCamera();
+            await setupWebRTC();
+            requestAnimationFrame(tickScan);
+        }
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                video.srcObject = stream;
+            } catch (err) {
+                log("Camera error: " + err.message);
+                updateStatus("Camera permission denied.");
+            }
+        }
+
+        // --- WebRTC Setup & QWBP Gathering phase ---
+        async function setupWebRTC() {
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: "stun:stun.l.google.com:19302" }] // Only STUN for bootstrapping
+            });
+
+            // Must create DataChannel BEFORE createOffer to include it in SDP
+            dc = pc.createDataChannel("qwbp-chat");
+            setupDataChannel(dc);
+
+            pc.ondatachannel = (event) => setupDataChannel(event.channel);
+            
+            pc.oniceconnectionstatechange = () => log(`ICE State: ${pc.iceConnectionState}`);
+            pc.onconnectionstatechange = () => {
+                log(`WebRTC State: ${pc.connectionState}`);
+                if (pc.connectionState === 'connected') {
+                    updateStatus("Connected Serverlessly! 🚀");
+                    scanning = false; // Stop scanning
+                }
+            };
+
+            // 1. Create initial Offer to generate DTLS certificate and get our fingerprint
+            let offer = await pc.createOffer();
+            localData.fingerprint = parseFingerprint(extractSdpValue(offer.sdp, "a=fingerprint:sha-256 "));
+            
+            // 2. Derive deterministic ICE credentials via HKDF based on our fingerprint
+            localData.creds = await deriveIceCredentials(localData.fingerprint);
+            
+            // 3. Munge the local SDP to inject our derived credentials BEFORE setting local description
+            offer.sdp = offer.sdp.replace(/a=ice-ufrag:.*/g, `a=ice-ufrag:${localData.creds.ufrag}`);
+            offer.sdp = offer.sdp.replace(/a=ice-pwd:.*/g, `a=ice-pwd:${localData.creds.pwd}`);
+            
+            await pc.setLocalDescription(offer);
+            
+            // 4. Wait for ICE gathering to complete before creating QR code
+            await new Promise(resolve => {
+                if (pc.iceGatheringState === 'complete') return resolve();
+                const timeout = setTimeout(resolve, 3000); // 3 sec timeout
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        const parsed = parseCandidate(event.candidate.candidate);
+                        if (parsed && localData.candidates.length < 4) { // Limit to 4 to save QR space
+                            localData.candidates.push(parsed);
+                        }
+                    } else {
+                        clearTimeout(timeout);
+                        resolve();
+                    }
+                };
+            });
+
+            localData.sdpTemplate = pc.localDescription.sdp;
+            
+            // 5. Encode local data to QWBP Binary Format and display QR
+            const payload = encodeQWBPPayload(localData.fingerprint, localData.candidates);
+            generateQR(payload);
+            updateStatus("Displaying QR. Ready to scan remote peer.");
+            log(`Gathered ${localData.candidates.length} candidates. Payload: ${payload.length} bytes.`);
+        }
+
+        // --- The "QR Tango" Scanner ---
+        function tickScan() {
+            if (!scanning) return;
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                scanCanvas.height = video.videoHeight;
+                scanCanvas.width = video.videoWidth;
+                scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height);
+                const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+                
+                const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
+                
+                if (code && code.binaryData && code.binaryData.length > 34) {
+                    const parsed = decodeQWBPPayload(new Uint8Array(code.binaryData));
+                    if (parsed) {
+                        scanning = false; // Stop loop
+                        updateStatus("QR Scanned! Initiating connection...");
+                        handleRemoteQWBP(parsed);
+                        return;
+                    }
+                }
+            }
+            requestAnimationFrame(tickScan);
+        }
+
+        // --- Connection Logic (The "Role Assignment" Breakthrough) ---
+        async function handleRemoteQWBP(remoteData) {
+            log("Decoded peer payload. Deriving remote keys...");
+            remoteData.creds = await deriveIceCredentials(remoteData.fingerprint);
+
+            // Symmetric Identity Check: Who is offerer?
+            const role = compareFingerprints(localData.fingerprint, remoteData.fingerprint);
+            
+            if (role === 0) {
+                alert("You scanned your own QR code!");
+                scanning = true; requestAnimationFrame(tickScan); return;
+            }
+
+            try {
+                if (role > 0) {
+                    // WE ARE OFFERER. (Our localDescription is already set as an offer).
+                    // We must synthesize a fake Remote Answer.
+                    log("Assigned Role: OFFERER");
+                    const fakeAnswer = synthesizeSDP(localData.sdpTemplate, remoteData, 'answer');
+                    await pc.setRemoteDescription({ type: 'answer', sdp: fakeAnswer });
+                } else {
+                    // WE ARE ANSWERER. (We are currently in 'have-local-offer' state).
+                    log("Assigned Role: ANSWERER. Performing signaling rollback...");
+                    
+                    // 1. Signaling Rollback (keeps ICE ports open but resets state machine)
+                    await pc.setLocalDescription({ type: 'rollback' });
+                    
+                    // 2. Synthesize fake Remote Offer
+                    const fakeOffer = synthesizeSDP(localData.sdpTemplate, remoteData, 'offer');
+                    await pc.setRemoteDescription({ type: 'offer', sdp: fakeOffer });
+                    
+                    // 3. Generate real local Answer
+                    const answer = await pc.createAnswer();
+                    
+                    // 4. Force our deterministic credentials into our Answer
+                    answer.sdp = answer.sdp.replace(/a=ice-ufrag:.*/g, `a=ice-ufrag:${localData.creds.ufrag}`);
+                    answer.sdp = answer.sdp.replace(/a=ice-pwd:.*/g, `a=ice-pwd:${localData.creds.pwd}`);
+                    
+                    await pc.setLocalDescription(answer);
+                }
+                log("SDP negotiation complete. Awaiting ICE connection...");
+            } catch (e) {
+                log("Connection Error: " + e.message);
+                console.error(e);
+            }
+        }
+
+        // --- SDP Synthesizer (The "Browser State Hack") ---
+        function synthesizeSDP(baseSdp, remote, type) {
+            let sdp = baseSdp;
+            
+            // Swap Fingerprint
+            const fpStr = Array.from(remote.fingerprint).map(b => b.toString(16).padStart(2,'0').toUpperCase()).join(':');
+            sdp = sdp.replace(/a=fingerprint:sha-256 .*/g, `a=fingerprint:sha-256 ${fpStr}`);
+            
+            // Swap ICE Credentials
+            sdp = sdp.replace(/a=ice-ufrag:.*/g, `a=ice-ufrag:${remote.creds.ufrag}`);
+            sdp = sdp.replace(/a=ice-pwd:.*/g, `a=ice-pwd:${remote.creds.pwd}`);
+            
+            // Handle Setup Role
+            // Offerer expects remote Answerer to be 'active'. Answerer expects remote Offerer to be 'actpass'.
+            const setup = type === 'answer' ? 'active' : 'actpass';
+            sdp = sdp.replace(/a=setup:.*/g, `a=setup:${setup}`);
+            
+            // Inject Remote Candidates
+            sdp = sdp.replace(/a=candidate:.*\r\n/g, ''); // Strip local candidates
+            let candidateLines = remote.candidates.map((c, i) => {
+                const typ = c.type === 0 ? "host" : "srflx";
+                const proto = c.protocol === 0 ? "udp" : "tcp";
+                return `a=candidate:${i} 1 ${proto} 2122260223 ${c.ipStr} ${c.port} typ ${typ}\r\n`;
+            }).join('');
+            
+            return sdp + candidateLines;
+        }
+
+        // --- QWBP Binary Format Encoders / Decoders ---
+        // Format: [Magic:1][Version:1][Fingerprint:32][Candidates:Var]
+        function encodeQWBPPayload(fingerprint, candidates) {
+            let size = 1 + 1 + 32; 
+            for (let c of candidates) size += (c.family === 0 ? 7 : 19);
+            
+            const buf = new Uint8Array(size);
+            buf[0] = 0x51; // 'Q'
+            buf[1] = 0x00; // v0
+            buf.set(fingerprint, 2);
+            
+            let offset = 34;
+            for (let c of candidates) {
+                buf[offset] = (c.family & 0x03) | ((c.protocol & 0x01) << 2) | ((c.type & 0x01) << 3);
+                offset++;
+                if (c.family === 0) { // IPv4
+                    buf.set(c.ipBytes, offset); offset += 4;
+                } else { // IPv6 / mDNS
+                    buf.set(c.ipBytes, offset); offset += 16;
+                }
+                buf[offset] = (c.port >> 8) & 0xFF;
+                buf[offset+1] = c.port & 0xFF;
+                offset += 2;
+            }
+            return buf;
+        }
+
+        function decodeQWBPPayload(buf) {
+            if (buf[0] !== 0x51) return null; // Magic byte check
+            const fingerprint = buf.slice(2, 34);
+            const candidates = [];
+            let offset = 34;
+            
+            while (offset < buf.length) {
+                const flags = buf[offset++];
+                const family = flags & 0x03;
+                const protocol = (flags >> 2) & 0x01;
+                const type = (flags >> 3) & 0x01;
+                
+                let ipBytes, ipStr;
+                if (family === 0) {
+                    ipBytes = buf.slice(offset, offset + 4);
+                    ipStr = ipBytes.join('.');
+                    offset += 4;
+                } else {
+                    ipBytes = buf.slice(offset, offset + 16);
+                    const hex = Array.from(ipBytes).map(b => b.toString(16).padStart(2,'0')).join('');
+                    if (family === 2) { // mDNS
+                        ipStr = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}.local`;
+                    } else { // IPv6 hacky parsing
+                        ipStr = hex; // Unused in this demo scope
+                    }
+                    offset += 16;
+                }
+                const port = (buf[offset] << 8) | buf[offset+1];
+                offset += 2;
+                candidates.push({ family, protocol, type, ipBytes, ipStr, port });
+            }
+            return { fingerprint, candidates };
+        }
+
+        // --- HKDF Cryptography ---
+        async function deriveIceCredentials(fpBytes) {
+            const keyMaterial = await crypto.subtle.importKey("raw", fpBytes, {name: "HKDF"}, false, ["deriveBits"]);
+            const ufragInfo = new TextEncoder().encode("QWBP-ICE-UFRAG-v1");
+            const pwdInfo = new TextEncoder().encode("QWBP-ICE-PWD-v1");
+            
+            const ufragBits = await crypto.subtle.deriveBits({name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: ufragInfo}, keyMaterial, 4 * 8);
+            const pwdBits = await crypto.subtle.deriveBits({name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: pwdInfo}, keyMaterial, 18 * 8);
+            
+            return { ufrag: base64url(ufragBits), pwd: base64url(pwdBits) };
+        }
+
+        // --- Utilities ---
+        function parseCandidate(cStr) {
+            const parts = cStr.split(' ');
+            if (parts.length < 8) return null;
+            const protocol = parts[2].toLowerCase() === 'tcp' ? 1 : 0;
+            const ipStr = parts[4];
+            const port = parseInt(parts[5]);
+            const type = parts[7] === 'host' ? 0 : 1;
+            
+            let family = 0, ipBytes;
+            if (ipStr.endsWith('.local')) {
+                family = 2; // mDNS
+                const hex = ipStr.replace(/[^a-f0-9]/gi, '');
+                ipBytes = new Uint8Array(16);
+                for(let i=0; i<16; i++) ipBytes[i] = parseInt(hex.substr(i*2, 2), 16);
+            } else if (ipStr.includes(':')) {
+                return null; // Skip pure IPv6 for demo simplicity
+            } else {
+                family = 0; // IPv4
+                ipBytes = new Uint8Array(ipStr.split('.').map(Number));
+            }
+            return { family, protocol, type, ipBytes, ipStr, port };
+        }
+
+        function extractSdpValue(sdp, prefix) {
+            const line = sdp.split('\r\n').find(l => l.startsWith(prefix));
+            return line ? line.substring(prefix.length) : "";
+        }
+
+        function parseFingerprint(fpStr) {
+            return new Uint8Array(fpStr.split(':').map(h => parseInt(h, 16)));
+        }
+
+        function compareFingerprints(a, b) {
+            for (let i = 0; i < 32; i++) {
+                if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+            }
+            return 0; // Identical
+        }
+
+        function base64url(buf) {
+            return btoa(String.fromCharCode(...new Uint8Array(buf)))
+                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        function generateQR(uint8Array) {
+            QRCode.toCanvas(qrCanvas, [{ data: uint8Array, mode: 'byte' }], {
+                errorCorrectionLevel: 'L',
+                margin: 2,
+                width: 250
+            }, (err) => { if (err) console.error(err); });
+            
+            // Hide "gathering..." text
+            qrCanvas.nextElementSibling.style.display = 'none';
+        }
+
+        // --- Chat UI Binding ---
+        function setupDataChannel(channel) {
+            channel.onopen = () => {
+                chatInput.disabled = false;
+                chatBtn.disabled = false;
+                log("DataChannel open. You can now send messages!");
+            };
+            channel.onmessage = (e) => log("Peer: " + e.data, true);
+        }
+
+        function sendMessage() {
+            const txt = chatInput.value;
+            if (!txt || dc.readyState !== "open") return;
+            dc.send(txt);
+            log("You: " + txt, true);
+            chatInput.value = "";
+        }
+        
+        chatBtn.onclick = sendMessage;
+        chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
+
+        // Start App
+        init();
+    </script>
+</body>
+</html>
