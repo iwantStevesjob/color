@@ -2241,8 +2241,8 @@
                 this.pc = session?.pc || null
                 this.channel = session?.channel || null
                 this.peerId = fingerprintToPeerId(session?.remoteFingerprint || [])
+                this.secureDirect = true
                 this.handlers = new Map()
-                this.verifiedPeers = new Set()
                 this.discoveredPeers = new Set()
                 this.connectedPeers = {}
                 this.left = false
@@ -2265,7 +2265,7 @@
 
                     this.pc.onconnectionstatechange = () => {
                         if (this.pc?.connectionState === 'connected') this.handleChannelOpen()
-                        if (['failed', 'disconnected', 'closed'].includes(this.pc?.connectionState)) {
+                        if (['failed', 'closed'].includes(this.pc?.connectionState)) {
                             this.handleChannelClose()
                         }
                     }
@@ -2351,25 +2351,11 @@
                 if (message.action === 'identity') {
                     this.remoteIdentitySeen = true
                     this.stopIdentityBroadcasts()
-
-                    if (message.data?.pubKey) {
-                        await this.identity.storePeerKey(this.peerId, message.data.pubKey)
-                    }
-
-                    this.verifiedPeers.add(this.peerId)
                     this.emit('peer-identity', message.data, this.peerId)
                     return
                 } else if (message.action === 'fragment') {
-                    if (!this.verifiedPeers.has(this.peerId)) return
-
-                    const verifiedData = await this.identity._call('db_verify_remote', {
-                        fragments: message.data,
-                        roomHex: this.roomHex,
-                        peerId: this.peerId
-                    })
-
-                    if (Object.keys(verifiedData).length > 0) {
-                        this.emit('fragment', verifiedData, this.peerId)
+                    if (message.data && typeof message.data === 'object') {
+                        this.emit('fragment', message.data, this.peerId)
                     }
                     return
                 }
@@ -2378,10 +2364,8 @@
             }
 
             async broadcastIdentity() {
-                const jwk = await this.identity.getPublicKeyData()
                 this.send('identity', {
                     color: window.app.user.color,
-                    pubKey: jwk,
                     cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
                     secureQr: true
                 })
@@ -2400,10 +2384,16 @@
             }
 
             getPeers() {
+                if (this.channel?.readyState === 'open' && !this.connectedPeers[this.peerId]) {
+                    this.handleChannelOpen()
+                }
                 return this.connectedPeers
             }
 
             getDiscoveredPeers() {
+                if (this.channel?.readyState === 'open' && !this.discoveredPeers.has(this.peerId)) {
+                    this.handleChannelOpen()
+                }
                 return this.discoveredPeers
             }
 
