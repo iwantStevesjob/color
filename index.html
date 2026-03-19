@@ -1309,6 +1309,557 @@
         async function sha1Hash(str) { const hashBuffer = await crypto.subtle.digest('SHA-1', encoder.encode(str)); return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(36)).join('').slice(0, 20) }
         const selfId = genId(20)
 
+        function normalizeHexValue(hex) {
+            const raw = String(hex || '').trim().replace(/^#/, '')
+            const expanded = raw.length === 3 ? raw.split('').map(ch => ch + ch).join('') : raw
+            if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return '#ffffff'
+            return '#' + expanded.toLowerCase()
+        }
+
+        function hexToRgbBytes(hex) {
+            const clean = normalizeHexValue(hex).slice(1)
+            return [
+                parseInt(clean.slice(0, 2), 16),
+                parseInt(clean.slice(2, 4), 16),
+                parseInt(clean.slice(4, 6), 16)
+            ]
+        }
+
+        function rgbBytesToHex(bytes) {
+            return '#' + Array.from(bytes).map(value => value.toString(16).padStart(2, '0')).join('')
+        }
+
+        function mixHexColors(leftHex, rightHex) {
+            const left = hexToRgbBytes(leftHex)
+            const right = hexToRgbBytes(rightHex)
+            return rgbBytesToHex([
+                Math.round((left[0] + right[0]) / 2),
+                Math.round((left[1] + right[1]) / 2),
+                Math.round((left[2] + right[2]) / 2)
+            ])
+        }
+
+        function bytesToBase64(bytes) {
+            let binary = ''
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+            return btoa(binary)
+        }
+
+        function base64ToBytes(base64) {
+            const binary = atob(base64)
+            const out = new Uint8Array(binary.length)
+            for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
+            return out
+        }
+
+        function base64url(buffer) {
+            return bytesToBase64(new Uint8Array(buffer))
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=+$/, '')
+        }
+
+        function bytesEqual(left, right) {
+            if (!left || !right || left.length !== right.length) return false
+            for (let i = 0; i < left.length; i++) {
+                if (left[i] !== right[i]) return false
+            }
+            return true
+        }
+
+        function normalizeLineEndings(sdp) {
+            return String(sdp || '').replace(/\r?\n/g, '\r\n')
+        }
+
+        function replaceSdpLine(sdp, regex, replacement) {
+            if (regex.test(sdp)) return sdp.replace(regex, replacement)
+            return `${sdp}${replacement}\r\n`
+        }
+
+        function stripCandidateLines(sdp) {
+            return sdp
+                .replace(/^a=candidate:.*$\r?\n?/gm, '')
+                .replace(/^a=end-of-candidates.*$\r?\n?/gm, '')
+                .replace(/^a=remote-candidates:.*$\r?\n?/gm, '')
+        }
+
+        function patchLocalIceCredentials(sdp, creds) {
+            let out = normalizeLineEndings(sdp)
+            out = replaceSdpLine(out, /^a=ice-ufrag:.+$/m, `a=ice-ufrag:${creds.ufrag}`)
+            out = replaceSdpLine(out, /^a=ice-pwd:.+$/m, `a=ice-pwd:${creds.pwd}`)
+            return out
+        }
+
+        function extractSdpValue(sdp, prefix) {
+            const line = normalizeLineEndings(sdp).split('\r\n').find(value => value.startsWith(prefix))
+            return line ? line.slice(prefix.length) : ''
+        }
+
+        function parseFingerprint(fpStr) {
+            const parts = String(fpStr || '').split(':').map(piece => parseInt(piece, 16))
+            if (parts.length !== 32 || parts.some(value => !Number.isInteger(value) || value < 0 || value > 255)) {
+                return new Uint8Array(0)
+            }
+            return new Uint8Array(parts)
+        }
+
+        function formatFingerprint(fpBytes) {
+            return Array.from(fpBytes).map(byte => byte.toString(16).padStart(2, '0').toUpperCase()).join(':')
+        }
+
+        function compareFingerprints(left, right) {
+            for (let i = 0; i < 32; i++) {
+                if (left[i] !== right[i]) return left[i] > right[i] ? 1 : -1
+            }
+            return 0
+        }
+
+        function ipv4StringToBytes(ip) {
+            const parts = String(ip || '').split('.').map(value => Number(value))
+            if (parts.length !== 4) return null
+            if (parts.some(value => !Number.isInteger(value) || value < 0 || value > 255)) return null
+            return new Uint8Array(parts)
+        }
+
+        function ipv6StringToBytes(ip) {
+            ip = String(ip || '')
+            const zoneIndex = ip.indexOf('%')
+            if (zoneIndex !== -1) ip = ip.slice(0, zoneIndex)
+
+            let left = []
+            let right = []
+
+            if (ip.includes('::')) {
+                const parts = ip.split('::')
+                left = parts[0] ? parts[0].split(':') : []
+                right = parts[1] ? parts[1].split(':') : []
+            } else {
+                left = ip.split(':')
+            }
+
+            if (left.some(Boolean) === false && right.some(Boolean) === false) return null
+
+            const total = left.length + right.length
+            if (total > 8) return null
+
+            const middle = new Array(8 - total).fill('0')
+            const full = ip.includes('::') ? [...left, ...middle, ...right] : left
+            if (full.length !== 8) return null
+
+            const bytes = new Uint8Array(16)
+            for (let i = 0; i < 8; i++) {
+                const value = parseInt(full[i] || '0', 16)
+                if (!Number.isFinite(value) || value < 0 || value > 0xffff) return null
+                bytes[i * 2] = (value >> 8) & 0xff
+                bytes[i * 2 + 1] = value & 0xff
+            }
+
+            return bytes
+        }
+
+        function ipv6BytesToString(bytes) {
+            const parts = []
+            for (let i = 0; i < 16; i += 2) {
+                parts.push(((bytes[i] << 8) | bytes[i + 1]).toString(16))
+            }
+            return parts.join(':')
+        }
+
+        function mdnsStringToBytes(hostname) {
+            const label = String(hostname || '').replace(/\.local$/i, '')
+            const hex = label.replace(/-/g, '')
+            if (!/^[a-fA-F0-9]{32}$/.test(hex)) return null
+
+            const bytes = new Uint8Array(16)
+            for (let i = 0; i < 16; i++) {
+                bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+            }
+            return bytes
+        }
+
+        function mdnsBytesToString(bytes) {
+            const hex = Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('')
+            return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}.local`
+        }
+
+        function parseCompactCandidate(candidateString) {
+            const parts = String(candidateString || '').trim().split(/\s+/)
+            if (parts.length < 8) return null
+
+            const protocolLabel = parts[2]?.toLowerCase()
+            const ipStr = parts[4]
+            const port = parseInt(parts[5], 10)
+            const typeIndex = parts.indexOf('typ')
+            const typeLabel = typeIndex >= 0 ? parts[typeIndex + 1] : null
+            const tcpTypeIndex = parts.indexOf('tcptype')
+            const tcpTypeLabel = tcpTypeIndex >= 0 ? parts[tcpTypeIndex + 1] : null
+
+            if (!Number.isFinite(port) || !typeLabel) return null
+            if (protocolLabel !== 'udp') return null
+
+            let family = 0
+            let ipBytes = null
+
+            if (ipStr.endsWith('.local')) {
+                family = 2
+                ipBytes = mdnsStringToBytes(ipStr)
+            } else if (ipStr.includes(':')) {
+                family = 1
+                ipBytes = ipv6StringToBytes(ipStr)
+            } else {
+                family = 0
+                ipBytes = ipv4StringToBytes(ipStr)
+            }
+
+            if (!ipBytes) return null
+
+            let type = null
+            if (typeLabel === 'host') type = 0
+            if (typeLabel === 'srflx') type = 1
+            if (type === null) return null
+
+            return {
+                family,
+                protocol: 0,
+                type,
+                ipBytes,
+                ipStr,
+                port,
+                tcpTypeLabel
+            }
+        }
+
+        function scoreCompactCandidate(candidate) {
+            const typeScore = candidate.type === 0 ? 0 : 10
+            const familyScore = candidate.family === 0 ? 0 : candidate.family === 2 ? 1 : 2
+            return typeScore + familyScore
+        }
+
+        function buildCompactCandidateLine(candidate, index) {
+            const foundation = index + 1
+            const component = 1
+            const protocol = candidate.protocol === 0 ? 'udp' : 'tcp'
+            const priority = candidate.type === 0 ? 2122260223 : 1686052607
+            const kind = candidate.type === 0 ? 'host' : 'srflx'
+            let line = `a=candidate:${foundation} ${component} ${protocol} ${priority} ${candidate.ipStr} ${candidate.port} typ ${kind}`
+            if (candidate.protocol === 1 && candidate.tcpTypeLabel) {
+                line += ` tcptype ${candidate.tcpTypeLabel}`
+            }
+            return `${line}\r\n`
+        }
+
+        function synthesizeCompactSdp(baseSdp, remote, type) {
+            let sdp = normalizeLineEndings(baseSdp)
+            sdp = stripCandidateLines(sdp)
+            sdp = replaceSdpLine(sdp, /^a=fingerprint:sha-256 .+$/m, `a=fingerprint:sha-256 ${formatFingerprint(remote.fingerprint)}`)
+            sdp = replaceSdpLine(sdp, /^a=ice-ufrag:.+$/m, `a=ice-ufrag:${remote.creds.ufrag}`)
+            sdp = replaceSdpLine(sdp, /^a=ice-pwd:.+$/m, `a=ice-pwd:${remote.creds.pwd}`)
+            sdp = replaceSdpLine(sdp, /^a=setup:.+$/m, type === 'answer' ? 'a=setup:active' : 'a=setup:actpass')
+            const candidateLines = remote.candidates.map((candidate, index) => buildCompactCandidateLine(candidate, index)).join('')
+            return `${sdp}${candidateLines}a=end-of-candidates\r\n`
+        }
+
+        function waitForSecureIceGathering(pc, timeoutMs) {
+            return new Promise(resolve => {
+                let done = false
+
+                function finish() {
+                    if (done) return
+                    done = true
+                    clearTimeout(timer)
+                    resolve()
+                }
+
+                const timer = setTimeout(finish, timeoutMs)
+
+                if (pc.iceGatheringState === 'complete') {
+                    finish()
+                    return
+                }
+
+                pc.addEventListener('icegatheringstatechange', () => {
+                    if (pc.iceGatheringState === 'complete') finish()
+                })
+            })
+        }
+
+        function encodeSecureRoomPayload(colorHex, fingerprint, candidates) {
+            let size = 1 + 1 + 3 + 32
+            for (const candidate of candidates) size += candidate.family === 0 ? 7 : 19
+
+            const buf = new Uint8Array(size)
+            buf[0] = 0x43
+            buf[1] = 0x00
+            buf.set(hexToRgbBytes(colorHex), 2)
+            buf.set(fingerprint, 5)
+
+            let offset = 37
+            for (const candidate of candidates) {
+                buf[offset++] = (candidate.family & 0x03) | ((candidate.protocol & 0x01) << 2) | ((candidate.type & 0x01) << 3)
+                buf.set(candidate.ipBytes, offset)
+                offset += candidate.family === 0 ? 4 : 16
+                buf[offset++] = (candidate.port >> 8) & 0xff
+                buf[offset++] = candidate.port & 0xff
+            }
+
+            return buf
+        }
+
+        function decodeSecureRoomPayload(buf) {
+            if (!(buf instanceof Uint8Array)) return null
+            if (buf.length < 44) return null
+            if (buf[0] !== 0x43) return null
+
+            const version = buf[1] & 0x07
+            if (version !== 0) return null
+
+            const colorHex = rgbBytesToHex(buf.slice(2, 5))
+            const fingerprint = buf.slice(5, 37)
+            const candidates = []
+            let offset = 37
+
+            while (offset < buf.length) {
+                const flags = buf[offset++]
+                const family = flags & 0x03
+                const protocol = (flags >> 2) & 0x01
+                const type = (flags >> 3) & 0x01
+
+                if (family > 2 || protocol > 1 || type > 1) return null
+
+                const addrLen = family === 0 ? 4 : 16
+                if (offset + addrLen + 2 > buf.length) return null
+
+                const ipBytes = buf.slice(offset, offset + addrLen)
+                offset += addrLen
+
+                const port = (buf[offset] << 8) | buf[offset + 1]
+                offset += 2
+
+                let ipStr = ''
+                if (family === 0) ipStr = Array.from(ipBytes).join('.')
+                else if (family === 1) ipStr = ipv6BytesToString(ipBytes)
+                else ipStr = mdnsBytesToString(ipBytes)
+
+                candidates.push({
+                    family,
+                    protocol,
+                    type,
+                    ipBytes,
+                    ipStr,
+                    port
+                })
+            }
+
+            if (candidates.length === 0 || candidates.length > 4) return null
+            return { colorHex, fingerprint, candidates }
+        }
+
+        function tryDecodeSecureRoomPayload(text) {
+            try {
+                return decodeSecureRoomPayload(base64ToBytes(String(text || '').trim()))
+            } catch (error) {
+                return null
+            }
+        }
+
+        async function deriveIceCredentials(fpBytes) {
+            if (!fpBytes || fpBytes.length !== 32) throw new Error('Invalid secure fingerprint.')
+            const keyMaterial = await crypto.subtle.importKey('raw', fpBytes, { name: 'HKDF' }, false, ['deriveBits'])
+            const salt = new Uint8Array(0)
+            const ufragInfo = new TextEncoder().encode('QWBP-ICE-UFRAG-v1')
+            const pwdInfo = new TextEncoder().encode('QWBP-ICE-PWD-v1')
+
+            const ufragBits = await crypto.subtle.deriveBits(
+                { name: 'HKDF', hash: 'SHA-256', salt, info: ufragInfo },
+                keyMaterial,
+                4 * 8
+            )
+
+            const pwdBits = await crypto.subtle.deriveBits(
+                { name: 'HKDF', hash: 'SHA-256', salt, info: pwdInfo },
+                keyMaterial,
+                18 * 8
+            )
+
+            return {
+                ufrag: base64url(ufragBits),
+                pwd: base64url(pwdBits)
+            }
+        }
+
+        class SecureQrRoomBootstrap {
+            constructor(onConnected) {
+                this.onConnected = onConnected
+                this.resetState()
+            }
+
+            resetState() {
+                this.pc = null
+                this.channel = null
+                this.pendingRemote = null
+                this.localReady = false
+                this.remoteHandled = false
+                this.connectedNotified = false
+                this.qrText = null
+                this.local = {
+                    colorHex: '#ffffff',
+                    fingerprint: null,
+                    creds: null,
+                    candidates: [],
+                    sdpTemplate: ''
+                }
+            }
+
+            async destroy() {
+                try {
+                    if (this.channel) this.channel.close()
+                } catch (_) { }
+
+                try {
+                    if (this.pc) this.pc.close()
+                } catch (_) { }
+
+                this.resetState()
+            }
+
+            hasPreparedQr() {
+                return this.localReady && !!this.qrText
+            }
+
+            addCandidate(candidate) {
+                if (candidate.protocol !== 0) return
+                if (candidate.type !== 0 && candidate.type !== 1) return
+
+                const hostCount = this.local.candidates.filter(item => item.type === 0).length
+                const srflxCount = this.local.candidates.filter(item => item.type === 1).length
+
+                if (candidate.type === 0 && hostCount >= 3) return
+                if (candidate.type === 1 && srflxCount >= 1) return
+
+                const duplicate = this.local.candidates.some(item =>
+                    item.family === candidate.family &&
+                    item.protocol === candidate.protocol &&
+                    item.type === candidate.type &&
+                    item.port === candidate.port &&
+                    bytesEqual(item.ipBytes, candidate.ipBytes)
+                )
+                if (duplicate) return
+
+                this.local.candidates.push(candidate)
+                this.local.candidates.sort((left, right) => scoreCompactCandidate(left) - scoreCompactCandidate(right))
+            }
+
+            notifyConnected() {
+                if (this.connectedNotified || !this.pendingRemote) return
+                this.connectedNotified = true
+                const sharedHex = mixHexColors(this.local.colorHex, this.pendingRemote.colorHex)
+                this.onConnected?.({
+                    sharedHex,
+                    localHex: this.local.colorHex,
+                    remoteHex: this.pendingRemote.colorHex
+                })
+            }
+
+            async prepare(colorHex) {
+                await this.destroy()
+
+                this.local.colorHex = normalizeHexValue(colorHex)
+
+                const pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+                    bundlePolicy: 'max-bundle'
+                })
+
+                this.pc = pc
+                this.channel = pc.createDataChannel('qwbp-color-room', {
+                    negotiated: true,
+                    id: 0,
+                    ordered: true
+                })
+
+                this.channel.onopen = () => this.notifyConnected()
+                this.channel.onerror = () => { }
+
+                pc.onconnectionstatechange = () => {
+                    if (pc.connectionState === 'connected') this.notifyConnected()
+                }
+
+                const gatherDone = waitForSecureIceGathering(pc, 4000)
+
+                pc.addEventListener('icecandidate', event => {
+                    if (!event.candidate) return
+                    const parsed = parseCompactCandidate(event.candidate.candidate)
+                    if (parsed) this.addCandidate(parsed)
+                })
+
+                let offer = await pc.createOffer()
+                this.local.fingerprint = parseFingerprint(extractSdpValue(offer.sdp, 'a=fingerprint:sha-256 '))
+                if (this.local.fingerprint.length !== 32) {
+                    throw new Error('Unable to build a secure QR fingerprint.')
+                }
+
+                this.local.creds = await deriveIceCredentials(this.local.fingerprint)
+                offer.sdp = patchLocalIceCredentials(offer.sdp, this.local.creds)
+                await pc.setLocalDescription(offer)
+
+                await gatherDone
+
+                this.local.sdpTemplate = pc.localDescription?.sdp || offer.sdp
+                if (this.local.candidates.length === 0) {
+                    throw new Error('No usable ICE candidates were gathered for secure QR.')
+                }
+
+                this.qrText = bytesToBase64(encodeSecureRoomPayload(this.local.colorHex, this.local.fingerprint, this.local.candidates))
+                this.localReady = true
+
+                if (this.pendingRemote && !this.remoteHandled) {
+                    await this.handleRemote(this.pendingRemote)
+                }
+
+                return this.qrText
+            }
+
+            async acceptPayload(remotePayload) {
+                if (!remotePayload) throw new Error('Invalid secure QR payload.')
+                this.pendingRemote = remotePayload
+                if (!this.localReady) return
+                await this.handleRemote(remotePayload)
+            }
+
+            async handleRemote(remotePayload) {
+                if (this.remoteHandled || !this.pc) return
+
+                this.remoteHandled = true
+                this.pendingRemote = remotePayload
+                remotePayload.creds = await deriveIceCredentials(remotePayload.fingerprint)
+
+                const role = compareFingerprints(this.local.fingerprint, remotePayload.fingerprint)
+                if (role === 0) {
+                    this.remoteHandled = false
+                    this.pendingRemote = null
+                    throw new Error('You scanned your own secure QR. Scan the other device.')
+                }
+
+                try {
+                    if (role > 0) {
+                        const fakeAnswer = synthesizeCompactSdp(this.local.sdpTemplate, remotePayload, 'answer')
+                        await this.pc.setRemoteDescription({ type: 'answer', sdp: fakeAnswer })
+                    } else {
+                        await this.pc.setLocalDescription({ type: 'rollback' })
+                        const fakeOffer = synthesizeCompactSdp(this.local.sdpTemplate, remotePayload, 'offer')
+                        await this.pc.setRemoteDescription({ type: 'offer', sdp: fakeOffer })
+
+                        let answer = await this.pc.createAnswer()
+                        answer.sdp = patchLocalIceCredentials(answer.sdp, this.local.creds)
+                        await this.pc.setLocalDescription(answer)
+                    }
+                } catch (error) {
+                    this.remoteHandled = false
+                    throw error
+                }
+            }
+        }
+
         function waitForIce(pc) {
             return Promise.race([
                 new Promise(resolve => {
@@ -1867,6 +2418,11 @@
                 this.minedForSession = false
                 this.miningInProgress = false
                 this.peeking = false
+                this.secureQrBootstrap = new SecureQrRoomBootstrap(({ sharedHex }) => {
+                    this.enterSecureSharedRoom(sharedHex).catch(error => {
+                        console.error('Secure room transition failed:', error)
+                    })
+                })
 
                 this.appState = {
                     session: 'booting',
@@ -2139,6 +2695,7 @@
 
                 clearTimeout(this.cursorSaveTimeout)
                 await this.stopScanner()
+                await this.secureQrBootstrap.destroy()
                 this.clearStatusInterval()
                 this.currentLineId = null
 
@@ -2394,18 +2951,18 @@
                     const qrContainer = document.getElementById('qr-display-container')
                     const btnText = document.getElementById('btn-toggle-secure')
 
-                    if (!this.mesh) return
-
-                    qrContainer.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:#333;">Generating Secure Offer...</div>'
-                    btnText.style.display = 'none'
+                    qrContainer.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:#333;">Preparing Secure Room...</div>'
+                    btnText.innerText = 'preparing secure room...'
+                    btnText.style.pointerEvents = 'none'
+                    btnText.style.opacity = '0.7'
 
                     try {
-                        const inviteData = await this.mesh.generateInvite()
+                        const securePayload = await this.secureQrBootstrap.prepare(this.user.color)
 
                         qrContainer.innerHTML = ''
 
                         new QRCode(qrContainer, {
-                            text: JSON.stringify(inviteData),
+                            text: securePayload,
                             width: 250,
                             height: 250,
                             colorDark: '#000000',
@@ -2413,14 +2970,16 @@
                             correctLevel: QRCode.CorrectLevel.L
                         })
 
-                        btnText.innerText = 'Offer Generated'
+                        btnText.innerText = 'waiting for secure scan...'
                         btnText.style.display = 'block'
                         btnText.style.textDecoration = 'none'
                         btnText.style.cursor = 'default'
+                        btnText.style.pointerEvents = 'none'
+                        btnText.style.opacity = '1'
                     } catch (e) {
                         console.error(e)
-                        qrContainer.innerHTML = 'Error generating offer'
-                        btnText.style.display = 'block'
+                        qrContainer.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:#333;">Secure QR failed</div>'
+                        this.resetSecureQrToggle()
                     }
                 })
 
@@ -2429,8 +2988,7 @@
                 })
                 document.getElementById('btn-cancel-scan').addEventListener('click', async () => {
                     await this.stopScanner()
-                    document.querySelectorAll('.connect-view').forEach(el => el.classList.remove('active'))
-                    document.getElementById('view-qr').classList.add('active')
+                    this.showQrConnectView()
                 })
 
                 document.querySelectorAll('.nav-item').forEach(item => {
@@ -2827,6 +3385,69 @@
                 }
             }
 
+            resetSecureQrToggle() {
+                const btn = document.getElementById('btn-toggle-secure')
+                if (!btn) return
+                btn.innerText = 'view more secure option'
+                btn.style.display = 'block'
+                btn.style.textDecoration = ''
+                btn.style.cursor = 'pointer'
+                btn.style.pointerEvents = 'auto'
+                btn.style.opacity = '1'
+            }
+
+            showQrConnectView() {
+                document.querySelectorAll('.connect-view').forEach(el => el.classList.remove('active'))
+                document.getElementById('view-qr')?.classList.add('active')
+            }
+
+            async transitionToScannedRoom(targetHex, vipTicket = null, manualOffer = null) {
+                const cleanTargetHex = normalizeHexValue(targetHex)
+
+                this.pendingVipTicket = vipTicket
+                this.pendingManualOffer = manualOffer
+                this.isGuestScan = true
+                this.peeking = false
+                this.halfPeekMode = null
+                this.setPanelState('home')
+                this.updatePeekState(0)
+                this.resetSecureQrToggle()
+
+                this.ui.dashboardPanel.classList.remove('peek-mode', 'half-peek', 'active', 'step-down', 'revealed')
+                document.getElementById('connect-content-layer')?.classList.remove('visible')
+                document.getElementById('sub-nav-layer')?.classList.remove('peek-slide', 'half-slide')
+
+                document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
+                document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'))
+                document.getElementById('view-home')?.classList.add('active')
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))
+                document.querySelector('.nav-item[data-target="home"]')?.classList.add('active')
+
+                let matchPos = window.findPositionFromColor ? window.findPositionFromColor(cleanTargetHex) : null
+                if (!matchPos) matchPos = [0, 0, 1]
+
+                if (!document.body.classList.contains('light-mode')) {
+                    document.body.classList.add('light-mode')
+                }
+
+                const length = Math.sqrt(matchPos[0] * matchPos[0] + matchPos[1] * matchPos[1] + matchPos[2] * matchPos[2])
+                const norm = length > 0 ? [matchPos[0] / length, matchPos[1] / length, matchPos[2] / length] : [0, 0, 0]
+
+                window.location.hash = cleanTargetHex
+                window.triggerLanding(norm, matchPos, window.hexToRgbNormalized(cleanTargetHex), true)
+
+                if (window.state && window.state.landing) {
+                    window.state.landing.shouldAutoEnter = true
+                }
+
+                await this.connectAndPreview(cleanTargetHex, true)
+            }
+
+            async enterSecureSharedRoom(sharedHex) {
+                await this.secureQrBootstrap.destroy()
+                await this.transitionToScannedRoom(sharedHex)
+            }
+
             togglePeek() {
                 if (!this.ui.dashboardPanel.classList.contains('active')) return
                 this.peeking = !this.peeking
@@ -2867,6 +3488,8 @@
                     if (connectType === 'qr') {
                         contentLayer.classList.add('visible')
                         document.getElementById('view-qr')?.classList.add('active')
+                        void this.secureQrBootstrap.destroy()
+                        this.resetSecureQrToggle()
 
                         const qrContainer = document.getElementById('qr-display-container')
                         qrContainer.innerHTML = ''
@@ -2923,10 +3546,47 @@
                 })
             }
 
-            handleScannedData(jsonString) {
+            async handleScannedData(jsonString) {
                 try {
                     const cleanString = typeof jsonString === 'string' ? jsonString.trim() : String(jsonString)
                     console.log('Scanned QR raw payload:', cleanString)
+
+                    const securePayload = tryDecodeSecureRoomPayload(cleanString)
+                    if (securePayload) {
+                        console.log('QR Scan Success (Secure Compact):', securePayload)
+
+                        this.showQrConnectView()
+
+                        const qrContainer = document.getElementById('qr-display-container')
+                        const btnText = document.getElementById('btn-toggle-secure')
+
+                        if (!this.secureQrBootstrap.hasPreparedQr()) {
+                            qrContainer.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:#333;">Preparing your secure QR...</div>'
+                            btnText.innerText = 'preparing secure room...'
+                            btnText.style.pointerEvents = 'none'
+                            btnText.style.opacity = '0.7'
+
+                            const localSecurePayload = await this.secureQrBootstrap.prepare(this.user.color)
+                            qrContainer.innerHTML = ''
+                            new QRCode(qrContainer, {
+                                text: localSecurePayload,
+                                width: 250,
+                                height: 250,
+                                colorDark: '#000000',
+                                colorLight: '#ffffff',
+                                correctLevel: QRCode.CorrectLevel.L
+                            })
+                        }
+
+                        btnText.innerText = 'connecting secure room...'
+                        btnText.style.textDecoration = 'none'
+                        btnText.style.cursor = 'default'
+                        btnText.style.pointerEvents = 'none'
+                        btnText.style.opacity = '1'
+
+                        await this.secureQrBootstrap.acceptPayload(securePayload)
+                        return
+                    }
 
                     let data
                     try {
@@ -2939,81 +3599,19 @@
                     if (data.h && data.s) {
                         console.log('QR Scan Success (Simple):', data)
 
-                        this.pendingVipTicket = data.s
-                        this.isGuestScan = true
-
-                        this.peeking = false
-                        this.setPanelState('home')
-                        this.updatePeekState(0)
-                        this.ui.dashboardPanel.classList.remove('peek-mode', 'half-peek', 'active', 'step-down', 'revealed')
-                        document.getElementById('connect-content-layer')?.classList.remove('visible')
-
-                        document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
-                        document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'))
-                        document.getElementById('view-home')?.classList.add('active')
-                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))
-                        document.querySelector('.nav-item[data-target="home"]')?.classList.add('active')
-
                         const cleanH = data.h.replace(/[^0-9a-fA-F]/g, '')
                         const targetHex = '#' + cleanH
-
-                        let matchPos = window.findPositionFromColor ? window.findPositionFromColor(targetHex) : null
-                        if (!matchPos) matchPos = [0, 0, 1]
-
-                        if (!document.body.classList.contains('light-mode')) {
-                            document.body.classList.add('light-mode')
-                        }
-
-                        const l = Math.sqrt(matchPos[0] * matchPos[0] + matchPos[1] * matchPos[1] + matchPos[2] * matchPos[2])
-                        const norm = l > 0 ? [matchPos[0] / l, matchPos[1] / l, matchPos[2] / l] : [0, 0, 0]
-
-                        window.location.hash = targetHex
-
-                        window.triggerLanding(norm, matchPos, window.hexToRgbNormalized(targetHex), true)
-
-                        if (window.state && window.state.landing) {
-                            window.state.landing.shouldAutoEnter = true
-                        }
-
-                        this.connectAndPreview(targetHex, true)
+                        await this.secureQrBootstrap.destroy()
+                        await this.transitionToScannedRoom(targetHex, data.s, null)
+                        return
                     } else if (data.type === 'offer' && data.offer && data.offer_id && data.peer_id && data.roomHex) {
                         console.log('QR Scan Success (Secure SDP Offer):', data)
 
-                        this.pendingManualOffer = data
-                        this.isGuestScan = true
-                        this.peeking = false
-                        this.setPanelState('home')
-                        this.updatePeekState(0)
-                        this.ui.dashboardPanel.classList.remove('peek-mode', 'half-peek', 'active', 'step-down', 'revealed')
-                        document.getElementById('connect-content-layer')?.classList.remove('visible')
-
-                        document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
-                        document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'))
-                        document.getElementById('view-home')?.classList.add('active')
-                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))
-                        document.querySelector('.nav-item[data-target="home"]')?.classList.add('active')
-
                         const cleanRoomHex = String(data.roomHex).replace(/[^0-9a-fA-F]/g, '')
                         const targetHex = '#' + cleanRoomHex
-
-                        let matchPos = window.findPositionFromColor ? window.findPositionFromColor(targetHex) : null
-                        if (!matchPos) matchPos = [0, 0, 1]
-
-                        if (!document.body.classList.contains('light-mode')) {
-                            document.body.classList.add('light-mode')
-                        }
-
-                        const l = Math.sqrt(matchPos[0] * matchPos[0] + matchPos[1] * matchPos[1] + matchPos[2] * matchPos[2])
-                        const norm = l > 0 ? [matchPos[0] / l, matchPos[1] / l, matchPos[2] / l] : [0, 0, 0]
-
-                        window.location.hash = targetHex
-                        window.triggerLanding(norm, matchPos, window.hexToRgbNormalized(targetHex), true)
-
-                        if (window.state && window.state.landing) {
-                            window.state.landing.shouldAutoEnter = true
-                        }
-
-                        this.connectAndPreview(targetHex, true)
+                        await this.secureQrBootstrap.destroy()
+                        await this.transitionToScannedRoom(targetHex, null, data)
+                        return
                     } else {
                         alert('Unrecognized data format in QR code.\n\nPayload:\n' + cleanString.substring(0, 100))
                     }
@@ -3057,6 +3655,7 @@
             async logout() {
                 if (window.resetSphereView) window.resetSphereView()
                 await this.stopScanner()
+                await this.secureQrBootstrap.destroy()
                 this.clearStatusInterval()
                 clearTimeout(this.cursorSaveTimeout)
 
@@ -3069,8 +3668,10 @@
                 this.ui.display.innerHTML = ''; this.ui.minimap.innerHTML = ''; this.activeLocks = {}
                 this.currentLineId = null
                 this.pendingManualOffer = null
+                this.pendingVipTicket = null
 
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
+                this.resetSecureQrToggle()
 
                 document.getElementById('sub-nav-layer')?.classList.remove('peek-slide', 'half-slide')
                 document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
