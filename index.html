@@ -1359,26 +1359,6 @@
                 .replace(/=+$/, '')
         }
 
-        function deriveSharedRoomSecret(localColorHex, remoteColorHex, localFingerprint, remoteFingerprint) {
-            const localColor = new Uint8Array(hexToRgbBytes(localColorHex))
-            const remoteColor = new Uint8Array(hexToRgbBytes(remoteColorHex))
-            const order = compareFingerprints(localFingerprint, remoteFingerprint)
-            const firstFingerprint = order <= 0 ? localFingerprint : remoteFingerprint
-            const secondFingerprint = order <= 0 ? remoteFingerprint : localFingerprint
-            const firstColor = order <= 0 ? localColor : remoteColor
-            const secondColor = order <= 0 ? remoteColor : localColor
-            const buffer = new Uint8Array(firstColor.length + secondColor.length + firstFingerprint.length + secondFingerprint.length)
-            let offset = 0
-            buffer.set(firstColor, offset)
-            offset += firstColor.length
-            buffer.set(secondColor, offset)
-            offset += secondColor.length
-            buffer.set(firstFingerprint, offset)
-            offset += firstFingerprint.length
-            buffer.set(secondFingerprint, offset)
-            return base64url(buffer.buffer)
-        }
-
         function bytesEqual(left, right) {
             if (!left || !right || left.length !== right.length) return false
             for (let i = 0; i < left.length; i++) {
@@ -1425,6 +1405,10 @@
 
         function formatFingerprint(fpBytes) {
             return Array.from(fpBytes).map(byte => byte.toString(16).padStart(2, '0').toUpperCase()).join(':')
+        }
+
+        function fingerprintToPeerId(fpBytes) {
+            return 'secure-' + Array.from(fpBytes || []).map(byte => byte.toString(16).padStart(2, '0')).join('')
         }
 
         function compareFingerprints(left, right) {
@@ -1742,19 +1726,6 @@
                 this.resetState()
             }
 
-            detachConnection() {
-                if (!this.pc || !this.channel || !this.pendingRemote) return null
-                const link = {
-                    pc: this.pc,
-                    channel: this.channel,
-                    peerId: `secure-${base64url(this.pendingRemote.fingerprint.slice(0, 9)).slice(0, 16)}`
-                }
-                this.pc = null
-                this.channel = null
-                this.qrText = null
-                return link
-            }
-
             hasPreparedQr() {
                 return this.localReady && !!this.qrText
             }
@@ -1785,19 +1756,25 @@
             notifyConnected() {
                 if (this.connectedNotified || !this.pendingRemote) return
                 this.connectedNotified = true
-                const sharedHex = mixHexColors(this.local.colorHex, this.pendingRemote.colorHex)
-                const sharedSecret = deriveSharedRoomSecret(
-                    this.local.colorHex,
-                    this.pendingRemote.colorHex,
-                    this.local.fingerprint,
-                    this.pendingRemote.fingerprint
-                )
-                this.onConnected?.({
-                    sharedHex,
-                    sharedSecret,
+                const session = this.takeConnectedSession()
+                if (session) this.onConnected?.(session)
+            }
+
+            takeConnectedSession() {
+                if (!this.pc || !this.channel || !this.pendingRemote) return null
+
+                const session = {
+                    pc: this.pc,
+                    channel: this.channel,
+                    sharedHex: mixHexColors(this.local.colorHex, this.pendingRemote.colorHex),
                     localHex: this.local.colorHex,
-                    remoteHex: this.pendingRemote.colorHex
-                })
+                    remoteHex: this.pendingRemote.colorHex,
+                    localFingerprint: this.local.fingerprint ? new Uint8Array(this.local.fingerprint) : null,
+                    remoteFingerprint: this.pendingRemote.fingerprint ? new Uint8Array(this.pendingRemote.fingerprint) : null
+                }
+
+                this.resetState()
+                return session
             }
 
             async prepare(colorHex) {
@@ -2199,114 +2176,6 @@
             }
         }
 
-        function createDirectSecureRoom(link) {
-            const connectedPeers = {}
-            const peerJoinCallbacks = []
-            const peerLeaveCallbacks = []
-            const peerDiscoverCallbacks = []
-            const peerErrorCallbacks = []
-            const actionHandlers = {}
-            const discoveredPeers = new Set()
-            let left = false
-            const peerId = link.peerId || `secure-${genId(12)}`
-            const channel = link.channel
-            const pc = link.pc
-
-            function handleOpen() {
-                if (left) return
-                if (connectedPeers[peerId]?.dc === channel) return
-                discoveredPeers.add(peerId)
-                connectedPeers[peerId] = { pc, dc: channel }
-                peerDiscoverCallbacks.forEach(cb => cb(peerId))
-                peerJoinCallbacks.forEach(cb => cb(peerId))
-            }
-
-            function handleClose() {
-                if (left) return
-                if (!connectedPeers[peerId]) return
-                delete connectedPeers[peerId]
-                peerLeaveCallbacks.forEach(cb => cb(peerId))
-            }
-
-            channel.onmessage = event => {
-                try {
-                    const message = JSON.parse(event.data)
-                    if (message.action && actionHandlers[message.action]) {
-                        actionHandlers[message.action].forEach(cb => cb(message.data, peerId))
-                    }
-                } catch (_) { }
-            }
-
-            channel.onerror = () => {
-                peerErrorCallbacks.forEach(cb => cb(peerId))
-            }
-
-            channel.onclose = handleClose
-
-            if (pc) {
-                pc.oniceconnectionstatechange = () => {
-                    if (pc.iceConnectionState === 'failed') {
-                        peerErrorCallbacks.forEach(cb => cb(peerId))
-                    }
-                }
-                pc.onconnectionstatechange = () => {
-                    if (pc.connectionState === 'connected') handleOpen()
-                    if (pc.connectionState === 'closed' || pc.connectionState === 'failed' || pc.connectionState === 'disconnected') handleClose()
-                }
-            }
-
-            if (channel.readyState === 'open') {
-                setTimeout(handleOpen, 0)
-            } else {
-                channel.onopen = handleOpen
-            }
-
-            return {
-                makeAction(name) {
-                    if (!actionHandlers[name]) actionHandlers[name] = []
-                    return [
-                        (data, targetPeerId = null) => {
-                            if (left) return
-                            if (targetPeerId && targetPeerId !== peerId) return
-                            if (channel.readyState !== 'open') return
-                            try {
-                                channel.send(JSON.stringify({ action: name, data }))
-                            } catch (_) { }
-                        },
-                        cb => actionHandlers[name].push(cb)
-                    ]
-                },
-                onPeerJoin(cb) {
-                    peerJoinCallbacks.push(cb)
-                    if (channel.readyState === 'open' && !left) setTimeout(() => cb(peerId), 0)
-                },
-                onPeerLeave(cb) { peerLeaveCallbacks.push(cb) },
-                getPeers() { return connectedPeers },
-                onPeerDiscover(cb) {
-                    peerDiscoverCallbacks.push(cb)
-                    if (!left && (discoveredPeers.has(peerId) || channel.readyState === 'open')) {
-                        setTimeout(() => cb(peerId), 0)
-                    }
-                },
-                onPeerError(cb) { peerErrorCallbacks.push(cb) },
-                getDiscoveredPeers() {
-                    if (!left && channel.readyState === 'open') discoveredPeers.add(peerId)
-                    return discoveredPeers
-                },
-                enableSync() { },
-                leave() {
-                    left = true
-                    try {
-                        channel.close()
-                    } catch (_) { }
-                    try {
-                        pc?.close()
-                    } catch (_) { }
-                    delete connectedPeers[peerId]
-                }
-            }
-        }
-
         class ColorDB {
             constructor() { this.name = 'color' }
             async init() { return }
@@ -2364,10 +2233,205 @@
         }
         window.ColorDB = ColorDB
 
-        class TrustedMesh {
-            constructor(roomId, identity, roomAdapter = null) {
+        class SecureDirectMesh {
+            constructor(roomId, identity, session) {
                 this.roomHex = roomId.replace('color-', '')
-                this.room = roomAdapter || joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, roomId)
+                this.identity = identity
+                this.session = session
+                this.pc = session?.pc || null
+                this.channel = session?.channel || null
+                this.peerId = fingerprintToPeerId(session?.remoteFingerprint || [])
+                this.handlers = new Map()
+                this.verifiedPeers = new Set()
+                this.discoveredPeers = new Set()
+                this.connectedPeers = {}
+                this.left = false
+                this.openNotified = false
+                this.remoteIdentitySeen = false
+                this.identityBroadcastTimer = null
+
+                if (this.channel) {
+                    this.channel.binaryType = 'arraybuffer'
+                    this.channel.onmessage = event => this.handleMessage(event)
+                    this.channel.onopen = () => this.handleChannelOpen()
+                    this.channel.onclose = () => this.handleChannelClose()
+                    this.channel.onerror = () => this.emit('peer-error', this.peerId)
+                }
+
+                if (this.pc) {
+                    this.pc.oniceconnectionstatechange = () => {
+                        if (this.pc?.iceConnectionState === 'failed') this.emit('peer-error', this.peerId)
+                    }
+
+                    this.pc.onconnectionstatechange = () => {
+                        if (this.pc?.connectionState === 'connected') this.handleChannelOpen()
+                        if (['failed', 'disconnected', 'closed'].includes(this.pc?.connectionState)) {
+                            this.handleChannelClose()
+                        }
+                    }
+                }
+
+                if (this.channel?.readyState === 'open') {
+                    queueMicrotask(() => this.handleChannelOpen())
+                }
+            }
+
+            on(eventName, callback) {
+                if (!this.handlers.has(eventName)) this.handlers.set(eventName, [])
+                this.handlers.get(eventName).push(callback)
+            }
+
+            emit(eventName, ...args) {
+                this.handlers.get(eventName)?.forEach(callback => callback(...args))
+            }
+
+            handleChannelOpen() {
+                if (this.left || this.openNotified || this.channel?.readyState !== 'open') return
+
+                this.openNotified = true
+                this.discoveredPeers.add(this.peerId)
+                this.connectedPeers[this.peerId] = { pc: this.pc, dc: this.channel }
+                this.emit('peer-discover', this.peerId)
+                this.emit('qr-success', this.peerId)
+                this.emit('peer-join', this.peerId)
+                this.startIdentityBroadcasts()
+            }
+
+            handleChannelClose() {
+                if (!this.connectedPeers[this.peerId] && !this.discoveredPeers.has(this.peerId)) return
+
+                delete this.connectedPeers[this.peerId]
+                this.discoveredPeers.delete(this.peerId)
+                this.stopIdentityBroadcasts()
+                this.emit('peer-leave', this.peerId)
+            }
+
+            startIdentityBroadcasts() {
+                this.stopIdentityBroadcasts()
+
+                const sendIdentity = () => {
+                    this.broadcastIdentity().catch(() => { })
+                }
+
+                sendIdentity()
+                this.identityBroadcastTimer = setInterval(() => {
+                    if (this.left || this.remoteIdentitySeen || this.channel?.readyState !== 'open') {
+                        this.stopIdentityBroadcasts()
+                        return
+                    }
+                    sendIdentity()
+                }, 1000)
+            }
+
+            stopIdentityBroadcasts() {
+                if (this.identityBroadcastTimer) {
+                    clearInterval(this.identityBroadcastTimer)
+                    this.identityBroadcastTimer = null
+                }
+            }
+
+            send(action, data) {
+                if (this.left || this.channel?.readyState !== 'open') return
+                try {
+                    this.channel.send(JSON.stringify({ action, data }))
+                } catch (error) { }
+            }
+
+            async handleMessage(event) {
+                let message = null
+
+                try {
+                    message = JSON.parse(event.data)
+                } catch (error) {
+                    return
+                }
+
+                if (!message?.action) return
+
+                if (message.action === 'identity') {
+                    this.remoteIdentitySeen = true
+                    this.stopIdentityBroadcasts()
+
+                    if (message.data?.pubKey) {
+                        await this.identity.storePeerKey(this.peerId, message.data.pubKey)
+                    }
+
+                    this.verifiedPeers.add(this.peerId)
+                    this.emit('peer-identity', message.data, this.peerId)
+                    return
+                } else if (message.action === 'fragment') {
+                    if (!this.verifiedPeers.has(this.peerId)) return
+
+                    const verifiedData = await this.identity._call('db_verify_remote', {
+                        fragments: message.data,
+                        roomHex: this.roomHex,
+                        peerId: this.peerId
+                    })
+
+                    if (Object.keys(verifiedData).length > 0) {
+                        this.emit('fragment', verifiedData, this.peerId)
+                    }
+                    return
+                }
+
+                this.emit(message.action, message.data, this.peerId)
+            }
+
+            async broadcastIdentity() {
+                const jwk = await this.identity.getPublicKeyData()
+                this.send('identity', {
+                    color: window.app.user.color,
+                    pubKey: jwk,
+                    cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
+                    secureQr: true
+                })
+            }
+
+            async broadcastFragment(fragMap) {
+                this.send('fragment', fragMap)
+            }
+
+            broadcastLock(data) {
+                this.send('lock', data)
+            }
+
+            requestSync(keys) {
+                this.send('req', keys)
+            }
+
+            getPeers() {
+                return this.connectedPeers
+            }
+
+            getDiscoveredPeers() {
+                return this.discoveredPeers
+            }
+
+            enableSync() {
+                if (this.channel?.readyState === 'open') this.handleChannelOpen()
+            }
+
+            leave() {
+                this.left = true
+                this.stopIdentityBroadcasts()
+
+                try {
+                    if (this.channel) this.channel.close()
+                } catch (error) { }
+
+                try {
+                    if (this.pc) this.pc.close()
+                } catch (error) { }
+
+                this.connectedPeers = {}
+                this.discoveredPeers.clear()
+            }
+        }
+
+        class TrustedMesh {
+            constructor(roomId, identity) {
+                this.roomHex = roomId.replace('color-', '')
+                this.room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, roomId)
                 this.identity = identity
                 this.handlers = new Map()
                 this.verifiedPeers = new Set()
@@ -2459,13 +2523,13 @@
             async broadcastIdentity() {
                 const token = window.app.user.proofToken
                 const jwk = await this.identity.getPublicKeyData()
-                if (jwk && (token || this.outgoingQrSecret)) {
+                if (token && jwk) {
                     console.log(`%c[P2P] 📡 Broadcasting NEW Identity to all peers`, 'color: orange;')
                     this.rawSendId({
                         color: window.app.user.color,
                         pubKey: jwk,
                         cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
-                        minedToken: token || 'PENDING',
+                        minedToken: token,
                         qrSecret: this.outgoingQrSecret
                     })
                 }
@@ -2474,19 +2538,12 @@
             async broadcastFragment(fragMap) {
                 this.rawSendFrag(fragMap)
             }
-            async generateInvite() {
-                if (!this.room.createManualOffer) throw new Error('Manual offers are unavailable for this connection.')
-                return this.room.createManualOffer()
-            }
-            async acceptManualOffer(inviteData) {
-                if (!this.room.acceptManualOffer) throw new Error('Manual offer acceptance is unavailable for this connection.')
-                return this.room.acceptManualOffer(inviteData)
-            }
+            async generateInvite() { return this.room.createManualOffer() }
+            async acceptManualOffer(inviteData) { return this.room.acceptManualOffer(inviteData) }
             broadcastLock(data) { this.rawSendLock(data) }
             requestSync(keys) { this.rawSendReq(keys) }
             getPeers() { return this.room.getPeers() }
             getDiscoveredPeers() { return this.room.getDiscoveredPeers() }
-            hasQrTrust() { return !!(this.expectedQrSecret || this.outgoingQrSecret) }
             enableSync() { this.room.enableSync() }
             leave() { this.room.leave() }
             on(e, cb) { if (!this.handlers.has(e)) this.handlers.set(e, []); this.handlers.get(e).push(cb) }
@@ -2573,10 +2630,10 @@
                 this.minedForSession = false
                 this.miningInProgress = false
                 this.peeking = false
-                this.pendingSecureRoomSecret = null
-                this.pendingSecureMeshLink = null
-                this.secureQrBootstrap = new SecureQrRoomBootstrap(({ sharedHex, sharedSecret }) => {
-                    this.enterSecureSharedRoom(sharedHex, sharedSecret).catch(error => {
+                this.pendingSecureSession = null
+                this.connectionMode = 'tracked'
+                this.secureQrBootstrap = new SecureQrRoomBootstrap(session => {
+                    this.enterSecureSharedRoom(session).catch(error => {
                         console.error('Secure room transition failed:', error)
                     })
                 })
@@ -2851,13 +2908,11 @@
                 this.setSessionState('connecting')
 
                 clearTimeout(this.cursorSaveTimeout)
-                const preserveSecureLink = !!this.pendingSecureMeshLink
                 await this.stopScanner()
-                if (!preserveSecureLink) {
-                    await this.secureQrBootstrap.destroy()
-                }
+                await this.secureQrBootstrap.destroy()
                 this.clearStatusInterval()
                 this.currentLineId = null
+                this.connectionMode = this.pendingSecureSession ? 'secure-direct' : 'tracked'
 
                 if (this.mesh) { this.mesh.leave(); this.mesh = null }
 
@@ -2909,22 +2964,20 @@
             }
 
             joinNetwork() {
-                const roomAdapter = this.pendingSecureMeshLink
-                    ? createDirectSecureRoom(this.pendingSecureMeshLink)
-                    : null
-
-                this.pendingSecureMeshLink = null
-                this.mesh = new TrustedMesh(this.roomId, this.identity, roomAdapter)
-
-                if (this.pendingVipTicket) {
-                    this.mesh.setOutgoingSecret(this.pendingVipTicket)
+                if (this.pendingSecureSession) {
+                    this.mesh = new SecureDirectMesh(this.roomId, this.identity, this.pendingSecureSession)
+                    this.pendingSecureSession = null
                     this.pendingVipTicket = null
+                    this.pendingManualOffer = null
+                    this.connectionMode = 'secure-direct'
+                } else {
+                    this.mesh = new TrustedMesh(this.roomId, this.identity)
+                    this.connectionMode = 'tracked'
                 }
 
-                if (this.pendingSecureRoomSecret) {
-                    this.mesh.setExpectedSecret(this.pendingSecureRoomSecret)
-                    this.mesh.setOutgoingSecret(this.pendingSecureRoomSecret)
-                    this.pendingSecureRoomSecret = null
+                if (this.pendingVipTicket && this.mesh.setOutgoingSecret) {
+                    this.mesh.setOutgoingSecret(this.pendingVipTicket)
+                    this.pendingVipTicket = null
                 }
 
                 this.store = new StateStore(this.db, this.mesh, this.identity)
@@ -3011,8 +3064,9 @@
 
                 this.clearStatusInterval()
                 this.statusInterval = setInterval(() => this.updateStatus(), 1000)
+                this.updateStatus()
 
-                if (this.pendingManualOffer) {
+                if (this.pendingManualOffer && this.mesh.acceptManualOffer) {
                     const inviteData = this.pendingManualOffer
                     this.pendingManualOffer = null
                     this.mesh.acceptManualOffer(inviteData).catch(err => {
@@ -3515,7 +3569,7 @@
                 const cleanHex = this.roomId.replace('color-', '').toLowerCase()
                 const userHex = this.user.color.replace('#', '').toLowerCase()
                 const isFounder = cleanHex === userHex
-                const hasQrTrust = this.mesh.hasQrTrust?.() || false
+                const isSecureDirect = this.connectionMode === 'secure-direct'
 
                 if (isError && connectedPeers === 0) {
                     this.ui.roomStatus.textContent = 'TURN SERVER REQUIRED (NAT BLOCKED)'
@@ -3525,19 +3579,8 @@
                     return
                 }
 
-                if (connectedPeers > 0) {
-                    this.ui.roomStatus.textContent = hasQrTrust
-                        ? `SECURE ROOM LINKED`
-                        : `${Math.max(discoveredPeers, connectedPeers)} PEER${Math.max(discoveredPeers, connectedPeers) > 1 ? 'S' : ''} ONLINE`
-                    this.ui.roomStatus.style.color = ''
-                    this.ui.peerCount.innerText = `${connectedPeers} connected`
-                    this.ui.dot.classList.add('on')
-                    this.ui.loginBtn.classList.add('hidden')
-                    return
-                }
-
                 if (discoveredPeers > 0) {
-                    if (!this.user.proofToken && !isFounder && !hasQrTrust) {
+                    if (!isSecureDirect && !this.user.proofToken && !isFounder) {
                         this.startMining()
                         this.ui.roomStatus.textContent = `${discoveredPeers} PEER${discoveredPeers > 1 ? 'S' : ''} ONLINE`
                         this.ui.roomStatus.style.color = ''
@@ -3557,7 +3600,7 @@
                     }
                 } else {
                     this.ui.peerCount.innerText = 'Offline'
-                    this.ui.loginBtn.innerHTML = `<span>${hasQrTrust ? 'JOIN' : 'LOGIN'}</span>`
+                    this.ui.loginBtn.innerHTML = '<span>LOGIN</span>'
 
                     if (!this.ui.dashboardPanel.classList.contains('active')) {
                         this.ui.loginBtn.classList.remove('hidden')
@@ -3584,12 +3627,11 @@
                 document.getElementById('view-qr')?.classList.add('active')
             }
 
-            async transitionToScannedRoom(targetHex, vipTicket = null, manualOffer = null, secureRoomSecret = null) {
+            async transitionToScannedRoom(targetHex, vipTicket = null, manualOffer = null, skipExplicitConnect = false) {
                 const cleanTargetHex = normalizeHexValue(targetHex)
 
                 this.pendingVipTicket = vipTicket
                 this.pendingManualOffer = manualOffer
-                this.pendingSecureRoomSecret = secureRoomSecret
                 this.isGuestScan = true
                 this.peeking = false
                 this.halfPeekMode = null
@@ -3624,13 +3666,14 @@
                     window.state.landing.shouldAutoEnter = true
                 }
 
-                await this.connectAndPreview(cleanTargetHex, true)
+                if (!skipExplicitConnect) {
+                    await this.connectAndPreview(cleanTargetHex, true)
+                }
             }
 
-            async enterSecureSharedRoom(sharedHex, sharedSecret) {
-                this.pendingSecureMeshLink = this.secureQrBootstrap.detachConnection()
-                await this.secureQrBootstrap.destroy()
-                await this.transitionToScannedRoom(sharedHex, null, null, sharedSecret)
+            async enterSecureSharedRoom(session) {
+                this.pendingSecureSession = session
+                await this.transitionToScannedRoom(session.sharedHex, null, null, true)
             }
 
             togglePeek() {
@@ -3854,8 +3897,8 @@
                 this.currentLineId = null
                 this.pendingManualOffer = null
                 this.pendingVipTicket = null
-                this.pendingSecureRoomSecret = null
-                this.pendingSecureMeshLink = null
+                this.pendingSecureSession = null
+                this.connectionMode = 'tracked'
 
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
                 this.resetSecureQrToggle()
