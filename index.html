@@ -1359,6 +1359,26 @@
                 .replace(/=+$/, '')
         }
 
+        function deriveSharedRoomSecret(localColorHex, remoteColorHex, localFingerprint, remoteFingerprint) {
+            const localColor = new Uint8Array(hexToRgbBytes(localColorHex))
+            const remoteColor = new Uint8Array(hexToRgbBytes(remoteColorHex))
+            const order = compareFingerprints(localFingerprint, remoteFingerprint)
+            const firstFingerprint = order <= 0 ? localFingerprint : remoteFingerprint
+            const secondFingerprint = order <= 0 ? remoteFingerprint : localFingerprint
+            const firstColor = order <= 0 ? localColor : remoteColor
+            const secondColor = order <= 0 ? remoteColor : localColor
+            const buffer = new Uint8Array(firstColor.length + secondColor.length + firstFingerprint.length + secondFingerprint.length)
+            let offset = 0
+            buffer.set(firstColor, offset)
+            offset += firstColor.length
+            buffer.set(secondColor, offset)
+            offset += secondColor.length
+            buffer.set(firstFingerprint, offset)
+            offset += firstFingerprint.length
+            buffer.set(secondFingerprint, offset)
+            return base64url(buffer.buffer)
+        }
+
         function bytesEqual(left, right) {
             if (!left || !right || left.length !== right.length) return false
             for (let i = 0; i < left.length; i++) {
@@ -1753,8 +1773,15 @@
                 if (this.connectedNotified || !this.pendingRemote) return
                 this.connectedNotified = true
                 const sharedHex = mixHexColors(this.local.colorHex, this.pendingRemote.colorHex)
+                const sharedSecret = deriveSharedRoomSecret(
+                    this.local.colorHex,
+                    this.pendingRemote.colorHex,
+                    this.local.fingerprint,
+                    this.pendingRemote.fingerprint
+                )
                 this.onConnected?.({
                     sharedHex,
+                    sharedSecret,
                     localHex: this.local.colorHex,
                     remoteHex: this.pendingRemote.colorHex
                 })
@@ -2311,13 +2338,13 @@
             async broadcastIdentity() {
                 const token = window.app.user.proofToken
                 const jwk = await this.identity.getPublicKeyData()
-                if (token && jwk) {
+                if (jwk && (token || this.outgoingQrSecret)) {
                     console.log(`%c[P2P] 📡 Broadcasting NEW Identity to all peers`, 'color: orange;')
                     this.rawSendId({
                         color: window.app.user.color,
                         pubKey: jwk,
                         cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
-                        minedToken: token,
+                        minedToken: token || 'PENDING',
                         qrSecret: this.outgoingQrSecret
                     })
                 }
@@ -2332,6 +2359,7 @@
             requestSync(keys) { this.rawSendReq(keys) }
             getPeers() { return this.room.getPeers() }
             getDiscoveredPeers() { return this.room.getDiscoveredPeers() }
+            hasQrTrust() { return !!(this.expectedQrSecret || this.outgoingQrSecret) }
             enableSync() { this.room.enableSync() }
             leave() { this.room.leave() }
             on(e, cb) { if (!this.handlers.has(e)) this.handlers.set(e, []); this.handlers.get(e).push(cb) }
@@ -2418,8 +2446,9 @@
                 this.minedForSession = false
                 this.miningInProgress = false
                 this.peeking = false
-                this.secureQrBootstrap = new SecureQrRoomBootstrap(({ sharedHex }) => {
-                    this.enterSecureSharedRoom(sharedHex).catch(error => {
+                this.pendingSecureRoomSecret = null
+                this.secureQrBootstrap = new SecureQrRoomBootstrap(({ sharedHex, sharedSecret }) => {
+                    this.enterSecureSharedRoom(sharedHex, sharedSecret).catch(error => {
                         console.error('Secure room transition failed:', error)
                     })
                 })
@@ -2754,6 +2783,12 @@
                 if (this.pendingVipTicket) {
                     this.mesh.setOutgoingSecret(this.pendingVipTicket)
                     this.pendingVipTicket = null
+                }
+
+                if (this.pendingSecureRoomSecret) {
+                    this.mesh.setExpectedSecret(this.pendingSecureRoomSecret)
+                    this.mesh.setOutgoingSecret(this.pendingSecureRoomSecret)
+                    this.pendingSecureRoomSecret = null
                 }
 
                 this.store = new StateStore(this.db, this.mesh, this.identity)
@@ -3344,6 +3379,7 @@
                 const cleanHex = this.roomId.replace('color-', '').toLowerCase()
                 const userHex = this.user.color.replace('#', '').toLowerCase()
                 const isFounder = cleanHex === userHex
+                const hasQrTrust = this.mesh.hasQrTrust?.() || false
 
                 if (isError && connectedPeers === 0) {
                     this.ui.roomStatus.textContent = 'TURN SERVER REQUIRED (NAT BLOCKED)'
@@ -3353,8 +3389,19 @@
                     return
                 }
 
+                if (connectedPeers > 0) {
+                    this.ui.roomStatus.textContent = hasQrTrust
+                        ? `SECURE ROOM LINKED`
+                        : `${Math.max(discoveredPeers, connectedPeers)} PEER${Math.max(discoveredPeers, connectedPeers) > 1 ? 'S' : ''} ONLINE`
+                    this.ui.roomStatus.style.color = ''
+                    this.ui.peerCount.innerText = `${connectedPeers} connected`
+                    this.ui.dot.classList.add('on')
+                    this.ui.loginBtn.classList.add('hidden')
+                    return
+                }
+
                 if (discoveredPeers > 0) {
-                    if (!this.user.proofToken && !isFounder) {
+                    if (!this.user.proofToken && !isFounder && !hasQrTrust) {
                         this.startMining()
                         this.ui.roomStatus.textContent = `${discoveredPeers} PEER${discoveredPeers > 1 ? 'S' : ''} ONLINE`
                         this.ui.roomStatus.style.color = ''
@@ -3374,7 +3421,7 @@
                     }
                 } else {
                     this.ui.peerCount.innerText = 'Offline'
-                    this.ui.loginBtn.innerHTML = '<span>LOGIN</span>'
+                    this.ui.loginBtn.innerHTML = `<span>${hasQrTrust ? 'JOIN' : 'LOGIN'}</span>`
 
                     if (!this.ui.dashboardPanel.classList.contains('active')) {
                         this.ui.loginBtn.classList.remove('hidden')
@@ -3401,11 +3448,12 @@
                 document.getElementById('view-qr')?.classList.add('active')
             }
 
-            async transitionToScannedRoom(targetHex, vipTicket = null, manualOffer = null) {
+            async transitionToScannedRoom(targetHex, vipTicket = null, manualOffer = null, secureRoomSecret = null) {
                 const cleanTargetHex = normalizeHexValue(targetHex)
 
                 this.pendingVipTicket = vipTicket
                 this.pendingManualOffer = manualOffer
+                this.pendingSecureRoomSecret = secureRoomSecret
                 this.isGuestScan = true
                 this.peeking = false
                 this.halfPeekMode = null
@@ -3443,9 +3491,9 @@
                 await this.connectAndPreview(cleanTargetHex, true)
             }
 
-            async enterSecureSharedRoom(sharedHex) {
+            async enterSecureSharedRoom(sharedHex, sharedSecret) {
                 await this.secureQrBootstrap.destroy()
-                await this.transitionToScannedRoom(sharedHex)
+                await this.transitionToScannedRoom(sharedHex, null, null, sharedSecret)
             }
 
             togglePeek() {
@@ -3669,6 +3717,7 @@
                 this.currentLineId = null
                 this.pendingManualOffer = null
                 this.pendingVipTicket = null
+                this.pendingSecureRoomSecret = null
 
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
                 this.resetSecureQrToggle()
