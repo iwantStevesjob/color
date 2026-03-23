@@ -1270,13 +1270,13 @@
                 isVisible: isOverlayVisible
             }
 
-            ;['log', 'info', 'warn', 'error', 'debug'].forEach(method => {
-                originalConsole[method] = console[method] ? console[method].bind(console) : null
-                console[method] = (...args) => {
-                    appendEntry(method, args)
-                    if (originalConsole[method]) originalConsole[method](...args)
-                }
-            })
+                ;['log', 'info', 'warn', 'error', 'debug'].forEach(method => {
+                    originalConsole[method] = console[method] ? console[method].bind(console) : null
+                    console[method] = (...args) => {
+                        appendEntry(method, args)
+                        if (originalConsole[method]) originalConsole[method](...args)
+                    }
+                })
 
             window.addEventListener('error', event => {
                 const resource = describeResourceTarget(event.target)
@@ -2777,13 +2777,13 @@
                 }
             }
 
-            async broadcastFragment(fragMap) {
-                this.rawSendFrag(fragMap)
+            async broadcastFragment(fragMap, targetPeerId = null) {
+                this.rawSendFrag(fragMap, targetPeerId)
             }
             async generateInvite() { return this.room.createManualOffer() }
             async acceptManualOffer(inviteData) { return this.room.acceptManualOffer(inviteData) }
             broadcastLock(data) { this.rawSendLock(data) }
-            requestSync(keys) { this.rawSendReq(keys) }
+            requestSync(keys, targetPeerId = null) { this.rawSendReq(keys, targetPeerId) }
             getPeers() { return this.room.getPeers() }
             getDiscoveredPeers() { return this.room.getDiscoveredPeers() }
             enableSync() { this.room.enableSync() }
@@ -2869,13 +2869,16 @@
                 this.pendingManualOffer = null
                 this.bufferCheckPending = false
                 this.pendingFocusLine = undefined
+                this.pendingConnectRequest = null
                 this.minedForSession = false
                 this.miningInProgress = false
                 this.peeking = false
                 this.pendingSecureSession = null
                 this.connectionMode = 'tracked'
+                this.connectionSource = 'local'
+                this.proofRoomHex = null
                 this.secureQrBootstrap = new SecureQrRoomBootstrap(session => {
-                    this.enterSecureSharedRoom(session).catch(error => {
+                    this.connectFromSecureSharedQr(session).catch(error => {
                         console.error('Secure room transition failed:', error)
                     })
                 })
@@ -2909,6 +2912,94 @@
 
             setMiningState(nextState) {
                 this.appState.mining = nextState
+            }
+
+            normalizeConnectionRequest(optionsOrFromUrl = false, navPath = null) {
+                if (typeof optionsOrFromUrl === 'object' && optionsOrFromUrl !== null && !Array.isArray(optionsOrFromUrl)) {
+                    return {
+                        source: optionsOrFromUrl.source || (optionsOrFromUrl.fromUrl ? 'url' : 'local'),
+                        navPath: optionsOrFromUrl.navPath ?? navPath
+                    }
+                }
+
+                return {
+                    source: optionsOrFromUrl ? 'url' : 'local',
+                    navPath
+                }
+            }
+
+            isQrConnectionSource(source = this.connectionSource) {
+                return source === 'simple-qr' || source === 'offer-qr' || source === 'secure-shared-qr'
+            }
+
+            resetProofState(nextRoomHex = null) {
+                const normalizedRoomHex = nextRoomHex ? String(nextRoomHex).replace('#', '').toLowerCase() : null
+                if (normalizedRoomHex && this.proofRoomHex === normalizedRoomHex) return
+
+                this.user.proofToken = null
+                this.minedForSession = false
+                this.miningInProgress = false
+                this.proofRoomHex = normalizedRoomHex
+                this.setMiningState('idle')
+            }
+
+            requiresMiningForCurrentConnection() {
+                if (this.connectionMode === 'secure-direct') return false
+                if (this.connectionSource !== 'url') return false
+
+                const cleanHex = (this.roomId || '').replace('color-', '').toLowerCase()
+                const userHex = (this.user.color || '').replace('#', '').toLowerCase()
+                return !!cleanHex && cleanHex !== userHex
+            }
+
+            hasRenderedContent() {
+                return Array.from(this.ui.display.querySelectorAll('.editor-line')).some(el => {
+                    const html = (el.innerHTML || '').trim()
+                    return html && html !== '<br>'
+                })
+            }
+
+            requestInitialSyncFromPeer(data, pid) {
+                if (!this.mesh || typeof data?.cursor !== 'number') return
+                if (!this.isFresh && this.hasRenderedContent()) return
+
+                const cursor = Math.max(0, data.cursor)
+                console.log(`[EditorApp] 🎯 Peer is at line ${cursor}. Syncing range...`)
+
+                this.pendingFocusLine = cursor
+                this.renderInitialState({}, cursor)
+                this.isFresh = false
+
+                const roomHex = this.roomId.replace('color-', '')
+                const start = Math.max(0, cursor - 50)
+                const end = cursor + 50
+                const missingKeys = []
+
+                for (let i = start; i <= end; i++) {
+                    missingKeys.push(roomHex + i)
+                }
+
+                this.mesh.requestSync(missingKeys, pid)
+            }
+
+            connectFromDirectUrl(hex, navPath = null) {
+                return this.connectAndPreview(hex, { source: 'url', navPath })
+            }
+
+            connectFromSimpleQr(targetHex, vipTicket = null) {
+                return this.transitionToScannedRoom(targetHex, { source: 'simple-qr', vipTicket })
+            }
+
+            connectFromOfferQr(targetHex, manualOffer) {
+                return this.transitionToScannedRoom(targetHex, { source: 'offer-qr', manualOffer })
+            }
+
+            connectFromSecureSharedQr(session) {
+                this.pendingSecureSession = session
+                return this.transitionToScannedRoom(session.sharedHex, {
+                    source: 'secure-shared-qr',
+                    skipExplicitConnect: true
+                })
             }
 
             clearStatusInterval() {
@@ -2979,7 +3070,7 @@
                     const hashParts = window.location.hash.split('/').filter(Boolean)
                     const hex = hashParts[0]
                     const navPath = hashParts.slice(1)
-                    this.connectAndPreview(hex, true, navPath)
+                    this.connectFromDirectUrl(hex, navPath)
                 }
             }
 
@@ -3102,12 +3193,15 @@
             }
 
             startMining() {
+                if (!this.requiresMiningForCurrentConnection()) return
                 if (this.minedForSession || this.miningInProgress) return
+                const miningRoomId = this.roomId
                 const cleanHex = this.roomId.replace('color-', '').toLowerCase()
                 const userHex = this.user.color.replace('#', '').toLowerCase()
 
                 if (cleanHex === userHex) {
                     this.minedForSession = true
+                    this.proofRoomHex = cleanHex
                     this.setMiningState('complete')
                     if (this.mesh) this.mesh.enableSync()
                     return
@@ -3118,10 +3212,12 @@
                 this.setMiningState('running')
                 console.log('%c[MINING] Starting mining...', 'color: orange;')
                 this.identity._call('generate_token', { roomHex: cleanHex }).then(token => {
+                    if (this.roomId !== miningRoomId) return
                     console.log('%c[MINING] Proof Generated: ' + token, 'color: orange; font-weight: bold;')
                     this.user.proofToken = token
                     this.minedForSession = true
                     this.miningInProgress = false
+                    this.proofRoomHex = cleanHex
                     this.setMiningState('complete')
 
                     if (this.mesh) {
@@ -3132,6 +3228,7 @@
 
                     this.updateStatus()
                 }).catch(err => {
+                    if (this.roomId !== miningRoomId) return
                     console.error('Mining failed:', err)
                     this.miningInProgress = false
                     this.setMiningState('idle')
@@ -3139,21 +3236,26 @@
                 })
             }
 
-            async connectAndPreview(hex, fromUrl = false, navPath = null) {
+            async connectAndPreview(hex, optionsOrFromUrl = false, navPath = null) {
+                const request = this.normalizeConnectionRequest(optionsOrFromUrl, navPath)
                 const cleanHex = hex.replace('#', '').toLowerCase()
-                this.pendingNavPath = navPath
+                this.pendingNavPath = request.navPath
                 this.roomId = 'color-' + cleanHex
+                this.connectionSource = request.source
+                this.isGuestScan = this.isQrConnectionSource(request.source)
                 this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff'
                 this.ui.userBadge.style.backgroundColor = this.user.color
                 this.ui.userBadge.setAttribute('data-hex', this.user.color.toUpperCase())
                 this.user.id = 'user_' + this.user.color.replace('#', '')
                 this.setSessionState('connecting')
+                this.resetProofState(cleanHex)
 
                 clearTimeout(this.cursorSaveTimeout)
                 await this.stopScanner()
                 await this.secureQrBootstrap.destroy()
                 this.clearStatusInterval()
                 this.currentLineId = null
+                this.pendingFocusLine = undefined
                 this.connectionMode = this.pendingSecureSession ? 'secure-direct' : 'tracked'
 
                 if (this.mesh) { this.mesh.leave(); this.mesh = null }
@@ -3161,6 +3263,7 @@
                 this.ui.display.innerHTML = ''
                 this.ui.minimap.innerHTML = ''
                 this.activeLocks = {}
+                this.isFresh = true
 
                 this.ui.loginBtn.classList.remove('hidden')
                 await this.db._open()
@@ -3177,8 +3280,7 @@
                     await this.renderFromLocalDB(data, centerIndex)
                     this.ui.roomStatus.textContent = 'READY'
                     this.joinNetwork()
-                    if (fromUrl && window.state?.landing) {
-                        window.state.landing.shouldAutoEnter = true
+                    if (window.state?.landing?.shouldAutoEnter) {
                         if (window.state.landing.progress >= 1 && window.enterRoomUI) window.enterRoomUI()
                     }
                 } else {
@@ -3193,7 +3295,7 @@
                     }, 8000)
                 }
 
-                if (fromUrl && !this.isGuestScan) {
+                if (this.requiresMiningForCurrentConnection()) {
                     this.startMining()
                 } else {
                     if (this.mesh) this.mesh.enableSync()
@@ -3202,7 +3304,7 @@
 
             async renderFromLocalDB(data, centerIndex) {
                 this.renderInitialState(data, centerIndex)
-                this.isFresh = false
+                this.isFresh = Object.keys(data || {}).length === 0
             }
 
             joinNetwork() {
@@ -3270,23 +3372,7 @@
 
                 this.mesh.on('peer-identity', (data, pid) => {
                     this.peerColors[pid] = data?.color || '#ffffff'
-
-                    if (this.isFresh && typeof data.cursor === 'number') {
-                        console.log(`[EditorApp] 🎯 Peer is at line ${data.cursor}. Syncing range...`)
-                        this.pendingFocusLine = data.cursor
-                        this.renderInitialState({}, data.cursor)
-                        this.isFresh = false
-
-                        const start = data.cursor - 50
-                        const end = data.cursor + 50
-                        const missingKeys = []
-                        const roomHex = this.roomId.replace('color-', '')
-
-                        for (let i = start; i <= end; i++) {
-                            missingKeys.push(roomHex + i)
-                        }
-                        this.mesh.requestSync(missingKeys)
-                    }
+                    this.requestInitialSyncFromPeer(data, pid)
                 })
 
                 this.mesh.on('lock', (data, pid) => {
@@ -3294,12 +3380,13 @@
                     this.reapplyVisualLocks()
                 })
 
-                this.mesh.on('req', async (keys, pid) => {
+                this.mesh.on('req', async (request, pid) => {
                     const roomHex = this.roomId.replace('color-', '')
+                    const keys = Array.isArray(request) ? request : request?.keys
                     if (keys && Array.isArray(keys)) {
                         const payload = await this.db.getSpecific(roomHex, keys)
                         if (Object.keys(payload).length > 0) {
-                            this.mesh.broadcastFragment(payload)
+                            this.mesh.broadcastFragment(payload, pid)
                         }
                     }
                 })
@@ -3822,7 +3909,7 @@
                 }
 
                 if (discoveredPeers > 0) {
-                    if (!isSecureDirect && !this.user.proofToken && !isFounder) {
+                    if (this.requiresMiningForCurrentConnection() && !this.user.proofToken && !isFounder) {
                         this.startMining()
                         this.ui.roomStatus.textContent = `${discoveredPeers} PEER${discoveredPeers > 1 ? 'S' : ''} ONLINE`
                         this.ui.roomStatus.style.color = ''
@@ -3869,12 +3956,19 @@
                 document.getElementById('view-qr')?.classList.add('active')
             }
 
-            async transitionToScannedRoom(targetHex, vipTicket = null, manualOffer = null, skipExplicitConnect = false) {
+            async transitionToScannedRoom(targetHex, options = {}) {
+                const {
+                    source = 'simple-qr',
+                    vipTicket = null,
+                    manualOffer = null,
+                    skipExplicitConnect = false
+                } = options
                 const cleanTargetHex = normalizeHexValue(targetHex)
 
                 this.pendingVipTicket = vipTicket
                 this.pendingManualOffer = manualOffer
-                this.isGuestScan = true
+                this.connectionSource = source
+                this.isGuestScan = this.isQrConnectionSource(source)
                 this.peeking = false
                 this.halfPeekMode = null
                 this.setPanelState('home')
@@ -3902,20 +3996,23 @@
                 const norm = length > 0 ? [matchPos[0] / length, matchPos[1] / length, matchPos[2] / length] : [0, 0, 0]
 
                 window.location.hash = cleanTargetHex
-                window.triggerLanding(norm, matchPos, window.hexToRgbNormalized(cleanTargetHex), true)
+                this.pendingConnectRequest = { source }
+
+                if (typeof window.triggerLanding === 'function') {
+                    window.triggerLanding(norm, matchPos, window.hexToRgbNormalized(cleanTargetHex), true)
+                }
 
                 if (window.state && window.state.landing) {
                     window.state.landing.shouldAutoEnter = true
                 }
 
-                if (!skipExplicitConnect) {
-                    await this.connectAndPreview(cleanTargetHex, true)
+                if (!skipExplicitConnect && typeof window.triggerLanding !== 'function') {
+                    await this.connectAndPreview(cleanTargetHex, { source })
                 }
             }
 
             async enterSecureSharedRoom(session) {
-                this.pendingSecureSession = session
-                await this.transitionToScannedRoom(session.sharedHex, null, null, true)
+                await this.connectFromSecureSharedQr(session)
             }
 
             togglePeek() {
@@ -4072,7 +4169,7 @@
                         const cleanH = data.h.replace(/[^0-9a-fA-F]/g, '')
                         const targetHex = '#' + cleanH
                         await this.secureQrBootstrap.destroy()
-                        await this.transitionToScannedRoom(targetHex, data.s, null)
+                        await this.connectFromSimpleQr(targetHex, data.s)
                         return
                     } else if (data.type === 'offer' && data.offer && data.offer_id && data.peer_id && data.roomHex) {
                         console.log('QR Scan Success (Secure SDP Offer):', data)
@@ -4080,7 +4177,7 @@
                         const cleanRoomHex = String(data.roomHex).replace(/[^0-9a-fA-F]/g, '')
                         const targetHex = '#' + cleanRoomHex
                         await this.secureQrBootstrap.destroy()
-                        await this.transitionToScannedRoom(targetHex, null, data)
+                        await this.connectFromOfferQr(targetHex, data)
                         return
                     } else {
                         alert('Unrecognized data format in QR code.\n\nPayload:\n' + cleanString.substring(0, 100))
@@ -4140,7 +4237,9 @@
                 this.pendingManualOffer = null
                 this.pendingVipTicket = null
                 this.pendingSecureSession = null
+                this.pendingConnectRequest = null
                 this.connectionMode = 'tracked'
+                this.connectionSource = 'local'
 
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
                 this.resetSecureQrToggle()
@@ -4153,10 +4252,8 @@
                 document.getElementById('view-home')?.classList.add('active')
 
                 if (window.updateVisitedFromDB) window.updateVisitedFromDB()
-                this.minedForSession = false
-                this.miningInProgress = false
+                this.resetProofState()
                 this.setSessionState('ready')
-                this.setMiningState('idle')
             }
 
             renderInitialState(data, centerIndex) {
@@ -4284,7 +4381,15 @@
                     return el ? `<div class="scroll-dot" style="background:${lock.color};top:${(el.offsetTop / h) * 100}%"></div>` : ''
                 }).join('')
             }
-            setupGlobalExposure() { window.connectAndPreview = (h, u) => this.connectAndPreview(h, u); window.enterRoomUI = () => this.enterRoomUI() }
+            setupGlobalExposure() {
+                window.connectAndPreview = (h, optionsOrFromUrl, navPath) => {
+                    const pendingRequest = this.pendingConnectRequest
+                    const usePendingRequest = pendingRequest && (typeof optionsOrFromUrl === 'boolean' || typeof optionsOrFromUrl === 'undefined')
+                    this.pendingConnectRequest = null
+                    return this.connectAndPreview(h, usePendingRequest ? pendingRequest : optionsOrFromUrl, navPath)
+                }
+                window.enterRoomUI = () => this.enterRoomUI()
+            }
             async runSequencedScan() { for (const rId of this.visitedRooms) { try { const r = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, rId); await new Promise(res => setTimeout(() => { window.postMessage({ type: 'handle-ready', hex: rId.replace('color-', '#'), count: Object.keys(r.getPeers()).length }, '*'); r.leave(); res() }, 1000)) } catch (e) { } } }
         }
 
@@ -5170,10 +5275,10 @@ self.onmessage = async (e) => {
                 state.uniforms.sphere.set(state.sphere.rotation, 16)
                 state.uniforms.sphere.set(state.sphere.rotation, 32)
                 state.uniforms.sphere.set(state.cameraPos, 48)
-                ;[0, 1, 2].forEach(i => {
-                    state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8)
-                    state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8)
-                })
+                    ;[0, 1, 2].forEach(i => {
+                        state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8)
+                        state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8)
+                    })
                 state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0
                 state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere)
                 const pass = encoder.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp } })
