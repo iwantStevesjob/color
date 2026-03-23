@@ -4780,6 +4780,30 @@ self.onmessage = async (e) => {
         const solidShaderWGSL = `struct U{mvp:mat4x4<f32>,c:vec4<f32>};@group(0) @binding(0) var<uniform> u:U;@vertex fn vs_main(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32>{return u.mvp*vec4<f32>(p,1.0);}@fragment fn fs_main()->@location(0) vec4<f32>{return u.c;}`
         const defaultCones = [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }]
         function findPositionFromColor(targetHex) { const t = hexToRgbNormalized(targetHex); let bd = Infinity, bp = null; for (let la = 0; la <= 30; la++) for (let lo = 0; lo <= 30; lo++) { const th = la * Math.PI / 30, ph = lo * 2 * Math.PI / 30, pos = [Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)]; const c = getSurfaceColor(pos, pos, defaultCones), d = Math.sqrt((c[0] - t[0]) ** 2 + (c[1] - t[1]) ** 2 + (c[2] - t[2]) ** 2); if (d < bd) { bd = d; bp = pos } if (d < 0.05) return bp } return bp }
+        async function requestWorkingAdapter() {
+            const attempts = [
+                { label: 'default', options: undefined },
+                { label: 'low-power', options: { powerPreference: 'low-power' } },
+                { label: 'high-performance', options: { powerPreference: 'high-performance' } }
+            ]
+            for (const attempt of attempts) {
+                try {
+                    console.info('[Sphere] adapter attempt', attempt.label, attempt.options || {})
+                    const adapter = await navigator.gpu.requestAdapter(attempt.options)
+                    if (adapter) {
+                        console.info('[Sphere] adapter attempt succeeded', attempt.label, {
+                            isFallbackAdapter: !!adapter.isFallbackAdapter,
+                            features: Array.from(adapter.features || [])
+                        })
+                        return adapter
+                    }
+                    console.warn('[Sphere] adapter attempt returned null', attempt.label)
+                } catch (error) {
+                    console.error('[Sphere] adapter attempt threw', attempt.label, error)
+                }
+            }
+            return null
+        }
         async function init() {
             console.info('[Sphere] init start')
             if (window.self !== window.top) document.getElementById('debug-btn').style.display = 'none'
@@ -4787,13 +4811,26 @@ self.onmessage = async (e) => {
             window.triggerLanding = triggerLanding
             window.hexToRgbNormalized = hexToRgbNormalized
             state.canvas = document.getElementById('gpu-canvas')
+            console.info('[Sphere] environment', {
+                href: window.location.href,
+                protocol: window.location.protocol,
+                host: window.location.host,
+                secureContext: window.isSecureContext,
+                topLevel: window.self === window.top,
+                visibilityState: document.visibilityState,
+                userAgent: navigator.userAgent,
+                language: navigator.language,
+                languages: navigator.languages,
+                hardwareConcurrency: navigator.hardwareConcurrency,
+                deviceMemory: navigator.deviceMemory
+            })
             if (!navigator.gpu) {
                 console.error('[Sphere] navigator.gpu is missing')
                 return alert('WebGPU not supported!')
             }
             console.info('[Sphere] requesting WebGPU adapter')
-            const adapter = await navigator.gpu.requestAdapter()
-            if (!adapter) throw new Error('[Sphere] navigator.gpu.requestAdapter() returned null')
+            const adapter = await requestWorkingAdapter()
+            if (!adapter) throw new Error('[Sphere] navigator.gpu.requestAdapter() returned null after all attempts')
             console.info('[Sphere] adapter acquired')
             state.device = await adapter.requestDevice()
             console.info('[Sphere] device acquired')
