@@ -1140,6 +1140,17 @@
             -webkit-overflow-scrolling: touch;
             overscroll-behavior: contain;
         }
+
+        #runtime-log-toggle-btn {
+            margin-top: 10px;
+            width: 100%;
+            background: #1f1f1f;
+            color: white;
+            border: 1px solid #555;
+            padding: 8px;
+            cursor: pointer;
+            font-family: 'Menlo', monospace;
+        }
     </style>
 </head>
 
@@ -1149,7 +1160,7 @@
             <div id="runtime-log-title">Runtime Log</div>
             <div id="runtime-log-actions">
                 <button type="button" class="runtime-log-btn" id="runtime-log-copy">COPY</button>
-                <button type="button" class="runtime-log-btn" id="runtime-log-clear">CLEAR</button>
+                <button type="button" class="runtime-log-btn" id="runtime-log-close">CLOSE</button>
             </div>
         </div>
         <pre id="runtime-log-output"></pre>
@@ -1159,9 +1170,10 @@
             const overlay = document.getElementById('runtime-log-overlay')
             const output = document.getElementById('runtime-log-output')
             const copyBtn = document.getElementById('runtime-log-copy')
-            const clearBtn = document.getElementById('runtime-log-clear')
+            const closeBtn = document.getElementById('runtime-log-close')
             const entries = []
             const originalConsole = {}
+            let toggleBtn = null
 
             function safeJson(value) {
                 const seen = new WeakSet()
@@ -1216,6 +1228,31 @@
                 output.scrollTop = output.scrollHeight
             }
 
+            function isOverlayVisible() {
+                return overlay.style.display !== 'none'
+            }
+
+            function syncToggleButton() {
+                if (!toggleBtn) toggleBtn = document.getElementById('runtime-log-toggle-btn')
+                if (!toggleBtn) return
+                toggleBtn.textContent = isOverlayVisible() ? 'CLOSE RUNTIME LOG' : 'OPEN RUNTIME LOG'
+            }
+
+            function openOverlay() {
+                overlay.style.display = 'flex'
+                syncToggleButton()
+            }
+
+            function closeOverlay() {
+                overlay.style.display = 'none'
+                syncToggleButton()
+            }
+
+            function toggleOverlay() {
+                if (isOverlayVisible()) closeOverlay()
+                else openOverlay()
+            }
+
             function describeResourceTarget(target) {
                 if (!target || target === window) return null
                 const url = target.src || target.href || target.currentSrc || ''
@@ -1226,7 +1263,11 @@
                 overlay,
                 output,
                 entries,
-                appendEntry
+                appendEntry,
+                open: openOverlay,
+                close: closeOverlay,
+                toggle: toggleOverlay,
+                isVisible: isOverlayVisible
             }
 
             ;['log', 'info', 'warn', 'error', 'debug'].forEach(method => {
@@ -1262,10 +1303,8 @@
                 appendEntry('info', ['window load fired'])
             })
 
-            clearBtn.addEventListener('click', () => {
-                entries.length = 0
-                output.textContent = ''
-                appendEntry('info', ['Runtime log cleared'])
+            closeBtn.addEventListener('click', () => {
+                closeOverlay()
             })
 
             copyBtn.addEventListener('click', async () => {
@@ -1279,6 +1318,14 @@
                     }
                 } catch (error) {
                     appendEntry('error', ['Clipboard copy failed', error])
+                }
+            })
+
+            document.addEventListener('DOMContentLoaded', () => {
+                toggleBtn = document.getElementById('runtime-log-toggle-btn')
+                if (toggleBtn) {
+                    toggleBtn.addEventListener('click', toggleOverlay)
+                    syncToggleButton()
                 }
             })
 
@@ -1342,6 +1389,7 @@
                 PASSWORD</button>
         </div>
         <button id="reset-btn">WIPE ALL DATA</button>
+        <button id="runtime-log-toggle-btn">CLOSE RUNTIME LOG</button>
         <h4>Discovered Rooms</h4>
         <div id="debug-rooms"></div>
     </div>
@@ -4769,7 +4817,7 @@ self.onmessage = async (e) => {
         })
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) }
         const Mat4 = { perspective: (f, a, n, fr) => { const nf = 1 / (n - fr), f_t = 1 / Math.tan(f / 2); return [f_t / a, 0, 0, 0, 0, f_t, 0, 0, 0, 0, (fr + n) * nf, -1, 0, 0, 2 * fr * n * nf, 0] }, lookAt: (e, c, u) => { const z = Vec3.normalize(Vec3.sub(e, c)), x = Vec3.normalize(Vec3.cross(u, z)), y = Vec3.cross(z, x); return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -Vec3.dot(x, e), -Vec3.dot(y, e), -Vec3.dot(z, e), 1] }, multiply: (a, b) => [a[0] * b[0] + a[4] * b[1] + a[8] * b[2] + a[12] * b[3], a[1] * b[0] + a[5] * b[1] + a[9] * b[2] + a[13] * b[3], a[2] * b[0] + a[6] * b[1] + a[10] * b[2] + a[14] * b[3], a[3] * b[0] + a[7] * b[1] + a[11] * b[2] + a[15] * b[3], a[0] * b[4] + a[4] * b[5] + a[8] * b[6] + a[12] * b[7], a[1] * b[4] + a[5] * b[5] + a[9] * b[6] + a[13] * b[7], a[2] * b[4] + a[6] * b[5] + a[10] * b[6] + a[14] * b[7], a[3] * b[4] + a[7] * b[5] + a[11] * b[6] + a[15] * b[7], a[0] * b[8] + a[4] * b[9] + a[8] * b[10] + a[12] * b[11], a[1] * b[8] + a[5] * b[9] + a[9] * b[10] + a[13] * b[11], a[2] * b[8] + a[6] * b[9] + a[10] * b[10] + a[14] * b[11], a[3] * b[8] + a[7] * b[9] + a[11] * b[10] + a[15] * b[11], a[0] * b[12] + a[4] * b[13] + a[8] * b[14] + a[12] * b[15], a[1] * b[12] + a[5] * b[13] + a[9] * b[14] + a[13] * b[15], a[2] * b[12] + a[6] * b[13] + a[10] * b[14] + a[14] * b[15], a[3] * b[12] + a[7] * b[13] + a[11] * b[14] + a[15] * b[15]], rotationX: r => [1, 0, 0, 0, 0, Math.cos(r), Math.sin(r), 0, 0, -Math.sin(r), Math.cos(r), 0, 0, 0, 0, 1], translation: v => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1], scale: v => [v[0], 0, 0, 0, 0, v[1], 0, 0, 0, 0, v[2], 0, 0, 0, 0, 1], rotationAxis: (a, r) => { const c = Math.cos(r), s = Math.sin(r), t = 1 - c, x = a[0], y = a[1], z = a[2]; return [t * x * x + c, t * x * y + z * s, t * x * z - y * s, 0, t * x * y - z * s, t * y * y + c, t * y * z + x * s, 0, t * x * z + y * s, t * y * z - x * s, t * z * z + c, 0, 0, 0, 0, 1] }, identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }
-        const state = { canvas: null, device: null, context: null, pipelines: { sphere: null, cone: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathStartPos: null, renderPath: false, interactionSignature: { type: 'click', path: [] } }
+        const state = { canvas: null, renderer: null, device: null, context: null, gl: null, pipelines: { sphere: null, cone: null }, glPrograms: { sphere: null, solid: null }, glLocations: { sphere: null, solid: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }], historyHandles: [], hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathStartPos: null, renderPath: false, interactionSignature: { type: 'click', path: [] } }
         window.state = state
         function rgbToHex(r, g, b) { return '#' + [r, g, b].map(x => Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).padStart(2, '0')).join('') }
         function hexToRgbNormalized(hex) {
@@ -4778,6 +4826,10 @@ self.onmessage = async (e) => {
         }
         const gradientShaderWGSL = `struct Uniforms { mvp: mat4x4<f32>, model: mat4x4<f32>, normalMatrix: mat4x4<f32>, viewPos: vec3<f32>, l1: vec3<f32>, c1: vec3<f32>, l2: vec3<f32>, c2: vec3<f32>, l3: vec3<f32>, c3: vec3<f32>, debug: f32, }; @group(0) @binding(0) var<uniform> u: Uniforms; struct VI { @location(0) p: vec3<f32>, @location(1) n: vec3<f32> }; struct VO { @builtin(position) P: vec4<f32>, @location(0) vP: vec3<f32>, @location(1) vN: vec3<f32> }; @vertex fn vs_main(i: VI) -> VO { var o: VO; o.P = u.mvp * vec4<f32>(i.p, 1.0); o.vP = (u.model * vec4<f32>(i.p, 1.0)).xyz; o.vN = (u.normalMatrix * vec4<f32>(i.n, 0.0)).xyz; return o; } fn Contrast(x: vec3<f32>) -> vec3<f32> { return x * x * (3.0 - 2.0 * x); } fn getI(lp: vec3<f32>, N: vec3<f32>, fp: vec3<f32>) -> f32 { let distSq = dot(lp - fp, lp - fp); let L = normalize(lp - fp); let wrap = max(dot(N, L) + 1.0, 0.0) / 2.0; let spread = pow(wrap, 1.25); return spread * (1.0 / (1.0 + distSq * 0.05)); } @fragment fn fs_main(i: VO) -> @location(0) vec4<f32> { let N = normalize(i.vN); let raw_d1 = getI(u.l1, N, i.vP); let raw_d2 = getI(u.l2, N, i.vP); let raw_d3 = getI(u.l3, N, i.vP); let d1 = raw_d1 * max(u.c1.r, max(u.c1.g, u.c1.b)); let d2 = raw_d2 * max(u.c2.r, max(u.c2.g, u.c2.b)); let d3 = raw_d3 * max(u.c3.r, max(u.c3.g, u.c3.b)); var l = (u.c1 * d1) + (u.c2 * d2) + (u.c3 * d3); let ep = 0.001; l = l + ((u.c1 + u.c2) * 2.0 * d1 * d2 / (d1 + d2 + ep)); l = l + ((u.c2 + u.c3) * 2.0 * d2 * d3 / (d2 + d3 + ep)); l = l + ((u.c3 + u.c1) * 2.0 * d3 * d1 / (d3 + d1 + ep)); let min_i = min(d1, min(d2, d3)); let max_i = max(d1, max(d2, d3)); let mask_base = smoothstep(0.15, 0.40, min_i); let variance = max_i - min_i; let roundness = exp(-variance * 10.0); let final_mask = mask_base * roundness; l = mix(l, vec3(1.0), final_mask); l = l * 1.2; let contrasty = Contrast(clamp(l, vec3(0.0), vec3(1.0))); return vec4<f32>(contrasty, 1.0); }`
         const solidShaderWGSL = `struct U{mvp:mat4x4<f32>,c:vec4<f32>};@group(0) @binding(0) var<uniform> u:U;@vertex fn vs_main(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32>{return u.mvp*vec4<f32>(p,1.0);}@fragment fn fs_main()->@location(0) vec4<f32>{return u.c;}`
+        const sphereVertexShaderGLSL = `attribute vec3 aPosition; attribute vec3 aNormal; uniform mat4 uMvp; uniform mat4 uModel; uniform mat4 uNormalMatrix; varying vec3 vWorldPos; varying vec3 vNormal; void main() { gl_Position = uMvp * vec4(aPosition, 1.0); vWorldPos = (uModel * vec4(aPosition, 1.0)).xyz; vNormal = normalize((uNormalMatrix * vec4(aNormal, 0.0)).xyz); }`
+        const sphereFragmentShaderGLSL = `precision mediump float; varying vec3 vWorldPos; varying vec3 vNormal; uniform vec3 uLights[3]; uniform vec3 uColors[3]; vec3 contrastFn(vec3 x) { return x * x * (3.0 - 2.0 * x); } float getI(vec3 lp, vec3 n, vec3 fp) { vec3 diff = lp - fp; float distSq = dot(diff, diff); vec3 l = normalize(diff); float wrap = max(dot(n, l) + 1.0, 0.0) / 2.0; float spread = pow(wrap, 1.25); return spread * (1.0 / (1.0 + distSq * 0.05)); } void main() { vec3 n = normalize(vNormal); float rawD1 = getI(uLights[0], n, vWorldPos); float rawD2 = getI(uLights[1], n, vWorldPos); float rawD3 = getI(uLights[2], n, vWorldPos); float d1 = rawD1 * max(uColors[0].r, max(uColors[0].g, uColors[0].b)); float d2 = rawD2 * max(uColors[1].r, max(uColors[1].g, uColors[1].b)); float d3 = rawD3 * max(uColors[2].r, max(uColors[2].g, uColors[2].b)); vec3 lightColor = (uColors[0] * d1) + (uColors[1] * d2) + (uColors[2] * d3); float ep = 0.001; lightColor += ((uColors[0] + uColors[1]) * 2.0 * d1 * d2 / (d1 + d2 + ep)); lightColor += ((uColors[1] + uColors[2]) * 2.0 * d2 * d3 / (d2 + d3 + ep)); lightColor += ((uColors[2] + uColors[0]) * 2.0 * d3 * d1 / (d3 + d1 + ep)); float minI = min(d1, min(d2, d3)); float maxI = max(d1, max(d2, d3)); float maskBase = smoothstep(0.15, 0.40, minI); float variance = maxI - minI; float roundness = exp(-variance * 10.0); float finalMask = maskBase * roundness; lightColor = mix(lightColor, vec3(1.0), finalMask); lightColor *= 1.2; gl_FragColor = vec4(contrastFn(clamp(lightColor, vec3(0.0), vec3(1.0))), 1.0); }`
+        const solidVertexShaderGLSL = `attribute vec3 aPosition; uniform mat4 uMvp; void main() { gl_Position = uMvp * vec4(aPosition, 1.0); }`
+        const solidFragmentShaderGLSL = `precision mediump float; uniform vec4 uColor; void main() { gl_FragColor = uColor; }`
         const defaultCones = [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }]
         function findPositionFromColor(targetHex) { const t = hexToRgbNormalized(targetHex); let bd = Infinity, bp = null; for (let la = 0; la <= 30; la++) for (let lo = 0; lo <= 30; lo++) { const th = la * Math.PI / 30, ph = lo * 2 * Math.PI / 30, pos = [Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)]; const c = getSurfaceColor(pos, pos, defaultCones), d = Math.sqrt((c[0] - t[0]) ** 2 + (c[1] - t[1]) ** 2 + (c[2] - t[2]) ** 2); if (d < bd) { bd = d; bp = pos } if (d < 0.05) return bp } return bp }
         async function requestWorkingAdapter() {
@@ -4824,29 +4876,35 @@ self.onmessage = async (e) => {
                 hardwareConcurrency: navigator.hardwareConcurrency,
                 deviceMemory: navigator.deviceMemory
             })
+            let adapter = null
             if (!navigator.gpu) {
-                console.error('[Sphere] navigator.gpu is missing')
-                return alert('WebGPU not supported!')
+                console.warn('[Sphere] navigator.gpu is missing, falling back to WebGL')
+            } else {
+                console.info('[Sphere] requesting WebGPU adapter')
+                adapter = await requestWorkingAdapter()
             }
-            console.info('[Sphere] requesting WebGPU adapter')
-            const adapter = await requestWorkingAdapter()
-            if (!adapter) throw new Error('[Sphere] navigator.gpu.requestAdapter() returned null after all attempts')
-            console.info('[Sphere] adapter acquired')
-            state.device = await adapter.requestDevice()
-            console.info('[Sphere] device acquired')
-            if (typeof state.device.addEventListener === 'function') {
-                state.device.addEventListener('uncapturederror', event => {
-                    console.error('[Sphere] WebGPU uncaptured error', event.error || event)
-                })
+            if (adapter) {
+                console.info('[Sphere] adapter acquired')
+                state.renderer = 'webgpu'
+                state.device = await adapter.requestDevice()
+                console.info('[Sphere] device acquired')
+                if (typeof state.device.addEventListener === 'function') {
+                    state.device.addEventListener('uncapturederror', event => {
+                        console.error('[Sphere] WebGPU uncaptured error', event.error || event)
+                    })
+                }
+                state.context = state.canvas.getContext('webgpu')
+                if (!state.context) throw new Error('[Sphere] canvas.getContext("webgpu") returned null')
+                state.presentationFormat = navigator.gpu.getPreferredCanvasFormat()
+                state.context.configure({ device: state.device, format: state.presentationFormat, alphaMode: 'premultiplied' })
+                console.info('[Sphere] context configured', { format: state.presentationFormat, sampleCount: state.sampleCount })
+            } else {
+                console.warn('[Sphere] WebGPU adapter unavailable, falling back to WebGL')
+                initWebGLRenderer()
             }
-            state.context = state.canvas.getContext('webgpu')
-            if (!state.context) throw new Error('[Sphere] canvas.getContext("webgpu") returned null')
-            state.presentationFormat = navigator.gpu.getPreferredCanvasFormat()
-            state.context.configure({ device: state.device, format: state.presentationFormat, alphaMode: 'premultiplied' })
-            console.info('[Sphere] context configured', { format: state.presentationFormat, sampleCount: state.sampleCount })
 
             await createAssets()
-            console.info('[Sphere] assets created')
+            console.info('[Sphere] assets created', { renderer: state.renderer })
             state.historyHandles = []
             const rooms = await (new window.ColorDB()).getAllRooms()
             console.info('[Sphere] rooms loaded', rooms?.length || 0)
@@ -4869,12 +4927,84 @@ self.onmessage = async (e) => {
             requestAnimationFrame(loop)
             console.info('[Sphere] render loop started')
         }
-        async function createAssets() { const dev = state.device, sphereGeo = createSphere(1.0, 128, 128), coneGeo = createCone(0.1, 0.3, 64); state.buffers.sphereVertex = createBuffer(dev, sphereGeo.p, GPUBufferUsage.VERTEX); state.buffers.sphereNormal = createBuffer(dev, sphereGeo.n, GPUBufferUsage.VERTEX); state.buffers.sphereIndex = createBuffer(dev, sphereGeo.i, GPUBufferUsage.INDEX); state.sphere.indexCount = sphereGeo.i.length; state.buffers.coneVertex = createBuffer(dev, coneGeo.p, GPUBufferUsage.VERTEX); state.buffers.coneIndex = createBuffer(dev, coneGeo.i, GPUBufferUsage.INDEX); state.coneIndexCount = coneGeo.i.length; state.buffers.sphereUniform = dev.createBuffer({ size: 320, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); state.buffers.coneUniform = dev.createBuffer({ size: 65536, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); const sm = dev.createShaderModule({ code: gradientShaderWGSL }), cm = dev.createShaderModule({ code: solidShaderWGSL }); state.pipelines.sphere = dev.createRenderPipeline({ layout: 'auto', vertex: { module: sm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }, { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x3' }] }] }, fragment: { module: sm, entryPoint: 'fs_main', targets: [{ format: state.presentationFormat }] }, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } }); state.pipelines.cone = dev.createRenderPipeline({ layout: 'auto', vertex: { module: cm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] }, fragment: { module: cm, entryPoint: 'fs_main', targets: [{ format: state.presentationFormat }] }, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } }); state.bindGroups.sphere = dev.createBindGroup({ layout: state.pipelines.sphere.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.sphereUniform } }] }); state.getBindGroupForHandle = idx => dev.createBindGroup({ layout: state.pipelines.cone.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.coneUniform, offset: idx * 256, size: 80 } }] }); state.bindGroups.cones = [0, 1, 2, 3].map(i => state.getBindGroupForHandle(i)) }
-        function createBuffer(dev, data, usage) { const buf = dev.createBuffer({ size: data.byteLength, usage: usage | GPUBufferUsage.COPY_DST, mappedAtCreation: true }); (data instanceof Float32Array ? new Float32Array(buf.getMappedRange()) : new Uint16Array(buf.getMappedRange())).set(data); buf.unmap(); return buf }
+        async function createAssets() {
+            if (state.renderer === 'webgpu') return createWebGPUAssets()
+            if (state.renderer === 'webgl') return createWebGLAssets()
+            throw new Error('[Sphere] No renderer selected')
+        }
+        function createWebGPUAssets() { const dev = state.device, sphereGeo = createSphere(1.0, 128, 128), coneGeo = createCone(0.1, 0.3, 64); state.buffers.sphereVertex = createWebGPUBuffer(dev, sphereGeo.p, GPUBufferUsage.VERTEX); state.buffers.sphereNormal = createWebGPUBuffer(dev, sphereGeo.n, GPUBufferUsage.VERTEX); state.buffers.sphereIndex = createWebGPUBuffer(dev, sphereGeo.i, GPUBufferUsage.INDEX); state.sphere.indexCount = sphereGeo.i.length; state.buffers.coneVertex = createWebGPUBuffer(dev, coneGeo.p, GPUBufferUsage.VERTEX); state.buffers.coneIndex = createWebGPUBuffer(dev, coneGeo.i, GPUBufferUsage.INDEX); state.buffers.pathVertex = null; state.buffers.sphereUniform = dev.createBuffer({ size: 320, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); state.buffers.coneUniform = dev.createBuffer({ size: 65536, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); const sm = dev.createShaderModule({ code: gradientShaderWGSL }), cm = dev.createShaderModule({ code: solidShaderWGSL }); state.pipelines.sphere = dev.createRenderPipeline({ layout: 'auto', vertex: { module: sm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }, { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x3' }] }] }, fragment: { module: sm, entryPoint: 'fs_main', targets: [{ format: state.presentationFormat }] }, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } }); state.pipelines.cone = dev.createRenderPipeline({ layout: 'auto', vertex: { module: cm, entryPoint: 'vs_main', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] }, fragment: { module: cm, entryPoint: 'fs_main', targets: [{ format: state.presentationFormat }] }, primitive: { cullMode: 'back' }, depthStencil: { depthWriteEnabled: true, depthCompare: 'less', format: 'depth24plus' }, multisample: { count: 4 } }); state.bindGroups.sphere = dev.createBindGroup({ layout: state.pipelines.sphere.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.sphereUniform } }] }); state.getBindGroupForHandle = idx => dev.createBindGroup({ layout: state.pipelines.cone.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: state.buffers.coneUniform, offset: idx * 256, size: 80 } }] }); state.bindGroups.cones = [0, 1, 2, 3].map(i => state.getBindGroupForHandle(i)) }
+        function createWebGPUBuffer(dev, data, usage) { const buf = dev.createBuffer({ size: data.byteLength, usage: usage | GPUBufferUsage.COPY_DST, mappedAtCreation: true }); (data instanceof Float32Array ? new Float32Array(buf.getMappedRange()) : new Uint16Array(buf.getMappedRange())).set(data); buf.unmap(); return buf }
+        function initWebGLRenderer() {
+            const gl = state.canvas.getContext('webgl', { antialias: true, alpha: true }) || state.canvas.getContext('experimental-webgl', { antialias: true, alpha: true })
+            if (!gl) throw new Error('[Sphere] WebGL fallback unavailable')
+            state.renderer = 'webgl'
+            state.gl = gl
+            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info')
+            console.info('[Sphere] WebGL fallback active', {
+                version: gl.getParameter(gl.VERSION),
+                renderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+                vendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR)
+            })
+        }
+        function createWebGLAssets() {
+            const gl = state.gl
+            const sphereGeo = createSphere(1.0, 96, 96)
+            const coneGeo = createCone(0.1, 0.3, 48)
+            state.buffers.sphereVertex = createWebGLBuffer(gl, gl.ARRAY_BUFFER, sphereGeo.p)
+            state.buffers.sphereNormal = createWebGLBuffer(gl, gl.ARRAY_BUFFER, sphereGeo.n)
+            state.buffers.sphereIndex = createWebGLBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, sphereGeo.i)
+            state.buffers.coneVertex = createWebGLBuffer(gl, gl.ARRAY_BUFFER, coneGeo.p)
+            state.buffers.coneIndex = createWebGLBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, coneGeo.i)
+            state.sphere.indexCount = sphereGeo.i.length
+            state.coneIndexCount = coneGeo.i.length
+            state.glPrograms.sphere = createWebGLProgram(gl, sphereVertexShaderGLSL, sphereFragmentShaderGLSL)
+            state.glPrograms.solid = createWebGLProgram(gl, solidVertexShaderGLSL, solidFragmentShaderGLSL)
+            state.glLocations.sphere = {
+                aPosition: gl.getAttribLocation(state.glPrograms.sphere, 'aPosition'),
+                aNormal: gl.getAttribLocation(state.glPrograms.sphere, 'aNormal'),
+                uMvp: gl.getUniformLocation(state.glPrograms.sphere, 'uMvp'),
+                uModel: gl.getUniformLocation(state.glPrograms.sphere, 'uModel'),
+                uNormalMatrix: gl.getUniformLocation(state.glPrograms.sphere, 'uNormalMatrix'),
+                uLights: gl.getUniformLocation(state.glPrograms.sphere, 'uLights'),
+                uColors: gl.getUniformLocation(state.glPrograms.sphere, 'uColors')
+            }
+            state.glLocations.solid = {
+                aPosition: gl.getAttribLocation(state.glPrograms.solid, 'aPosition'),
+                uMvp: gl.getUniformLocation(state.glPrograms.solid, 'uMvp'),
+                uColor: gl.getUniformLocation(state.glPrograms.solid, 'uColor')
+            }
+        }
+        function createWebGLBuffer(gl, target, data) {
+            const buffer = gl.createBuffer()
+            gl.bindBuffer(target, buffer)
+            gl.bufferData(target, data, gl.STATIC_DRAW)
+            return buffer
+        }
+        function createWebGLProgram(gl, vertexSource, fragmentSource) {
+            const program = gl.createProgram()
+            const vertexShader = compileWebGLShader(gl, gl.VERTEX_SHADER, vertexSource)
+            const fragmentShader = compileWebGLShader(gl, gl.FRAGMENT_SHADER, fragmentSource)
+            gl.attachShader(program, vertexShader)
+            gl.attachShader(program, fragmentShader)
+            gl.linkProgram(program)
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                throw new Error('[Sphere] WebGL link error: ' + gl.getProgramInfoLog(program))
+            }
+            return program
+        }
+        function compileWebGLShader(gl, type, source) {
+            const shader = gl.createShader(type)
+            gl.shaderSource(shader, source)
+            gl.compileShader(shader)
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                throw new Error('[Sphere] WebGL shader compile error: ' + gl.getShaderInfoLog(shader))
+            }
+            return shader
+        }
         function createSphere(r, latB, longB) { const p = [], n = [], idx = []; for (let la = 0; la <= latB; la++) for (let lo = 0; lo <= longB; lo++) { const th = la * Math.PI / latB, ph = lo * 2 * Math.PI / longB, x = Math.cos(ph) * Math.sin(th), y = Math.cos(th), z = Math.sin(ph) * Math.sin(th); n.push(x, y, z); p.push(r * x, r * y, r * z) } for (let la = 0; la < latB; la++) for (let lo = 0; lo < longB; lo++) { const f = (la * (longB + 1)) + lo, s = f + longB + 1; idx.push(f, f + 1, s, s, f + 1, s + 1) } return { p: new Float32Array(p), n: new Float32Array(n), i: new Uint16Array(idx) } }
         function createCone(r, h, s) { const p = [0, h, 0], n = [0, 1, 0], idx = []; for (let i = 0; i <= s; i++) { const th = i * 2 * Math.PI / s, x = r * Math.cos(th), z = r * Math.sin(th); p.push(x, 0, z); const nv = Vec3.normalize([x, .5, z]); n.push(nv[0], nv[1], nv[2]) } p.push(0, 0, 0); n.push(0, -1, 0); const bc = p.length / 3 - 1; for (let i = 1; i <= s; i++) idx.push(0, i, i + 1, bc, i + 1, i); return { p: new Float32Array(p), n: new Float32Array(n), i: new Uint16Array(idx) } }
         function pathToVertices(pathPoints, sphereRotation) { if (pathPoints.length < 2) return null; const WIDTH = 0.015; const PROTRUDE = 1.02; const path = pathPoints.map(p => { const wp = transformPos(p, sphereRotation); return Vec3.scale(Vec3.normalize(wp), PROTRUDE) }); const tangents = []; for (let i = 0; i < path.length; i++) { let dir; if (i === 0) { dir = Vec3.sub(path[1], path[0]) } else if (i === path.length - 1) { dir = Vec3.sub(path[i], path[i - 1]) } else { dir = Vec3.sub(path[i + 1], path[i - 1]) } const radial = Vec3.normalize(path[i]); let tangent = Vec3.cross(dir, radial); const tLen = Vec3.len(tangent); if (tLen < 0.001) { tangent = Vec3.cross(dir, [0, 1, 0]); if (Vec3.len(tangent) < 0.001) tangent = Vec3.cross(dir, [1, 0, 0]) } tangents.push(Vec3.scale(Vec3.normalize(tangent), WIDTH)) } const vertices = []; for (let i = 1; i < path.length; i++) { const p0 = path[i - 1], p1 = path[i]; const t0 = tangents[i - 1], t1 = tangents[i]; const v0p = Vec3.add(p0, t0), v0m = Vec3.sub(p0, t0); const v1p = Vec3.add(p1, t1), v1m = Vec3.sub(p1, t1); vertices.push(...v1p, ...v1m, ...v0m); vertices.push(...v1p, ...v0m, ...v0p) } return new Float32Array(vertices) }
-        function onResize() { if (!state.device) return; const w = state.canvas.clientWidth; const h = state.canvas.clientHeight; state.canvas.width = w; state.canvas.height = h; if (state.msaaTexture) state.msaaTexture.destroy(); if (state.depthTexture) state.depthTexture.destroy(); state.msaaTexture = state.device.createTexture({ size: [w, h], sampleCount: 4, format: state.presentationFormat, usage: GPUTextureUsage.RENDER_ATTACHMENT }); state.depthTexture = state.device.createTexture({ size: [w, h], sampleCount: 4, format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT }); const aspect = w / h; const newZ = aspect < 1 ? 3.5 / aspect : 4; if (!state.landing.active && (!state.returning || !state.returning.active)) { state.cameraPos = [0, 0, newZ] } if (state.returning) state.returning.targetDist = newZ }
+        function onResize() { if (!state.canvas || (!state.device && !state.gl)) return; const w = state.canvas.clientWidth; const h = state.canvas.clientHeight; state.canvas.width = w; state.canvas.height = h; if (state.renderer === 'webgpu') { if (state.msaaTexture) state.msaaTexture.destroy(); if (state.depthTexture) state.depthTexture.destroy(); state.msaaTexture = state.device.createTexture({ size: [w, h], sampleCount: 4, format: state.presentationFormat, usage: GPUTextureUsage.RENDER_ATTACHMENT }); state.depthTexture = state.device.createTexture({ size: [w, h], sampleCount: 4, format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT }) } else if (state.renderer === 'webgl' && state.gl) { state.gl.viewport(0, 0, w, h) } const aspect = w / h; const newZ = aspect < 1 ? 3.5 / aspect : 4; if (!state.landing.active && (!state.returning || !state.returning.active)) { state.cameraPos = [0, 0, newZ] } if (state.returning) state.returning.targetDist = newZ }
         function getMouseRay(x, y) { const aspect = state.canvas.width / state.canvas.height, ndcX = (x / state.canvas.width) * 2 - 1, ndcY = -(y / state.canvas.height) * 2 + 1; const dir = Vec3.normalize([ndcX * aspect * Math.tan(Math.PI / 8), ndcY * Math.tan(Math.PI / 8), -1]); return { o: state.cameraPos, d: dir } }
         function getTargetPos(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)); return Vec3.dot(p, p) <= 1 ? Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))) : Vec3.scale(Vec3.normalize(p), 1) }
         function calculateConePosition(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)), dist = Math.sqrt(Vec3.dot(p, p)), R = 1.2; if (dist <= R) return Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(R * R - Vec3.dot(p, p)))); const axis = Vec3.cross(Vec3.normalize(r.o), r.d); return Vec3.scale(transformPos(Vec3.normalize(r.o), Mat4.rotationAxis(Vec3.normalize(Vec3.len(axis) < .001 ? [1, 0, 0] : axis), Math.acos(R / Vec3.len(r.o)) + (dist - R))), R) }
@@ -5028,7 +5158,188 @@ self.onmessage = async (e) => {
             state.landing.showHandle = false
         }
 
-        function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])) } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05 } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]) } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ] } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = '' } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t) } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = '#FFFFFF'; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '' } } } let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ] } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx] } }) }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95) } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2) } }) } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) } } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)) } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95 } } if (state.device && state.pipelines.sphere && state.msaaTexture) { const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => { state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0); state.uniforms.sphere.set(state.sphere.rotation, 16); state.uniforms.sphere.set(state.sphere.rotation, 32); state.uniforms.sphere.set(state.cameraPos, 48);[0, 1, 2].forEach(i => { state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8); state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8) }); state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0; state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere); const pass = encoder.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp } }); pass.setPipeline(state.pipelines.sphere); pass.setBindGroup(0, state.bindGroups.sphere); pass.setVertexBuffer(0, state.buffers.sphereVertex); pass.setVertexBuffer(1, state.buffers.sphereNormal); pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16'); pass.drawIndexed(state.sphere.indexCount); return pass }; const drawCones = pass => { pass.setPipeline(state.pipelines.cone); pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex); pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16'); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { if (c.active) { let m; if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) { const y = Vec3.normalize(c.pos), x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y)), z = Vec3.cross(x, y); m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1] } else m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity()); state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0); state.uniforms.cone.set([...c.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone); pass.setBindGroup(0, state.bindGroups.cones[i]); pass.drawIndexed(state.coneIndexCount) } }) } else { let bindIdx = 4; if (state.handle.active || state.landing.showHandle) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...state.handle.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(3)); pass.drawIndexed(state.sphere.indexCount) } state.historyHandles.forEach(h => { const wp = transformPos(h.pos, state.sphere.rotation); if (wp[2] > -0.5) { state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0); state.uniforms.cone.set([...h.color, 1.0], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.drawIndexed(state.sphere.indexCount); bindIdx++ } }); if (state.pathPoints.length > 1 && (state.dragStart.active || state.landing.active || state.renderPath)) { const pathVerts = pathToVertices(state.pathPoints, state.sphere.rotation); if (pathVerts && pathVerts.length > 0) { if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) { if (state.buffers.pathVertex) state.buffers.pathVertex.destroy(); state.buffers.pathVertex = state.device.createBuffer({ size: Math.max(pathVerts.byteLength, 1024 * 12), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST }) } state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts); state.uniforms.cone.set(state.vpMatrix, 0); state.uniforms.cone.set([1, 1, 1, 1], 16); state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone); pass.setPipeline(state.pipelines.cone); pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx)); pass.setVertexBuffer(0, state.buffers.pathVertex); pass.draw(pathVerts.length / 3) } } } }; if (renderBackgroundLayer) { const bgEncoder = state.device.createCommandEncoder(); const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0])); const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard'); bgPass.end(); state.device.queue.submit([bgEncoder.finish()]); const fgEncoder = state.device.createCommandEncoder(); const fgPass = drawSphere(fgEncoder, state.vpMatrix, 'load', 'discard'); drawCones(fgPass); fgPass.end(); state.device.queue.submit([fgEncoder.finish()]) } else { const encoder = state.device.createCommandEncoder(); const pass = drawSphere(encoder, state.vpMatrix, 'clear', 'discard'); drawCones(pass); pass.end(); state.device.queue.submit([encoder.finish()]) } } requestAnimationFrame(loop) }
+        function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])) } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05 } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]) } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ] } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = '' } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t) } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = '#FFFFFF'; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '' } } } let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ] } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx] } }) }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95) } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2) } }) } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) } } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)) } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95 } } renderCurrentFrame(renderBackgroundLayer, bgCameraPos); requestAnimationFrame(loop) }
+        function renderCurrentFrame(renderBackgroundLayer, bgCameraPos) {
+            if (state.renderer === 'webgpu') return renderWithWebGPU(renderBackgroundLayer, bgCameraPos)
+            if (state.renderer === 'webgl') return renderWithWebGL()
+        }
+        function renderWithWebGPU(renderBackgroundLayer, bgCameraPos) {
+            if (!state.device || !state.pipelines.sphere || !state.msaaTexture) return
+            const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => {
+                state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0)
+                state.uniforms.sphere.set(state.sphere.rotation, 16)
+                state.uniforms.sphere.set(state.sphere.rotation, 32)
+                state.uniforms.sphere.set(state.cameraPos, 48)
+                ;[0, 1, 2].forEach(i => {
+                    state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8)
+                    state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8)
+                })
+                state.uniforms.sphere[76] = state.debugMode ? 1.0 : 0.0
+                state.device.queue.writeBuffer(state.buffers.sphereUniform, 0, state.uniforms.sphere)
+                const pass = encoder.beginRenderPass({ colorAttachments: [{ view: state.msaaTexture.createView(), resolveTarget: state.context.getCurrentTexture().createView(), clearValue: document.body.classList.contains('light-mode') ? { r: 0, g: 0, b: 0, a: 0 } : { r: 0, g: 0, b: 0, a: 1 }, loadOp: loadOp, storeOp: 'store' }], depthStencilAttachment: { view: state.depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: depthOp } })
+                pass.setPipeline(state.pipelines.sphere)
+                pass.setBindGroup(0, state.bindGroups.sphere)
+                pass.setVertexBuffer(0, state.buffers.sphereVertex)
+                pass.setVertexBuffer(1, state.buffers.sphereNormal)
+                pass.setIndexBuffer(state.buffers.sphereIndex, 'uint16')
+                pass.drawIndexed(state.sphere.indexCount)
+                return pass
+            }
+            const drawCones = pass => {
+                pass.setPipeline(state.pipelines.cone)
+                pass.setVertexBuffer(0, document.body.classList.contains('light-mode') ? state.buffers.sphereVertex : state.buffers.coneVertex)
+                pass.setIndexBuffer(document.body.classList.contains('light-mode') ? state.buffers.sphereIndex : state.buffers.coneIndex, 'uint16')
+                if (!document.body.classList.contains('light-mode')) {
+                    state.cones.forEach((c, i) => {
+                        if (!c.active) return
+                        let m
+                        if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) {
+                            const y = Vec3.normalize(c.pos)
+                            const x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y))
+                            const z = Vec3.cross(x, y)
+                            m = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]
+                        } else {
+                            m = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity())
+                        }
+                        state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(m, Mat4.scale([.5, .5, .5]))), 0)
+                        state.uniforms.cone.set([...c.color, 1.0], 16)
+                        state.device.queue.writeBuffer(state.buffers.coneUniform, i * 256, state.uniforms.cone)
+                        pass.setBindGroup(0, state.bindGroups.cones[i])
+                        pass.drawIndexed(state.coneIndexCount)
+                    })
+                    return
+                }
+                let bindIdx = 4
+                if (state.handle.active || state.landing.showHandle) {
+                    state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0)
+                    state.uniforms.cone.set([...state.handle.color, 1.0], 16)
+                    state.device.queue.writeBuffer(state.buffers.coneUniform, 3 * 256, state.uniforms.cone)
+                    pass.setBindGroup(0, state.getBindGroupForHandle(3))
+                    pass.drawIndexed(state.sphere.indexCount)
+                }
+                state.historyHandles.forEach(h => {
+                    const wp = transformPos(h.pos, state.sphere.rotation)
+                    if (wp[2] <= -0.5) return
+                    state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0)
+                    state.uniforms.cone.set([...h.color, 1.0], 16)
+                    state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone)
+                    pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx))
+                    pass.drawIndexed(state.sphere.indexCount)
+                    bindIdx++
+                })
+                if (state.pathPoints.length > 1 && (state.dragStart.active || state.landing.active || state.renderPath)) {
+                    const pathVerts = pathToVertices(state.pathPoints, state.sphere.rotation)
+                    if (!pathVerts || pathVerts.length === 0) return
+                    if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) {
+                        if (state.buffers.pathVertex) state.buffers.pathVertex.destroy()
+                        state.buffers.pathVertex = state.device.createBuffer({ size: Math.max(pathVerts.byteLength, 1024 * 12), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+                    }
+                    state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts)
+                    state.uniforms.cone.set(state.vpMatrix, 0)
+                    state.uniforms.cone.set([1, 1, 1, 1], 16)
+                    state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone)
+                    pass.setPipeline(state.pipelines.cone)
+                    pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx))
+                    pass.setVertexBuffer(0, state.buffers.pathVertex)
+                    pass.draw(pathVerts.length / 3)
+                }
+            }
+            if (renderBackgroundLayer) {
+                const bgEncoder = state.device.createCommandEncoder()
+                const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0]))
+                const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard')
+                bgPass.end()
+                state.device.queue.submit([bgEncoder.finish()])
+                const fgEncoder = state.device.createCommandEncoder()
+                const fgPass = drawSphere(fgEncoder, state.vpMatrix, 'load', 'discard')
+                drawCones(fgPass)
+                fgPass.end()
+                state.device.queue.submit([fgEncoder.finish()])
+                return
+            }
+            const encoder = state.device.createCommandEncoder()
+            const pass = drawSphere(encoder, state.vpMatrix, 'clear', 'discard')
+            drawCones(pass)
+            pass.end()
+            state.device.queue.submit([encoder.finish()])
+        }
+        function renderWithWebGL() {
+            const gl = state.gl
+            if (!gl || !state.glPrograms.sphere || !state.glPrograms.solid) return
+            gl.viewport(0, 0, state.canvas.width, state.canvas.height)
+            gl.enable(gl.DEPTH_TEST)
+            gl.depthFunc(gl.LEQUAL)
+            gl.enable(gl.CULL_FACE)
+            gl.cullFace(gl.BACK)
+            const clear = document.body.classList.contains('light-mode') ? [0, 0, 0, 0] : [0, 0, 0, 1]
+            gl.clearColor(clear[0], clear[1], clear[2], clear[3])
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+            renderWebGLSphere()
+            renderWebGLMarkers()
+        }
+        function renderWebGLSphere() {
+            const gl = state.gl
+            const loc = state.glLocations.sphere
+            const lightPositions = []
+            const lightColors = []
+            state.cones.forEach(c => {
+                lightPositions.push(c.pos[0], c.pos[1], c.pos[2])
+                const color = c.active ? c.color : [0, 0, 0]
+                lightColors.push(color[0], color[1], color[2])
+            })
+            gl.useProgram(state.glPrograms.sphere)
+            gl.bindBuffer(gl.ARRAY_BUFFER, state.buffers.sphereVertex)
+            gl.enableVertexAttribArray(loc.aPosition)
+            gl.vertexAttribPointer(loc.aPosition, 3, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ARRAY_BUFFER, state.buffers.sphereNormal)
+            gl.enableVertexAttribArray(loc.aNormal)
+            gl.vertexAttribPointer(loc.aNormal, 3, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, state.buffers.sphereIndex)
+            gl.uniformMatrix4fv(loc.uMvp, false, new Float32Array(Mat4.multiply(state.vpMatrix, state.sphere.rotation)))
+            gl.uniformMatrix4fv(loc.uModel, false, new Float32Array(state.sphere.rotation))
+            gl.uniformMatrix4fv(loc.uNormalMatrix, false, new Float32Array(state.sphere.rotation))
+            gl.uniform3fv(loc.uLights, new Float32Array(lightPositions))
+            gl.uniform3fv(loc.uColors, new Float32Array(lightColors))
+            gl.drawElements(gl.TRIANGLES, state.sphere.indexCount, gl.UNSIGNED_SHORT, 0)
+        }
+        function renderWebGLMarkers() {
+            if (!document.body.classList.contains('light-mode')) {
+                state.cones.forEach(c => {
+                    if (!c.active) return
+                    let model
+                    if (Vec3.len(Vec3.cross([0, 1, 0], c.pos)) > .001) {
+                        const y = Vec3.normalize(c.pos)
+                        const x = Vec3.normalize(Vec3.cross(Vec3.len(Vec3.cross([0, 1, 0], y)) < .01 ? [0, 0, 1] : [0, 1, 0], y))
+                        const z = Vec3.cross(x, y)
+                        model = [x[0], x[1], x[2], 0, y[0], y[1], y[2], 0, z[0], z[1], z[2], 0, c.pos[0], c.pos[1], c.pos[2], 1]
+                    } else {
+                        model = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity())
+                    }
+                    renderWebGLSolidMesh(state.buffers.coneVertex, state.buffers.coneIndex, state.coneIndexCount, Mat4.multiply(model, Mat4.scale([.5, .5, .5])), [...c.color, 1.0])
+                })
+                return
+            }
+            if (state.handle.active || state.landing.showHandle) {
+                renderWebGLSolidMesh(state.buffers.sphereVertex, state.buffers.sphereIndex, state.sphere.indexCount, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08])), [...state.handle.color, 1.0])
+            }
+            state.historyHandles.forEach(h => {
+                const wp = transformPos(h.pos, state.sphere.rotation)
+                if (wp[2] <= -0.5) return
+                renderWebGLSolidMesh(state.buffers.sphereVertex, state.buffers.sphereIndex, state.sphere.indexCount, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08])), [...h.color, 1.0])
+            })
+        }
+        function renderWebGLSolidMesh(vertexBuffer, indexBuffer, indexCount, modelMatrix, color) {
+            const gl = state.gl
+            const loc = state.glLocations.solid
+            gl.useProgram(state.glPrograms.solid)
+            gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer)
+            gl.enableVertexAttribArray(loc.aPosition)
+            gl.vertexAttribPointer(loc.aPosition, 3, gl.FLOAT, false, 0, 0)
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer)
+            gl.uniformMatrix4fv(loc.uMvp, false, new Float32Array(Mat4.multiply(state.vpMatrix, modelMatrix)))
+            gl.uniform4fv(loc.uColor, new Float32Array(color))
+            gl.drawElements(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0)
+        }
         init().catch(error => console.error('[Sphere] init failed', error))
         window.updateVisitedFromDB = async function () { const rooms = await (new window.ColorDB()).getAllRooms(); state.historyHandles = []; if (rooms?.length) { rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }) }) } }
         window.addEventListener('message', e => { if (e.data === 'getSphereColor') e.source.postMessage(storageScope.getItem('lastSphereColor') || '#ff0000', e.origin); if (e.data?.type === 'handle-ready') { const hex = e.data.hex, pos = findPositionFromColor(hex); if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: e.data.count }); const d = document.createElement('div'); d.className = 'debug-room-item ' + (e.data.count > 0 ? 'active' : ''); d.innerHTML = `<span>${hex}</span> <span class="count">${e.data.count} peer(s)</span>`; document.getElementById('debug-rooms').appendChild(d) } } })
