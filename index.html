@@ -1536,8 +1536,11 @@
                 </div>
             </div>
             <div id="tab-signatures" class="settings-pane">
-                <button id="signature-practice-btn" class="signature-practice-btn" type="button">PRACTICE</button>
-                <span id="signature-compare-result" class="signature-compare-result"></span>
+                <button id="signature-practice-btn" class="signature-practice-btn" type="button"
+                    style="border: 1px solid lightgrey;">PRACTICE</button>
+                <button id="signature-clear-btn" class="signature-practice-btn" type="button"
+                    style="right: 110px;">CLEAR</button>
+                <span id="signature-compare-result" class="signature-compare-result" style="right: 180px;"></span>
                 <h2>Cryptographic Signatures</h2>
             </div>
             <div id="tab-raw" class="settings-pane">
@@ -3390,8 +3393,8 @@
                         const practicePaths = (savedSignature?.practicePaths || []).map(path => path.map(p => [...p]))
                         window.state.signatureHex = cleanHex
                         window.state.signaturePaths = [...(basePath.length ? [basePath] : []), ...practicePaths].filter(path => path.length > 1)
-                        window.state.selectedHandle = savedSignature?.handle ? { pos: [...savedSignature.handle.pos], color: [...savedSignature.handle.color], hex: savedSignature.handle.hex } : null
-                        window.state.interactionSignature = savedSignature ? { ...savedSignature, path: basePath, practicePaths, handle: savedSignature.handle ? { pos: [...savedSignature.handle.pos], color: [...savedSignature.handle.color], hex: savedSignature.handle.hex } : null } : { type: 'click', path: [], practicePaths: [], handle: null }
+                        window.state.selectedHandle = null
+                        window.state.interactionSignature = savedSignature ? { ...savedSignature, path: basePath, practicePaths } : { type: 'click', path: [], practicePaths: [] }
                         window.state.pathPoints = window.state.signaturePaths[window.state.signaturePaths.length - 1]?.map(p => [...p]) || []
                     }
                     let centerIndex = await this.db.getCursor(cleanHex).catch(() => 0)
@@ -4273,6 +4276,7 @@
 
             async logout() {
                 if (window.resetSphereView) window.resetSphereView(false, false, true)
+                if (window.state) window.state.selectedHandle = null, window.state.signaturePaths = [], window.state.pathPoints = [], window.state.renderPath = false
                 await this.stopScanner()
                 await this.secureQrBootstrap.destroy()
                 this.clearStatusInterval()
@@ -4763,21 +4767,43 @@ async function db_read_specific({ roomHex, keys }) {
 async function db_read_signature({ roomHex }) {
     const db = await openColorDB(roomHex);
     if (!db.objectStoreNames.contains(roomHex)) { db.close(); return null; }
-    const store = db.transaction([roomHex], 'readonly').objectStore(roomHex);
+    const savedRows = [];
+    await new Promise(resolve => {
+        const req = db.transaction([roomHex], 'readonly').objectStore(roomHex).openCursor();
+        req.onsuccess = e => {
+            const cursor = e.target.result;
+            if (!cursor) { resolve(); return; }
+            if (typeof cursor.key === 'string' && cursor.key.startsWith('signature:') && Array.isArray(cursor.value?.path) && cursor.value.path.length > 0) {
+                savedRows.push(cursor.value);
+            }
+            cursor.continue();
+        };
+        req.onerror = () => resolve();
+    });
+    if (savedRows.length) {
+        db.close();
+        savedRows.sort((a, b) => (a.created || 0) - (b.created || 0));
+        const [path, ...practicePaths] = savedRows.map(row => row.path).filter(path => Array.isArray(path) && path.length > 0);
+        const rotations = savedRows[0]?.rotations || null;
+        return path ? { type: savedRows[savedRows.length - 1]?.type || 'drag', path, practicePaths, rotations } : null;
+    }
+    const readSignatureValue = key => new Promise(resolve => {
+        const req = db.transaction([roomHex], 'readonly').objectStore(roomHex).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+    });
     const result = await new Promise(resolve => {
-        const req = store.get('signature');
+        const req = db.transaction([roomHex], 'readonly').objectStore(roomHex).get('signature');
         req.onsuccess = () => resolve(req.result || null);
         req.onerror = () => resolve(null);
     });
     if (result?.path) { db.close(); return result; }
-    const paths = await Promise.all(Array.from({ length: result?.pathCount || 0 }, (_, i) => new Promise(resolve => {
-        const req = store.get('signature:' + i);
-        req.onsuccess = () => resolve(req.result?.path || null);
-        req.onerror = () => resolve(null);
-    })));
+    const pathsData = await Promise.all(Array.from({ length: result?.pathCount || 0 }, async (_, i) => (await readSignatureValue('signature:' + i)) || null));
     db.close();
+    const paths = pathsData.map(d => d?.path || null);
     const [path, ...practicePaths] = paths.filter(path => Array.isArray(path) && path.length > 0);
-    return path ? { type: result?.type || 'drag', path, practicePaths, handle: result?.handle || null } : null;
+    const rotations = pathsData[0]?.rotations || null;
+    return path ? { type: result?.type || 'drag', path, practicePaths, rotations } : null;
 }
 
 self.onmessage = async (e) => {
@@ -4840,11 +4866,38 @@ self.onmessage = async (e) => {
             case 'saveSignature':
                 if (_locked) break;
                 const sdb = await openColorDB(data.roomHex);
+                const signaturePaths = [data.signature.path, ...(data.signature.practicePaths || [])].filter(path => Array.isArray(path) && path.length > 0);
+                const existingSignaturePaths = await new Promise(resolve => {
+                    const rows = [];
+                    const req = sdb.transaction([data.roomHex], 'readonly').objectStore(data.roomHex).openCursor();
+                    req.onsuccess = e => {
+                        const cursor = e.target.result;
+                        if (!cursor) { resolve(rows); return; }
+                        const key = cursor.key;
+                        if (typeof key === 'string' && key.startsWith('signature:') && Array.isArray(cursor.value?.path)) {
+                            rows.push(JSON.stringify(cursor.value.path));
+                        }
+                        cursor.continue();
+                    };
+                    req.onerror = () => resolve(rows);
+                });
                 const stx = sdb.transaction([data.roomHex], 'readwrite');
                 const sstore = stx.objectStore(data.roomHex);
-                const signaturePaths = [data.signature.path, ...(data.signature.practicePaths || [])].filter(path => Array.isArray(path) && path.length > 0);
-                sstore.put({ type: data.signature.type, pathCount: signaturePaths.length, handle: data.signature.handle || null, created: Date.now() }, 'signature');
-                signaturePaths.forEach((path, i) => sstore.put({ path, created: Date.now() }, 'signature:' + i));
+                const cleanupReq = sstore.openCursor();
+                cleanupReq.onsuccess = e => {
+                    const cursor = e.target.result;
+                    if (!cursor) return;
+                    if (cursor.key === 'signature' || /^signature:\d+$/.test(cursor.key)) cursor.delete();
+                    cursor.continue();
+                };
+                const existingSignatureSet = new Set(existingSignaturePaths);
+                signaturePaths.forEach((path, i) => {
+                    const serializedPath = JSON.stringify(path);
+                    if (existingSignatureSet.has(serializedPath)) return;
+                    existingSignatureSet.add(serializedPath);
+                    const created = Date.now() + i;
+                    sstore.put({ type: data.signature.type, path, created }, 'signature:' + created + ':' + i);
+                });
                 stx.oncomplete = () => sdb.close();
                 stx.onerror = () => sdb.close();
                 res = true;
@@ -4994,7 +5047,8 @@ self.onmessage = async (e) => {
         })
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) }
         const Mat4 = { perspective: (f, a, n, fr) => { const nf = 1 / (n - fr), f_t = 1 / Math.tan(f / 2); return [f_t / a, 0, 0, 0, 0, f_t, 0, 0, 0, 0, (fr + n) * nf, -1, 0, 0, 2 * fr * n * nf, 0] }, lookAt: (e, c, u) => { const z = Vec3.normalize(Vec3.sub(e, c)), x = Vec3.normalize(Vec3.cross(u, z)), y = Vec3.cross(z, x); return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -Vec3.dot(x, e), -Vec3.dot(y, e), -Vec3.dot(z, e), 1] }, multiply: (a, b) => [a[0] * b[0] + a[4] * b[1] + a[8] * b[2] + a[12] * b[3], a[1] * b[0] + a[5] * b[1] + a[9] * b[2] + a[13] * b[3], a[2] * b[0] + a[6] * b[1] + a[10] * b[2] + a[14] * b[3], a[3] * b[0] + a[7] * b[1] + a[11] * b[2] + a[15] * b[3], a[0] * b[4] + a[4] * b[5] + a[8] * b[6] + a[12] * b[7], a[1] * b[4] + a[5] * b[5] + a[9] * b[6] + a[13] * b[7], a[2] * b[4] + a[6] * b[5] + a[10] * b[6] + a[14] * b[7], a[3] * b[4] + a[7] * b[5] + a[11] * b[6] + a[15] * b[7], a[0] * b[8] + a[4] * b[9] + a[8] * b[10] + a[12] * b[11], a[1] * b[8] + a[5] * b[9] + a[9] * b[10] + a[13] * b[11], a[2] * b[8] + a[6] * b[9] + a[10] * b[10] + a[14] * b[11], a[3] * b[8] + a[7] * b[9] + a[11] * b[10] + a[15] * b[11], a[0] * b[12] + a[4] * b[13] + a[8] * b[14] + a[12] * b[15], a[1] * b[12] + a[5] * b[13] + a[9] * b[14] + a[13] * b[15], a[2] * b[12] + a[6] * b[13] + a[10] * b[14] + a[14] * b[15], a[3] * b[12] + a[7] * b[13] + a[11] * b[14] + a[15] * b[15]], rotationX: r => [1, 0, 0, 0, 0, Math.cos(r), Math.sin(r), 0, 0, -Math.sin(r), Math.cos(r), 0, 0, 0, 0, 1], translation: v => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1], scale: v => [v[0], 0, 0, 0, 0, v[1], 0, 0, 0, 0, v[2], 0, 0, 0, 0, 1], rotationAxis: (a, r) => { const c = Math.cos(r), s = Math.sin(r), t = 1 - c, x = a[0], y = a[1], z = a[2]; return [t * x * x + c, t * x * y + z * s, t * x * z - y * s, 0, t * x * y - z * s, t * y * y + c, t * y * z + x * s, 0, t * x * z + y * s, t * y * z - x * s, t * z * z + c, 0, 0, 0, 0, 1] }, identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }
-        const state = { canvas: null, renderer: null, device: null, context: null, gl: null, pipelines: { sphere: null, cone: null }, glPrograms: { sphere: null, solid: null }, glLocations: { sphere: null, solid: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }], historyHandles: [], selectedHandle: null, hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathStartPos: null, renderPath: false, signatureHex: null, signaturePaths: [], practice: { active: false, path: [], index: 0, speed: 2.75, awaitingRedraw: false }, interactionSignature: { type: 'click', path: [], practicePaths: [] } }
+        const Quat = { fromMat4: m => { let tr = m[0] + m[5] + m[10]; if (tr > 0) { let S = Math.sqrt(tr + 1.0) * 2; return [(m[6] - m[9]) / S, (m[8] - m[2]) / S, (m[1] - m[4]) / S, 0.25 * S] } else if ((m[0] > m[5]) && (m[0] > m[10])) { let S = Math.sqrt(1.0 + m[0] - m[5] - m[10]) * 2; return [0.25 * S, (m[1] + m[4]) / S, (m[8] + m[2]) / S, (m[6] - m[9]) / S] } else if (m[5] > m[10]) { let S = Math.sqrt(1.0 + m[5] - m[0] - m[10]) * 2; return [(m[1] + m[4]) / S, 0.25 * S, (m[6] + m[9]) / S, (m[8] - m[2]) / S] } else { let S = Math.sqrt(1.0 + m[10] - m[0] - m[5]) * 2; return [(m[8] + m[2]) / S, (m[6] + m[9]) / S, 0.25 * S, (m[1] - m[4]) / S] } }, toMat4: q => { let x = q[0], y = q[1], z = q[2], w = q[3], x2 = x + x, y2 = y + y, z2 = z + z, xx = x * x2, xy = x * y2, xz = x * z2, yy = y * y2, yz = y * z2, zz = z * z2, wx = w * x2, wy = w * y2, wz = w * z2; return [1 - (yy + zz), xy + wz, xz - wy, 0, xy - wz, 1 - (xx + zz), yz + wx, 0, xz + wy, yz - wx, 1 - (xx + yy), 0, 0, 0, 0, 1] }, slerp: (a, b, t) => { let cosHalfTheta = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]; if (cosHalfTheta < 0) { b = [-b[0], -b[1], -b[2], -b[3]]; cosHalfTheta = -cosHalfTheta } if (Math.abs(cosHalfTheta) >= 1.0) return [a[0], a[1], a[2], a[3]]; let halfTheta = Math.acos(cosHalfTheta), sinHalfTheta = Math.sqrt(1.0 - cosHalfTheta * cosHalfTheta); if (Math.abs(sinHalfTheta) < 0.001) return [(a[0] * 0.5 + b[0] * 0.5), (a[1] * 0.5 + b[1] * 0.5), (a[2] * 0.5 + b[2] * 0.5), (a[3] * 0.5 + b[3] * 0.5)]; let ratioA = Math.sin((1 - t) * halfTheta) / sinHalfTheta, ratioB = Math.sin(t * halfTheta) / sinHalfTheta; return [a[0] * ratioA + b[0] * ratioB, a[1] * ratioA + b[1] * ratioB, a[2] * ratioA + b[2] * ratioB, a[3] * ratioA + b[3] * ratioB] } }
+        const state = { canvas: null, renderer: null, device: null, context: null, gl: null, pipelines: { sphere: null, cone: null }, glPrograms: { sphere: null, solid: null }, glLocations: { sphere: null, solid: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }], historyHandles: [], selectedHandle: null, hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathRotations: [], pathStartPos: null, renderPath: false, signatureHex: null, signaturePaths: [], signaturePathsRotations: [], practice: { active: false, path: [], rotations: null, index: 0, floatIndex: 0, speed: 2.75, awaitingRedraw: false }, interactionSignature: { type: 'click', path: [], practicePaths: [], rotations: [] }, signatureBaseRotation: null }
         window.state = state
         function rgbToHex(r, g, b) { return '#' + [r, g, b].map(x => Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).padStart(2, '0')).join('') }
         function hexToRgbNormalized(hex) {
@@ -5089,7 +5143,23 @@ self.onmessage = async (e) => {
             window.addEventListener('resize', onResize); onResize()
 
             state.canvas.addEventListener('mousedown', onMouseDown); window.addEventListener('mousemove', onMouseMove); window.addEventListener('mouseup', onMouseUp); state.canvas.addEventListener('touchstart', e => { e.preventDefault(); onMouseDown(e.touches[0]) }, { passive: false }); state.canvas.addEventListener('touchmove', e => { e.preventDefault(); onMouseMove(e.touches[0]) }, { passive: false }); state.canvas.addEventListener('touchend', e => { e.preventDefault(); onMouseUp(e.changedTouches[0]) }); document.getElementById('freeze-btn').addEventListener('click', toggleFreeze)
-            document.getElementById('signature-practice-btn').addEventListener('click', () => { const sourcePath = (state.interactionSignature.path?.length ? state.interactionSignature.path : state.signaturePaths[0] || []).map(p => [...p]); if (sourcePath.length === 0) return; const practicePath = sourcePath.slice().reverse().filter((p, i, arr) => i === 0 || Vec3.dist(p, arr[i - 1]) > 0.002); state.signaturePaths = [sourcePath]; state.practice = { ...state.practice, active: true, path: practicePath, index: 0, speed: 3.25, awaitingRedraw: false }; state.renderPath = true; document.body.classList.add('light-mode'); document.body.style.backgroundColor = ''; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = '' })
+            document.getElementById('signature-practice-btn').addEventListener('click', () => {
+                const sourcePath = (state.signaturePaths[0] || state.interactionSignature.path || []).map(p => [...p]);
+                if (sourcePath.length === 0) return;
+                const sourceRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) || state.interactionSignature.rotations || null;
+                const pathRev = sourcePath.slice().reverse();
+                const rotsRev = sourceRots && sourceRots.length === sourcePath.length ? sourceRots.slice().reverse() : null;
+                let practicePath = [], practiceRots = [];
+                for (let i = 0; i < pathRev.length; i++) {
+                    if (i === 0 || Vec3.dist(pathRev[i], practicePath[practicePath.length - 1]) > 0.002) {
+                        practicePath.push(pathRev[i]);
+                        if (rotsRev) practiceRots.push(rotsRev[i]);
+                    }
+                }
+                state.practice = { ...state.practice, active: true, path: practicePath, rotations: practiceRots.length === practicePath.length ? practiceRots : null, index: 0, floatIndex: 0, speed: 50 * 3.25, awaitingRedraw: false };
+                state.renderPath = true; document.body.classList.add('light-mode'); document.body.style.backgroundColor = ''; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = ''
+            })
+            document.getElementById('signature-clear-btn').addEventListener('click', () => { if (!state.signaturePaths || state.signaturePaths.length === 0) return; state.signaturePaths = state.signaturePaths.length > 0 ? [state.signaturePaths[0].map(p => [...p])] : []; state.interactionSignature.practicePaths = []; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); document.getElementById('signature-compare-result').textContent = ''; })
             document.getElementById('debug-btn').onclick = function () { state.debugMode = !state.debugMode; this.classList.toggle('active', state.debugMode); this.innerText = state.debugMode ? 'DEBUG ON' : 'DEBUG OFF'; document.getElementById('debug-panel').classList.toggle('visible', state.debugMode) }
             document.getElementById('reset-btn').onclick = async () => {
                 if (confirm('Permanently wipe all local data?')) {
@@ -5183,52 +5253,113 @@ self.onmessage = async (e) => {
         function createCone(r, h, s) { const p = [0, h, 0], n = [0, 1, 0], idx = []; for (let i = 0; i <= s; i++) { const th = i * 2 * Math.PI / s, x = r * Math.cos(th), z = r * Math.sin(th); p.push(x, 0, z); const nv = Vec3.normalize([x, .5, z]); n.push(nv[0], nv[1], nv[2]) } p.push(0, 0, 0); n.push(0, -1, 0); const bc = p.length / 3 - 1; for (let i = 1; i <= s; i++) idx.push(0, i, i + 1, bc, i + 1, i); return { p: new Float32Array(p), n: new Float32Array(n), i: new Uint16Array(idx) } }
         function pathToVertices(pathPoints, sphereRotation) {
             if (pathPoints.length < 2) return null
-            const WIDTH = 0.028
-            const PROTRUDE = 1.03
-            const rawPath = pathPoints.map(p => {
-                const wp = transformPos(p, sphereRotation)
-                return Vec3.scale(Vec3.normalize(wp), PROTRUDE)
-            })
-            const path = []
-            for (let i = 0; i < rawPath.length; i++) {
-                if (i > 0) path.push(Vec3.scale(Vec3.normalize(Vec3.add(rawPath[i - 1], rawPath[i])), PROTRUDE))
+            const WIDTH = 0.018
+            const PROTRUDE = 0.025
+            const rawPath = pathPoints.map(p => Vec3.normalize(transformPos(p, sphereRotation)))
+            const path = [rawPath[0]]
+            for (let i = 1; i < rawPath.length; i++) {
+                path.push(Vec3.normalize(Vec3.add(rawPath[i - 1], rawPath[i])))
                 path.push(rawPath[i])
             }
-            const smoothedPath = path.map((point, i, arr) => {
-                if (i === 0 || i === arr.length - 1) return point
-                return Vec3.scale(Vec3.normalize(Vec3.add(Vec3.add(Vec3.scale(arr[i - 1], 0.2), Vec3.scale(point, 0.6)), Vec3.scale(arr[i + 1], 0.2))), PROTRUDE)
-            })
-            const tangents = []
-            for (let i = 0; i < smoothedPath.length; i++) {
-                let dir
-                if (i === 0) dir = Vec3.sub(smoothedPath[1], smoothedPath[0])
-                else if (i === smoothedPath.length - 1) dir = Vec3.sub(smoothedPath[i], smoothedPath[i - 1])
-                else dir = Vec3.sub(smoothedPath[i + 1], smoothedPath[i - 1])
-                const radial = Vec3.normalize(smoothedPath[i])
-                let tangent = Vec3.cross(dir, radial)
+            const tangents = [Vec3.create()]
+            for (let i = 1; i < path.length; i++) {
+                let tangent = Vec3.cross(Vec3.sub(path[i], path[i - 1]), path[i])
                 if (Vec3.len(tangent) < 0.001) {
-                    tangent = Vec3.cross(dir, [0, 1, 0])
-                    if (Vec3.len(tangent) < 0.001) tangent = Vec3.cross(dir, [1, 0, 0])
+                    tangent = Vec3.cross(Vec3.sub(path[i], path[i - 1]), [0, 1, 0])
+                    if (Vec3.len(tangent) < 0.001) tangent = Vec3.cross(Vec3.sub(path[i], path[i - 1]), [1, 0, 0])
                 }
-                tangents.push(Vec3.scale(Vec3.normalize(tangent), WIDTH))
+                tangent = Vec3.scale(Vec3.normalize(tangent), WIDTH)
+                tangents[i - 1] = Vec3.add(tangents[i - 1], tangent)
+                tangents.push(tangent)
             }
-            const vertices = []
-            for (let i = 1; i < smoothedPath.length; i++) {
-                const p0 = smoothedPath[i - 1], p1 = smoothedPath[i]
-                const t0 = tangents[i - 1], t1 = tangents[i]
-                const v0p = Vec3.add(p0, t0), v0m = Vec3.sub(p0, t0)
-                const v1p = Vec3.add(p1, t1), v1m = Vec3.sub(p1, t1)
-                vertices.push(...v1p, ...v1m, ...v0m)
-                vertices.push(...v1p, ...v0m, ...v0p)
+            const s = 1 + PROTRUDE
+            const vertices = new Float32Array((path.length - 1) * 36)
+            let vi = 0
+            for (let i = 1; i < path.length; i++) {
+                const p = path[i - 1], v = path[i], pt = tangents[i - 1], vt = tangents[i]
+                vertices[vi++] = (v[0] + vt[0]) * s
+                vertices[vi++] = (v[1] + vt[1]) * s
+                vertices[vi++] = (v[2] + vt[2]) * s
+                vertices[vi++] = (v[0] - vt[0]) * s
+                vertices[vi++] = (v[1] - vt[1]) * s
+                vertices[vi++] = (v[2] - vt[2]) * s
+                vertices[vi++] = (p[0] - pt[0]) * s
+                vertices[vi++] = (p[1] - pt[1]) * s
+                vertices[vi++] = (p[2] - pt[2]) * s
+                vertices[vi++] = (v[0] + vt[0]) * s
+                vertices[vi++] = (v[1] + vt[1]) * s
+                vertices[vi++] = (v[2] + vt[2]) * s
+                vertices[vi++] = (p[0] - pt[0]) * s
+                vertices[vi++] = (p[1] - pt[1]) * s
+                vertices[vi++] = (p[2] - pt[2]) * s
+                vertices[vi++] = (p[0] + pt[0]) * s
+                vertices[vi++] = (p[1] + pt[1]) * s
+                vertices[vi++] = (p[2] + pt[2]) * s
+                vertices[vi++] = (v[0] - vt[0]) * s
+                vertices[vi++] = (v[1] - vt[1]) * s
+                vertices[vi++] = (v[2] - vt[2]) * s
+                vertices[vi++] = 0
+                vertices[vi++] = 0
+                vertices[vi++] = 0
+                vertices[vi++] = (p[0] - pt[0]) * s
+                vertices[vi++] = (p[1] - pt[1]) * s
+                vertices[vi++] = (p[2] - pt[2]) * s
+                vertices[vi++] = 0
+                vertices[vi++] = 0
+                vertices[vi++] = 0
+                vertices[vi++] = (v[0] + vt[0]) * s
+                vertices[vi++] = (v[1] + vt[1]) * s
+                vertices[vi++] = (v[2] + vt[2]) * s
+                vertices[vi++] = (p[0] + pt[0]) * s
+                vertices[vi++] = (p[1] + pt[1]) * s
+                vertices[vi++] = (p[2] + pt[2]) * s
             }
-            return new Float32Array(vertices)
+            return vertices
         }
         function onResize() { if (!state.canvas || (!state.device && !state.gl)) return; const w = state.canvas.clientWidth; const h = state.canvas.clientHeight; state.canvas.width = w; state.canvas.height = h; if (state.renderer === 'webgpu') { if (state.msaaTexture) state.msaaTexture.destroy(); if (state.depthTexture) state.depthTexture.destroy(); state.msaaTexture = state.device.createTexture({ size: [w, h], sampleCount: 4, format: state.presentationFormat, usage: GPUTextureUsage.RENDER_ATTACHMENT }); state.depthTexture = state.device.createTexture({ size: [w, h], sampleCount: 4, format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT }) } else if (state.renderer === 'webgl' && state.gl) { state.gl.viewport(0, 0, w, h) } const aspect = w / h; const newZ = aspect < 1 ? 3.5 / aspect : 4; if (!state.landing.active && (!state.returning || !state.returning.active)) { state.cameraPos = [0, 0, newZ] } if (state.returning) state.returning.targetDist = newZ }
         function getMouseRay(x, y) { const aspect = state.canvas.width / state.canvas.height, ndcX = (x / state.canvas.width) * 2 - 1, ndcY = -(y / state.canvas.height) * 2 + 1; const dir = Vec3.normalize([ndcX * aspect * Math.tan(Math.PI / 8), ndcY * Math.tan(Math.PI / 8), -1]); return { o: state.cameraPos, d: dir } }
         function getTargetPos(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)); return Vec3.dot(p, p) <= 1 ? Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))) : Vec3.scale(Vec3.normalize(p), 1) }
         function calculateConePosition(x, y) { const r = getMouseRay(x, y), t = Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d), p = Vec3.add(r.o, Vec3.scale(r.d, t)), dist = Math.sqrt(Vec3.dot(p, p)), R = 1.2; if (dist <= R) return Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(R * R - Vec3.dot(p, p)))); const axis = Vec3.cross(Vec3.normalize(r.o), r.d); return Vec3.scale(transformPos(Vec3.normalize(r.o), Mat4.rotationAxis(Vec3.normalize(Vec3.len(axis) < .001 ? [1, 0, 0] : axis), Math.acos(R / Vec3.len(r.o)) + (dist - R))), R) }
         function transformPos(p, m) { return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]] }
-        function advancePractice(dt) { if (!state.practice.active || state.practice.path.length === 0) return; const front = [0, 0, 1]; while (state.practice.index < state.practice.path.length) { const target = state.practice.path[state.practice.index], worldTarget = Vec3.normalize(transformPos(target, state.sphere.rotation)), dot = Math.max(-1, Math.min(1, Vec3.dot(worldTarget, front))), angle = Math.acos(dot); if (angle >= 0.003) { const axis = Vec3.cross(worldTarget, front), step = Math.min(angle, dt * state.practice.speed), rotation = Mat4.rotationAxis(Vec3.len(axis) > 0.001 ? Vec3.normalize(axis) : [1, 0, 0], step); state.sphere.rotation = Mat4.multiply(rotation, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, rotation)); return } state.practice.index++ } state.practice.active = false; state.practice.awaitingRedraw = true; state.pathPoints = [] }
+        function advancePractice(dt) {
+            if (!state.practice.active || state.practice.path.length === 0) return;
+            const front = [0, 0, 1];
+
+            if (state.practice.rotations && state.practice.rotations.length === state.practice.path.length) {
+                state.practice.floatIndex += dt * state.practice.speed;
+                let i = Math.floor(state.practice.floatIndex);
+                if (i >= state.practice.path.length - 1) {
+                    state.sphere.rotation = Quat.toMat4(state.practice.rotations[state.practice.path.length - 1]);
+                    state.cones.forEach(c => c.pos = transformPos(defaultCones.find(dc => dc.name === c.name).pos, state.sphere.rotation));
+                    state.practice.active = false; state.practice.awaitingRedraw = true; state.pathPoints = [];
+                    return;
+                }
+                const t = state.practice.floatIndex - i;
+                const slerped = Quat.slerp(state.practice.rotations[i], state.practice.rotations[i + 1], t);
+                state.sphere.rotation = Quat.toMat4(slerped);
+                state.cones.forEach(c => c.pos = transformPos(defaultCones.find(dc => dc.name === c.name).pos, state.sphere.rotation));
+                state.practice.index = i;
+                return;
+            }
+
+            while (state.practice.index < state.practice.path.length) {
+                const target = state.practice.path[state.practice.index], worldTarget = Vec3.normalize(transformPos(target, state.sphere.rotation)), dot = Math.max(-1, Math.min(1, Vec3.dot(worldTarget, front))), angle = Math.acos(dot);
+                if (angle >= 0.003) {
+                    const axis = Vec3.cross(worldTarget, front), step = Math.min(angle, dt * state.practice.speed), rotation = Mat4.rotationAxis(Vec3.len(axis) > 0.001 ? Vec3.normalize(axis) : [1, 0, 0], step);
+                    state.sphere.rotation = Mat4.multiply(rotation, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, rotation));
+                    return
+                }
+                state.practice.index++
+            }
+            state.practice.active = false; state.practice.awaitingRedraw = true; state.pathPoints = [];
+            if (state.signatureBaseRotation) {
+                let base = [...state.signatureBaseRotation];
+                let currentQuat = Quat.fromMat4(state.sphere.rotation);
+                let targetQuat = Quat.fromMat4(base);
+                state.sphere.rotation = Quat.toMat4(Quat.slerp(currentQuat, targetQuat, 0.5));
+                state.returning = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], rotationAxis: [1, 0, 0], rotationAngle: 0, keepRotation: true, startDist: state.cameraPos[2], targetDist: state.cameraPos[2], coneStartPositions: state.cones.map(c => [...c.pos]), explicitTargetQuat: targetQuat, isFallbackReturn: true };
+            }
+        }
         function getRenderablePaths() { const paths = state.signaturePaths.filter(path => path?.length > 1), activePath = state.dragStart.active && state.pathPoints.length > 1 ? state.pathPoints : null; if (activePath && state.practice.awaitingRedraw) { const alpha = 1 / (paths.length + 1); return [...paths.map(path => ({ path, alpha })), { path: activePath, alpha: 1 }] } if (paths.length > 0) { const alpha = 1 / paths.length; return [...paths.map(path => ({ path, alpha })), ...(activePath ? [{ path: activePath, alpha: 1 }] : [])] } if (activePath) return [{ path: activePath, alpha: 1 }]; if (state.pathPoints.length > 1 && (state.landing.active || state.renderPath)) return [{ path: state.pathPoints, alpha: 1 }]; return [] }
         function projectToScreen(worldPos) { const m = state.vpMatrix, x = worldPos[0], y = worldPos[1], z = worldPos[2], clipX = x * m[0] + y * m[4] + z * m[8] + m[12], clipY = x * m[1] + y * m[5] + z * m[9] + m[13], clipW = x * m[3] + y * m[7] + z * m[11] + m[15]; if (clipW <= 0) return null; return { x: (clipX / clipW + 1) * state.canvas.width / 2, y: (1 - clipY / clipW) * state.canvas.height / 2 } }
         function toLocalSpherePos(p) { const m = state.sphere.rotation; return Vec3.normalize([m[0] * p[0] + m[1] * p[1] + m[2] * p[2], m[4] * p[0] + m[5] * p[1] + m[6] * p[2], m[8] * p[0] + m[9] * p[1] + m[10] * p[2]]) }
@@ -5265,7 +5396,7 @@ self.onmessage = async (e) => {
             state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top, down: true }
             state.clickData = { startX: state.mouse.x, startY: state.mouse.y, startTime: Date.now() }
 
-            if (document.body.classList.contains('light-mode') && !state.practice.awaitingRedraw) { state.signaturePaths = []; state.selectedHandle = null }
+            if (document.body.classList.contains('light-mode') && !state.practice.awaitingRedraw && !getVisibleHandleAt(state.mouse.x, state.mouse.y)) { state.signaturePaths = []; state.selectedHandle = null }
             state.interactionSignature = { type: 'click', path: [], practicePaths: document.body.classList.contains('light-mode') && state.practice.awaitingRedraw ? state.signaturePaths.slice(1).map(path => path.map(p => [...p])) : [] }
             state.pathPoints = []
             state.pathStartPos = null
@@ -5283,12 +5414,15 @@ self.onmessage = async (e) => {
 
                 if (hit) {
                     state.interaction = { mode: 'zoom', hasTouchedSphere: true, startZ: state.cameraPos[2], startMouse: { x: state.mouse.x, y: state.mouse.y } }
+                    if (state.signaturePaths.length === 0) state.signatureBaseRotation = [...state.sphere.rotation];
                     const m = state.sphere.rotation
                     const initialLocalCenter = Vec3.normalize([m[2], m[6], m[10]])
                     const rounded = [Math.round(initialLocalCenter[0] * 100) / 100, Math.round(initialLocalCenter[1] * 100) / 100, Math.round(initialLocalCenter[2] * 100) / 100]
 
                     state.pathPoints = [rounded]
+                    state.pathRotations = [Quat.fromMat4(m)]
                     state.interactionSignature.path = [rounded]
+                    state.interactionSignature.rotations = [[...state.pathRotations[0]]]
 
                     startDragLogic(p, !!clickedHandle)
                 } else {
@@ -5336,16 +5470,19 @@ self.onmessage = async (e) => {
                     const rounded = [Math.round(normalized[0] * 100) / 100, Math.round(normalized[1] * 100) / 100, Math.round(normalized[2] * 100) / 100]
 
                     state.pathPoints.push(rounded)
+                    state.pathRotations.push(Quat.fromMat4(m))
                     state.interactionSignature.type = 'drag'
                     state.interactionSignature.path.push(rounded)
+                    if (!state.interactionSignature.rotations) state.interactionSignature.rotations = []
+                    state.interactionSignature.rotations.push([...state.pathRotations[state.pathRotations.length - 1]])
                 }
 
-                if (state.pathPoints.length > 500) state.pathPoints.shift()
-                if (state.interactionSignature.path.length > 1000) state.interactionSignature.path.shift()
+                if (state.pathPoints.length > 500) { state.pathPoints.shift(); state.pathRotations.shift() }
+                if (state.interactionSignature.path.length > 1000) { state.interactionSignature.path.shift(); state.interactionSignature.rotations.shift() }
             }
         }
-        function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); const handle = selectedHandle ? { pos: [...selectedHandle.pos], color: [...selectedHandle.color], hex: selectedHandle.hex } : null; if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const ratio = comparePaths(originalPath, currentPath); state.signaturePaths = [originalPath, currentPath].filter(path => path.length > 1); state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, practicePaths: currentPath.length > 1 ? [currentPath] : [], handle }; state.practice.awaitingRedraw = false; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${Math.round(ratio * 100)}`; if (window.app?.db) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { state.pathPoints = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.interactionSignature = { type: 'drag', path: currentPath, practicePaths: [], handle } } state.signatureHex = hex.replace('#', ''); if (window.app?.db) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); if (selectedHandle) triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { try { localStorage.setItem('lastSphereColor', h.hex) } catch (e) { } triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false) } } } state.pathPoints = []; state.pathStartPos = null }
-        function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (window.connectAndPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
+        function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const currentRots = state.interactionSignature.rotations ? state.interactionSignature.rotations.map(r => [...r]) : null; const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const originalRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) ? state.signaturePathsRotations[0].map(r => [...r]) : null; const ratio = comparePaths(originalPath, currentPath); const mergedPaths = state.signaturePaths.filter(path => path.length > 1), serializedCurrentPath = JSON.stringify(currentPath); if (currentPath.length > 1 && !mergedPaths.some(path => JSON.stringify(path) === serializedCurrentPath)) mergedPaths.push(currentPath); state.signaturePaths = mergedPaths; state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, rotations: originalPath.length > 1 ? originalRots : currentRots, practicePaths: state.signaturePaths.slice(originalPath.length > 1 ? 1 : 0).map(path => path.map(p => [...p])) }; state.practice.awaitingRedraw = false; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${Math.round(ratio * 100)}`; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.signaturePathsRotations = currentRots ? [currentRots] : []; state.interactionSignature = { type: 'drag', path: currentPath, rotations: currentRots, practicePaths: [] } } state.signatureHex = hex.replace('#', ''); if (selectedHandle) triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { if (state.selectedHandle) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(state.selectedHandle.pos, transformPos(state.selectedHandle.pos, state.sphere.rotation), state.selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false) } } } state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }
+        function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4 }
         function toggleFreeze() {
             const isZoomed = document.getElementById('dashboard-panel').classList.contains('active') ||
@@ -5420,7 +5557,7 @@ self.onmessage = async (e) => {
             const endScore = Math.max(0, 1 - Vec3.dist(cleanA[cleanA.length - 1], cleanB[cleanB.length - 1]) / 0.2)
             return Math.max(0, Math.min(1, overlapScore * 0.3 + distanceScore * 0.25 + directionScore * 0.2 + lengthScore * 0.1 + startScore * 0.075 + endScore * 0.075))
         }
-        function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return } const hitPos = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))); const hex = rgbToHex(...getSurfaceColor(hitPos, Vec3.normalize(hitPos))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}` }) }
+        function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return } } if (state.selectedHandle && !state.dragStart.active) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${state.selectedHandle.hex.toUpperCase()}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${state.selectedHandle.hex}`; return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return } const hitPos = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))); const hex = rgbToHex(...getSurfaceColor(hitPos, Vec3.normalize(hitPos))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}` }) }
         window.resetSphereView = function (animateIn = false, keepRotation = false, clearHex = false, centerPoint = null) {
             const m = state.sphere.rotation
             const preserveRotation = keepRotation || !!centerPoint
@@ -5497,6 +5634,28 @@ self.onmessage = async (e) => {
                     return
                 }
                 let bindIdx = 4
+                const renderablePaths = getRenderablePaths()
+                if (renderablePaths.length > 0) {
+                    if (!state.buffers.pathVertices) state.buffers.pathVertices = []
+                    renderablePaths.forEach(({ path, alpha }, pathIdx) => {
+                        const pathVerts = pathToVertices(path, state.sphere.rotation)
+                        if (!pathVerts || pathVerts.length === 0) return
+                        if (!state.buffers.pathVertices[pathIdx] || state.buffers.pathVertices[pathIdx].size < pathVerts.byteLength) {
+                            if (state.buffers.pathVertices[pathIdx]) state.buffers.pathVertices[pathIdx].destroy()
+                            state.buffers.pathVertices[pathIdx] = state.device.createBuffer({ size: Math.max(pathVerts.byteLength, 1024 * 12), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+                        }
+                        state.device.queue.writeBuffer(state.buffers.pathVertices[pathIdx], 0, pathVerts)
+                        state.uniforms.cone.set(state.vpMatrix, 0)
+                        state.uniforms.cone.set([1, 1, 1, alpha], 16)
+                        state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone)
+                        pass.setPipeline(state.pipelines.cone)
+                        pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx))
+                        pass.setVertexBuffer(0, state.buffers.pathVertices[pathIdx])
+                        pass.draw(pathVerts.length / 3)
+                        bindIdx++
+                    })
+                    pass.setVertexBuffer(0, state.buffers.sphereVertex)
+                }
                 if (state.handle.active || state.landing.showHandle) {
                     state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0)
                     state.uniforms.cone.set([...state.handle.color, 1.0], 16)
@@ -5514,7 +5673,7 @@ self.onmessage = async (e) => {
                     pass.drawIndexed(state.sphere.indexCount)
                     bindIdx++
                 })
-                if (state.selectedHandle && !state.dragStart.active) {
+                if (state.selectedHandle) {
                     const wp = transformPos(state.selectedHandle.pos, state.sphere.rotation)
                     if (wp[2] > -0.5) {
                         state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([.08, .08, .08]))), 0)
@@ -5524,25 +5683,6 @@ self.onmessage = async (e) => {
                         pass.drawIndexed(state.sphere.indexCount)
                         bindIdx++
                     }
-                }
-                const renderablePaths = getRenderablePaths()
-                if (renderablePaths.length > 0) {
-                    renderablePaths.forEach(({ path, alpha }) => {
-                        const pathVerts = pathToVertices(path, state.sphere.rotation)
-                        if (!pathVerts || pathVerts.length === 0) return
-                        if (!state.buffers.pathVertex || state.buffers.pathVertex.size < pathVerts.byteLength) {
-                            if (state.buffers.pathVertex) state.buffers.pathVertex.destroy()
-                            state.buffers.pathVertex = state.device.createBuffer({ size: Math.max(pathVerts.byteLength, 1024 * 12), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
-                        }
-                        state.device.queue.writeBuffer(state.buffers.pathVertex, 0, pathVerts)
-                        state.uniforms.cone.set(state.vpMatrix, 0)
-                        state.uniforms.cone.set([1, 1, 1, alpha], 16)
-                        state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone)
-                        pass.setPipeline(state.pipelines.cone)
-                        pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx))
-                        pass.setVertexBuffer(0, state.buffers.pathVertex)
-                        pass.draw(pathVerts.length / 3)
-                    })
                 }
             }
             if (renderBackgroundLayer) {
@@ -5576,8 +5716,8 @@ self.onmessage = async (e) => {
             gl.clearColor(clear[0], clear[1], clear[2], clear[3])
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
             renderWebGLSphere()
-            renderWebGLMarkers()
             renderWebGLPaths()
+            renderWebGLMarkers()
         }
         function renderWebGLSphere() {
             const gl = state.gl
@@ -5688,3 +5828,4 @@ self.onmessage = async (e) => {
 </body>
 
 </html>
+
