@@ -1427,7 +1427,7 @@
             <h4 style="margin: 0 0 5px 0; color: #ff4444;">🔒 Master Security</h4>
             <div id="security-status" style="font-size: 11px; margin-bottom: 8px; color: #aaa;">STATUS: <b>UNSECURED</b>
             </div>
-            <input type="password" id="master-pass" placeholder="Type Password to Lock/Unlock"
+            <input type="text" id="master-pass" placeholder="Current derived room password"
                 style="width: 100%; background: #000; border: 1px solid #555; color: white; padding: 5px; margin-bottom: 5px;">
             <button id="btn-security-apply"
                 style="width: 100%; background: #444; border: 1px solid #666; color: white; cursor: pointer;">APPLY
@@ -1479,8 +1479,8 @@
                         <div class="stat-label">Trust</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-value" id="stat-coins">0</div>
-                        <div class="stat-label">Coins</div>
+                        <div class="stat-value" id="stat-assets">0</div>
+                        <div class="stat-label">Assets</div>
                     </div>
                 </div>
             </div>
@@ -2922,6 +2922,8 @@
                 this.pendingManualOffer = null
                 this.bufferCheckPending = false
                 this.pendingFocusLine = undefined
+                this.pendingLoginHex = null
+                this.pendingLoginSignature = null
                 this.minedForSession = false
                 this.miningInProgress = false
                 this.peeking = false
@@ -2929,6 +2931,8 @@
                 this.connectionMode = 'tracked'
                 this.connectionSource = 'local'
                 this.proofRoomHex = null
+                this.roomExists = false
+                this.roomSignature = null
                 this.secureQrBootstrap = new SecureQrRoomBootstrap(session => {
                     this.enterSecureSharedRoom(session).catch(error => {
                         console.error('Secure room transition failed:', error)
@@ -2948,10 +2952,111 @@
                     if (!window.location.hash || window.location.hash.length < 2) this.runSequencedScan()
                     else this.tryAutoConnectFromHash()
                     this.initDone = true
+                    this.syncDebugPassword()
                 })
 
                 this.bindEvents()
                 this.setupGlobalExposure()
+            }
+
+            cloneSignature(signature) {
+                if (!signature) return null
+                return {
+                    type: signature.type || 'click',
+                    path: Array.isArray(signature.path) ? signature.path.map(point => [...point]) : [],
+                    practicePaths: Array.isArray(signature.practicePaths) ? signature.practicePaths.map(path => path.map(point => [...point])) : [],
+                    rotations: Array.isArray(signature.rotations) ? signature.rotations.map(rotation => [...rotation]) : null,
+                    password: signature.password || ''
+                }
+            }
+
+            setPendingLoginSignature(roomHex, signature) {
+                const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
+                this.pendingLoginHex = cleanHex || null
+                this.pendingLoginSignature = this.cloneSignature(signature)
+                if (this.pendingLoginSignature && cleanHex) this.pendingLoginSignature.password = this.getRoomPassword(cleanHex, this.pendingLoginSignature)
+                this.syncDebugPassword(cleanHex)
+            }
+
+            getAttemptedRoomSignature(roomHex = this.roomId?.replace('color-', '')) {
+                const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
+                if (cleanHex && this.pendingLoginHex === cleanHex && this.pendingLoginSignature) return this.cloneSignature(this.pendingLoginSignature)
+                if (this.roomSignature) return null
+                return this.cloneSignature(window.state?.interactionSignature)
+            }
+
+            getRoomSignatureForSave(roomHex = this.roomId?.replace('color-', '')) {
+                const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
+                if (cleanHex && this.pendingLoginHex === cleanHex && this.pendingLoginSignature) return this.cloneSignature(this.pendingLoginSignature)
+                return this.cloneSignature(window.state?.interactionSignature)
+            }
+
+            getRoomPassword(roomHex, signature) {
+                const cleanHex = String(roomHex || '').replace('#', '').toUpperCase()
+                if (!cleanHex) return ''
+                if (signature?.password) return signature.password
+                if (!signature || signature.type === 'click') return 'FFFFFF' + cleanHex
+                const path = Array.isArray(signature.path) ? signature.path : []
+                if (!path.length) return 'FFFFFF' + cleanHex
+                const cones = [{ color: [1, 0, 0], pos: [0, .98, .69], active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], active: true }]
+                const clamp01 = x => Math.min(1, Math.max(0, x))
+                const normalize = v => { const x = v?.[0] || 0, y = v?.[1] || 0, z = v?.[2] || 0, len = Math.sqrt(x * x + y * y + z * z); return len > 0 ? [x / len, y / len, z / len] : [0, 0, 0] }
+                return path.map(point => {
+                    const p = [point?.[0] || 0, point?.[1] || 0, point?.[2] || 0]
+                    const n = normalize(p)
+                    const d = cones.map(cone => {
+                        if (!cone?.active) return 0
+                        const diff = [(cone.pos?.[0] || 0) - p[0], (cone.pos?.[1] || 0) - p[1], (cone.pos?.[2] || 0) - p[2]]
+                        const distSq = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2]
+                        const L = normalize(diff)
+                        const wrap = Math.max(n[0] * L[0] + n[1] * L[1] + n[2] * L[2] + 1.0, 0.0) / 2.0
+                        return Math.pow(wrap, 1.25) * (1.0 / (1.0 + distSq * 0.05))
+                    })
+                    const colors = cones.map(cone => cone?.color || [0, 0, 0])
+                    let l = [
+                        colors[0][0] * d[0] + colors[1][0] * d[1] + colors[2][0] * d[2],
+                        colors[0][1] * d[0] + colors[1][1] * d[1] + colors[2][1] * d[2],
+                        colors[0][2] * d[0] + colors[1][2] * d[1] + colors[2][2] * d[2]
+                    ]
+                    const boost = (i, j) => {
+                        const factor = (2.0 * d[i] * d[j]) / (d[i] + d[j] + 0.001)
+                        return [(colors[i][0] + colors[j][0]) * factor, (colors[i][1] + colors[j][1]) * factor, (colors[i][2] + colors[j][2]) * factor]
+                    }
+                    const boost01 = boost(0, 1), boost12 = boost(1, 2), boost20 = boost(2, 0)
+                    l = [l[0] + boost01[0] + boost12[0] + boost20[0], l[1] + boost01[1] + boost12[1] + boost20[1], l[2] + boost01[2] + boost12[2] + boost20[2]]
+                    let t = clamp01((Math.min(d[0], d[1], d[2]) - 0.15) / 0.25)
+                    const finalMask = (t * t * (3.0 - 2.0 * t)) * Math.exp(-(Math.max(d[0], d[1], d[2]) - Math.min(d[0], d[1], d[2])) * 10.0)
+                    l = l.map(x => x * (1.0 - finalMask) + finalMask).map(x => clamp01(x * 1.2)).map(x => x * x * (3.0 - 2.0 * x))
+                    return l.map(x => Math.round(clamp01(x) * 255).toString(16).padStart(2, '0')).join('').toUpperCase()
+                }).join('')
+            }
+
+            roomNeedsLogin() {
+                return !this.isGuestScan && (!!this.roomSignature || (!this.roomExists && ((this.mesh?.getDiscoveredPeers?.().size || 0) === 0)))
+            }
+
+            syncDebugPassword(roomHex = this.roomId?.replace('color-', '')) {
+                const input = document.getElementById('master-pass')
+                if (!input) return
+                const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
+                const signature = cleanHex && this.pendingLoginHex === cleanHex && this.pendingLoginSignature ? this.pendingLoginSignature : this.roomSignature
+                input.type = 'text'
+                input.value = cleanHex && this.roomNeedsLogin() ? this.getRoomPassword(cleanHex, signature) : 'FFFFFF'
+            }
+
+            async validateRoomLogin(roomHex = this.roomId?.replace('color-', '')) {
+                const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
+                if (!this.roomNeedsLogin()) return true
+                const attemptedSignature = this.getAttemptedRoomSignature(cleanHex)
+                if (!attemptedSignature?.path?.length) {
+                    alert('No login signature was captured for this color.')
+                    return false
+                }
+                this.syncDebugPassword(cleanHex)
+                if (!this.roomSignature) return true
+                if (this.getRoomPassword(cleanHex, attemptedSignature) === this.getRoomPassword(cleanHex, this.roomSignature)) return true
+                alert('Login signature does not match this color.')
+                return false
             }
 
             setSessionState(nextState) {
@@ -3240,6 +3345,8 @@
                 this.setPanelState('home')
 
                 const roomHex = this.roomId.replace('color-', '')
+                const roomSignature = this.getRoomSignatureForSave(roomHex)
+                if (roomSignature?.path?.length) roomSignature.password = this.getRoomPassword(roomHex, roomSignature)
 
                 if (this.ui.loginBtn.textContent === 'LOGIN' && !this.isGuestScan) {
                     this.user.color = '#' + roomHex
@@ -3255,14 +3362,17 @@
                 this.triggerSave(null)
                 this.ui.hoverTrigger.style.display = 'block'
 
-                if (window.state && window.state.interactionSignature) {
-                    this.db.saveSignature(roomHex, window.state.interactionSignature)
+                if (roomSignature?.path?.length) {
+                    this.roomSignature = this.cloneSignature(roomSignature)
+                    this.db.saveSignature(roomHex, roomSignature)
                 }
 
                 if (!this.visitedRooms.includes(this.roomId)) {
                     this.visitedRooms.push(this.roomId)
                     this.db._open(roomHex)
                 }
+                this.roomExists = true
+                this.syncDebugPassword(roomHex)
 
                 setTimeout(() => {
                     document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'
@@ -3348,6 +3458,12 @@
                 const preserveSignatureState = !!options.preserveSignatureState
                 this.pendingNavPath = options.navPath || null
                 this.roomId = 'color-' + cleanHex
+                this.roomExists = false
+                this.roomSignature = null
+                if (this.pendingLoginHex !== cleanHex) {
+                    this.pendingLoginHex = null
+                    this.pendingLoginSignature = null
+                }
                 this.connectionSource = source
                 this.isGuestScan = this.isQrConnectionSource(source)
                 this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff'
@@ -3384,11 +3500,14 @@
                 }
 
                 const exists = await this.db.roomExists(cleanHex)
+                this.roomExists = exists
 
                 if (exists) {
                     this.ui.roomStatus.textContent = 'Loading...'
+                    const savedSignature = await this.db.getSignature(cleanHex).catch(() => null)
+                    this.roomSignature = savedSignature ? this.cloneSignature(savedSignature) : null
+                    this.syncDebugPassword(cleanHex)
                     if (!preserveSignatureState && window.state) {
-                        const savedSignature = await this.db.getSignature(cleanHex).catch(() => null)
                         const basePath = savedSignature?.path?.map(p => [...p]) || []
                         const practicePaths = (savedSignature?.practicePaths || []).map(path => path.map(p => [...p]))
                         window.state.signatureHex = cleanHex
@@ -3405,9 +3524,10 @@
                     await this.renderFromLocalDB(data, centerIndex)
                     this.joinNetwork()
                     if (options.skipAutoEnter) this.ui.roomStatus.textContent = 'COLOR AVAILABLE'
-                    if (!options.skipAutoEnter && window.state?.landing && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
-                    else if (!options.skipAutoEnter && window.enterRoomUI) window.enterRoomUI()
+                    else if (!options.skipAutoEnter && !this.roomNeedsLogin() && window.state?.landing && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
+                    else if (!options.skipAutoEnter && !this.roomNeedsLogin() && window.enterRoomUI) window.enterRoomUI()
                 } else {
+                    this.syncDebugPassword(cleanHex)
                     this.ui.roomStatus.textContent = options.source === 'url' ? 'Checking Network...' : 'COLOR AVAILABLE'
                     this.joinNetwork()
 
@@ -3970,18 +4090,18 @@
                         this.ui.loginBtn.classList.add('hidden')
                         this.ui.dot.classList.remove('on')
                     } else {
-                        this.ui.loginBtn.innerHTML = '<span>JOIN</span>'
+                        this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
                         if (!this.ui.dashboardPanel.classList.contains('active')) {
                             this.ui.loginBtn.classList.remove('hidden')
                         }
                         this.ui.roomStatus.textContent = `${discoveredPeers} PEER${discoveredPeers > 1 ? 'S' : ''} ONLINE`
                         this.ui.roomStatus.style.color = ''
-                        this.ui.peerCount.innerText = connectedPeers > 0 ? `${connectedPeers} connected` : `Ready to join...`
+                        this.ui.peerCount.innerText = this.roomNeedsLogin() ? 'Owner login required' : connectedPeers > 0 ? `${connectedPeers} connected` : `Ready to join...`
                         this.ui.dot.classList.add('on')
                     }
                 } else {
                     this.ui.peerCount.innerText = 'Offline'
-                    this.ui.loginBtn.innerHTML = '<span>LOGIN</span>'
+                    this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
 
                     if (!this.ui.dashboardPanel.classList.contains('active')) {
                         this.ui.loginBtn.classList.remove('hidden')
@@ -4294,9 +4414,14 @@
                 this.currentLineId = null
                 this.pendingManualOffer = null
                 this.pendingVipTicket = null
+                this.pendingLoginHex = null
+                this.pendingLoginSignature = null
                 this.pendingSecureSession = null
                 this.connectionMode = 'tracked'
                 this.connectionSource = 'local'
+                this.roomExists = false
+                this.roomSignature = null
+                this.syncDebugPassword()
 
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
                 this.resetSecureQrToggle()
@@ -4785,7 +4910,7 @@ async function db_read_signature({ roomHex }) {
         savedRows.sort((a, b) => (a.created || 0) - (b.created || 0));
         const [path, ...practicePaths] = savedRows.map(row => row.path).filter(path => Array.isArray(path) && path.length > 0);
         const rotations = savedRows[0]?.rotations || null;
-        return path ? { type: savedRows[savedRows.length - 1]?.type || 'drag', path, practicePaths, rotations } : null;
+        return path ? { type: savedRows[savedRows.length - 1]?.type || 'drag', path, practicePaths, rotations, password: savedRows[savedRows.length - 1]?.password || '' } : null;
     }
     const readSignatureValue = key => new Promise(resolve => {
         const req = db.transaction([roomHex], 'readonly').objectStore(roomHex).get(key);
@@ -4803,7 +4928,7 @@ async function db_read_signature({ roomHex }) {
     const paths = pathsData.map(d => d?.path || null);
     const [path, ...practicePaths] = paths.filter(path => Array.isArray(path) && path.length > 0);
     const rotations = pathsData[0]?.rotations || null;
-    return path ? { type: result?.type || 'drag', path, practicePaths, rotations } : null;
+    return path ? { type: result?.type || 'drag', path, practicePaths, rotations, password: result?.password || pathsData[0]?.password || '' } : null;
 }
 
 self.onmessage = async (e) => {
@@ -4896,7 +5021,7 @@ self.onmessage = async (e) => {
                     if (existingSignatureSet.has(serializedPath)) return;
                     existingSignatureSet.add(serializedPath);
                     const created = Date.now() + i;
-                    sstore.put({ type: data.signature.type, path, created }, 'signature:' + created + ':' + i);
+                    sstore.put({ type: data.signature.type, path, created, password: data.signature.password || '' }, 'signature:' + created + ':' + i);
                 });
                 stx.oncomplete = () => sdb.close();
                 stx.onerror = () => sdb.close();
@@ -4944,18 +5069,22 @@ self.onmessage = async (e) => {
 
             updateUI(status) {
                 const el = document.getElementById('security-status'), btn = document.getElementById('btn-security-apply'), input = document.getElementById('master-pass')
+                btn.innerText = 'REFRESH PASSWORD'
+                input.type = 'text'
+                input.placeholder = 'Current derived room password'
                 if (status === 'LOCKED') {
                     this.locked = true; this.ready = true
-                    el.innerHTML = "STATUS: <b style='color:red'>LOCKED</b>"; btn.innerText = 'UNLOCK'; input.value = ''
+                    el.innerHTML = "STATUS: <b style='color:red'>LOCKED</b>"
                 }
                 else if (status === 'DEFAULT') {
                     this.locked = false; this.ready = true
-                    el.innerHTML = "STATUS: <b style='color:orange'>UNSECURED (DEFAULT)</b>"; btn.innerText = 'UPDATE PASSWORD'; input.value = this.DEFAULT_PASS
+                    el.innerHTML = "STATUS: <b style='color:orange'>UNSECURED (DEFAULT)</b>"
                 }
                 else {
                     this.locked = false; this.ready = true
-                    el.innerHTML = "STATUS: <b style='color:#00e676'>SECURED</b>"; btn.innerText = 'UPDATE PASSWORD'; input.value = ''; input.placeholder = 'Type new password...'
+                    el.innerHTML = "STATUS: <b style='color:#00e676'>SECURED</b>"
                 }
+                if (window.app?.syncDebugPassword) window.app.syncDebugPassword()
             }
 
             async init() {
@@ -5020,11 +5149,7 @@ self.onmessage = async (e) => {
         }
 
         window.app = new EditorApp()
-        document.getElementById('btn-security-apply').addEventListener('click', async () => {
-            const pass = document.getElementById('master-pass').value
-            if (window.app.identity.locked) await window.app.identity.unlockWithPassword(pass)
-            else if (confirm('Update master password?')) await window.app.identity.updatePassword(pass)
-        })
+        document.getElementById('btn-security-apply').addEventListener('click', () => window.app?.syncDebugPassword())
     </script>
 
     <script type="module">
@@ -5032,6 +5157,7 @@ self.onmessage = async (e) => {
         document.getElementById('login-btn').addEventListener('click', async () => {
             const btnText = document.getElementById('login-btn').innerText
             if (btnText === 'LOGIN') {
+                if (window.app && !(await window.app.validateRoomLogin())) return
                 try { storageScope.setItem('lastSphereColor', document.getElementById('color-hex').innerText) } catch (e) { }
                 if (window.app && window.app.mesh) window.app.mesh.enableSync()
             } else if (btnText === 'JOIN') {
@@ -5482,7 +5608,7 @@ self.onmessage = async (e) => {
             }
         }
         function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const currentRots = state.interactionSignature.rotations ? state.interactionSignature.rotations.map(r => [...r]) : null; const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const originalRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) ? state.signaturePathsRotations[0].map(r => [...r]) : null; const ratio = comparePaths(originalPath, currentPath); const mergedPaths = state.signaturePaths.filter(path => path.length > 1), serializedCurrentPath = JSON.stringify(currentPath); if (currentPath.length > 1 && !mergedPaths.some(path => JSON.stringify(path) === serializedCurrentPath)) mergedPaths.push(currentPath); state.signaturePaths = mergedPaths; state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, rotations: originalPath.length > 1 ? originalRots : currentRots, practicePaths: state.signaturePaths.slice(originalPath.length > 1 ? 1 : 0).map(path => path.map(p => [...p])) }; state.practice.awaitingRedraw = false; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${Math.round(ratio * 100)}`; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.signaturePathsRotations = currentRots ? [currentRots] : []; state.interactionSignature = { type: 'drag', path: currentPath, rotations: currentRots, practicePaths: [] } } state.signatureHex = hex.replace('#', ''); if (selectedHandle) triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { if (state.selectedHandle) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(state.selectedHandle.pos, transformPos(state.selectedHandle.pos, state.sphere.rotation), state.selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false) } } } state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }
-        function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
+        function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (source === 'local' && window.app?.setPendingLoginSignature && state.interactionSignature?.path?.length) window.app.setPendingLoginSignature(hex, state.interactionSignature); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4 }
         function toggleFreeze() {
             const isZoomed = document.getElementById('dashboard-panel').classList.contains('active') ||
@@ -5828,4 +5954,3 @@ self.onmessage = async (e) => {
 </body>
 
 </html>
-
