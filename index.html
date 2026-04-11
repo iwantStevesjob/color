@@ -1549,9 +1549,14 @@
         </div>
     </div>
 
-    <div id="password-security-status" style="position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); text-align: center; font-family: 'Inter', sans-serif; z-index: 190; pointer-events: none; display: none; width: 90%; max-width: 500px;">
-        <div id="password-security-title" style="font-weight: 900; font-size: 1.3rem; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">PASSWORD NOT SECURE</div>
-        <div id="password-security-desc" style="font-size: 0.85rem; color: #888; text-transform: uppercase; line-height: 1.5; letter-spacing: 0.5px;">It would take 0.001 seconds to guess your password.</div>
+    <div id="password-security-status"
+        style="position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); text-align: center; font-family: 'Inter', sans-serif; z-index: 190; pointer-events: none; display: none; width: 90%; max-width: 500px;">
+        <div id="password-security-title"
+            style="font-weight: 900; font-size: 1.3rem; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">
+            PASSWORD NOT SECURE</div>
+        <div id="password-security-desc"
+            style="font-size: 0.85rem; color: #888; text-transform: uppercase; line-height: 1.5; letter-spacing: 0.5px;">
+            It would take 0.001 seconds to guess your password.</div>
     </div>
 
     <div id="tools">
@@ -2952,6 +2957,8 @@
                 this.pendingLoginHex = null
                 this.pendingLoginSignature = null
                 this.ownerLoginApproved = false
+                this.roomHasWrappedKeys = false
+                this.wrongPasswordState = false
                 this.minedForSession = false
                 this.miningInProgress = false
                 this.peeking = false
@@ -2994,6 +3001,7 @@
                     path: Array.isArray(signature.path) ? signature.path.map(point => [...point]) : [],
                     practicePaths: Array.isArray(signature.practicePaths) ? signature.practicePaths.map(path => path.map(point => [...point])) : [],
                     rotations: Array.isArray(signature.rotations) ? signature.rotations.map(rotation => [...rotation]) : null,
+                    clicks: Array.isArray(signature.clicks) ? signature.clicks.map(click => String(click)) : [],
                     password: signature.password || ''
                 }
             }
@@ -3009,8 +3017,9 @@
             getAttemptedRoomSignature(roomHex = this.roomId?.replace('color-', '')) {
                 const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
                 if (cleanHex && this.pendingLoginHex === cleanHex && this.pendingLoginSignature) return this.cloneSignature(this.pendingLoginSignature)
-                if (this.roomSignature) return null
-                return this.cloneSignature(window.state?.interactionSignature)
+                const currentSignature = this.cloneSignature(window.state?.interactionSignature)
+                if (currentSignature?.password || currentSignature?.path?.length || currentSignature?.clicks?.length) return currentSignature
+                return this.cloneSignature(this.roomSignature)
             }
 
             getRoomSignatureForSave(roomHex = this.roomId?.replace('color-', '')) {
@@ -3023,6 +3032,7 @@
                 const cleanHex = String(roomHex || '').replace('#', '').toUpperCase()
                 if (!cleanHex) return ''
                 if (signature?.password) return signature.password
+                if (Array.isArray(signature?.clicks) && signature.clicks.length) return 'FFFFFF' + signature.clicks.map(click => String(click || '').replace('#', '').toUpperCase()).join('')
                 if (!signature || signature.type === 'click') return 'FFFFFF' + cleanHex
                 const path = Array.isArray(signature.path) ? signature.path : []
                 if (!path.length) return 'FFFFFF' + cleanHex
@@ -3060,7 +3070,7 @@
             }
 
             roomNeedsLogin() {
-                return !this.isGuestScan && (!!this.roomSignature || (!this.roomExists && ((this.mesh?.getDiscoveredPeers?.().size || 0) === 0)))
+                return !this.isGuestScan && !this.ownerLoginApproved && (!!this.roomHasWrappedKeys || !!this.roomSignature || (!this.roomExists && ((this.mesh?.getDiscoveredPeers?.().size || 0) === 0)))
             }
 
             syncDebugPassword(roomHex = this.roomId?.replace('color-', '')) {
@@ -3069,7 +3079,7 @@
                 const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
                 const signature = cleanHex && this.pendingLoginHex === cleanHex && this.pendingLoginSignature ? this.pendingLoginSignature : this.roomSignature
                 input.type = 'text'
-                input.value = cleanHex && this.roomNeedsLogin() ? this.getRoomPassword(cleanHex, signature) : 'FFFFFF'
+                input.value = cleanHex && (this.roomNeedsLogin() || this.roomHasWrappedKeys) ? this.getRoomPassword(cleanHex, signature) : 'FFFFFF'
                 this.updatePasswordSecurityStatus()
             }
 
@@ -3165,14 +3175,42 @@
                 const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
                 if (!this.roomNeedsLogin()) return true
                 const attemptedSignature = this.getAttemptedRoomSignature(cleanHex)
-                if (!attemptedSignature?.path?.length) {
+                const attemptedPassword = attemptedSignature ? this.getRoomPassword(cleanHex, attemptedSignature) : ''
+                this.syncDebugPassword(cleanHex)
+                if (this.roomHasWrappedKeys) {
+                    if (attemptedPassword && await this.identity.unlockRoom(cleanHex, attemptedPassword, true)) {
+                        this.ownerLoginApproved = true
+                        this.wrongPasswordState = false
+                        return true
+                    }
+                    this.wrongPasswordState = true
+                    this.ui.roomStatus.textContent = 'WRONG PASSWORD'
+                    this.ui.roomStatus.style.color = 'red'
+                    this.ui.loginBtn.innerHTML = '<span>RETRY</span>'
+                    this.ui.peerCount.innerText = 'Retry required'
+                    this.updateStatus()
+                    return false
+                }
+                if (!this.roomSignature) {
+                    if (attemptedPassword) {
+                        this.ownerLoginApproved = true
+                        this.wrongPasswordState = false
+                        return true
+                    }
                     alert('No login signature was captured for this color.')
                     return false
                 }
-                this.syncDebugPassword(cleanHex)
-                if (!this.roomSignature) { this.ownerLoginApproved = true; return true }
-                if (this.getRoomPassword(cleanHex, attemptedSignature) === this.getRoomPassword(cleanHex, this.roomSignature)) { this.ownerLoginApproved = true; return true }
-                alert('Login signature does not match this color.')
+                if (attemptedPassword === this.getRoomPassword(cleanHex, this.roomSignature)) {
+                    this.ownerLoginApproved = true
+                    this.wrongPasswordState = false
+                    return true
+                }
+                this.wrongPasswordState = true
+                this.ui.roomStatus.textContent = 'WRONG PASSWORD'
+                this.ui.roomStatus.style.color = 'red'
+                this.ui.loginBtn.innerHTML = '<span>RETRY</span>'
+                this.ui.peerCount.innerText = 'Retry required'
+                this.updateStatus()
                 return false
             }
 
@@ -3454,7 +3492,7 @@
                 }
             }
 
-            enterRoomUI() {
+            async enterRoomUI() {
                 if (window.state) { window.state.landing.active = false; window.state.landing.showHandle = false }
                 if (this.ui.dashboardPanel.classList.contains('active')) return
 
@@ -3463,9 +3501,15 @@
 
                 const roomHex = this.roomId.replace('color-', '')
                 const roomSignature = this.getRoomSignatureForSave(roomHex)
-                if (roomSignature?.path?.length) roomSignature.password = this.getRoomPassword(roomHex, roomSignature)
+                const roomPassword = roomSignature ? this.getRoomPassword(roomHex, roomSignature) : ''
+                if (roomSignature?.path?.length) roomSignature.password = roomPassword
+                if (Array.isArray(roomSignature?.clicks) && roomSignature.clicks.length) for (const clickHex of roomSignature.clicks) await this.db._open(String(clickHex || '').replace('#', '').toLowerCase())
+                if (roomPassword) {
+                    await this.identity.ensureRoomSecurity(roomHex, roomPassword)
+                    this.roomHasWrappedKeys = await this.identity.roomHasWrappedKeys(roomHex)
+                }
 
-                if (this.ui.loginBtn.textContent === 'LOGIN' && !this.isGuestScan) {
+                if ((this.ui.loginBtn.textContent === 'LOGIN' || this.ownerLoginApproved) && !this.isGuestScan) {
                     this.user.color = '#' + roomHex
                     this.ui.userBadge.style.backgroundColor = this.user.color
                     localStorage.setItem('lastSphereColor', this.user.color)
@@ -3489,7 +3533,9 @@
                     this.db._open(roomHex)
                 }
                 this.roomExists = true
+                this.wrongPasswordState = false
                 this.syncDebugPassword(roomHex)
+                if (this.mesh?.broadcastIdentity) this.mesh.broadcastIdentity()
 
                 setTimeout(() => {
                     document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'
@@ -3576,7 +3622,10 @@
                 this.pendingNavPath = options.navPath || null
                 this.roomId = 'color-' + cleanHex
                 this.roomExists = false
+                this.roomHasWrappedKeys = false
                 this.roomSignature = null
+                this.ownerLoginApproved = false
+                this.wrongPasswordState = false
                 if (this.pendingLoginHex !== cleanHex) {
                     this.pendingLoginHex = null
                     this.pendingLoginSignature = null
@@ -3606,6 +3655,7 @@
                 this.isFresh = true
 
                 this.ui.loginBtn.classList.remove('hidden')
+                await this.identity.lockCurrentRoom()
                 await this.db._open()
                 if (window.state && !preserveSignatureState && window.state.signatureHex !== cleanHex) {
                     window.state.signatureHex = cleanHex
@@ -3624,9 +3674,11 @@
 
                 if (exists) {
                     this.ui.roomStatus.textContent = 'Loading...'
+                    this.roomHasWrappedKeys = await this.identity.roomHasWrappedKeys(cleanHex).catch(() => false)
                     const savedSignature = await this.db.getSignature(cleanHex).catch(() => null)
                     this.roomSignature = savedSignature ? this.cloneSignature(savedSignature) : null
                     this.syncDebugPassword(cleanHex)
+                    if (this.roomHasWrappedKeys) await this.validateRoomLogin(cleanHex)
                     if (!preserveSignatureState && window.state) {
                         const basePath = savedSignature?.path?.map(p => [...p]) || []
                         const practicePaths = (savedSignature?.practicePaths || []).map(path => path.map(p => [...p]))
@@ -3646,7 +3698,9 @@
                     const data = await this.db.getRange(cleanHex, centerIndex - 50, centerIndex + 50)
                     await this.renderFromLocalDB(data, centerIndex)
                     this.joinNetwork()
-                    if (options.skipAutoEnter) this.ui.roomStatus.textContent = 'COLOR AVAILABLE'
+                    if (this.ownerLoginApproved && this.roomHasWrappedKeys && window.state?.landing && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
+                    else if (this.ownerLoginApproved && this.roomHasWrappedKeys && window.enterRoomUI) window.enterRoomUI()
+                    else if (options.skipAutoEnter) this.ui.roomStatus.textContent = this.wrongPasswordState ? 'WRONG PASSWORD' : 'COLOR AVAILABLE'
                     else if (!options.skipAutoEnter && !this.roomNeedsLogin() && window.state?.landing && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
                     else if (!options.skipAutoEnter && !this.roomNeedsLogin() && window.enterRoomUI) window.enterRoomUI()
                 } else {
@@ -4012,7 +4066,7 @@
                         if (!matchPos) matchPos = [0, 0, 1]
                         const len = Math.sqrt(matchPos[0] * matchPos[0] + matchPos[1] * matchPos[1] + matchPos[2] * matchPos[2])
                         const norm = len > 0 ? [matchPos[0] / len, matchPos[1] / len, matchPos[2] / len] : [0, 0, 0]
-                        
+
                         if (typeof window.triggerLanding === 'function') {
                             window.triggerLanding(norm, matchPos, window.hexToRgbNormalized('#' + userHex), true, 'url')
                         } else if (window.connectAndPreview) {
@@ -4204,6 +4258,16 @@
                 const userHex = this.user.color.replace('#', '').toLowerCase()
                 const isFounder = cleanHex === userHex
                 const isSecureDirect = this.connectionMode === 'secure-direct'
+
+                if (this.wrongPasswordState) {
+                    this.ui.roomStatus.textContent = 'WRONG PASSWORD'
+                    this.ui.roomStatus.style.color = 'red'
+                    this.ui.peerCount.innerText = 'Retry required'
+                    this.ui.loginBtn.innerHTML = '<span>RETRY</span>'
+                    this.ui.loginBtn.classList.remove('hidden')
+                    this.ui.dot.classList.remove('on')
+                    return
+                }
 
                 if (isError && connectedPeers === 0) {
                     this.ui.roomStatus.textContent = 'TURN SERVER REQUIRED (NAT BLOCKED)'
@@ -4553,7 +4617,10 @@
                 this.connectionMode = 'tracked'
                 this.connectionSource = 'local'
                 this.roomExists = false
+                this.roomHasWrappedKeys = false
                 this.roomSignature = null
+                this.ownerLoginApproved = false
+                this.wrongPasswordState = false
                 this.syncDebugPassword()
 
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
@@ -4711,6 +4778,7 @@ let _peerKeys = {};
 let _encryptedBlob = null;
 let _locked = true;
 let _currentPassword = null;
+let _currentRoomHex = null;
 
 const DIFFICULTY_PREFIX = "0000"; 
 
@@ -4743,15 +4811,6 @@ async function isValidPeer(peerId, roomHex) {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     return hashHex.startsWith(DIFFICULTY_PREFIX);
-}
-
-function openKeyDB() {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open("sys_security", 2);
-        req.onupgradeneeded = e => { if (!e.target.result.objectStoreNames.contains("keys")) e.target.result.createObjectStore("keys"); };
-        req.onsuccess = e => resolve(e.target.result);
-        req.onerror = e => reject(e);
-    });
 }
 
 function openColorDB(hex = null) {
@@ -4794,17 +4853,44 @@ async function loadKeysToMemory(sigJWK, aesJWK, pubJWK) {
     _locked = false;
 }
 
-async function saveWrappedKeys(password, keysJwkObj, pubKeyJwk) {
+async function getWrappedKeys(roomHex) {
+    if (!roomHex) return null;
+    const db = await openColorDB();
+    if (!db.objectStoreNames.contains(roomHex)) {
+        db.close();
+        return null;
+    }
+    const result = await new Promise(resolve => {
+        const tx = db.transaction([roomHex], "readonly");
+        const req = tx.objectStore(roomHex).get("wrapped_keys");
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+    });
+    db.close();
+    return result;
+}
+
+async function saveWrappedKeys(roomHex, password, keysJwkObj, pubKeyJwk) {
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const wrapKey = await deriveKeyFromPass(password, salt);
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encryptedData = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, new TextEncoder().encode(JSON.stringify(keysJwkObj)));
     _encryptedBlob = { salt, iv, data: encryptedData, pubKey: pubKeyJwk };
-    const db = await openKeyDB();
-    const tx = db.transaction(["keys"], "readwrite");
-    tx.objectStore("keys").put(_encryptedBlob, "wrapped_keys");
+    _currentRoomHex = roomHex;
+    const db = await openColorDB(roomHex);
+    const tx = db.transaction([roomHex], "readwrite");
+    tx.objectStore(roomHex).put(_encryptedBlob, "wrapped_keys");
     await new Promise(r => tx.oncomplete = r);
     db.close(); 
+}
+
+function lockCurrentRoom() {
+    _keyPair = null;
+    _aesKey = null;
+    _encryptedBlob = null;
+    _locked = true;
+    _currentPassword = null;
+    _currentRoomHex = null;
 }
 
 async function encrypt(data) {
@@ -4838,39 +4924,25 @@ async function verify(key, content, signature) {
 }
 
 async function init() {
-    const db = await openKeyDB();
-    const tx = db.transaction(["keys"], "readwrite");
-    const req = tx.objectStore("keys").get("wrapped_keys");
-    await new Promise(r => tx.oncomplete = r);
-    const result = req.result;
-    db.close(); 
-
-    if (result) {
-        _encryptedBlob = result;
-        try { 
-            await unlock(DEFAULT_PASS); 
-            return "DEFAULT"; 
-        } catch(e) { 
-            return "LOCKED"; 
-        }
-    } else {
-        await generate(); 
-        return "DEFAULT";
-    }
+    lockCurrentRoom();
+    return "LOCKED";
 }
 
-async function generate() {
+async function generate(roomHex, password = DEFAULT_PASS) {
+    if (!roomHex) throw new Error("Room required");
     const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-521" }, true, ["sign", "verify"]);
     const kAes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
     const sigJWK = await crypto.subtle.exportKey("jwk", kSig.privateKey);
     const pubJWK = await crypto.subtle.exportKey("jwk", kSig.publicKey);
     const aesJWK = await crypto.subtle.exportKey("jwk", kAes);
-    await saveWrappedKeys(DEFAULT_PASS, { aes: aesJWK, sig: sigJWK }, pubJWK);
-    _currentPassword = DEFAULT_PASS;
+    await saveWrappedKeys(roomHex, password, { aes: aesJWK, sig: sigJWK }, pubJWK);
+    _currentPassword = password;
     await loadKeysToMemory(sigJWK, aesJWK, pubJWK);
+    return password === DEFAULT_PASS ? "DEFAULT" : "SECURE";
 }
 
-async function unlock(password) {
+async function unlock(roomHex, password) {
+    _encryptedBlob = await getWrappedKeys(roomHex);
     if (!_encryptedBlob) throw new Error("No keys");
     const wrapKey = await deriveKeyFromPass(password, _encryptedBlob.salt);
     try {
@@ -4878,16 +4950,30 @@ async function unlock(password) {
         const keysObj = JSON.parse(new TextDecoder().decode(decryptedBytes));
         await loadKeysToMemory(keysObj.sig, keysObj.aes, _encryptedBlob.pubKey);
         _currentPassword = password;
+        _currentRoomHex = roomHex;
     } catch(e) { throw new Error("Wrong Password"); }
 }
 
-async function updatePass(newPassword) {
+async function updatePass({ roomHex, newPassword }) {
      if (_locked) throw new Error("Locked");
      const oldWrapKey = await deriveKeyFromPass(_currentPassword, _encryptedBlob.salt);
      const bytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: _encryptedBlob.iv }, oldWrapKey, _encryptedBlob.data);
      const keysObj = JSON.parse(new TextDecoder().decode(bytes));
-     await saveWrappedKeys(newPassword, keysObj, _encryptedBlob.pubKey);
+     await saveWrappedKeys(roomHex || _currentRoomHex, newPassword, keysObj, _encryptedBlob.pubKey);
      _currentPassword = newPassword;
+}
+
+async function hasWrappedKeys(roomHex) {
+    return !!(await getWrappedKeys(roomHex));
+}
+
+async function ensureRoomSecurity(roomHex, password) {
+    if (!roomHex) throw new Error("Room required");
+    if (await hasWrappedKeys(roomHex)) {
+        await unlock(roomHex, password);
+        return "SECURE";
+    }
+    return generate(roomHex, password);
 }
 
 async function db_write_local({ roomHex, index, content, owner }) {
@@ -5070,9 +5156,11 @@ self.onmessage = async (e) => {
         let res;
         switch(action) {
             case 'init': res = await init(); break;
-            case 'unlock': await unlock(data); res = "SUCCESS"; break;
-            case 'generate': await generate(); res = "DEFAULT"; break;
+            case 'lock': lockCurrentRoom(); res = true; break;
+            case 'unlock': await unlock(data.roomHex, data.password); res = "SUCCESS"; break;
+            case 'generate': res = await generate(data.roomHex, data.password); break;
             case 'updatePassword': await updatePass(data); res = "SUCCESS"; break;
+            case 'ensure_room_security': res = await ensureRoomSecurity(data.roomHex, data.password); break;
             case 'getPublicKey': res = _locked ? null : await crypto.subtle.exportKey("jwk", _keyPair.publicKey); break;
             case 'storePeerKey': 
                 try {
@@ -5095,6 +5183,9 @@ self.onmessage = async (e) => {
                  const dbHas = await openColorDB();
                  res = dbHas.objectStoreNames.contains(data.roomHex);
                  dbHas.close();
+                 break;
+            case 'db_has_wrapped_keys':
+                 res = await hasWrappedKeys(data.roomHex);
                  break;
             case 'db_get_all_rooms':
                  const dbAll = await openColorDB();
@@ -5227,12 +5318,27 @@ self.onmessage = async (e) => {
                 } catch (e) { console.error(e) }
             }
 
-            async unlockWithPassword(password, silent = false) {
+            async lockCurrentRoom() {
+                const res = await this._call('lock')
+                this.updateUI('LOCKED')
+                return res
+            }
+
+            async roomHasWrappedKeys(roomHex) {
+                return this._call('db_has_wrapped_keys', { roomHex })
+            }
+
+            async ensureRoomSecurity(roomHex, password) {
+                const status = await this._call('ensure_room_security', { roomHex, password })
+                this.updateUI(password === this.DEFAULT_PASS ? 'DEFAULT' : status)
+                return true
+            }
+
+            async unlockRoom(roomHex, password, silent = false) {
                 try {
-                    const res = await this._call('unlock', password)
+                    const res = await this._call('unlock', { roomHex, password })
                     if (res === 'SUCCESS') {
                         this.updateUI(password === this.DEFAULT_PASS ? 'DEFAULT' : 'SECURE')
-                        if (window.app) window.app.connectAndPreview(window.location.hash || '#ffffff', { source: 'url' })
                         return true
                     }
                     return false
@@ -5242,10 +5348,14 @@ self.onmessage = async (e) => {
                 }
             }
 
+            async unlockWithPassword(password, silent = false) {
+                return this.unlockRoom(window.app?.roomId?.replace('color-', ''), password, silent)
+            }
+
             async updatePassword(newPassword) {
                 if (this.locked || !newPassword) return
                 try {
-                    await this._call('updatePassword', newPassword)
+                    await this._call('updatePassword', { roomHex: window.app?.roomId?.replace('color-', ''), newPassword })
                     this.updateUI('SECURE')
                 } catch (e) { alert('Update failed') }
             }
@@ -5289,7 +5399,10 @@ self.onmessage = async (e) => {
         let storageScope = window.localStorage
         document.getElementById('login-btn').addEventListener('click', async () => {
             const btnText = document.getElementById('login-btn').innerText
-            if (btnText === 'LOGIN') {
+            if (btnText === 'RETRY') {
+                if (window.app && window.app.logout) await window.app.logout()
+                return
+            } else if (btnText === 'LOGIN') {
                 if (window.app && !(await window.app.validateRoomLogin())) return
                 try { storageScope.setItem('lastSphereColor', document.getElementById('color-hex').innerText) } catch (e) { }
                 if (window.app && window.app.mesh) window.app.mesh.enableSync()
@@ -5423,7 +5536,7 @@ self.onmessage = async (e) => {
             document.getElementById('reset-btn').onclick = async () => {
                 if (confirm('Permanently wipe all local data?')) {
                     localStorage.clear()
-                    const DB_NAMES = ['color', 'sys_security']
+                    const DB_NAMES = ['color']
                     for (const name of DB_NAMES) {
                         try { window.indexedDB.deleteDatabase(name) } catch (e) { }
                     }
