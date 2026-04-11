@@ -3655,7 +3655,7 @@
                 this.isFresh = true
 
                 this.ui.loginBtn.classList.remove('hidden')
-                await this.identity.lockCurrentRoom()
+                if (source !== 'simple-qr') await this.identity.lockCurrentRoom()
                 await this.db._open()
                 if (window.state && !preserveSignatureState && window.state.signatureHex !== cleanHex) {
                     window.state.signatureHex = cleanHex
@@ -3674,6 +3674,7 @@
 
                 if (exists) {
                     this.ui.roomStatus.textContent = 'Loading...'
+                    this.ui.roomStatus.style.color = ''
                     this.roomHasWrappedKeys = await this.identity.roomHasWrappedKeys(cleanHex).catch(() => false)
                     const savedSignature = await this.db.getSignature(cleanHex).catch(() => null)
                     this.roomSignature = savedSignature ? this.cloneSignature(savedSignature) : null
@@ -3700,18 +3701,20 @@
                     this.joinNetwork()
                     if (this.ownerLoginApproved && this.roomHasWrappedKeys && window.state?.landing && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
                     else if (this.ownerLoginApproved && this.roomHasWrappedKeys && window.enterRoomUI) window.enterRoomUI()
-                    else if (options.skipAutoEnter) this.ui.roomStatus.textContent = this.wrongPasswordState ? 'WRONG PASSWORD' : 'COLOR AVAILABLE'
+                    else if (options.skipAutoEnter) this.ui.roomStatus.textContent = this.wrongPasswordState ? 'WRONG PASSWORD' : 'COLOR AVAILABLE', this.ui.roomStatus.style.color = this.wrongPasswordState ? 'red' : ''
                     else if (!options.skipAutoEnter && !this.roomNeedsLogin() && window.state?.landing && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
                     else if (!options.skipAutoEnter && !this.roomNeedsLogin() && window.enterRoomUI) window.enterRoomUI()
                 } else {
                     this.syncDebugPassword(cleanHex)
                     this.ui.roomStatus.textContent = options.source === 'url' ? 'Checking Network...' : 'COLOR AVAILABLE'
+                    this.ui.roomStatus.style.color = ''
                     this.joinNetwork()
 
                     setTimeout(() => {
                         const discoveredPeers = this.mesh?.getDiscoveredPeers()?.size || 0
                         if (discoveredPeers === 0 && this.ui.roomStatus.textContent === 'Checking Network...') {
                             this.ui.roomStatus.textContent = 'COLOR AVAILABLE'
+                            this.ui.roomStatus.style.color = ''
                         }
                     }, 8000)
                 }
@@ -4603,6 +4606,7 @@
                 this.peeking = false; this.halfPeekMode = null; this.setPanelState('closed'); this.updatePeekState(0)
                 this.ui.loginCard.classList.remove('visible'); this.ui.topNav.classList.remove('visible')
                 this.ui.hoverTrigger.style.display = 'none'; this.ui.loginBtn.classList.remove('hidden')
+                this.ui.roomStatus.style.color = ''
                 document.getElementById('color-hex').innerText = ''
                 window.history.replaceState(null, null, window.location.pathname.replace(/\/index\.html$/, '/'))
                 document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>'
@@ -4616,6 +4620,7 @@
                 this.pendingSecureSession = null
                 this.connectionMode = 'tracked'
                 this.connectionSource = 'local'
+                this.roomId = null
                 this.roomExists = false
                 this.roomHasWrappedKeys = false
                 this.roomSignature = null
@@ -4928,6 +4933,19 @@ async function init() {
     return "LOCKED";
 }
 
+async function generateSessionIdentity() {
+    const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-521" }, true, ["sign", "verify"]);
+    const kAes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const sigJWK = await crypto.subtle.exportKey("jwk", kSig.privateKey);
+    const pubJWK = await crypto.subtle.exportKey("jwk", kSig.publicKey);
+    const aesJWK = await crypto.subtle.exportKey("jwk", kAes);
+    _encryptedBlob = null;
+    _currentPassword = DEFAULT_PASS;
+    _currentRoomHex = null;
+    await loadKeysToMemory(sigJWK, aesJWK, pubJWK);
+    return "DEFAULT";
+}
+
 async function generate(roomHex, password = DEFAULT_PASS) {
     if (!roomHex) throw new Error("Room required");
     const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-521" }, true, ["sign", "verify"]);
@@ -4974,6 +4992,11 @@ async function ensureRoomSecurity(roomHex, password) {
         return "SECURE";
     }
     return generate(roomHex, password);
+}
+
+async function ensureSessionIdentity() {
+    if (!_locked && _keyPair && _aesKey) return "DEFAULT";
+    return generateSessionIdentity();
 }
 
 async function db_write_local({ roomHex, index, content, owner }) {
@@ -5157,6 +5180,7 @@ self.onmessage = async (e) => {
         switch(action) {
             case 'init': res = await init(); break;
             case 'lock': lockCurrentRoom(); res = true; break;
+            case 'ensure_session_identity': res = await ensureSessionIdentity(); break;
             case 'unlock': await unlock(data.roomHex, data.password); res = "SUCCESS"; break;
             case 'generate': res = await generate(data.roomHex, data.password); break;
             case 'updatePassword': await updatePass(data); res = "SUCCESS"; break;
@@ -5326,6 +5350,12 @@ self.onmessage = async (e) => {
 
             async roomHasWrappedKeys(roomHex) {
                 return this._call('db_has_wrapped_keys', { roomHex })
+            }
+
+            async ensureSessionIdentity() {
+                const status = await this._call('ensure_session_identity')
+                this.updateUI(status)
+                return true
             }
 
             async ensureRoomSecurity(roomHex, password) {
