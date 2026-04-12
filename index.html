@@ -6465,7 +6465,6 @@ self.onmessage = async (e) => {
                     keyboardContainer.classList.remove('keyboard-hidden')
                     closeBtn.classList.add('visible')
                 }
-                if (activeEditor === display) display.style.paddingBottom = '50vh'
                 requestAnimationFrame(keepCursorVisible)
                 requestAnimationFrame(settleLandscapeViewport)
             }
@@ -6474,7 +6473,6 @@ self.onmessage = async (e) => {
                 isKeyboardVisible = false
                 keyboardContainer.classList.add('keyboard-hidden')
                 closeBtn.classList.remove('visible')
-                display.style.paddingBottom = ''
                 if (blur) activeEditor?.blur?.()
             }
 
@@ -6620,7 +6618,7 @@ self.onmessage = async (e) => {
             }
 
             function handleInput(action) {
-                navigator.vibrate?.(10)
+                try { if (typeof navigator.vibrate === 'function') navigator.vibrate(10) } catch (e) {}
                 if (action === 'shift') {
                     isShifted = !isShifted
                     renderKeyboard()
@@ -6702,6 +6700,16 @@ self.onmessage = async (e) => {
                     showKeyboard()
                 })
             })
+
+            const handleOutsideClick = (e) => {
+                if (!isKeyboardVisible) return
+                if ([display, ...editors].some(ed => ed && ed.contains(e.target))) return
+                if (keyboardContainer.contains(e.target) || closeBtn.contains(e.target)) return
+                if (e.target.closest && e.target.closest('.editor-tools, #editor-tools, .my-line, .nav-item, .sub-tab')) hideKeyboard(true)
+                else hideKeyboard(true)
+            }
+            document.addEventListener('mousedown', handleOutsideClick)
+            document.addEventListener('touchstart', handleOutsideClick, { passive: true })
 
             closeBtn.addEventListener('click', e => {
                 e.preventDefault()
