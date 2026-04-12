@@ -6407,6 +6407,7 @@ self.onmessage = async (e) => {
             let isKeyboardVisible = false
             let maxHeight = window.innerHeight
             let scrollCheckFrame = 0
+            let lastTouchActivation = 0
 
             if (!isMobileKeyboard) return
 
@@ -6666,11 +6667,28 @@ self.onmessage = async (e) => {
             }
 
             ;[display, ...editors].forEach(editor => {
+                let touchStartX = 0
+                let touchStartY = 0
+                let didScrollTouch = false
                 editor.addEventListener('touchstart', e => {
+                    const touch = e.changedTouches?.[0]
+                    touchStartX = touch?.clientX ?? 0
+                    touchStartY = touch?.clientY ?? 0
+                    didScrollTouch = false
+                }, { passive: true })
+                editor.addEventListener('touchmove', e => {
+                    const touch = e.changedTouches?.[0]
+                    if (!touch) return
+                    if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) didScrollTouch = true
+                }, { passive: true })
+                editor.addEventListener('touchend', e => {
+                    if (didScrollTouch) return
                     e.preventDefault()
+                    lastTouchActivation = Date.now()
                     activateEditor(editor, e.changedTouches?.[0])
                 }, { passive: false })
                 editor.addEventListener('click', e => {
+                    if (Date.now() - lastTouchActivation < 350) return
                     e.preventDefault()
                     activateEditor(editor)
                 })
