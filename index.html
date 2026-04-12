@@ -4799,7 +4799,8 @@
                         range.collapse(true)
                         sel.removeAllRanges()
                         sel.addRange(range)
-                        this.ui.display.focus()
+                        if (window.__mobileKeyboardActivateDisplay) window.__mobileKeyboardActivateDisplay()
+                        else this.ui.display.focus()
                         this.currentLineId = domId
                         this.scheduleCursorSave()
 
@@ -6462,13 +6463,16 @@ self.onmessage = async (e) => {
                     keyboardContainer.classList.remove('keyboard-hidden')
                     closeBtn.classList.add('visible')
                 }
+                if (activeEditor === display) display.style.paddingBottom = '50vh'
                 requestAnimationFrame(keepCursorVisible)
+                requestAnimationFrame(settleLandscapeViewport)
             }
 
             function hideKeyboard(blur = true) {
                 isKeyboardVisible = false
                 keyboardContainer.classList.add('keyboard-hidden')
                 closeBtn.classList.remove('visible')
+                display.style.paddingBottom = ''
                 if (blur) activeEditor?.blur?.()
             }
 
@@ -6493,10 +6497,17 @@ self.onmessage = async (e) => {
                 return activeEditor?.closest?.('.settings-pane, .blocks-pane') || dashboardPanel
             }
 
+            function settleLandscapeViewport() {
+                if (!activeEditor || !window.matchMedia('(orientation: landscape)').matches) return
+                activeEditor.focus?.({ preventScroll: true })
+                window.scrollTo(0, 1)
+                requestAnimationFrame(keepCursorVisible)
+            }
+
             function isCursorVisible() {
                 const rect = getCursorRect()
                 if (!rect) return false
-                const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - 12
+                const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - (window.matchMedia('(orientation: landscape)').matches ? 28 : 12)
                 return rect.bottom > 0 && rect.top < window.innerHeight && rect.top >= 0 && rect.bottom <= keyboardTop
             }
 
@@ -6504,7 +6515,7 @@ self.onmessage = async (e) => {
                 if (!isKeyboardVisible || !activeEditor) return
                 const rect = getCursorRect()
                 if (!rect) return
-                const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - 12
+                const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - (window.matchMedia('(orientation: landscape)').matches ? 28 : 12)
                 const scrollContainer = getScrollContainer()
                 if (rect.bottom > keyboardTop) {
                     const delta = rect.bottom - keyboardTop + 16
@@ -6607,6 +6618,7 @@ self.onmessage = async (e) => {
             }
 
             function handleInput(action) {
+                navigator.vibrate?.(10)
                 if (action === 'shift') {
                     isShifted = !isShifted
                     renderKeyboard()
@@ -6636,11 +6648,20 @@ self.onmessage = async (e) => {
             function activateEditor(editor, touch) {
                 activeEditor = editor
                 if (editor === display) {
-                    display.focus({ preventScroll: true })
-                    setDisplaySelectionFromTouch(touch)
+                    if (touch) setDisplaySelectionFromTouch(touch)
+                    else ensureDisplaySelection()
                 } else {
-                    editor.focus({ preventScroll: true })
+                    if (editor.selectionStart == null || editor.selectionEnd == null) {
+                        const end = editor.value.length
+                        editor.setSelectionRange?.(end, end)
+                    }
                 }
+                showKeyboard()
+            }
+
+            window.__mobileKeyboardActivateDisplay = () => {
+                activeEditor = display
+                ensureDisplaySelection()
                 showKeyboard()
             }
 
@@ -6649,7 +6670,10 @@ self.onmessage = async (e) => {
                     e.preventDefault()
                     activateEditor(editor, e.changedTouches?.[0])
                 }, { passive: false })
-                editor.addEventListener('click', () => activateEditor(editor))
+                editor.addEventListener('click', e => {
+                    e.preventDefault()
+                    activateEditor(editor)
+                })
                 editor.addEventListener('focus', () => {
                     activeEditor = editor
                     showKeyboard()
@@ -6664,6 +6688,7 @@ self.onmessage = async (e) => {
             window.addEventListener('resize', () => {
                 if (window.innerHeight > maxHeight) maxHeight = window.innerHeight
                 if (isKeyboardVisible && window.innerHeight < maxHeight * 0.75 && document.activeElement === activeEditor) activeEditor.blur()
+                requestAnimationFrame(settleLandscapeViewport)
             })
 
             ;[chatContainer, dashboardPanel, window].filter(Boolean).forEach(target => target.addEventListener('scroll', scheduleKeyboardVisibilityCheck, { passive: true }))
