@@ -1565,7 +1565,8 @@
             <h4 style="margin: 0 0 5px 0; color: #ff4444;">🔒 Master Security</h4>
             <div id="security-status" style="font-size: 11px; margin-bottom: 8px; color: #aaa;">STATUS: <b>UNSECURED</b>
             </div>
-            <input type="text" id="master-pass" placeholder="Current derived room password" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off"
+            <input type="text" id="master-pass" placeholder="Current derived room password" inputmode="none"
+                autocomplete="off" autocorrect="off" autocapitalize="off"
                 style="width: 100%; background: #000; border: 1px solid #555; color: white; padding: 5px; margin-bottom: 5px;">
             <button id="btn-security-apply"
                 style="width: 100%; background: #444; border: 1px solid #666; color: white; cursor: pointer;">APPLY
@@ -1633,7 +1634,8 @@
                         id="peer-count">Disconnected</span></div>
             </div>
             <div id="chat-container">
-                <div id="display" contenteditable="true" spellcheck="false" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off"></div>
+                <div id="display" contenteditable="true" spellcheck="false" inputmode="none" autocomplete="off"
+                    autocorrect="off" autocapitalize="off"></div>
             </div>
             <div id="minimap"></div>
         </div>
@@ -1668,9 +1670,11 @@
                     </ol>
 
                     <label class="settings-label">Metered.ca App Name</label>
-                    <input type="text" id="turn-app-name" class="settings-input" placeholder="e.g. yourappname" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off">
+                    <input type="text" id="turn-app-name" class="settings-input" placeholder="e.g. yourappname"
+                        inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off">
                     <label class="settings-label">Metered.ca API Key</label>
-                    <input type="password" id="turn-api-key" class="settings-input" placeholder="e.g. at_xxx..." inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off">
+                    <input type="password" id="turn-api-key" class="settings-input" placeholder="e.g. at_xxx..."
+                        inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off">
                 </div>
             </div>
             <div id="tab-signatures" class="settings-pane">
@@ -2897,22 +2901,14 @@
 
                 this.room.onPeerJoin(async pid => {
                     console.log(`%c[P2P] Peer Joined: ${pid}`, 'color: cyan; font-weight: bold;')
-                    const jwk = await this.identity.getPublicKeyData()
-                    const token = window.app.user.proofToken || 'PENDING'
-
-                    this.rawSendId({
-                        color: window.app.user.color,
-                        pubKey: jwk,
-                        cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
-                        minedToken: token,
-                        qrSecret: this.outgoingQrSecret
-                    }, pid)
+                    await this.sendIdentity(pid)
 
                     this.emit('peer-join', pid)
                 })
 
                 onId(async (data, pid) => {
                     let isVerified = false
+                    const wasVerified = this.verifiedPeers.has(pid)
 
                     if (this.expectedQrSecret && data.qrSecret === this.expectedQrSecret) {
                         console.log(`%c[P2P] 🎟️ VIP Ticket Accepted for ${pid}`, 'color: gold; font-weight: bold;')
@@ -2935,6 +2931,7 @@
                         this.verifiedPeers.add(pid)
                         if (data.pubKey) await this.identity.storePeerKey(pid, data.pubKey)
                         this.emit('peer-identity', data, pid)
+                        if (!wasVerified) this.sendIdentity(pid).catch(() => { })
                     } else if (data.minedToken && data.minedToken !== 'PENDING') {
                         console.warn(`[P2P] ❌ Peer verification failed for ${pid}`)
                     }
@@ -2967,20 +2964,24 @@
                 this.room.onPeerLeave(p => this.emit('peer-leave', p))
             }
 
-            async broadcastIdentity() {
-                const token = window.app.user.proofToken
+            async sendIdentity(targetPeerId = null) {
                 const jwk = await this.identity.getPublicKeyData()
-                if (token && jwk) {
-                    console.log(`%c[P2P] 📡 Broadcasting NEW Identity to all peers`, 'color: orange;')
-                    this.rawSendId({
-                        color: window.app.user.color,
-                        pubKey: jwk,
-                        cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
-                        minedToken: token,
-                        qrSecret: this.outgoingQrSecret
-                    })
-                }
+                if (!jwk) return
+                this.rawSendId({
+                    color: window.app.user.color,
+                    pubKey: jwk,
+                    cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
+                    minedToken: window.app.user.proofToken || 'PENDING',
+                    qrSecret: this.outgoingQrSecret
+                }, targetPeerId)
             }
+
+            async broadcastIdentity() {
+                const hasProof = !!window.app.user.proofToken
+                console.log(`[P2P] ${hasProof ? 'Broadcasting NEW Identity to all peers' : 'Broadcasting Identity to all peers'}`, 'color: orange;')
+                await this.sendIdentity()
+            }
+
 
             async broadcastFragment(fragMap, targetPeerId = null) {
                 if (targetPeerId) {
@@ -3072,7 +3073,7 @@
                 this.ui = Object.fromEntries(['display', 'chat-container', 'minimap', 'peer-count', 'tools', 'room-status', 'login-btn', 'user-badge', 'login-card', 'dashboard-panel', 'hover-trigger', 'top-nav', 'sub-nav-layer'].map(id => [id.replace(/-./g, x => x[1].toUpperCase()), document.getElementById(id)]))
                 this.ui.dot = document.querySelector('.dot')
 
-                let savedColor = localStorage.getItem('lastSphereColor') || '#ffffff'
+                let savedColor = localStorage.getItem('lastSphereColor') || '#ffffff'; if (!localStorage.getItem('lastSphereColor')) localStorage.setItem('lastSphereColor', savedColor)
                 this.user = { id: 'user_' + savedColor.replace('#', ''), color: savedColor }
 
                 this.visitedRooms = []
@@ -3092,6 +3093,8 @@
                 this.pendingManualOffer = null
                 this.bufferCheckPending = false
                 this.pendingFocusLine = undefined
+                this.syncRetryTimeout = null
+                this.syncRetryAttempts = 0
                 this.pendingLoginHex = null
                 this.pendingLoginSignature = null
                 this.ownerLoginApproved = false
@@ -3208,7 +3211,7 @@
             }
 
             roomNeedsLogin() {
-                return !this.isGuestScan && !this.ownerLoginApproved && (!!this.roomHasWrappedKeys || !!this.roomSignature || (!this.roomExists && ((this.mesh?.getDiscoveredPeers?.().size || 0) === 0)))
+                return !this.isGuestScan && !this.ownerLoginApproved && (!!this.roomHasWrappedKeys || !!this.roomSignature || (!this.roomExists && Math.max(this.mesh?.getDiscoveredPeers?.().size || 0, Object.values(this.mesh?.getPeers?.() || {}).filter(p => p.dc?.readyState === 'open').length) === 0))
             }
 
             syncDebugPassword(roomHex = this.roomId?.replace('color-', '')) {
@@ -3503,7 +3506,21 @@
                     missingKeys.push(roomHex + i)
                 }
 
-                this.mesh.requestSync(missingKeys, pid)
+                clearTimeout(this.syncRetryTimeout)
+                this.syncRetryAttempts = 0
+
+                const requestSync = () => {
+                    if (!this.mesh || !this.roomId || this.roomId.replace('color-', '') !== roomHex) return
+                    this.mesh.requestSync(missingKeys, pid)
+                    if (this.hasRenderedContent() || this.syncRetryAttempts >= 5) {
+                        this.syncRetryTimeout = null
+                        return
+                    }
+                    this.syncRetryAttempts++
+                    this.syncRetryTimeout = setTimeout(requestSync, 700)
+                }
+
+                requestSync()
             }
 
             clearStatusInterval() {
@@ -3770,7 +3787,7 @@
                 }
                 this.connectionSource = source
                 this.isGuestScan = this.isQrConnectionSource(source)
-                this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff'
+                this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff'; if (!localStorage.getItem('lastSphereColor')) localStorage.setItem('lastSphereColor', this.user.color)
                 this.ui.userBadge.style.backgroundColor = this.user.color
                 this.ui.userBadge.setAttribute('data-hex', this.user.color.toUpperCase())
                 this.user.id = 'user_' + this.user.color.replace('#', '')
@@ -3783,6 +3800,9 @@
                 this.clearStatusInterval()
                 this.currentLineId = null
                 this.pendingFocusLine = undefined
+                clearTimeout(this.syncRetryTimeout)
+                this.syncRetryTimeout = null
+                this.syncRetryAttempts = 0
                 this.connectionMode = this.pendingSecureSession ? 'secure-direct' : 'tracked'
 
                 if (this.mesh) { this.mesh.leave(); this.mesh = null }
@@ -3794,6 +3814,7 @@
 
                 this.ui.loginBtn.classList.remove('hidden')
                 if (source !== 'simple-qr') await this.identity.lockCurrentRoom()
+                await this.identity.ensureSessionIdentity()
                 await this.db._open()
                 if (window.state && !preserveSignatureState && window.state.signatureHex !== cleanHex) {
                     window.state.signatureHex = cleanHex
@@ -3858,6 +3879,7 @@
                 }
 
                 if (this.requiresMiningForCurrentConnection()) {
+                    if (this.mesh) this.mesh.enableSync()
                     this.startMining()
                 } else {
                     if (this.mesh) this.mesh.enableSync()
@@ -3994,6 +4016,11 @@
                     const isEmpty = !newContent || newContent.trim() === '' || newContent === '<br>'
                     const amOwner = (newOwner === myHex)
                     el.contentEditable = (isEmpty || amOwner) ? 'true' : 'false'
+                    if (!isEmpty) {
+                        clearTimeout(this.syncRetryTimeout)
+                        this.syncRetryTimeout = null
+                        this.syncRetryAttempts = 0
+                    }
                 }
 
                 if (this.pendingFocusLine !== undefined && index === this.pendingFocusLine) {
@@ -4395,6 +4422,7 @@
                 if (!this.mesh) return
                 const discoveredPeers = this.mesh.getDiscoveredPeers()?.size || 0
                 const connectedPeers = Object.values(this.mesh.getPeers()).filter(p => p.dc?.readyState === 'open').length
+                const onlinePeers = Math.max(discoveredPeers, connectedPeers)
                 const cleanHex = this.roomId.replace('color-', '').toLowerCase()
                 const userHex = this.user.color.replace('#', '').toLowerCase()
                 const isFounder = cleanHex === userHex
@@ -4418,10 +4446,10 @@
                     return
                 }
 
-                if (discoveredPeers > 0) {
+                if (onlinePeers > 0) {
                     if (this.requiresMiningForCurrentConnection() && !this.user.proofToken && !isFounder) {
                         this.startMining()
-                        this.ui.roomStatus.textContent = `${discoveredPeers} PEER${discoveredPeers > 1 ? 'S' : ''} ONLINE`
+                        this.ui.roomStatus.textContent = `${onlinePeers} PEER${onlinePeers > 1 ? 'S' : ''} ONLINE`
                         this.ui.roomStatus.style.color = ''
                         this.ui.peerCount.innerText = 'Generating Proof...'
                         this.ui.loginBtn.innerHTML = "<span style='font-size:0.7rem'>VERIFYING...</span>"
@@ -4432,7 +4460,7 @@
                         if (!this.ui.dashboardPanel.classList.contains('active')) {
                             this.ui.loginBtn.classList.remove('hidden')
                         }
-                        this.ui.roomStatus.textContent = `${discoveredPeers} PEER${discoveredPeers > 1 ? 'S' : ''} ONLINE`
+                        this.ui.roomStatus.textContent = `${onlinePeers} PEER${onlinePeers > 1 ? 'S' : ''} ONLINE`
                         this.ui.roomStatus.style.color = ''
                         this.ui.peerCount.innerText = connectedPeers > 0 ? `${connectedPeers} connected` : `Ready to join...`
                         this.ui.dot.classList.add('on')
@@ -4751,6 +4779,9 @@
                 if (this.mesh) { this.mesh.leave(); this.mesh = null }
                 this.ui.display.innerHTML = ''; this.ui.minimap.innerHTML = ''; this.activeLocks = {}
                 this.currentLineId = null
+                clearTimeout(this.syncRetryTimeout)
+                this.syncRetryTimeout = null
+                this.syncRetryAttempts = 0
                 this.pendingManualOffer = null
                 this.pendingVipTicket = null
                 this.pendingLoginHex = null
@@ -6356,8 +6387,8 @@ self.onmessage = async (e) => {
         }
         init().catch(error => console.error('[Sphere] init failed', error))
         window.updateVisitedFromDB = async function () { const rooms = await (new window.ColorDB()).getAllRooms(); state.historyHandles = []; if (rooms?.length) { rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }) }) } }
-        window.addEventListener('message', e => { if (e.data === 'getSphereColor') e.source.postMessage(storageScope.getItem('lastSphereColor') || '#ff0000', e.origin); if (e.data?.type === 'handle-ready') { const hex = e.data.hex, pos = findPositionFromColor(hex); if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: e.data.count }); const d = document.createElement('div'); d.className = 'debug-room-item ' + (e.data.count > 0 ? 'active' : ''); d.innerHTML = `<span>${hex}</span> <span class="count">${e.data.count} peer(s)</span>`; document.getElementById('debug-rooms').appendChild(d) } } })
-        async function initStorageAccess() { if (window.self === window.top) return; const triggerZoomToColor = hexColor => { const matchPos = findPositionFromColor(hexColor); if (matchPos) { if (!document.body.classList.contains('light-mode')) { document.body.classList.add('light-mode') } triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true); const checkLandingComplete = () => { if (state.landing.progress >= 1) { window.parent.postMessage({ type: 'zoom-done', color: hexColor }, '*') } else if (state.landing.active) { requestAnimationFrame(checkLandingComplete) } }; requestAnimationFrame(checkLandingComplete) } }; const access = async h => { try { if (h?.localStorage) storageScope = h.localStorage; const c = storageScope.getItem('lastSphereColor'); if (c) { window.parent.postMessage(c, '*'); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); document.body.style.backgroundColor = c; triggerZoomToColor(c) } else { window.parent.postMessage({ type: 'no-color' }, '*'); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove() } } catch (e) { } }; try { if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true })) } catch (e) { access(null) } else { const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }); const b = document.createElement('button'); b.innerText = 'LOGIN'; Object.assign(b.style, { padding: '12px 24px', fontSize: '16px', cursor: 'pointer', background: '#000', color: '#fff', border: 'none', borderRadius: '8px' }); o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true })) } catch (e) { o.innerHTML = 'Access Denied' } } } } catch (e) { } }
+        window.addEventListener('message', e => { if (e.data === 'getSphereColor') e.source.postMessage(storageScope.getItem('lastSphereColor') || '#ffffff', e.origin); if (e.data?.type === 'handle-ready') { const hex = e.data.hex, pos = findPositionFromColor(hex); if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: e.data.count }); const d = document.createElement('div'); d.className = 'debug-room-item ' + (e.data.count > 0 ? 'active' : ''); d.innerHTML = `<span>${hex}</span> <span class="count">${e.data.count} peer(s)</span>`; document.getElementById('debug-rooms').appendChild(d) } } })
+        async function initStorageAccess() { if (window.self === window.top) return; const triggerZoomToColor = hexColor => { const matchPos = findPositionFromColor(hexColor); if (matchPos) { if (!document.body.classList.contains('light-mode')) { document.body.classList.add('light-mode') } triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true); const checkLandingComplete = () => { if (state.landing.progress >= 1) { window.parent.postMessage({ type: 'zoom-done', color: hexColor }, '*') } else if (state.landing.active) { requestAnimationFrame(checkLandingComplete) } }; requestAnimationFrame(checkLandingComplete) } }; const access = async h => { try { if (h?.localStorage) storageScope = h.localStorage; const c = storageScope.getItem('lastSphereColor') || '#ffffff'; if (!storageScope.getItem('lastSphereColor')) storageScope.setItem('lastSphereColor', c); window.parent.postMessage(c, '*'); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); document.body.style.backgroundColor = c; triggerZoomToColor(c) } catch (e) { } }; try { if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true })) } catch (e) { access(null) } else { const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }); const b = document.createElement('button'); b.innerText = 'LOGIN'; Object.assign(b.style, { padding: '12px 24px', fontSize: '16px', cursor: 'pointer', background: '#000', color: '#fff', border: 'none', borderRadius: '8px' }); o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true })) } catch (e) { o.innerHTML = 'Access Denied' } } } } catch (e) { } }
         initStorageAccess()
 
         const turnAppNameEl = document.getElementById('turn-app-name')
@@ -6380,353 +6411,353 @@ self.onmessage = async (e) => {
         <div id="keys-wrapper"></div>
     </div>
     <script>
-        (() => {
-            const layout = [
-                { left: ['q', 'w', 'e', 'r', 't'], right: ['y', 'u', 'i', 'o', 'p'] },
-                { left: ['a', 's', 'd', 'f', 'g'], right: ['h', 'j', 'k', 'l'] },
-                { left: ['shift', 'z', 'x', 'c', 'v'], right: ['b', 'n', 'm', 'backspace'] },
-                { left: ['123', ','], right: ['.', 'return'], space: true }
-            ]
-            const symbolLayout = [
-                { left: ['1', '2', '3', '4', '5'], right: ['6', '7', '8', '9', '0'] },
-                { left: ['@', '#', '$', '&', '*'], right: ['(', ')', '-', '+', '='] },
-                { left: ['abc', '%', '"', '\'', ':'], right: [';', '/', '!', '?', 'backspace'] },
-                { left: ['abc', ','], right: ['.', 'return'], space: true }
-            ]
-            const display = document.getElementById('display')
-            const keyboardContainer = document.getElementById('keyboard-container')
-            const keysWrapper = document.getElementById('keys-wrapper')
-            const closeBtn = document.getElementById('close-keyboard')
-            const chatContainer = document.getElementById('chat-container')
-            const dashboardPanel = document.getElementById('dashboard-panel')
-            const editors = ['master-pass', 'turn-app-name', 'turn-api-key'].map(id => document.getElementById(id)).filter(Boolean)
-            const isMobileKeyboard = window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-            let activeEditor = null
-            let isShifted = false
-            let isSymbolMode = false
-            let isKeyboardVisible = false
-            let maxHeight = window.innerHeight
-            let scrollCheckFrame = 0
-            let lastTouchActivation = 0
+            (() => {
+                const layout = [
+                    { left: ['q', 'w', 'e', 'r', 't'], right: ['y', 'u', 'i', 'o', 'p'] },
+                    { left: ['a', 's', 'd', 'f', 'g'], right: ['h', 'j', 'k', 'l'] },
+                    { left: ['shift', 'z', 'x', 'c', 'v'], right: ['b', 'n', 'm', 'backspace'] },
+                    { left: ['123', ','], right: ['.', 'return'], space: true }
+                ]
+                const symbolLayout = [
+                    { left: ['1', '2', '3', '4', '5'], right: ['6', '7', '8', '9', '0'] },
+                    { left: ['@', '#', '$', '&', '*'], right: ['(', ')', '-', '+', '='] },
+                    { left: ['abc', '%', '"', '\'', ':'], right: [';', '/', '!', '?', 'backspace'] },
+                    { left: ['abc', ','], right: ['.', 'return'], space: true }
+                ]
+                const display = document.getElementById('display')
+                const keyboardContainer = document.getElementById('keyboard-container')
+                const keysWrapper = document.getElementById('keys-wrapper')
+                const closeBtn = document.getElementById('close-keyboard')
+                const chatContainer = document.getElementById('chat-container')
+                const dashboardPanel = document.getElementById('dashboard-panel')
+                const editors = ['master-pass', 'turn-app-name', 'turn-api-key'].map(id => document.getElementById(id)).filter(Boolean)
+                const isMobileKeyboard = window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                let activeEditor = null
+                let isShifted = false
+                let isSymbolMode = false
+                let isKeyboardVisible = false
+                let maxHeight = window.innerHeight
+                let scrollCheckFrame = 0
+                let lastTouchActivation = 0
 
-            if (!isMobileKeyboard) return
+                if (!isMobileKeyboard) return
 
-            function renderKeyboard() {
-                keysWrapper.innerHTML = ''
-                ;(isSymbolMode ? symbolLayout : layout).forEach(row => {
-                    const rowDiv = document.createElement('div')
-                    rowDiv.className = 'key-row'
-                    row.left.forEach(key => rowDiv.appendChild(createKey(key)))
-                    if (row.space) rowDiv.appendChild(createKey('space', 'key-space'))
-                    const spacer = document.createElement('div')
-                    spacer.className = 'split-spacer'
-                    rowDiv.appendChild(spacer)
-                    if (row.space) rowDiv.appendChild(createKey('space', 'key-space'))
-                    row.right.forEach(key => rowDiv.appendChild(createKey(key)))
-                    keysWrapper.appendChild(rowDiv)
-                })
-            }
-
-            function createKey(action, extraClass = '') {
-                const label = action === 'backspace' ? 'Bksp' : action === 'shift' ? (isShifted ? 'Shift On' : 'Shift') : action === 'return' ? 'Enter' : action === '123' ? '?123' : action === 'abc' ? 'ABC' : action === 'space' ? '' : (!isSymbolMode && action.length === 1 && isShifted ? action.toUpperCase() : action)
-                const key = document.createElement('div')
-                key.className = `key${extraClass ? ` ${extraClass}` : ''}${['backspace', 'shift', 'return', '123', 'abc'].includes(action) ? ' key-special' : ''}`
-                key.textContent = label
-                if (action.length === 1 && action !== ' ') {
-                    const popup = document.createElement('div')
-                    popup.className = 'key-popup'
-                    popup.textContent = label
-                    key.appendChild(popup)
+                function renderKeyboard() {
+                    keysWrapper.innerHTML = ''
+                        ; (isSymbolMode ? symbolLayout : layout).forEach(row => {
+                            const rowDiv = document.createElement('div')
+                            rowDiv.className = 'key-row'
+                            row.left.forEach(key => rowDiv.appendChild(createKey(key)))
+                            if (row.space) rowDiv.appendChild(createKey('space', 'key-space'))
+                            const spacer = document.createElement('div')
+                            spacer.className = 'split-spacer'
+                            rowDiv.appendChild(spacer)
+                            if (row.space) rowDiv.appendChild(createKey('space', 'key-space'))
+                            row.right.forEach(key => rowDiv.appendChild(createKey(key)))
+                            keysWrapper.appendChild(rowDiv)
+                        })
                 }
-                const press = e => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    key.classList.add('active-key')
-                    handleInput(action)
-                }
-                key.addEventListener('touchstart', press, { passive: false })
-                key.addEventListener('touchend', e => {
-                    e.preventDefault()
-                    key.classList.remove('active-key')
-                })
-                key.addEventListener('mousedown', e => {
-                    e.preventDefault()
-                    handleInput(action)
-                    key.classList.add('active-key')
-                    setTimeout(() => key.classList.remove('active-key'), 100)
-                })
-                return key
-            }
 
-            function showKeyboard() {
-                if (window.app?.appState?.session !== 'joined') return
-                if (!isKeyboardVisible) {
-                    isKeyboardVisible = true
-                    keyboardContainer.classList.remove('keyboard-hidden')
-                    closeBtn.classList.add('visible')
-                }
-                requestAnimationFrame(keepCursorVisible)
-                requestAnimationFrame(settleLandscapeViewport)
-            }
-
-            function hideKeyboard(blur = true) {
-                isKeyboardVisible = false
-                keyboardContainer.classList.add('keyboard-hidden')
-                closeBtn.classList.remove('visible')
-                if (blur) activeEditor?.blur?.()
-            }
-
-            function getDisplayCaretRect() {
-                const selection = window.getSelection()
-                if (!selection.rangeCount || !display.contains(selection.anchorNode)) return null
-                const range = selection.getRangeAt(0).cloneRange()
-                range.collapse(true)
-                const rect = range.getClientRects()[0] || range.getBoundingClientRect()
-                if (rect && (rect.width || rect.height)) return rect
-                const line = (selection.anchorNode.nodeType === 3 ? selection.anchorNode.parentNode : selection.anchorNode).closest?.('.editor-line')
-                return line?.getBoundingClientRect() || null
-            }
-
-            function getCursorRect() {
-                if (!activeEditor) return null
-                return activeEditor === display ? getDisplayCaretRect() : activeEditor.getBoundingClientRect()
-            }
-
-            function getScrollContainer() {
-                if (activeEditor === display) return chatContainer
-                return activeEditor?.closest?.('.settings-pane, .blocks-pane') || dashboardPanel
-            }
-
-            function settleLandscapeViewport() {
-                if (!activeEditor || !window.matchMedia('(orientation: landscape)').matches) return
-                activeEditor.focus?.({ preventScroll: true })
-                window.scrollTo(0, 1)
-                requestAnimationFrame(keepCursorVisible)
-            }
-
-            function isCursorVisible() {
-                const rect = getCursorRect()
-                if (!rect) return false
-                const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - (window.matchMedia('(orientation: landscape)').matches ? 28 : 12)
-                return rect.bottom > 0 && rect.top < window.innerHeight && rect.top >= 0 && rect.bottom <= keyboardTop
-            }
-
-            function keepCursorVisible() {
-                if (!isKeyboardVisible || !activeEditor) return
-                const rect = getCursorRect()
-                if (!rect) return
-                const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - (window.matchMedia('(orientation: landscape)').matches ? 28 : 12)
-                const scrollContainer = getScrollContainer()
-                if (rect.bottom > keyboardTop) {
-                    const delta = rect.bottom - keyboardTop + 16
-                    if (scrollContainer && typeof scrollContainer.scrollTop === 'number') scrollContainer.scrollTop += delta
-                    else window.scrollBy(0, delta)
-                } else if (rect.top < 12) {
-                    const delta = rect.top - 12
-                    if (scrollContainer && typeof scrollContainer.scrollTop === 'number') scrollContainer.scrollTop += delta
-                    else window.scrollBy(0, delta)
-                }
-            }
-
-            function scheduleKeyboardVisibilityCheck() {
-                cancelAnimationFrame(scrollCheckFrame)
-                scrollCheckFrame = requestAnimationFrame(() => {
-                    if (isKeyboardVisible && activeEditor && !isCursorVisible()) hideKeyboard(false)
-                })
-            }
-
-            function setDisplaySelectionFromTouch(touch) {
-                if (!touch) return
-                let range = null
-                if (document.caretRangeFromPoint) {
-                    range = document.caretRangeFromPoint(touch.clientX, touch.clientY)
-                } else if (document.caretPositionFromPoint) {
-                    const pos = document.caretPositionFromPoint(touch.clientX, touch.clientY)
-                    if (pos) {
-                        range = document.createRange()
-                        range.setStart(pos.offsetNode, pos.offset)
-                        range.collapse(true)
+                function createKey(action, extraClass = '') {
+                    const label = action === 'backspace' ? 'Bksp' : action === 'shift' ? (isShifted ? 'Shift On' : 'Shift') : action === 'return' ? 'Enter' : action === '123' ? '?123' : action === 'abc' ? 'ABC' : action === 'space' ? '' : (!isSymbolMode && action.length === 1 && isShifted ? action.toUpperCase() : action)
+                    const key = document.createElement('div')
+                    key.className = `key${extraClass ? ` ${extraClass}` : ''}${['backspace', 'shift', 'return', '123', 'abc'].includes(action) ? ' key-special' : ''}`
+                    key.textContent = label
+                    if (action.length === 1 && action !== ' ') {
+                        const popup = document.createElement('div')
+                        popup.className = 'key-popup'
+                        popup.textContent = label
+                        key.appendChild(popup)
                     }
+                    const press = e => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        key.classList.add('active-key')
+                        handleInput(action)
+                    }
+                    key.addEventListener('touchstart', press, { passive: false })
+                    key.addEventListener('touchend', e => {
+                        e.preventDefault()
+                        key.classList.remove('active-key')
+                    })
+                    key.addEventListener('mousedown', e => {
+                        e.preventDefault()
+                        handleInput(action)
+                        key.classList.add('active-key')
+                        setTimeout(() => key.classList.remove('active-key'), 100)
+                    })
+                    return key
                 }
-                if (range && display.contains(range.startContainer)) {
+
+                function showKeyboard() {
+                    if (window.app?.appState?.session !== 'joined') return
+                    if (!isKeyboardVisible) {
+                        isKeyboardVisible = true
+                        keyboardContainer.classList.remove('keyboard-hidden')
+                        closeBtn.classList.add('visible')
+                    }
+                    requestAnimationFrame(keepCursorVisible)
+                    requestAnimationFrame(settleLandscapeViewport)
+                }
+
+                function hideKeyboard(blur = true) {
+                    isKeyboardVisible = false
+                    keyboardContainer.classList.add('keyboard-hidden')
+                    closeBtn.classList.remove('visible')
+                    if (blur) activeEditor?.blur?.()
+                }
+
+                function getDisplayCaretRect() {
                     const selection = window.getSelection()
-                    selection.removeAllRanges()
-                    selection.addRange(range)
+                    if (!selection.rangeCount || !display.contains(selection.anchorNode)) return null
+                    const range = selection.getRangeAt(0).cloneRange()
+                    range.collapse(true)
+                    const rect = range.getClientRects()[0] || range.getBoundingClientRect()
+                    if (rect && (rect.width || rect.height)) return rect
+                    const line = (selection.anchorNode.nodeType === 3 ? selection.anchorNode.parentNode : selection.anchorNode).closest?.('.editor-line')
+                    return line?.getBoundingClientRect() || null
                 }
-            }
 
-            function ensureDisplaySelection() {
-                const selection = window.getSelection()
-                if (selection.rangeCount && display.contains(selection.anchorNode)) return selection
-                const target = display.querySelector('.my-line') || display.lastElementChild || display
-                const range = document.createRange()
-                range.selectNodeContents(target)
-                range.collapse(false)
-                selection.removeAllRanges()
-                selection.addRange(range)
-                return selection
-            }
-
-            function mutateInput(editor, text, isBackspace = false) {
-                editor.focus({ preventScroll: true })
-                if (editor.selectionStart == null || editor.selectionEnd == null) {
-                    const end = editor.value.length
-                    editor.setSelectionRange(end, end)
+                function getCursorRect() {
+                    if (!activeEditor) return null
+                    return activeEditor === display ? getDisplayCaretRect() : activeEditor.getBoundingClientRect()
                 }
-                const start = editor.selectionStart
-                const end = editor.selectionEnd
-                if (isBackspace) {
-                    if (start === end && start === 0) return
-                    editor.setRangeText('', start === end ? start - 1 : start, end, 'end')
-                } else {
-                    editor.setRangeText(text, start, end, 'end')
-                }
-                editor.dispatchEvent(new Event('input', { bubbles: true }))
-            }
 
-            function handleDisplayInput(action) {
-                const selection = ensureDisplaySelection()
-                if (!selection.rangeCount) return
-                if (action === 'backspace') {
-                    const range = selection.getRangeAt(0)
-                    const anchor = selection.anchorNode
-                    const currentLine = anchor && (anchor.nodeType === 3 ? anchor.parentNode : anchor).closest?.('.editor-line')
-                    if (currentLine) {
-                        const isAtStart = range.collapsed && range.startOffset === 0 && (anchor === currentLine || anchor === currentLine.firstChild)
-                        const prevLine = currentLine.previousElementSibling
-                        if (isAtStart && prevLine && prevLine.isContentEditable === false) return
+                function getScrollContainer() {
+                    if (activeEditor === display) return chatContainer
+                    return activeEditor?.closest?.('.settings-pane, .blocks-pane') || dashboardPanel
+                }
+
+                function settleLandscapeViewport() {
+                    if (!activeEditor || !window.matchMedia('(orientation: landscape)').matches) return
+                    activeEditor.focus?.({ preventScroll: true })
+                    window.scrollTo(0, 1)
+                    requestAnimationFrame(keepCursorVisible)
+                }
+
+                function isCursorVisible() {
+                    const rect = getCursorRect()
+                    if (!rect) return false
+                    const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - (window.matchMedia('(orientation: landscape)').matches ? 28 : 12)
+                    return rect.bottom > 0 && rect.top < window.innerHeight && rect.top >= 0 && rect.bottom <= keyboardTop
+                }
+
+                function keepCursorVisible() {
+                    if (!isKeyboardVisible || !activeEditor) return
+                    const rect = getCursorRect()
+                    if (!rect) return
+                    const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - (window.matchMedia('(orientation: landscape)').matches ? 28 : 12)
+                    const scrollContainer = getScrollContainer()
+                    if (rect.bottom > keyboardTop) {
+                        const delta = rect.bottom - keyboardTop + 16
+                        if (scrollContainer && typeof scrollContainer.scrollTop === 'number') scrollContainer.scrollTop += delta
+                        else window.scrollBy(0, delta)
+                    } else if (rect.top < 12) {
+                        const delta = rect.top - 12
+                        if (scrollContainer && typeof scrollContainer.scrollTop === 'number') scrollContainer.scrollTop += delta
+                        else window.scrollBy(0, delta)
                     }
-                    document.execCommand('delete')
-                    return
                 }
-                if (action === 'return') {
-                    const range = selection.getRangeAt(0)
-                    const br = document.createElement('br')
-                    range.deleteContents()
-                    range.insertNode(br)
-                    range.setStartAfter(br)
-                    range.setEndAfter(br)
-                    let next = br.nextSibling
-                    if (next && next.nodeType === 3 && next.length === 0) next = next.nextSibling
-                    if (!next) br.parentNode.appendChild(document.createElement('br'))
+
+                function scheduleKeyboardVisibilityCheck() {
+                    cancelAnimationFrame(scrollCheckFrame)
+                    scrollCheckFrame = requestAnimationFrame(() => {
+                        if (isKeyboardVisible && activeEditor && !isCursorVisible()) hideKeyboard(false)
+                    })
+                }
+
+                function setDisplaySelectionFromTouch(touch) {
+                    if (!touch) return
+                    let range = null
+                    if (document.caretRangeFromPoint) {
+                        range = document.caretRangeFromPoint(touch.clientX, touch.clientY)
+                    } else if (document.caretPositionFromPoint) {
+                        const pos = document.caretPositionFromPoint(touch.clientX, touch.clientY)
+                        if (pos) {
+                            range = document.createRange()
+                            range.setStart(pos.offsetNode, pos.offset)
+                            range.collapse(true)
+                        }
+                    }
+                    if (range && display.contains(range.startContainer)) {
+                        const selection = window.getSelection()
+                        selection.removeAllRanges()
+                        selection.addRange(range)
+                    }
+                }
+
+                function ensureDisplaySelection() {
+                    const selection = window.getSelection()
+                    if (selection.rangeCount && display.contains(selection.anchorNode)) return selection
+                    const target = display.querySelector('.my-line') || display.lastElementChild || display
+                    const range = document.createRange()
+                    range.selectNodeContents(target)
+                    range.collapse(false)
                     selection.removeAllRanges()
                     selection.addRange(range)
-                    display.dispatchEvent(new Event('input', { bubbles: true }))
-                    return
+                    return selection
                 }
-                document.execCommand('insertText', false, action === 'space' ? ' ' : (!isSymbolMode && action.length === 1 && isShifted ? action.toUpperCase() : action))
-            }
 
-            function handleInput(action) {
-                try { if (typeof navigator.vibrate === 'function') navigator.vibrate(10) } catch (e) {}
-                if (action === 'shift') {
-                    isShifted = !isShifted
-                    renderKeyboard()
-                    return
-                }
-                if (action === '123' || action === 'abc') {
-                    isSymbolMode = !isSymbolMode
-                    isShifted = false
-                    renderKeyboard()
-                    return
-                }
-                if (!activeEditor) return
-                if (activeEditor === display) {
-                    handleDisplayInput(action)
-                } else if (action === 'return') {
-                    hideKeyboard()
-                } else {
-                    mutateInput(activeEditor, action === 'space' ? ' ' : (!isSymbolMode && action.length === 1 && isShifted ? action.toUpperCase() : action), action === 'backspace')
-                }
-                requestAnimationFrame(keepCursorVisible)
-                if (isShifted && !isSymbolMode && action.length === 1) {
-                    isShifted = false
-                    renderKeyboard()
-                }
-            }
-
-            function activateEditor(editor, touch) {
-                if (window.app?.appState?.session !== 'joined') return
-                activeEditor = editor
-                if (editor === display) {
-                    if (touch) setDisplaySelectionFromTouch(touch)
-                    else ensureDisplaySelection()
-                } else {
+                function mutateInput(editor, text, isBackspace = false) {
+                    editor.focus({ preventScroll: true })
                     if (editor.selectionStart == null || editor.selectionEnd == null) {
                         const end = editor.value.length
-                        editor.setSelectionRange?.(end, end)
+                        editor.setSelectionRange(end, end)
+                    }
+                    const start = editor.selectionStart
+                    const end = editor.selectionEnd
+                    if (isBackspace) {
+                        if (start === end && start === 0) return
+                        editor.setRangeText('', start === end ? start - 1 : start, end, 'end')
+                    } else {
+                        editor.setRangeText(text, start, end, 'end')
+                    }
+                    editor.dispatchEvent(new Event('input', { bubbles: true }))
+                }
+
+                function handleDisplayInput(action) {
+                    const selection = ensureDisplaySelection()
+                    if (!selection.rangeCount) return
+                    if (action === 'backspace') {
+                        const range = selection.getRangeAt(0)
+                        const anchor = selection.anchorNode
+                        const currentLine = anchor && (anchor.nodeType === 3 ? anchor.parentNode : anchor).closest?.('.editor-line')
+                        if (currentLine) {
+                            const isAtStart = range.collapsed && range.startOffset === 0 && (anchor === currentLine || anchor === currentLine.firstChild)
+                            const prevLine = currentLine.previousElementSibling
+                            if (isAtStart && prevLine && prevLine.isContentEditable === false) return
+                        }
+                        document.execCommand('delete')
+                        return
+                    }
+                    if (action === 'return') {
+                        const range = selection.getRangeAt(0)
+                        const br = document.createElement('br')
+                        range.deleteContents()
+                        range.insertNode(br)
+                        range.setStartAfter(br)
+                        range.setEndAfter(br)
+                        let next = br.nextSibling
+                        if (next && next.nodeType === 3 && next.length === 0) next = next.nextSibling
+                        if (!next) br.parentNode.appendChild(document.createElement('br'))
+                        selection.removeAllRanges()
+                        selection.addRange(range)
+                        display.dispatchEvent(new Event('input', { bubbles: true }))
+                        return
+                    }
+                    document.execCommand('insertText', false, action === 'space' ? ' ' : (!isSymbolMode && action.length === 1 && isShifted ? action.toUpperCase() : action))
+                }
+
+                function handleInput(action) {
+                    try { if (typeof navigator.vibrate === 'function') navigator.vibrate(10) } catch (e) { }
+                    if (action === 'shift') {
+                        isShifted = !isShifted
+                        renderKeyboard()
+                        return
+                    }
+                    if (action === '123' || action === 'abc') {
+                        isSymbolMode = !isSymbolMode
+                        isShifted = false
+                        renderKeyboard()
+                        return
+                    }
+                    if (!activeEditor) return
+                    if (activeEditor === display) {
+                        handleDisplayInput(action)
+                    } else if (action === 'return') {
+                        hideKeyboard()
+                    } else {
+                        mutateInput(activeEditor, action === 'space' ? ' ' : (!isSymbolMode && action.length === 1 && isShifted ? action.toUpperCase() : action), action === 'backspace')
+                    }
+                    requestAnimationFrame(keepCursorVisible)
+                    if (isShifted && !isSymbolMode && action.length === 1) {
+                        isShifted = false
+                        renderKeyboard()
                     }
                 }
-                showKeyboard()
-            }
 
-            window.__mobileKeyboardActivateDisplay = () => {
-                if (window.app?.appState?.session !== 'joined') return
-                activeEditor = display
-                ensureDisplaySelection()
-                document.getElementById(window.app?.currentLineId)?.scrollIntoView({ block: 'center' })
-                showKeyboard()
-            }
-
-            ;[display, ...editors].forEach(editor => {
-                let touchStartX = 0
-                let touchStartY = 0
-                let didScrollTouch = false
-                editor.addEventListener('touchstart', e => {
-                    const touch = e.changedTouches?.[0]
-                    touchStartX = touch?.clientX ?? 0
-                    touchStartY = touch?.clientY ?? 0
-                    didScrollTouch = false
-                }, { passive: true })
-                editor.addEventListener('touchmove', e => {
-                    const touch = e.changedTouches?.[0]
-                    if (!touch) return
-                    if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) didScrollTouch = true
-                }, { passive: true })
-                editor.addEventListener('touchend', e => {
-                    if (didScrollTouch) return
-                    e.preventDefault()
-                    lastTouchActivation = Date.now()
-                    activateEditor(editor, e.changedTouches?.[0])
-                }, { passive: false })
-                editor.addEventListener('click', e => {
-                    if (Date.now() - lastTouchActivation < 350) return
-                    e.preventDefault()
-                    activateEditor(editor)
-                })
-                editor.addEventListener('focus', () => {
+                function activateEditor(editor, touch) {
                     if (window.app?.appState?.session !== 'joined') return
                     activeEditor = editor
+                    if (editor === display) {
+                        if (touch) setDisplaySelectionFromTouch(touch)
+                        else ensureDisplaySelection()
+                    } else {
+                        if (editor.selectionStart == null || editor.selectionEnd == null) {
+                            const end = editor.value.length
+                            editor.setSelectionRange?.(end, end)
+                        }
+                    }
                     showKeyboard()
+                }
+
+                window.__mobileKeyboardActivateDisplay = () => {
+                    if (window.app?.appState?.session !== 'joined') return
+                    activeEditor = display
+                    ensureDisplaySelection()
+                    document.getElementById(window.app?.currentLineId)?.scrollIntoView({ block: 'center' })
+                    showKeyboard()
+                }
+
+                    ;[display, ...editors].forEach(editor => {
+                        let touchStartX = 0
+                        let touchStartY = 0
+                        let didScrollTouch = false
+                        editor.addEventListener('touchstart', e => {
+                            const touch = e.changedTouches?.[0]
+                            touchStartX = touch?.clientX ?? 0
+                            touchStartY = touch?.clientY ?? 0
+                            didScrollTouch = false
+                        }, { passive: true })
+                        editor.addEventListener('touchmove', e => {
+                            const touch = e.changedTouches?.[0]
+                            if (!touch) return
+                            if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) didScrollTouch = true
+                        }, { passive: true })
+                        editor.addEventListener('touchend', e => {
+                            if (didScrollTouch) return
+                            e.preventDefault()
+                            lastTouchActivation = Date.now()
+                            activateEditor(editor, e.changedTouches?.[0])
+                        }, { passive: false })
+                        editor.addEventListener('click', e => {
+                            if (Date.now() - lastTouchActivation < 350) return
+                            e.preventDefault()
+                            activateEditor(editor)
+                        })
+                        editor.addEventListener('focus', () => {
+                            if (window.app?.appState?.session !== 'joined') return
+                            activeEditor = editor
+                            showKeyboard()
+                        })
+                    })
+
+                const handleOutsideClick = (e) => {
+                    if (!isKeyboardVisible) return
+                    if ([display, ...editors].some(ed => ed && ed.contains(e.target))) return
+                    if (keyboardContainer.contains(e.target) || closeBtn.contains(e.target)) return
+                    if (e.target.closest && e.target.closest('.editor-tools, #editor-tools, .my-line, .nav-item, .sub-tab')) hideKeyboard(true)
+                    else hideKeyboard(true)
+                }
+                document.addEventListener('mousedown', handleOutsideClick)
+                document.addEventListener('touchstart', handleOutsideClick, { passive: true })
+
+                closeBtn.addEventListener('click', e => {
+                    e.preventDefault()
+                    hideKeyboard()
                 })
-            })
 
-            const handleOutsideClick = (e) => {
-                if (!isKeyboardVisible) return
-                if ([display, ...editors].some(ed => ed && ed.contains(e.target))) return
-                if (keyboardContainer.contains(e.target) || closeBtn.contains(e.target)) return
-                if (e.target.closest && e.target.closest('.editor-tools, #editor-tools, .my-line, .nav-item, .sub-tab')) hideKeyboard(true)
-                else hideKeyboard(true)
-            }
-            document.addEventListener('mousedown', handleOutsideClick)
-            document.addEventListener('touchstart', handleOutsideClick, { passive: true })
+                window.addEventListener('resize', () => {
+                    if (window.innerHeight > maxHeight) maxHeight = window.innerHeight
+                    if (isKeyboardVisible && window.innerHeight < maxHeight * 0.75 && document.activeElement === activeEditor) activeEditor.blur()
+                    requestAnimationFrame(settleLandscapeViewport)
+                })
 
-            closeBtn.addEventListener('click', e => {
-                e.preventDefault()
-                hideKeyboard()
-            })
+                    ;[chatContainer, dashboardPanel, window].filter(Boolean).forEach(target => target.addEventListener('scroll', scheduleKeyboardVisibilityCheck, { passive: true }))
+                    ;[display, ...editors].forEach(editor => editor.addEventListener('input', () => requestAnimationFrame(keepCursorVisible)))
 
-            window.addEventListener('resize', () => {
-                if (window.innerHeight > maxHeight) maxHeight = window.innerHeight
-                if (isKeyboardVisible && window.innerHeight < maxHeight * 0.75 && document.activeElement === activeEditor) activeEditor.blur()
-                requestAnimationFrame(settleLandscapeViewport)
-            })
-
-            ;[chatContainer, dashboardPanel, window].filter(Boolean).forEach(target => target.addEventListener('scroll', scheduleKeyboardVisibilityCheck, { passive: true }))
-            ;[display, ...editors].forEach(editor => editor.addEventListener('input', () => requestAnimationFrame(keepCursorVisible)))
-
-            renderKeyboard()
-        })()
+                renderKeyboard()
+            })()
     </script>
 </body>
 
