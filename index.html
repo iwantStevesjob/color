@@ -1592,6 +1592,7 @@
             <h1 class="page-title">SETTINGS</h1>
             <div class="tabs-row">
                 <div class="sub-tab active" data-tab="general" data-group="settings">GENERAL</div>
+                <div class="sub-tab" data-tab="about" data-group="settings">ABOUT</div>
                 <div class="sub-tab" data-tab="connections" data-group="settings">CONNECTIONS</div>
                 <div class="sub-tab" data-tab="signatures" data-group="settings">SIGNATURES</div>
                 <div class="sub-tab" data-tab="raw" data-group="settings">RAW DATA</div>
@@ -1654,6 +1655,75 @@
         <div id="view-settings" class="content-view">
             <div id="tab-general" class="settings-pane active">
                 <h2>General Settings</h2>
+            </div>
+            <div id="tab-about" class="settings-pane">
+                <h2>System Diagnostics</h2>
+
+                <div class="settings-group">
+                    <h3 style="margin-top:0; font-size: 1rem; color:#333;">Device Information</h3>
+                    <label class="settings-label">Operating System & Browser</label>
+                    <div class="settings-input" id="diag-ua"
+                        style="height:auto; min-height:20px; font-size: 0.75rem; word-break: break-all;">Detecting...
+                    </div>
+
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 1;">
+                            <label class="settings-label">CPU Cores</label>
+                            <div class="settings-input" id="diag-cores">...</div>
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="settings-label">Est. Memory</label>
+                            <div class="settings-input" id="diag-memory">...</div>
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="settings-label">Language</label>
+                            <div class="settings-input" id="diag-lang">...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h3 style="margin-top:0; font-size: 1rem; color:#333;">Network Routing</h3>
+                    <p class="settings-hint">Testing local network capabilities via STUN...</p>
+
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 1;">
+                            <label class="settings-label">IPv4 Support</label>
+                            <div class="settings-input" id="diag-ipv4" style="color:#888; font-weight:bold;">Checking...
+                            </div>
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="settings-label">IPv6 Support</label>
+                            <div class="settings-input" id="diag-ipv6" style="color:#888; font-weight:bold;">Checking...
+                            </div>
+                        </div>
+                    </div>
+                    <label class="settings-label">NAT/Firewall Status</label>
+                    <div class="settings-input" id="diag-nat" style="height:auto;">Checking network accessibility...
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h3 style="margin-top:0; font-size: 1rem; color:#333;">How Connection Works</h3>
+
+                    <label class="settings-label">1. Standard Connection (Trackers)</label>
+                    <p class="settings-hint" style="line-height:1.5;">When you enter a URL, the app connects to public
+                        WebTorrent matchmaking servers. It sends an encrypted hash of your room name. If someone else is
+                        looking for the same room, the server introduces you. Because these public servers handle
+                        millions of users globally, this process relies on DNS, TCP, and TLS negotiation, and can
+                        occasionally take up to 8 seconds to process.</p>
+
+                    <label class="settings-label" style="margin-top:15px;">2. Secure QR Code (Direct P2P)</label>
+                    <p class="settings-hint" style="line-height:1.5;">The Secure QR completely bypasses public
+                        matchmaking servers. It takes your local IP address, port, and security keys, compresses them
+                        into a 100-byte binary payload, and displays them on screen. The scanning device reads the
+                        pixels and connects instantly directly to your device (often remaining entirely on your local
+                        Wi-Fi).</p>
+                    <p class="settings-hint" style="line-height:1.5; font-weight:bold; color:#a33;">Note: To keep the QR
+                        code small enough to be scanned by a camera, "TURN Relay" fallback candidates are deleted from
+                        the code. Therefore, Secure QR may fail if both devices are strictly on cellular data networks
+                        that require a server relay to punch through the carrier's firewall.</p>
+                </div>
             </div>
             <div id="tab-connections" class="settings-pane">
                 <h2>Network Connections</h2>
@@ -3133,6 +3203,8 @@
 
                 this.bindEvents()
                 this.setupGlobalExposure()
+
+                this.runSystemDiagnostics()
             }
 
             cloneSignature(signature) {
@@ -3529,7 +3601,63 @@
                     this.statusInterval = null
                 }
             }
+            async runSystemDiagnostics() {
+                // 1. Get Device Info
+                document.getElementById('diag-ua').textContent = navigator.userAgent;
+                document.getElementById('diag-cores').textContent = navigator.hardwareConcurrency || 'Unknown';
+                document.getElementById('diag-memory').textContent = navigator.deviceMemory ? `${navigator.deviceMemory}GB+` : 'Unknown';
+                document.getElementById('diag-lang').textContent = navigator.language || 'Unknown';
 
+                // 2. Perform a "Dummy" WebRTC connection to trick the browser into revealing Network Routing Info
+                let hasIPv4 = false;
+                let hasIPv6 = false;
+                let isPubliclyAccessible = false;
+
+                try {
+                    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+                    pc.createDataChannel('diagnostic');
+
+                    pc.onicecandidate = (event) => {
+                        if (!event.candidate) {
+                            // Gathering finished, update UI colors based on results
+                            document.getElementById('diag-ipv4').style.color = hasIPv4 ? '#00e676' : '#e53935';
+                            document.getElementById('diag-ipv6').style.color = hasIPv6 ? '#00e676' : '#e53935';
+                            return;
+                        }
+
+                        const cand = event.candidate.candidate.toLowerCase();
+
+                        // Check IP Families
+                        if (cand.includes(':')) {
+                            hasIPv6 = true;
+                            document.getElementById('diag-ipv6').textContent = 'DETECTED';
+                        }
+                        // IPv4 Regex check
+                        if (cand.match(/([0-9]{1,3}\.){3}[0-9]{1,3}/)) {
+                            hasIPv4 = true;
+                            document.getElementById('diag-ipv4').textContent = 'DETECTED';
+                        }
+
+                        // Check if STUN successfully found a public IP through the router
+                        if (cand.includes('typ srflx')) {
+                            isPubliclyAccessible = true;
+                            const natEl = document.getElementById('diag-nat');
+                            natEl.textContent = 'Public IP Accessible (srflx detected). P2P works well.';
+                            natEl.style.color = '#00e676';
+                        }
+                    };
+
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+
+                    // Close the dummy connection after 3 seconds so it doesn't hang in memory
+                    setTimeout(() => pc.close(), 3000);
+
+                } catch (err) {
+                    document.getElementById('diag-nat').textContent = 'Diagnostic failed. WebRTC may be blocked.';
+                    console.error('Diagnostic error:', err);
+                }
+            }
             async stopScanner() {
                 if (!this.qrScanner) return
                 const scanner = this.qrScanner
@@ -3916,6 +4044,11 @@
                 })
 
                 this.mesh.on('peer-discover', pid => {
+                    // 1. Force the text to update instantly
+                    this.ui.roomStatus.textContent = "1 PEER ONLINE";
+                    // 2. Remove any red error colors just in case
+                    this.ui.roomStatus.style.color = "";
+
                     this.updateStatus()
                 })
 
@@ -6536,6 +6669,7 @@ self.onmessage = async (e) => {
                 }
 
                 function isCursorVisible() {
+                    if (activeEditor === display) return true
                     const rect = getCursorRect()
                     if (!rect) return false
                     const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - (window.matchMedia('(orientation: landscape)').matches ? 28 : 12)
@@ -6543,7 +6677,7 @@ self.onmessage = async (e) => {
                 }
 
                 function keepCursorVisible() {
-                    if (!isKeyboardVisible || !activeEditor) return
+                    if (!isKeyboardVisible || !activeEditor || activeEditor === display) return
                     const rect = getCursorRect()
                     if (!rect) return
                     const keyboardTop = window.innerHeight - keyboardContainer.getBoundingClientRect().height - (window.matchMedia('(orientation: landscape)').matches ? 28 : 12)
