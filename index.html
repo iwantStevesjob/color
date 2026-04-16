@@ -5164,9 +5164,10 @@ async function deriveKeyFromPass(password, salt) {
 
 async function loadKeysToMemory(sigJWK, aesJWK, pubJWK) {
     _aesKey = await crypto.subtle.importKey("jwk", aesJWK, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    const curve = sigJWK.crv || pubJWK.crv || "P-256";
     _keyPair = {
-        privateKey: await crypto.subtle.importKey("jwk", sigJWK, { name: "ECDSA", namedCurve: "P-521" }, false, ["sign"]),
-        publicKey: await crypto.subtle.importKey("jwk", pubJWK, { name: "ECDSA", namedCurve: "P-521" }, true, ["verify"])
+        privateKey: await crypto.subtle.importKey("jwk", sigJWK, { name: "ECDSA", namedCurve: curve }, false, ["sign"]),
+        publicKey: await crypto.subtle.importKey("jwk", pubJWK, { name: "ECDSA", namedCurve: curve }, true, ["verify"])
     };
     _locked = false;
 }
@@ -5233,12 +5234,12 @@ async function decrypt(buffer) {
 
 async function sign(data) {
      if (_locked) throw new Error("Locked");
-     const buf = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-512" }, _keyPair.privateKey, new TextEncoder().encode(data));
+     const buf = await crypto.subtle.sign({ name: "ECDSA", hash: _keyPair.privateKey.algorithm.namedCurve === "P-521" ? "SHA-512" : "SHA-256" }, _keyPair.privateKey, new TextEncoder().encode(data));
      return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
 
 async function verify(key, content, signature) {
-    return await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-512" }, key, Uint8Array.from(atob(signature), c => c.charCodeAt(0)), new TextEncoder().encode(content));
+    return await crypto.subtle.verify({ name: "ECDSA", hash: key.algorithm.namedCurve === "P-521" ? "SHA-512" : "SHA-256" }, key, Uint8Array.from(atob(signature), c => c.charCodeAt(0)), new TextEncoder().encode(content));
 }
 
 async function init() {
@@ -5247,7 +5248,7 @@ async function init() {
 }
 
 async function generateSessionIdentity() {
-    const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-521" }, true, ["sign", "verify"]);
+    const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
     const kAes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
     const sigJWK = await crypto.subtle.exportKey("jwk", kSig.privateKey);
     const pubJWK = await crypto.subtle.exportKey("jwk", kSig.publicKey);
@@ -5261,7 +5262,7 @@ async function generateSessionIdentity() {
 
 async function generate(roomHex, password = DEFAULT_PASS) {
     if (!roomHex) throw new Error("Room required");
-    const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-521" }, true, ["sign", "verify"]);
+    const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
     const kAes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
     const sigJWK = await crypto.subtle.exportKey("jwk", kSig.privateKey);
     const pubJWK = await crypto.subtle.exportKey("jwk", kSig.publicKey);
@@ -5501,7 +5502,7 @@ self.onmessage = async (e) => {
             case 'getPublicKey': res = _locked ? null : await crypto.subtle.exportKey("jwk", _keyPair.publicKey); break;
             case 'storePeerKey': 
                 try {
-                    _peerKeys[data.peerId] = await crypto.subtle.importKey("jwk", data.jwk, { name: "ECDSA", namedCurve: "P-521" }, true, ["verify"]);
+                    _peerKeys[data.peerId] = await crypto.subtle.importKey("jwk", data.jwk, { name: "ECDSA", namedCurve: data.jwk.crv || "P-256" }, true, ["verify"]);
                     res = true;
                 } catch(e) { res = false; }
                 break;
@@ -5757,7 +5758,7 @@ self.onmessage = async (e) => {
                     document.getElementById('peer-count').innerText = peers > 0 ? `${peers} connected` : `Syncing...`
                 }
             }
-            if (window.enterRoomUI) window.enterRoomUI()
+            if (window.enterRoomUI) await window.enterRoomUI()
             document.getElementById('login-btn').classList.add('hidden')
         })
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) }
