@@ -5132,13 +5132,23 @@ function openColorDB(hex = null) {
             if (hex && !db.objectStoreNames.contains(hex)) {
                 const v = db.version + 1;
                 db.close();
-                const upg = indexedDB.open('color', v);
-                upg.onupgradeneeded = evt => {
-                    const d = evt.target.result;
-                    if (!d.objectStoreNames.contains(hex)) d.createObjectStore(hex).createIndex('owner', 'owner', { unique: false });
+                
+                const attemptUpgrade = () => {
+                    const upg = indexedDB.open('color', v);
+                    upg.onblocked = () => {
+                        // iOS Safari is still closing the previous connection, retry shortly.
+                        setTimeout(attemptUpgrade, 50);
+                    };
+                    upg.onupgradeneeded = evt => {
+                        const d = evt.target.result;
+                        if (!d.objectStoreNames.contains(hex)) d.createObjectStore(hex).createIndex('owner', 'owner', { unique: false });
+                    };
+                    upg.onerror = evt => rej(evt);
+                    upg.onsuccess = evt => res(evt.target.result);
                 };
-                upg.onerror = evt => rej(evt);
-                upg.onsuccess = evt => res(evt.target.result);
+                
+                // Give iOS Safari a 10ms head start to process the db.close()
+                setTimeout(attemptUpgrade, 10);
             } else {
                 res(db);
             }
