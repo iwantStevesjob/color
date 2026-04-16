@@ -3776,6 +3776,7 @@
             }
 
             async enterRoomUI() {
+                console.log('[COLOR ui]', 'enterRoomUI start', { roomId: this.roomId, ownerLoginApproved: this.ownerLoginApproved, isGuestScan: this.isGuestScan })
                 if (window.state) { window.state.landing.active = false; window.state.landing.showHandle = false }
                 if (this.ui.dashboardPanel.classList.contains('active')) return
 
@@ -3786,10 +3787,21 @@
                 const roomSignature = this.getRoomSignatureForSave(roomHex)
                 const roomPassword = roomSignature ? this.getRoomPassword(roomHex, roomSignature) : ''
                 if (roomSignature?.path?.length) roomSignature.password = roomPassword
-                if (Array.isArray(roomSignature?.clicks) && roomSignature.clicks.length) for (const clickHex of roomSignature.clicks) await this.db._open(String(clickHex || '').replace('#', '').toLowerCase())
-                if (roomPassword) {
-                    await this.identity.ensureRoomSecurity(roomHex, roomPassword)
-                    this.roomHasWrappedKeys = await this.identity.roomHasWrappedKeys(roomHex)
+                this.ui.loginBtn.classList.add('hidden')
+                this.ui.loginCard.classList.remove('visible')
+                this.ui.dashboardPanel.classList.add('active')
+
+                this.triggerSave(null)
+                this.ui.hoverTrigger.style.display = 'block'
+
+                try {
+                    if (Array.isArray(roomSignature?.clicks) && roomSignature.clicks.length) for (const clickHex of roomSignature.clicks) await this.db._open(String(clickHex || '').replace('#', '').toLowerCase())
+                    if (roomPassword) {
+                        await this.identity.ensureRoomSecurity(roomHex, roomPassword)
+                        this.roomHasWrappedKeys = await this.identity.roomHasWrappedKeys(roomHex)
+                    }
+                } catch (e) {
+                    console.warn('enterRoomUI background setup failed', e)
                 }
 
                 if ((this.ui.loginBtn.textContent === 'LOGIN' || this.ownerLoginApproved) && !this.isGuestScan) {
@@ -3799,26 +3811,20 @@
                     this.user.id = 'user_' + this.user.color.replace('#', '')
                 }
 
-                this.ui.loginBtn.classList.add('hidden')
-                this.ui.loginCard.classList.remove('visible')
-                this.ui.dashboardPanel.classList.add('active')
-
-                this.triggerSave(null)
-                this.ui.hoverTrigger.style.display = 'block'
-
                 if (roomSignature?.path?.length) {
                     this.roomSignature = this.cloneSignature(roomSignature)
-                    this.db.saveSignature(roomHex, roomSignature)
+                    this.db.saveSignature(roomHex, roomSignature).catch(e => console.warn('saveSignature failed', e))
                 }
 
                 if (!this.visitedRooms.includes(this.roomId)) {
                     this.visitedRooms.push(this.roomId)
-                    this.db._open(roomHex)
+                    this.db._open(roomHex).catch(e => console.warn('room open failed', e))
                 }
                 this.roomExists = true
                 this.wrongPasswordState = false
                 this.syncDebugPassword(roomHex)
                 if (this.mesh?.broadcastIdentity) this.mesh.broadcastIdentity()
+                console.log('[COLOR ui]', 'enterRoomUI complete', { roomId: this.roomId, roomHex, roomHasWrappedKeys: this.roomHasWrappedKeys })
 
                 setTimeout(() => {
                     document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'
@@ -3899,6 +3905,7 @@
             }
 
             async connectAndPreview(hex, options = {}) {
+                console.log('[COLOR ui]', 'connectAndPreview start', { hex, source: options.source || 'local', preserveSignatureState: !!options.preserveSignatureState, skipAutoEnter: !!options.skipAutoEnter })
                 const cleanHex = hex.replace('#', '').toLowerCase()
                 const source = options.source || 'local'
                 const preserveSignatureState = !!options.preserveSignatureState
@@ -3941,9 +3948,9 @@
                 this.isFresh = true
 
                 this.ui.loginBtn.classList.remove('hidden')
-                if (source !== 'simple-qr') await this.identity.lockCurrentRoom()
-                await this.identity.ensureSessionIdentity()
-                await this.db._open()
+                if (source !== 'simple-qr') await this.identity.lockCurrentRoom().catch(e => console.warn('lockCurrentRoom failed', e))
+                await this.identity.ensureSessionIdentity().catch(e => console.warn('ensureSessionIdentity failed', e))
+                await this.db._open().catch(e => console.warn('preview db open failed', e))
                 if (window.state && !preserveSignatureState && window.state.signatureHex !== cleanHex) {
                     window.state.signatureHex = cleanHex
                     window.state.signaturePaths = []
@@ -3956,7 +3963,7 @@
                     document.getElementById('signature-practice-btn').textContent = 'PRACTICE'; document.getElementById('signature-compare-result').textContent = ''
                 }
 
-                const exists = await this.db.roomExists(cleanHex)
+                const exists = await this.db.roomExists(cleanHex).catch(e => (console.warn('roomExists failed', e), false))
                 this.roomExists = exists
 
                 if (exists) {
@@ -4012,6 +4019,7 @@
                 } else {
                     if (this.mesh) this.mesh.enableSync()
                 }
+                console.log('[COLOR ui]', 'connectAndPreview complete', { roomId: this.roomId, roomExists: this.roomExists, roomHasWrappedKeys: this.roomHasWrappedKeys, wrongPasswordState: this.wrongPasswordState })
             }
 
             async renderFromLocalDB(data, centerIndex) {
@@ -5087,6 +5095,7 @@ let _encryptedBlob = null;
 let _locked = true;
 let _currentPassword = null;
 let _currentRoomHex = null;
+const WORKER_LOG = "[COLOR worker]";
 
 const DIFFICULTY_PREFIX = "0000"; 
 
@@ -5489,6 +5498,7 @@ async function db_read_signature({ roomHex }) {
 
 self.onmessage = async (e) => {
     const { id, action, data } = e.data;
+    console.log(WORKER_LOG, "start", action, { id, roomHex: data?.roomHex, peerId: data?.peerId });
     try {
         let res;
         switch(action) {
@@ -5595,8 +5605,10 @@ self.onmessage = async (e) => {
             case 'generate_token': res = await computeProof(data.roomHex); break;
             case 'validate_peer': res = await isValidPeer(data.peerId, data.roomHex); break;
         }
+        console.log(WORKER_LOG, "success", action, { id, roomHex: data?.roomHex, peerId: data?.peerId });
         self.postMessage({ id, result: res });
     } catch(err) {
+        console.error(WORKER_LOG, "error", action, { id, roomHex: data?.roomHex, peerId: data?.peerId, message: err?.message, name: err?.name, stack: err?.stack });
         self.postMessage({ id, error: err.message });
     }
 };
@@ -5610,21 +5622,35 @@ self.onmessage = async (e) => {
                 this.ready = false
                 this.locked = true
                 this.DEFAULT_PASS = 'FFFFFF'
+                this.LOG = '[COLOR identity]'
 
                 this.worker.onmessage = e => {
                     const { id, result, error } = e.data
+                    console.log(this.LOG, 'recv', { id, error, resultType: result == null ? String(result) : typeof result })
                     if (this.callbacks[id]) {
                         if (error) this.callbacks[id].reject(new Error(error))
                         else this.callbacks[id].resolve(result)
                         delete this.callbacks[id]
                     }
                 }
+                this.worker.onerror = e => console.error(this.LOG, 'worker error', { message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno, error: e.error })
+                this.worker.onmessageerror = e => console.error(this.LOG, 'worker message error', e)
             }
 
             _call(action, data, transfer = []) {
                 return new Promise((resolve, reject) => {
                     const id = Math.random().toString(36).slice(2)
-                    this.callbacks[id] = { resolve, reject }
+                    console.log(this.LOG, 'send', { id, action, roomHex: data?.roomHex, peerId: data?.peerId })
+                    this.callbacks[id] = {
+                        resolve: value => {
+                            console.log(this.LOG, 'resolve', { id, action, roomHex: data?.roomHex, peerId: data?.peerId })
+                            resolve(value)
+                        },
+                        reject: err => {
+                            console.error(this.LOG, 'reject', { id, action, roomHex: data?.roomHex, peerId: data?.peerId, message: err?.message, name: err?.name, stack: err?.stack })
+                            reject(err)
+                        }
+                    }
                     this.worker.postMessage({ id, action, data }, transfer)
                 })
             }
@@ -5743,6 +5769,7 @@ self.onmessage = async (e) => {
         let storageScope = window.localStorage
         document.getElementById('login-btn').addEventListener('click', async () => {
             const btnText = document.getElementById('login-btn').innerText
+            console.log('[COLOR ui]', 'login click', { btnText, roomId: window.app?.roomId, roomStatus: document.getElementById('room-status')?.innerText })
             if (btnText === 'RETRY') {
                 if (window.app && window.app.logout) await window.app.logout()
                 return
