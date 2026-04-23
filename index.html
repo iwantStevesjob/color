@@ -144,6 +144,12 @@
             display: none;
         }
 
+        #login-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
         #hover-trigger {
             position: fixed;
             top: 0;
@@ -1407,8 +1413,7 @@
                 const timestamp = new Date().toISOString()
                 const line = `[${timestamp}] [${level.toUpperCase()}] ${values.map(formatValue).join(' ')}`
                 entries.push(line)
-                output.textContent = entries.join('\n')
-                output.scrollTop = output.scrollHeight
+                const atBottom = output.scrollHeight - output.scrollTop <= output.clientHeight + 50; output.textContent = entries.join('\n'); if (atBottom) output.scrollTop = output.scrollHeight;
             }
 
             function isOverlayVisible() {
@@ -2508,7 +2513,7 @@
                 const ws = new WebSocket(url)
                 trackerSockets[url] = ws
                 ws.onopen = () => startAnnouncing(ws)
-                ws.onerror = e => { console.warn(`Tracker connection error to ${url}:`, e) }
+                ws.onerror = () => { }
                 ws.onmessage = e => { try { const data = JSON.parse(e.data); if (data) handleTrackerMessage(ws, data) } catch (err) { } }
                 ws.onclose = () => { delete trackerSockets[url]; if (!isLeaving) setTimeout(() => connectToTracker(url), 5000) }
             }
@@ -2546,6 +2551,11 @@
                 }
 
                 if (!syncEnabled) return
+
+                if (Array.isArray(data.offers)) {
+                    for (const offer of data.offers) await handleTrackerMessage(ws, { ...data, offers: null, offer_id: offer.offer_id, offer: offer.offer })
+                    return
+                }
 
                 if (data.offer && data.offer_id) {
                     if (handledOffers.has(data.offer_id) || connectedPeers[data.peer_id]) return
@@ -2772,6 +2782,7 @@
                 this.handlers = new Map()
                 this.discoveredPeers = new Set()
                 this.connectedPeers = {}
+                this.peerIdentities = new Map()
                 this.left = false
                 this.openNotified = false
                 this.remoteIdentitySeen = false
@@ -2806,6 +2817,7 @@
             on(eventName, callback) {
                 if (!this.handlers.has(eventName)) this.handlers.set(eventName, [])
                 this.handlers.get(eventName).push(callback)
+                if (eventName === 'peer-identity') this.peerIdentities.forEach((data, pid) => callback(data, pid))
             }
 
             emit(eventName, ...args) {
@@ -2829,6 +2841,7 @@
 
                 delete this.connectedPeers[this.peerId]
                 this.discoveredPeers.delete(this.peerId)
+                this.peerIdentities.delete(this.peerId)
                 this.stopIdentityBroadcasts()
                 this.emit('peer-leave', this.peerId)
             }
@@ -2878,6 +2891,7 @@
                 if (message.action === 'identity') {
                     this.remoteIdentitySeen = true
                     this.stopIdentityBroadcasts()
+                    this.peerIdentities.set(this.peerId, message.data)
                     this.emit('peer-identity', message.data, this.peerId)
                     return
                 } else if (message.action === 'fragment') {
@@ -2893,7 +2907,6 @@
             async broadcastIdentity() {
                 this.send('identity', {
                     color: window.app.user.color,
-                    cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
                     secureQr: true
                 })
             }
@@ -2908,6 +2921,10 @@
 
             requestSync(keys) {
                 this.send('req', keys)
+            }
+
+            sendCursor(data) {
+                this.send('sync-cursor', data)
             }
 
             getPeers() {
@@ -2952,6 +2969,7 @@
                 this.identity = identity
                 this.handlers = new Map()
                 this.verifiedPeers = new Set()
+                this.peerIdentities = new Map()
                 this.outgoingQrSecret = null
                 this.expectedQrSecret = null
 
@@ -2967,7 +2985,8 @@
                 const [sendLock, onLock] = this.room.makeAction('lock')
                 const [sendReq, onReq] = this.room.makeAction('req')
                 const [sendId, onId] = this.room.makeAction('identity')
-                this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId
+                const [sendCursor, onCursor] = this.room.makeAction('sync-cursor')
+                this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId; this.rawSendCursor = sendCursor
 
                 this.room.onPeerJoin(async pid => {
                     console.log(`%c[P2P] Peer Joined: ${pid}`, 'color: cyan; font-weight: bold;')
@@ -2979,12 +2998,13 @@
                 onId(async (data, pid) => {
                     let isVerified = false
                     const wasVerified = this.verifiedPeers.has(pid)
+                    if (wasVerified) { this.peerIdentities.set(pid, data); return }
 
                     if (this.expectedQrSecret && data.qrSecret === this.expectedQrSecret) {
                         console.log(`%c[P2P] 🎟️ VIP Ticket Accepted for ${pid}`, 'color: gold; font-weight: bold;')
                         isVerified = true
                         this.emit('qr-success', pid)
-                    } else if (data.color && data.color.replace('#', '').toLowerCase() === this.roomHex.toLowerCase()) {
+                    } else if (data.color && data.color.replace('#', '').toLowerCase() === this.roomHex.toLowerCase() && window.app.user.color.replace('#', '').toLowerCase() !== this.roomHex.toLowerCase()) {
                         console.log(`%c[P2P] 👑 Room Owner verified automatically: ${pid}`, 'color: #00e676; font-weight: bold;')
                         isVerified = true
                     } else if (data.minedToken && data.minedToken !== 'PENDING') {
@@ -3000,6 +3020,7 @@
                         console.log(`%c[P2P] ✅ Peer verified: ${pid}`, 'color: #00e676;')
                         this.verifiedPeers.add(pid)
                         if (data.pubKey) await this.identity.storePeerKey(pid, data.pubKey)
+                        this.peerIdentities.set(pid, data)
                         this.emit('peer-identity', data, pid)
                         if (!wasVerified) this.sendIdentity(pid).catch(() => { })
                     } else if (data.minedToken && data.minedToken !== 'PENDING') {
@@ -3031,7 +3052,10 @@
                 onReq((d, p) => {
                     if (this.verifiedPeers.has(p)) this.emit('req', d, p)
                 })
-                this.room.onPeerLeave(p => this.emit('peer-leave', p))
+                onCursor((d, p) => {
+                    if (this.verifiedPeers.has(p)) this.emit('sync-cursor', d, p)
+                })
+                this.room.onPeerLeave(p => { this.peerIdentities.delete(p); this.emit('peer-leave', p) })
             }
 
             async sendIdentity(targetPeerId = null) {
@@ -3040,7 +3064,6 @@
                 this.rawSendId({
                     color: window.app.user.color,
                     pubKey: jwk,
-                    cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
                     minedToken: window.app.user.proofToken || 'PENDING',
                     qrSecret: this.outgoingQrSecret
                 }, targetPeerId)
@@ -3078,11 +3101,15 @@
                     }
                 }
             }
+            sendCursor(data, targetPeerId = null) {
+                if (targetPeerId) this.rawSendCursor(data, targetPeerId)
+                else for (const pid of this.verifiedPeers) this.rawSendCursor(data, pid)
+            }
             getPeers() { return this.room.getPeers() }
             getDiscoveredPeers() { return this.room.getDiscoveredPeers() }
             enableSync() { this.room.enableSync() }
             leave() { this.room.leave() }
-            on(e, cb) { if (!this.handlers.has(e)) this.handlers.set(e, []); this.handlers.get(e).push(cb) }
+            on(e, cb) { if (!this.handlers.has(e)) this.handlers.set(e, []); this.handlers.get(e).push(cb); if (e === 'peer-identity') this.peerIdentities.forEach((data, pid) => cb(data, pid)) }
             emit(e, ...args) { this.handlers.get(e)?.forEach(cb => cb(...args)) }
             setExpectedSecret(secret) { this.expectedQrSecret = secret }
             setOutgoingSecret(secret) { this.outgoingQrSecret = secret }
@@ -3165,11 +3192,14 @@
                 this.pendingFocusLine = undefined
                 this.syncRetryTimeout = null
                 this.syncRetryAttempts = 0
+                this.joinApprovedPeers = new Set()
                 this.pendingLoginHex = null
                 this.pendingLoginSignature = null
                 this.ownerLoginApproved = false
                 this.roomHasWrappedKeys = false
                 this.wrongPasswordState = false
+                this.awaitingPeerCheck = false
+                this.lastPeerCursor = null
                 this.minedForSession = false
                 this.miningInProgress = false
                 this.peeking = false
@@ -3283,6 +3313,8 @@
             }
 
             roomNeedsLogin() {
+                const cleanHex = this.roomId?.replace('color-', '').toLowerCase(), userHex = this.user.color.replace('#', '').toLowerCase(), onlinePeers = Math.max(this.mesh?.getDiscoveredPeers?.().size || 0, Object.values(this.mesh?.getPeers?.() || {}).filter(p => p.dc?.readyState === 'open').length)
+                if (cleanHex !== userHex && onlinePeers > 0) return false
                 return !this.isGuestScan && !this.ownerLoginApproved && (!!this.roomHasWrappedKeys || !!this.roomSignature || (!this.roomExists && Math.max(this.mesh?.getDiscoveredPeers?.().size || 0, Object.values(this.mesh?.getPeers?.() || {}).filter(p => p.dc?.readyState === 'open').length) === 0))
             }
 
@@ -3824,6 +3856,8 @@
                 this.wrongPasswordState = false
                 this.syncDebugPassword(roomHex)
                 if (this.mesh?.broadcastIdentity) this.mesh.broadcastIdentity()
+                if (this.lastPeerCursor) this.requestInitialSyncFromPeer(this.lastPeerCursor.data, this.lastPeerCursor.pid)
+                if (this.mesh?.sendCursor) setTimeout(() => this.mesh?.sendCursor?.({ type: 'request' }), 0)
                 console.log('[COLOR ui]', 'enterRoomUI complete', { roomId: this.roomId, roomHex, roomHasWrappedKeys: this.roomHasWrappedKeys })
 
                 setTimeout(() => {
@@ -3891,6 +3925,7 @@
                     if (this.mesh) {
                         this.mesh.broadcastIdentity()
                         this.mesh.enableSync()
+                        this.mesh.sendCursor?.({ type: 'request' })
                         console.log('[P2P] ⏳ Ready. Waiting for peer cursor...')
                     }
 
@@ -3905,9 +3940,10 @@
             }
 
             async connectAndPreview(hex, options = {}) {
-                console.log('[COLOR ui]', 'connectAndPreview start', { hex, source: options.source || 'local', preserveSignatureState: !!options.preserveSignatureState, skipAutoEnter: !!options.skipAutoEnter })
                 const cleanHex = hex.replace('#', '').toLowerCase()
                 const source = options.source || 'local'
+                if (this.roomId === 'color-' + cleanHex && ['connecting', 'verifying'].includes(this.appState.session) && this.connectionSource === source) return
+                console.log('[COLOR ui]', 'connectAndPreview start', { hex, source, preserveSignatureState: !!options.preserveSignatureState, skipAutoEnter: !!options.skipAutoEnter })
                 const preserveSignatureState = !!options.preserveSignatureState
                 this.pendingNavPath = options.navPath || null
                 this.roomId = 'color-' + cleanHex
@@ -3922,6 +3958,8 @@
                 }
                 this.connectionSource = source
                 this.isGuestScan = this.isQrConnectionSource(source)
+                this.awaitingPeerCheck = source === 'url'
+                this.lastPeerCursor = null
                 this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff'; if (!localStorage.getItem('lastSphereColor')) localStorage.setItem('lastSphereColor', this.user.color)
                 this.ui.userBadge.style.backgroundColor = this.user.color
                 this.ui.userBadge.setAttribute('data-hex', this.user.color.toUpperCase())
@@ -3938,6 +3976,7 @@
                 clearTimeout(this.syncRetryTimeout)
                 this.syncRetryTimeout = null
                 this.syncRetryAttempts = 0
+                this.joinApprovedPeers.clear()
                 this.connectionMode = this.pendingSecureSession ? 'secure-direct' : 'tracked'
 
                 if (this.mesh) { this.mesh.leave(); this.mesh = null }
@@ -3947,7 +3986,7 @@
                 this.activeLocks = {}
                 this.isFresh = true
 
-                this.ui.loginBtn.classList.remove('hidden')
+                this.ui.loginBtn.classList.toggle('hidden', this.awaitingPeerCheck)
                 if (source !== 'simple-qr') await this.identity.lockCurrentRoom().catch(e => console.warn('lockCurrentRoom failed', e))
                 await this.identity.ensureSessionIdentity().catch(e => console.warn('ensureSessionIdentity failed', e))
                 await this.db._open().catch(e => console.warn('preview db open failed', e))
@@ -3973,7 +4012,7 @@
                     const savedSignature = await this.db.getSignature(cleanHex).catch(() => null)
                     this.roomSignature = savedSignature ? this.cloneSignature(savedSignature) : null
                     this.syncDebugPassword(cleanHex)
-                    if (this.roomHasWrappedKeys) await this.validateRoomLogin(cleanHex)
+                    if (this.roomHasWrappedKeys && !(source === 'url' && cleanHex !== this.user.color.replace('#', '').toLowerCase())) await this.validateRoomLogin(cleanHex)
                     if (!preserveSignatureState && window.state) {
                         const basePath = savedSignature?.path?.map(p => [...p]) || []
                         const practicePaths = (savedSignature?.practicePaths || []).map(path => path.map(p => [...p]))
@@ -4003,22 +4042,19 @@
                     this.ui.roomStatus.textContent = options.source === 'url' ? 'Checking Network...' : 'COLOR AVAILABLE'
                     this.ui.roomStatus.style.color = ''
                     this.joinNetwork()
-
-                    setTimeout(() => {
-                        const discoveredPeers = this.mesh?.getDiscoveredPeers()?.size || 0
-                        if (discoveredPeers === 0 && this.ui.roomStatus.textContent === 'Checking Network...') {
-                            this.ui.roomStatus.textContent = 'COLOR AVAILABLE'
-                            this.ui.roomStatus.style.color = ''
-                        }
-                    }, 8000)
                 }
 
-                if (this.requiresMiningForCurrentConnection()) {
-                    if (this.mesh) this.mesh.enableSync()
-                    this.startMining()
-                } else {
-                    if (this.mesh) this.mesh.enableSync()
-                }
+                if (this.awaitingPeerCheck) setTimeout(() => {
+                    const discoveredPeers = this.mesh?.getDiscoveredPeers()?.size || 0
+                    if (discoveredPeers === 0 && this.ui.roomStatus.textContent === 'Checking Network...') {
+                        this.awaitingPeerCheck = false
+                        this.ui.roomStatus.textContent = 'COLOR AVAILABLE'
+                        this.ui.roomStatus.style.color = ''
+                        this.updateStatus()
+                    }
+                }, 8000)
+
+                if (this.mesh) this.mesh.enableSync()
                 console.log('[COLOR ui]', 'connectAndPreview complete', { roomId: this.roomId, roomExists: this.roomExists, roomHasWrappedKeys: this.roomHasWrappedKeys, wrongPasswordState: this.wrongPasswordState })
             }
 
@@ -4056,6 +4092,7 @@
                     this.ui.roomStatus.textContent = "1 PEER ONLINE";
                     // 2. Remove any red error colors just in case
                     this.ui.roomStatus.style.color = "";
+                    this.awaitingPeerCheck = false
 
                     this.updateStatus()
                 })
@@ -4093,11 +4130,33 @@
                     if (this.currentLineId) this.mesh.broadcastLock({ lineId: this.currentLineId, userColor: this.user.color })
                 })
 
-                this.mesh.on('peer-leave', () => { this.updateStatus(); this.reapplyVisualLocks() })
+                this.mesh.on('peer-leave', pid => { this.joinApprovedPeers.delete(pid); this.updateStatus(); this.reapplyVisualLocks() })
 
-                this.mesh.on('peer-identity', (data, pid) => {
+                this.mesh.on('peer-identity', async (data, pid) => {
                     this.peerColors[pid] = data?.color || '#ffffff'
-                    this.requestInitialSyncFromPeer(data, pid)
+                    const roomHex = this.roomId.replace('color-', '')
+                    const isOwner = this.user.color.replace('#', '').toLowerCase() === roomHex.toLowerCase()
+                    if (isOwner && this.mesh.sendCursor) {
+                        const meta = this.currentLineId ? this.parseId(this.currentLineId) : null
+                        const cursor = meta ? meta.index : await this.db.getCursor(roomHex).catch(() => 0)
+                        this.mesh.sendCursor({ type: 'response', cursor, approved: true }, pid)
+                    }
+                    this.updateStatus()
+                    if (this.connectionSource !== 'url' || this.joinApprovedPeers.has(pid)) this.requestInitialSyncFromPeer(data, pid)
+                    if (this.mesh.sendCursor && (this.isFresh || !this.hasRenderedContent())) setTimeout(() => this.mesh?.sendCursor?.({ type: 'request' }, pid), 0)
+                })
+
+                this.mesh.on('sync-cursor', async (data, pid) => {
+                    if (data?.type === 'request') {
+                        const meta = this.currentLineId ? this.parseId(this.currentLineId) : null
+                        const cursor = meta ? meta.index : await this.db.getCursor(this.roomId.replace('color-', '')).catch(() => 0)
+                        this.mesh.sendCursor?.({ type: 'response', cursor, approved: this.connectionMode === 'secure-direct' || this.joinApprovedPeers.has(pid) || this.user.color.replace('#', '').toLowerCase() === this.roomId.replace('color-', '').toLowerCase() }, pid)
+                    } else if (data?.type === 'response') {
+                        this.lastPeerCursor = { data, pid }
+                        if (data.approved || this.connectionMode === 'secure-direct' || this.isQrConnectionSource()) this.joinApprovedPeers.add(pid)
+                        this.updateStatus()
+                        this.requestInitialSyncFromPeer(data, pid)
+                    }
                 })
 
                 this.mesh.on('lock', (data, pid) => {
@@ -4573,6 +4632,7 @@
                     this.ui.roomStatus.textContent = 'WRONG PASSWORD'
                     this.ui.roomStatus.style.color = 'red'
                     this.ui.peerCount.innerText = 'Retry required'
+                    this.ui.loginBtn.disabled = false
                     this.ui.loginBtn.innerHTML = '<span>RETRY</span>'
                     this.ui.loginBtn.classList.remove('hidden')
                     this.ui.dot.classList.remove('on')
@@ -4583,31 +4643,33 @@
                     this.ui.roomStatus.textContent = 'TURN SERVER REQUIRED (NAT BLOCKED)'
                     this.ui.roomStatus.style.color = 'red'
                     this.ui.peerCount.innerText = 'Connection Failed'
+                    this.ui.loginBtn.disabled = false
                     this.ui.dot.classList.remove('on')
                     return
                 }
 
                 if (onlinePeers > 0) {
-                    if (this.requiresMiningForCurrentConnection() && !this.user.proofToken && !isFounder) {
-                        this.startMining()
-                        this.ui.roomStatus.textContent = `${onlinePeers} PEER${onlinePeers > 1 ? 'S' : ''} ONLINE`
+                    if (this.requiresMiningForCurrentConnection() && !isFounder && this.joinApprovedPeers.size === 0) this.startMining()
+                    this.ui.loginBtn.disabled = false
+                    this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
+                    if (!this.ui.dashboardPanel.classList.contains('active')) {
+                        this.ui.loginBtn.classList.remove('hidden')
+                    }
+                    this.ui.roomStatus.textContent = `${onlinePeers} PEER${onlinePeers > 1 ? 'S' : ''} ONLINE`
+                    this.ui.roomStatus.style.color = ''
+                    this.ui.peerCount.innerText = connectedPeers > 0 ? `${connectedPeers} connected` : `Ready to join...`
+                    this.ui.dot.classList.add('on')
+                } else {
+                    if (this.awaitingPeerCheck) {
+                        this.ui.roomStatus.textContent = 'Checking Network...'
                         this.ui.roomStatus.style.color = ''
-                        this.ui.peerCount.innerText = 'Generating Proof...'
-                        this.ui.loginBtn.innerHTML = "<span style='font-size:0.7rem'>VERIFYING...</span>"
+                        this.ui.peerCount.innerText = 'Checking...'
                         this.ui.loginBtn.classList.add('hidden')
                         this.ui.dot.classList.remove('on')
-                    } else {
-                        this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
-                        if (!this.ui.dashboardPanel.classList.contains('active')) {
-                            this.ui.loginBtn.classList.remove('hidden')
-                        }
-                        this.ui.roomStatus.textContent = `${onlinePeers} PEER${onlinePeers > 1 ? 'S' : ''} ONLINE`
-                        this.ui.roomStatus.style.color = ''
-                        this.ui.peerCount.innerText = connectedPeers > 0 ? `${connectedPeers} connected` : `Ready to join...`
-                        this.ui.dot.classList.add('on')
+                        return
                     }
-                } else {
                     this.ui.peerCount.innerText = 'Offline'
+                    this.ui.loginBtn.disabled = false
                     this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
 
                     if (!this.ui.dashboardPanel.classList.contains('active')) {
@@ -4923,6 +4985,7 @@
                 clearTimeout(this.syncRetryTimeout)
                 this.syncRetryTimeout = null
                 this.syncRetryAttempts = 0
+                this.joinApprovedPeers.clear()
                 this.pendingManualOffer = null
                 this.pendingVipTicket = null
                 this.pendingLoginHex = null
@@ -5498,7 +5561,6 @@ async function db_read_signature({ roomHex }) {
 
 self.onmessage = async (e) => {
     const { id, action, data } = e.data;
-    console.log(WORKER_LOG, "start", action, { id, roomHex: data?.roomHex, peerId: data?.peerId });
     try {
         let res;
         switch(action) {
@@ -5605,7 +5667,6 @@ self.onmessage = async (e) => {
             case 'generate_token': res = await computeProof(data.roomHex); break;
             case 'validate_peer': res = await isValidPeer(data.peerId, data.roomHex); break;
         }
-        console.log(WORKER_LOG, "success", action, { id, roomHex: data?.roomHex, peerId: data?.peerId });
         self.postMessage({ id, result: res });
     } catch(err) {
         console.error(WORKER_LOG, "error", action, { id, roomHex: data?.roomHex, peerId: data?.peerId, message: err?.message, name: err?.name, stack: err?.stack });
@@ -5626,7 +5687,6 @@ self.onmessage = async (e) => {
 
                 this.worker.onmessage = e => {
                     const { id, result, error } = e.data
-                    console.log(this.LOG, 'recv', { id, error, resultType: result == null ? String(result) : typeof result })
                     if (this.callbacks[id]) {
                         if (error) this.callbacks[id].reject(new Error(error))
                         else this.callbacks[id].resolve(result)
@@ -5640,10 +5700,8 @@ self.onmessage = async (e) => {
             _call(action, data, transfer = []) {
                 return new Promise((resolve, reject) => {
                     const id = Math.random().toString(36).slice(2)
-                    console.log(this.LOG, 'send', { id, action, roomHex: data?.roomHex, peerId: data?.peerId })
                     this.callbacks[id] = {
                         resolve: value => {
-                            console.log(this.LOG, 'resolve', { id, action, roomHex: data?.roomHex, peerId: data?.peerId })
                             resolve(value)
                         },
                         reject: err => {
@@ -5768,7 +5826,9 @@ self.onmessage = async (e) => {
     <script type="module">
         let storageScope = window.localStorage
         document.getElementById('login-btn').addEventListener('click', async () => {
-            const btnText = document.getElementById('login-btn').innerText
+            const btn = document.getElementById('login-btn')
+            if (btn.disabled) return
+            const btnText = btn.innerText
             console.log('[COLOR ui]', 'login click', { btnText, roomId: window.app?.roomId, roomStatus: document.getElementById('room-status')?.innerText })
             if (btnText === 'RETRY') {
                 if (window.app && window.app.logout) await window.app.logout()
