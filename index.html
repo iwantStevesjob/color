@@ -942,8 +942,6 @@
             right: 0;
             width: 8px;
             height: 8px;
-            padding: 0;
-            border: 0;
             border-radius: 50%;
             cursor: pointer;
             pointer-events: auto;
@@ -2907,10 +2905,9 @@
             }
 
             async broadcastIdentity() {
-                const meta = window.app.currentLineId ? window.app.parseId(window.app.currentLineId) : null
                 this.send('identity', {
                     color: window.app.user.color,
-                    cursor: meta ? meta.index : await window.app.db.getCursor(this.roomHex).catch(() => 0),
+                    cursor: window.app.currentLineId ? (window.app.parseId(window.app.currentLineId)?.index || 0) : 0,
                     secureQr: true
                 })
             }
@@ -3065,12 +3062,10 @@
             async sendIdentity(targetPeerId = null) {
                 const jwk = await this.identity.getPublicKeyData()
                 if (!jwk) return
-                const meta = window.app.currentLineId ? window.app.parseId(window.app.currentLineId) : null
                 this.rawSendId({
                     color: window.app.user.color,
                     pubKey: jwk,
                     minedToken: window.app.user.proofToken || 'PENDING',
-                    cursor: meta ? meta.index : await window.app.db.getCursor(this.roomHex).catch(() => 0),
                     qrSecret: this.outgoingQrSecret
                 }, targetPeerId)
             }
@@ -3198,9 +3193,6 @@
                 this.pendingFocusLine = undefined
                 this.syncRetryTimeout = null
                 this.syncRetryAttempts = 0
-                this.focusAnchorIndex = null
-                this.focusAnchorUntil = 0
-                this.focusAnchorTimer = null
                 this.joinApprovedPeers = new Set()
                 this.pendingLoginHex = null
                 this.pendingLoginSignature = null
@@ -3602,21 +3594,19 @@
 
             requestInitialSyncFromPeer(data, pid) {
                 if (!this.mesh || typeof data?.cursor !== 'number') return
-                if (!this.isFresh && this.hasRenderedContent() && (this.peerCursorReady || (this.connectionSource !== 'url' && !this.isQrConnectionSource()))) return
+                if (!this.isFresh && this.hasRenderedContent()) return
 
-                const cursor = data.cursor
+                const cursor = Math.max(0, data.cursor)
                 console.log(`[EditorApp] 🎯 Peer is at line ${cursor}. Syncing range...`)
 
                 this.pendingFocusLine = cursor
-                this.focusAnchorIndex = cursor
-                this.focusAnchorUntil = Date.now() + 5000
                 this.peerCursorReady = true
                 this.updateStatus()
                 this.renderInitialState({}, cursor)
                 this.isFresh = false
 
                 const roomHex = this.roomId.replace('color-', '')
-                const start = cursor - 50
+                const start = Math.max(0, cursor - 50)
                 const end = cursor + 50
                 const missingKeys = []
 
@@ -3626,14 +3616,11 @@
 
                 clearTimeout(this.syncRetryTimeout)
                 this.syncRetryAttempts = 0
-                const keepCursorCentered = () => { if (this.roomId?.replace('color-', '') === roomHex) this.focusLine(cursor) }
-                setTimeout(keepCursorCentered, 250)
-                setTimeout(keepCursorCentered, 900)
 
                 const requestSync = () => {
                     if (!this.mesh || !this.roomId || this.roomId.replace('color-', '') !== roomHex) return
                     this.mesh.requestSync(missingKeys, pid)
-                    if (this.syncRetryAttempts >= 5) {
+                    if (this.hasRenderedContent() || this.syncRetryAttempts >= 5) {
                         this.syncRetryTimeout = null
                         return
                     }
@@ -3891,11 +3878,12 @@
                 }
 
                 if (!this.ui.display.querySelector('.editor-line')) {
-                    this.renderInitialState({}, 0)
+                    this.ui.display.innerHTML = this.createLines(101)
                     this.isFresh = true
+                    this.focusLine(50)
                 } else {
                     this.db.getCursor(roomHex).then(cursorIdx => {
-                        if (typeof cursorIdx === 'number') {
+                        if (typeof cursorIdx === 'number' && cursorIdx >= 0) {
                             this.focusLine(cursorIdx)
                             return
                         }
@@ -3990,7 +3978,6 @@
                 this.currentLineId = null
                 this.pendingFocusLine = undefined
                 this.peerCursorReady = false
-                this.focusAnchorUntil = 0
                 clearTimeout(this.syncRetryTimeout)
                 this.syncRetryTimeout = null
                 this.syncRetryAttempts = 0
@@ -4044,7 +4031,7 @@
                         window.state.pathPoints = window.state.signaturePaths[window.state.signaturePaths.length - 1]?.map(p => [...p]) || []
                     }
                     let centerIndex = await this.db.getCursor(cleanHex).catch(() => 0)
-                    if (typeof centerIndex !== 'number') {
+                    if (typeof centerIndex !== 'number' || centerIndex < 0) {
                         centerIndex = await this.db.getLastEdited(cleanHex)
                     }
                     const data = await this.db.getRange(cleanHex, centerIndex - 50, centerIndex + 50)
@@ -4178,7 +4165,7 @@
                 })
 
                 this.mesh.on('lock', (data, pid) => {
-                    this.activeLocks[pid] = { lineId: data.lineId, index: this.parseId(data.lineId)?.index, ts: Date.now(), color: data.userColor }
+                    this.activeLocks[pid] = { lineId: data.lineId, ts: Date.now(), color: data.userColor }
                     this.reapplyVisualLocks()
                 })
 
@@ -4212,7 +4199,7 @@
                 const domId = roomHex + index
                 let el = document.getElementById(domId)
 
-                if (document.activeElement === el && Date.now() >= (this.focusAnchorUntil || 0)) return
+                if (document.activeElement === el) return
 
                 if (!el) {
                     const temp = document.createElement('div')
@@ -4245,11 +4232,6 @@
                     this.focusLine(this.pendingFocusLine)
                     this.pendingFocusLine = undefined
                 }
-                if (typeof this.focusAnchorIndex === 'number' && Date.now() < this.focusAnchorUntil && Math.abs(index - this.focusAnchorIndex) <= 50) {
-                    clearTimeout(this.focusAnchorTimer)
-                    this.focusAnchorTimer = setTimeout(() => this.focusLine(this.focusAnchorIndex), 80)
-                }
-                if (Object.keys(this.activeLocks).length) this.renderMinimap()
             }
 
             async triggerSave(lineId) {
@@ -4269,7 +4251,6 @@
 
             bindEvents() {
                 this.ui.display.addEventListener('input', e => {
-                    this.focusAnchorUntil = 0
                     this.isFresh = false; clearTimeout(this.saveTimeout)
                     let line = e.target.closest('.editor-line')
                     if (!line) {
@@ -4780,6 +4761,7 @@
             async enterSecureSharedRoom(session) {
                 this.pendingSecureSession = session
                 await this.transitionToScannedRoom(session.sharedHex, {
+                    source: 'secure-shared-qr',
                     skipExplicitConnect: true
                 })
             }
@@ -5052,17 +5034,16 @@
                     const domId = this.roomId.replace('color-', '') + index
                     const el = document.getElementById(domId)
                     if (el) {
-                        const c = this.ui.chatContainer
-                        c.scrollTop += el.getBoundingClientRect().top + el.offsetHeight / 2 - c.getBoundingClientRect().top - c.clientHeight / 2
+                        el.scrollIntoView({ block: 'center' })
                         const range = document.createRange()
                         const sel = window.getSelection()
                         range.selectNodeContents(el)
                         range.collapse(true)
                         sel.removeAllRanges()
                         sel.addRange(range)
-                        this.currentLineId = domId
                         if (window.__mobileKeyboardActivateDisplay) window.__mobileKeyboardActivateDisplay()
                         else this.ui.display.focus()
+                        this.currentLineId = domId
                         this.scheduleCursorSave()
 
                         this.checkBuffers()
@@ -5126,15 +5107,10 @@
                         }
                     }
 
-                    if (keysToRequest.length > 0) {
-                        const localRows = await this.db.getSpecific(roomHex, keysToRequest).catch(() => ({}))
-                        Object.entries(localRows).forEach(([index, row]) => this.renderUpdate(parseInt(index, 10), row.content, row.owner))
-                        const localIndexes = new Set(Object.keys(localRows).map(Number))
-                        const missingKeys = keysToRequest.filter(key => !localIndexes.has(parseInt(key.replace(roomHex, ''), 10)))
-                        if (this.mesh && missingKeys.length > 0) this.mesh.requestSync(missingKeys)
+                    if (this.mesh && keysToRequest.length > 0) {
+                        this.mesh.requestSync(keysToRequest)
                     }
 
-                    this.renderMinimap()
                     this.bufferCheckPending = false
                 })
             }
@@ -5167,34 +5143,11 @@
                 this.renderMinimap()
             }
             renderMinimap() {
-                const c = this.ui.chatContainer, h = c.scrollHeight, maxScroll = Math.max(0, h - c.clientHeight), now = Date.now(), hexRegex = /^#[0-9a-fA-F]{6}$/i
-                const locks = Object.entries(this.activeLocks).filter(([pid, lock]) => now - lock.ts <= 60000 && hexRegex.test(lock.color || ''))
-                const visibleIndexes = Array.from(this.ui.display.children).map(el => this.parseId(el.id)?.index).filter(index => typeof index === 'number')
-                const lockIndexes = locks.map(([_, lock]) => typeof lock.index === 'number' ? lock.index : this.parseId(lock.lineId)?.index).filter(index => typeof index === 'number')
-                const minIndex = Math.min(...visibleIndexes, ...lockIndexes)
-                const maxIndex = Math.max(...visibleIndexes, ...lockIndexes)
-                this.ui.minimap.innerHTML = locks.map(([pid, lock]) => {
-                    const index = typeof lock.index === 'number' ? lock.index : this.parseId(lock.lineId)?.index
-                    if (typeof index !== 'number') return ''
+                const h = this.ui.chatContainer.scrollHeight, now = Date.now()
+                this.ui.minimap.innerHTML = Object.entries(this.activeLocks).filter(([pid, lock]) => now - lock.ts <= 60000).map(([_, lock]) => {
                     const el = document.getElementById(lock.lineId)
-                    const scrollTop = el ? Math.max(0, Math.min(maxScroll, el.offsetTop + el.offsetHeight / 2 - c.clientHeight / 2)) : null
-                    const top = scrollTop !== null && maxScroll > 0 ? (scrollTop / maxScroll) * 100 : maxIndex > minIndex ? ((index - minIndex) / (maxIndex - minIndex)) * 100 : 50
-                    return `<button type="button" class="scroll-dot" data-peer="${pid}" data-index="${index}" style="background:${lock.color};top:${Math.max(0, Math.min(100, top))}%"></button>`
+                    return el ? `<div class="scroll-dot" style="background:${lock.color};top:${(el.offsetTop / h) * 100}%"></div>` : ''
                 }).join('')
-                this.ui.minimap.querySelectorAll('.scroll-dot').forEach(dot => dot.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); this.scrollToMinimapLine(parseInt(dot.dataset.index, 10), dot.dataset.peer) }))
-            }
-            async scrollToMinimapLine(index, pid = null) {
-                if (isNaN(index) || !this.roomId) return
-                const roomHex = this.roomId.replace('color-', '')
-                if (document.getElementById(roomHex + index)) { this.focusLine(index); return }
-                const keys = []
-                for (let i = index - 50; i <= index + 50; i++) keys.push(roomHex + i)
-                const rows = await this.db.getSpecific(roomHex, keys).catch(() => ({}))
-                this.renderInitialState(rows, index)
-                this.reapplyVisualLocks()
-                const localIndexes = new Set(Object.keys(rows).map(Number))
-                const missingKeys = keys.filter(key => !localIndexes.has(parseInt(key.replace(roomHex, ''), 10)))
-                if (this.mesh && missingKeys.length > 0) this.mesh.requestSync(missingKeys, pid)
             }
             setupGlobalExposure() {
                 window.connectAndPreview = (h, options) => this.connectAndPreview(h, options)
@@ -5851,6 +5804,26 @@ self.onmessage = async (e) => {
                 return this._call('storePeerKey', { peerId, jwk })
             }
 
+            async sign(text) {
+                if (!this.ready || this.locked) return null
+                return this._call('sign', text)
+            }
+
+            async verify(peerId, content, signature) {
+                return this._call('verify', { peerId, content, signature })
+            }
+
+            async encryptContent(text) {
+                if (!this.ready || this.locked) throw new Error('Keystore Locked')
+                return this._call('encrypt', text)
+            }
+
+            async decryptContent(packedBuffer) {
+                if (!this.ready || this.locked) return '🔒 LOCKED'
+                try {
+                    return await this._call('decrypt', packedBuffer)
+                } catch (e) { return '--- CORRUPT ---' }
+            }
         }
 
         window.app = new EditorApp()
@@ -6961,9 +6934,7 @@ self.onmessage = async (e) => {
                     if (window.app?.appState?.session !== 'joined') return
                     activeEditor = display
                     ensureDisplaySelection()
-                    const line = document.getElementById(window.app?.currentLineId)
-                    const c = window.app?.ui?.chatContainer
-                    if (line && c) c.scrollTop += line.getBoundingClientRect().top + line.offsetHeight / 2 - c.getBoundingClientRect().top - c.clientHeight / 2
+                    document.getElementById(window.app?.currentLineId)?.scrollIntoView({ block: 'center' })
                     showKeyboard()
                 }
 
