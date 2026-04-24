@@ -1559,7 +1559,7 @@
     <div id="login-card">
         <div id="color-hex">#FFFFFF</div>
         <div id="room-status">COLOR AVAILABLE</div>
-        <button id="login-btn"><span>LOGIN</span></button>
+        <button id="login-btn" class="hidden"><span>LOGIN</span></button>
     </div>
 
     <button id="debug-btn">DEBUG OFF</button>
@@ -2998,7 +2998,7 @@
                 onId(async (data, pid) => {
                     let isVerified = false
                     const wasVerified = this.verifiedPeers.has(pid)
-                    if (wasVerified) { this.peerIdentities.set(pid, data); return }
+                    if (wasVerified) { if (data.pubKey) await this.identity.storePeerKey(pid, data.pubKey); this.peerIdentities.set(pid, data); return }
 
                     if (this.expectedQrSecret && data.qrSecret === this.expectedQrSecret) {
                         console.log(`%c[P2P] 🎟️ VIP Ticket Accepted for ${pid}`, 'color: gold; font-weight: bold;')
@@ -3200,6 +3200,7 @@
                 this.wrongPasswordState = false
                 this.awaitingPeerCheck = false
                 this.lastPeerCursor = null
+                this.peerCursorReady = false
                 this.minedForSession = false
                 this.miningInProgress = false
                 this.peeking = false
@@ -3598,6 +3599,8 @@
                 console.log(`[EditorApp] 🎯 Peer is at line ${cursor}. Syncing range...`)
 
                 this.pendingFocusLine = cursor
+                this.peerCursorReady = true
+                this.updateStatus()
                 this.renderInitialState({}, cursor)
                 this.isFresh = false
 
@@ -3973,6 +3976,7 @@
                 this.clearStatusInterval()
                 this.currentLineId = null
                 this.pendingFocusLine = undefined
+                this.peerCursorReady = false
                 clearTimeout(this.syncRetryTimeout)
                 this.syncRetryTimeout = null
                 this.syncRetryAttempts = 0
@@ -3986,7 +3990,7 @@
                 this.activeLocks = {}
                 this.isFresh = true
 
-                this.ui.loginBtn.classList.toggle('hidden', this.awaitingPeerCheck)
+                this.ui.loginBtn.classList.add('hidden')
                 if (source !== 'simple-qr') await this.identity.lockCurrentRoom().catch(e => console.warn('lockCurrentRoom failed', e))
                 await this.identity.ensureSessionIdentity().catch(e => console.warn('ensureSessionIdentity failed', e))
                 await this.db._open().catch(e => console.warn('preview db open failed', e))
@@ -4652,7 +4656,9 @@
                     if (this.requiresMiningForCurrentConnection() && !isFounder && this.joinApprovedPeers.size === 0) this.startMining()
                     this.ui.loginBtn.disabled = false
                     this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
-                    if (!this.ui.dashboardPanel.classList.contains('active')) {
+                    if (this.connectionSource === 'url' && !this.peerCursorReady) {
+                        this.ui.loginBtn.classList.add('hidden')
+                    } else if (!this.ui.dashboardPanel.classList.contains('active')) {
                         this.ui.loginBtn.classList.remove('hidden')
                     }
                     this.ui.roomStatus.textContent = `${onlinePeers} PEER${onlinePeers > 1 ? 'S' : ''} ONLINE`
