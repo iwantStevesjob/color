@@ -3374,6 +3374,8 @@
                 display.addEventListener('dragover', e => this.handleDragOver(e))
                 display.addEventListener('dragleave', e => { if (!display.contains(e.relatedTarget)) this.setHoverLine(null) })
                 display.addEventListener('drop', e => this.handleDrop(e))
+                display.addEventListener('pointerdown', e => this.logDownloadPointer(e))
+                display.addEventListener('touchstart', e => this.logDownloadPointer(e), { passive: true })
                 display.addEventListener('click', e => this.handleClick(e))
             }
 
@@ -3434,11 +3436,20 @@
                 if (!attachment) return
                 event.preventDefault()
                 event.stopPropagation()
+                console.log('[FileTransfer] download click', this.metaFromElement(attachment), { disabled: button.disabled, mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
                 this.requestDownload(this.metaFromElement(attachment))
+            }
+
+            logDownloadPointer(event) {
+                const button = event.target.closest?.('.file-download-btn')
+                if (!button) return
+                const attachment = button.closest('.file-attachment')
+                console.log('[FileTransfer] download pointer', event.type, attachment ? this.metaFromElement(attachment) : null, { disabled: button.disabled })
             }
 
             async dropFile(line, file) {
                 if (!this.app.store || !this.app.mesh || !this.app.roomId) return
+                console.log('[FileTransfer] drop file', { name: file.name, size: file.size, type: file.type, lineId: line.id, roomId: this.app.roomId })
                 const meta = {
                     id: this.makeFileId(),
                     name: file.name || 'file',
@@ -3465,6 +3476,7 @@
 
             async prepareOutgoing(entry, index) {
                 const { file, meta, base } = entry
+                console.log('[FileTransfer] prepare outgoing start', { fileId: meta.id, name: meta.name, size: meta.size, index })
                 const buffer = await this.readFile(file, progress => {
                     if (this.app.roomId !== entry.roomId) return
                     const value = Math.min(0.9, Math.max(0.02, progress * 0.9))
@@ -3473,6 +3485,7 @@
                 })
                 meta.hash = await this.hashBuffer(buffer)
                 if (this.app.roomId !== entry.roomId) return
+                console.log('[FileTransfer] prepare outgoing complete', { fileId: meta.id, hash: meta.hash })
                 const line = document.getElementById(entry.lineId)
                 const content = this.buildContent(meta, base)
                 if (line) {
@@ -3486,18 +3499,21 @@
             }
 
             requestDownload(meta) {
-                if (!meta?.id || !this.app.mesh?.broadcastFile) return
+                console.log('[FileTransfer] request download start', meta, { mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile, mobile: this.isMobileBrowser() })
+                if (!meta?.id || !this.app.mesh?.broadcastFile) { console.warn('[FileTransfer] request download blocked', meta); return }
                 const cached = this.completed.get(meta.id)
-                if (cached) { this.saveBlob(cached.blob, cached.meta); return }
+                if (cached) { console.log('[FileTransfer] using cached file', meta.id); this.saveBlob(cached.blob, cached.meta); return }
                 this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
                 this.setProgress(meta.id, 0.08, meta.ownerColor)
                 if (this.isMobileBrowser()) this.downloadTargets.set(meta.id, this.openDownloadTarget(meta))
+                console.log('[FileTransfer] sending file request', { fileId: meta.id })
                 this.app.mesh.broadcastFile({ type: 'request', fileId: meta.id })
                 setTimeout(() => { if (!this.incoming.has(meta.id) && !this.completed.has(meta.id)) this.setButtonState(meta.id, 'RETRY ' + meta.name, false) }, 10000)
             }
 
             async handleFileMessage(data, pid) {
                 if (!data?.type || !data.fileId) return
+                console.log('[FileTransfer] file message', data.type, { fileId: data.fileId, pid, index: data.index, progress: data.progress })
                 if (data.type === 'request') return this.handleRequest(data.fileId, pid)
                 if (data.type === 'progress') return this.setProgress(data.fileId, data.progress, data.ownerColor)
                 if (data.type === 'start') return this.startIncoming(data, pid)
@@ -3507,6 +3523,7 @@
 
             async handleRequest(fileId, pid) {
                 const entry = this.outgoing.get(fileId)
+                console.log('[FileTransfer] received file request', { fileId, pid, hasEntry: !!entry, canSend: !!this.app.mesh?.broadcastFile })
                 if (!entry || !this.app.mesh?.broadcastFile) return
                 if (entry.ready) try { await entry.ready } catch (error) { return }
                 await this.sendFile(entry, pid)
@@ -3516,6 +3533,7 @@
                 if (this.app.roomId !== entry.roomId) return
                 const { file, meta } = entry
                 const totalChunks = Math.ceil((file.size || 0) / this.chunkSize)
+                console.log('[FileTransfer] send file start', { fileId: meta.id, pid, size: file.size, chunks: totalChunks })
                 this.app.mesh.broadcastFile({ type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, chunks: totalChunks }, pid)
                 if (!file.size) {
                     this.setProgress(meta.id, 1, meta.ownerColor)
@@ -3531,6 +3549,7 @@
                     this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
                     await new Promise(resolve => setTimeout(resolve, 5))
                 }
+                console.log('[FileTransfer] send file end', { fileId: meta.id, pid })
                 this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
             }
 
@@ -3546,6 +3565,7 @@
                     hash: data.hash || localMeta.hash || ''
                 }
                 this.incoming.set(data.fileId, { pid, meta, chunks: new Array(data.chunks || 0), received: 0 })
+                console.log('[FileTransfer] incoming start', { fileId: data.fileId, pid, size: meta.size, chunks: data.chunks })
                 this.setProgress(data.fileId, 0, meta.ownerColor)
             }
 
@@ -3556,12 +3576,14 @@
                 const bytes = this.base64ToBytes(data.data)
                 incoming.chunks[data.index] = bytes
                 incoming.received += bytes.byteLength
+                if (data.index === 0 || incoming.received >= incoming.meta.size) console.log('[FileTransfer] incoming progress', { fileId: data.fileId, received: incoming.received, size: incoming.meta.size })
                 this.setProgress(data.fileId, incoming.meta.size ? incoming.received / incoming.meta.size : 1, incoming.meta.ownerColor)
             }
 
             async finishIncoming(fileId, pid) {
                 const incoming = this.incoming.get(fileId)
                 if (!incoming || incoming.pid !== pid) return
+                console.log('[FileTransfer] incoming end', { fileId, pid, received: incoming.received, size: incoming.meta.size })
                 if (incoming.chunks.some(chunk => !chunk)) { this.setButtonState(fileId, 'RETRY ' + incoming.meta.name, false); return }
                 const blob = new Blob(incoming.chunks, { type: incoming.meta.type })
                 if (incoming.meta.hash && await this.hashBuffer(await blob.arrayBuffer()) !== incoming.meta.hash) {
@@ -3622,6 +3644,7 @@
 
             setProgress(fileId, progress, color) {
                 const pct = Math.max(0, Math.min(100, Number(progress || 0) * 100))
+                if (pct === 0 || pct >= 100 || pct <= 8) console.log('[FileTransfer] progress', { fileId, pct })
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
                     const line = el.closest('.editor-line')
                     if (!line) return
@@ -3701,6 +3724,7 @@
 
             saveBlob(blob, meta, target = null) {
                 const url = URL.createObjectURL(blob)
+                console.log('[FileTransfer] save blob', { name: meta.name, size: blob.size, type: blob.type, target: !!target, mobile: this.isMobileBrowser() })
                 if (target && !target.closed) {
                     try { target.location.href = url } catch (error) { }
                     setTimeout(() => URL.revokeObjectURL(url), 10000)
