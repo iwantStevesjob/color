@@ -222,6 +222,14 @@
             transform: translateY(calc(100vh - var(--nav-height) - var(--sub-nav-height) - 50px + 1px));
         }
 
+        #top-nav[style*="--nav-color: white"]~#sub-nav-layer #header-connect {
+            --nav-color: white;
+        }
+
+        #top-nav[style*="--nav-color: black"]~#sub-nav-layer #header-connect {
+            --nav-color: black;
+        }
+
         body:has(#tab-signatures.active) #sub-nav-layer.peek-slide {
             transform: translateY(calc(100vh - var(--nav-height) - 50px + 1px));
         }
@@ -244,6 +252,11 @@
         .sub-header.active {
             opacity: 1;
             pointer-events: auto;
+        }
+
+        #sub-nav-layer:not(.half-slide) #header-connect.active {
+            opacity: 0;
+            pointer-events: none;
         }
 
         .page-title {
@@ -368,23 +381,31 @@
         .connect-option {
             padding: 16px 28px;
             background: transparent;
-            border: 1.5px solid rgba(0, 0, 0, 0.2);
+            border: 2px solid currentColor;
             border-radius: 50px;
             display: flex;
             align-items: center;
             justify-content: center;
+            gap: 8px;
+            white-space: nowrap;
             cursor: pointer;
             transition: all 0.2s ease;
             font-weight: 600;
             text-transform: uppercase;
             font-size: 0.7rem;
             letter-spacing: 0.5px;
-            color: #333;
+            color: var(--nav-color);
         }
 
         .connect-option:hover {
             background: rgba(0, 0, 0, 0.06);
-            border-color: rgba(0, 0, 0, 0.35);
+            border-color: var(--nav-color);
+        }
+
+        .connect-option svg {
+            width: 15px;
+            height: 15px;
+            flex-shrink: 0;
         }
 
         #user-badge {
@@ -440,7 +461,7 @@
             font-weight: 600;
             margin: 0 0 15px 0;
             text-align: center;
-            color: #666;
+            color: var(--nav-color);
             text-transform: uppercase;
             letter-spacing: 1px;
         }
@@ -473,6 +494,17 @@
 
         .content-view.active {
             display: flex;
+        }
+
+        #view-blocks {
+            transition: opacity 0.25s ease;
+        }
+
+        body.create-block-mode #view-blocks,
+        body.create-block-mode #header-blocks.active {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
         }
 
         .settings-pane,
@@ -1044,14 +1076,21 @@
             }
 
             .connect-options {
-                gap: 12px;
-                padding: 15px;
+                gap: 8px;
+                padding: 15px 8px;
+                flex-wrap: nowrap;
             }
 
             .connect-option {
-                width: 85px;
-                height: 85px;
-                font-size: 0.55rem;
+                width: auto;
+                height: auto;
+                padding: 12px 10px;
+                font-size: 0.58rem;
+            }
+
+            .connect-option svg {
+                width: 13px;
+                height: 13px;
             }
 
             .connect-option span:first-child {
@@ -1128,6 +1167,60 @@
         .settings-input:focus {
             border-color: #333;
             outline: none;
+        }
+
+        #create-block-panel {
+            position: fixed;
+            top: var(--nav-height);
+            left: 0;
+            right: 0;
+            bottom: 50px;
+            z-index: 160;
+            overflow-y: auto;
+            padding: 24px 20px 80px;
+            box-sizing: border-box;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+
+        #create-block-panel.visible {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+
+        .create-block-form {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #111;
+        }
+
+        .create-block-form textarea {
+            min-height: 180px;
+            resize: vertical;
+        }
+
+        .create-block-submit,
+        .password-security-slider {
+            width: 100%;
+        }
+
+        .create-block-submit {
+            padding: 12px;
+            border: 0;
+            border-radius: 4px;
+            background: #111;
+            color: #fff;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .password-security-slider {
+            accent-color: #111;
+            pointer-events: auto;
         }
 
         .settings-hint {
@@ -1546,6 +1639,20 @@
         </div>
     </div>
 
+    <div id="create-block-panel">
+        <div class="create-block-form">
+            <label class="settings-label" for="create-block-title">Title</label>
+            <input id="create-block-title" class="settings-input" type="text" autocomplete="off">
+            <label class="settings-label" for="create-block-html">HTML</label>
+            <textarea id="create-block-html" class="settings-input"></textarea>
+            <label class="settings-label" for="create-block-js">JS</label>
+            <textarea id="create-block-js" class="settings-input"></textarea>
+            <label class="settings-label" for="create-block-css">CSS</label>
+            <textarea id="create-block-css" class="settings-input"></textarea>
+            <button class="create-block-submit" type="button">SUBMIT</button>
+        </div>
+    </div>
+
     <nav id="top-nav">
         <div class="nav-item active" data-target="home">Home</div>
         <div class="nav-item" data-target="blocks">BLOCKS</div>
@@ -1608,9 +1715,20 @@
         <div id="header-connect" class="sub-header">
             <div class="connect-panel-title">How would you like to connect?</div>
             <div class="connect-options">
-                <div class="connect-option" data-connect-type="qr">QR Code</div>
-                <div class="connect-option" data-connect-type="nearby">Nearby</div>
-                <div class="connect-option" data-connect-type="topic">Topic</div>
+                <div class="connect-option" data-connect-type="qr"><svg viewBox="0 0 21 21" fill="currentColor">
+                        <path
+                            d="M1 1h7v7H1V1zm2 2v3h3V3H3zm10-2h7v7h-7V1zm2 2v3h3V3h-3zM1 13h7v7H1v-7zm2 2v3h3v-3H3zm9-5h2v2h-2v-2zm4 0h4v2h-4v-2zm-6 4h2v2h-2v-2zm4 0h2v2h-2v-2zm4 0h2v6h-2v-6zm-8 4h6v2h-6v-2z" />
+                    </svg>Directly</div>
+                <div class="connect-option" data-connect-type="nearby"><svg viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" />
+                        <circle cx="12" cy="10" r="3" />
+                    </svg>Nearby</div>
+                <div class="connect-option" data-connect-type="topic"><svg viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8" />
+                        <path d="m21 21-4.3-4.3" />
+                    </svg>Other</div>
             </div>
         </div>
         <div id="header-profile" class="sub-header">
@@ -3345,6 +3463,7 @@
                 const clicks = sig?.clicks || []
                 const pathPoints = sig?.path || []
                 const hasPath = pathPoints.length > 1
+                document.getElementById('password-security-status').style.pointerEvents = hasPath ? 'auto' : 'none'
                 const GUESSES_PER_SECOND = 1_000_000_000
                 const HEX_SPACE = 16_777_216
 
@@ -3407,6 +3526,18 @@
                     timeStr = (seconds / (86400 * 365 * 1e12)).toFixed(0) + ' trillion years'
                 } else {
                     timeStr = 'longer than the age of the universe'
+                }
+
+                if (hasPath) {
+                    const fullPath = window.state?.signatureFullPath?.length ? window.state.signatureFullPath : pathPoints
+                    titleEl.innerHTML = `<input class="password-security-slider" type="range" min="0" max="100" value="${fullPath.length > 2 ? Math.min(100, Math.round(pathPoints.length / fullPath.length * 100)) : 100}">`
+                    titleEl.style.color = ''
+                    descEl.textContent = 'It would take ' + timeStr + ' to guess your password.'
+                    titleEl.querySelector('.password-security-slider').addEventListener('input', e => {
+                        const pointCount = window.applySignaturePointSlider(Number(e.target.value))
+                        descEl.textContent = 'It would take ' + window.formatGuessTime(Math.pow(4096, pointCount) / GUESSES_PER_SECOND) + ' to guess your password.'
+                    })
+                    return
                 }
 
                 if (level === 'not-secure') {
@@ -3495,6 +3626,8 @@
             clearTransientPanelModes() {
                 if (window.state?.practice) window.state.practice.active = false
                 document.getElementById('password-security-status').style.display = 'none'
+                document.body.classList.remove('create-block-mode')
+                document.getElementById('create-block-panel')?.classList.remove('visible')
                 if (this.halfPeekMode) this.exitHalfPeek()
                 if (!this.peeking) return
                 this.togglePeek()
@@ -3825,6 +3958,7 @@
 
             async enterRoomUI() {
                 console.log('[COLOR ui]', 'enterRoomUI start', { roomId: this.roomId, ownerLoginApproved: this.ownerLoginApproved, isGuestScan: this.isGuestScan })
+                document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none')
                 if (window.state) { window.state.landing.active = false; window.state.landing.showHandle = false }
                 if (this.ui.dashboardPanel.classList.contains('active')) return
 
@@ -4372,6 +4506,16 @@
                 document.getElementById('settings-btn').addEventListener('click', () => {
                     this.openMainSection('settings')
                 })
+                document.getElementById('create-app-btn').addEventListener('click', () => {
+                    document.body.classList.add('create-block-mode')
+                    document.getElementById('create-block-panel')?.classList.add('visible')
+                    this.peeking = true
+                    this.setPanelState('peek')
+                    this.ui.dashboardPanel.classList.remove('revealed', 'step-down', 'half-peek')
+                    this.ui.dashboardPanel.classList.add('peek-mode')
+                    this.ui.subNavLayer.classList.remove('half-slide', 'peek-slide')
+                    this.updatePeekState(0)
+                })
                 document.querySelectorAll('.sub-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
                         const group = tab.getAttribute('data-group'), target = tab.getAttribute('data-tab')
@@ -4395,6 +4539,12 @@
                             if (window.state) {
                                 window.state.renderPath = true
                                 if (latestPath && latestPath.length > 0) {
+                                    const full = window.state.signatureFullPath
+                                    const samePath = full && JSON.stringify(full[0]) === JSON.stringify(latestPath[0]) && JSON.stringify(full[full.length - 1]) === JSON.stringify(latestPath[latestPath.length - 1])
+                                    if (!samePath || full.length < latestPath.length) {
+                                        window.state.signatureFullPath = latestPath.map(p => [...p])
+                                        window.state.signatureFullRotations = window.state.interactionSignature?.rotations?.length === latestPath.length ? window.state.interactionSignature.rotations.map(r => [...r]) : null
+                                    } else if (!window.state.signatureFullRotations && window.state.interactionSignature?.rotations?.length === latestPath.length) window.state.signatureFullRotations = window.state.interactionSignature.rotations.map(r => [...r])
                                     window.state.pathPoints = latestPath.map(p => [...p])
                                 }
                             }
@@ -4992,6 +5142,12 @@
             async logout() {
                 if (window.resetSphereView) window.resetSphereView(false, false, true)
                 if (window.state) window.state.selectedHandle = null, window.state.signaturePaths = [], window.state.signaturePathsRotations = [], window.state.pathPoints = [], window.state.pathRotations = [], window.state.pathStartPos = null, window.state.renderPath = false, window.state.signatureHex = null, window.state.signatureBaseRotation = null, window.state.interactionSignature = { type: 'click', path: [], practicePaths: [], rotations: [], clicks: [] }, window.state.practice && (window.state.practice.awaitingRedraw = false)
+                document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none')
+                document.getElementById('connect-content-layer')?.classList.remove('visible')
+                document.getElementById('create-block-panel')?.classList.remove('visible')
+                document.body.classList.remove('create-block-mode')
+                document.getElementById('sub-nav-layer')?.classList.remove('peek-slide', 'half-slide')
+                document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
                 await this.stopScanner()
                 await this.secureQrBootstrap.destroy()
                 this.clearStatusInterval()
@@ -6240,6 +6396,8 @@ self.onmessage = async (e) => {
             state.interactionSignature = { type: 'click', path: [], practicePaths: document.body.classList.contains('light-mode') && state.practice.awaitingRedraw ? state.signaturePaths.slice(1).map(path => path.map(p => [...p])) : [], clicks: prevClicks }
             if (prevClicks.length) state.interactionSignature.password = 'FFFFFF' + prevClicks.join('');
             state.pathPoints = []
+            state.signatureFullPath = null
+            state.signatureFullRotations = null
             state.pathStartPos = null
 
             if (document.body.classList.contains('light-mode')) {
@@ -6254,6 +6412,7 @@ self.onmessage = async (e) => {
                 const hit = Vec3.dot(Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))), Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d)))) <= 1
 
                 if (hit) {
+                    document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none')
                     state.interaction = { mode: 'zoom', hasTouchedSphere: true, startZ: state.cameraPos[2], startMouse: { x: state.mouse.x, y: state.mouse.y } }
                     if (state.signaturePaths.length === 0) state.signatureBaseRotation = [...state.sphere.rotation];
                     const m = state.sphere.rotation
@@ -6323,7 +6482,7 @@ self.onmessage = async (e) => {
             }
         }
         function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const currentRots = state.interactionSignature.rotations ? state.interactionSignature.rotations.map(r => [...r]) : null; const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const originalRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) ? state.signaturePathsRotations[0].map(r => [...r]) : null; const ratio = comparePaths(originalPath, currentPath); const mergedPaths = state.signaturePaths.filter(path => path.length > 1), serializedCurrentPath = JSON.stringify(currentPath); if (currentPath.length > 1 && !mergedPaths.some(path => JSON.stringify(path) === serializedCurrentPath)) mergedPaths.push(currentPath); state.signaturePaths = mergedPaths; state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, rotations: originalPath.length > 1 ? originalRots : currentRots, practicePaths: state.signaturePaths.slice(originalPath.length > 1 ? 1 : 0).map(path => path.map(p => [...p])) }; state.practice.awaitingRedraw = false; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${Math.round(ratio * 100)}`; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.signaturePathsRotations = currentRots ? [currentRots] : []; state.interactionSignature = { type: 'drag', path: currentPath, rotations: currentRots, practicePaths: [] } } state.signatureHex = hex.replace('#', ''); if (selectedHandle) triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { if (state.selectedHandle) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(state.selectedHandle.pos, transformPos(state.selectedHandle.pos, state.sphere.rotation), state.selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false, 'local', { preserveSignatureState: true, skipAutoEnter: true }) } } } state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }
-        function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (source === 'local' && (!state.interactionSignature.path || state.interactionSignature.path.length <= 1)) { if (!state.interactionSignature.clicks) state.interactionSignature.clicks = []; state.interactionSignature.clicks.push(hex.replace('#', '').toUpperCase()); state.interactionSignature.password = 'FFFFFF' + state.interactionSignature.clicks.join(''); } if (!state.historyHandles.some(h => h.hex.toLowerCase() === hex.toLowerCase())) { state.historyHandles.push({ pos: [...norm], color: [...col], hex: hex, peerCount: 0 }); } if (source === 'local' && window.app?.setPendingLoginSignature && (state.interactionSignature?.path?.length || state.interactionSignature?.clicks?.length)) window.app.setPendingLoginSignature(hex, state.interactionSignature); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
+        function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none'); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (source === 'local' && (!state.interactionSignature.path || state.interactionSignature.path.length <= 1)) { if (!state.interactionSignature.clicks) state.interactionSignature.clicks = []; state.interactionSignature.clicks.push(hex.replace('#', '').toUpperCase()); state.interactionSignature.password = 'FFFFFF' + state.interactionSignature.clicks.join(''); } if (!state.historyHandles.some(h => h.hex.toLowerCase() === hex.toLowerCase())) { state.historyHandles.push({ pos: [...norm], color: [...col], hex: hex, peerCount: 0 }); } if (source === 'local' && window.app?.setPendingLoginSignature && (state.interactionSignature?.path?.length || state.interactionSignature?.clicks?.length)) window.app.setPendingLoginSignature(hex, state.interactionSignature); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4 }
         function toggleFreeze() {
             const isZoomed = document.getElementById('dashboard-panel').classList.contains('active') ||
@@ -6356,6 +6515,12 @@ self.onmessage = async (e) => {
         function getPathMatches(pathA, pathB, maxDistSq) { const matches = []; for (let i = 0; i < pathA.length; i++) { const a = pathA[i]; let shortest = Infinity; for (let j = 1; j < pathB.length; j++) { const b1 = pathB[j - 1], b2 = pathB[j], seg = Vec3.sub(b2, b1), segLenSq = Vec3.dot(seg, seg), rel = Vec3.sub(a, b1), t = segLenSq > 0 ? Math.min(1, Math.max(0, Vec3.dot(rel, seg) / segLenSq)) : 0, point = Vec3.add(b1, Vec3.scale(seg, t)), distSq = Vec3.dot(Vec3.sub(a, point), Vec3.sub(a, point)); if (distSq < shortest) shortest = distSq } matches.push(shortest < maxDistSq) } return matches }
         function normalizePath(path, minStep = 0.01) { const pts = []; path?.forEach(p => { if (!p) return; if (!pts.length || Vec3.dist(pts[pts.length - 1], p) >= minStep) pts.push([...p]) }); return pts }
         function getPathLength(path) { let len = 0; for (let i = 1; i < path.length; i++) len += Vec3.dist(path[i], path[i - 1]); return len }
+        function pointSegmentDistance(p, a, b) { const ab = Vec3.sub(b, a), lenSq = Vec3.dot(ab, ab); if (!lenSq) return Vec3.dist(p, a); const t = Math.min(1, Math.max(0, Vec3.dot(Vec3.sub(p, a), ab) / lenSq)), q = Vec3.add(a, Vec3.scale(ab, t)); return Vec3.dist(p, q) }
+        function simplifyPathIndices(path, targetCount) { const selected = new Set([0, path.length - 1]); while (selected.size < targetCount) { const ordered = [...selected].sort((a, b) => a - b); let best = -1, bestDist = -1; for (let s = 1; s < ordered.length; s++) { const a = ordered[s - 1], b = ordered[s]; for (let i = a + 1; i < b; i++) { const dist = pointSegmentDistance(path[i], path[a], path[b]); if (dist > bestDist) { bestDist = dist; best = i } } } if (best < 0) break; selected.add(best) } return [...selected].sort((a, b) => a - b) }
+        function applySignaturePointSlider(value) { const fullPath = (state.signatureFullPath?.length ? state.signatureFullPath : state.interactionSignature.path || []).map(p => [...p]); if (fullPath.length < 2) return fullPath.length; state.signatureFullPath = fullPath; if (!state.signatureFullRotations && state.interactionSignature.rotations?.length === fullPath.length) state.signatureFullRotations = state.interactionSignature.rotations.map(r => [...r]); const targetCount = value <= 0 ? 2 : Math.max(2, Math.min(fullPath.length, Math.round(fullPath.length * value / 100))), indices = targetCount >= fullPath.length ? fullPath.map((_, i) => i) : simplifyPathIndices(fullPath, targetCount), path = indices.map(i => [...fullPath[i]]), fullRots = state.signatureFullRotations?.length === fullPath.length ? state.signatureFullRotations : state.interactionSignature.rotations; state.interactionSignature.path = path; if (fullRots?.length === fullPath.length) state.interactionSignature.rotations = indices.map(i => [...fullRots[i]]); state.signaturePaths = [path, ...state.signaturePaths.slice(1)]; state.pathPoints = path.map(p => [...p]); state.renderPath = true; return path.length }
+        function formatGuessTime(seconds) { if (seconds < 0.01) return 'less than 0.01 seconds'; if (seconds < 1) return seconds.toFixed(3) + ' seconds'; if (seconds < 60) return Math.round(seconds) + ' seconds'; if (seconds < 3600) return Math.round(seconds / 60) + ' minutes'; if (seconds < 86400) return (seconds / 3600).toFixed(1) + ' hours'; if (seconds < 86400 * 365) return Math.round(seconds / 86400) + ' days'; if (seconds < 86400 * 365 * 1000) return Math.round(seconds / (86400 * 365)) + ' years'; if (seconds < 86400 * 365 * 1e6) return (seconds / (86400 * 365 * 1000)).toFixed(0) + ' thousand years'; if (seconds < 86400 * 365 * 1e9) return (seconds / (86400 * 365 * 1e6)).toFixed(0) + ' million years'; if (seconds < 86400 * 365 * 1e12) return (seconds / (86400 * 365 * 1e9)).toFixed(0) + ' billion years'; return isFinite(seconds) ? (seconds / (86400 * 365 * 1e12)).toFixed(0) + ' trillion years' : 'longer than the age of the universe' }
+        window.applySignaturePointSlider = applySignaturePointSlider
+        window.formatGuessTime = formatGuessTime
         function samplePath(path, samples = 64) {
             if (!path || path.length === 0) return []
             if (path.length === 1) return Array.from({ length: samples }, () => [...path[0]])
@@ -6398,7 +6563,7 @@ self.onmessage = async (e) => {
             const endScore = Math.max(0, 1 - Vec3.dist(cleanA[cleanA.length - 1], cleanB[cleanB.length - 1]) / 0.2)
             return Math.max(0, Math.min(1, overlapScore * 0.3 + distanceScore * 0.25 + directionScore * 0.2 + lengthScore * 0.1 + startScore * 0.075 + endScore * 0.075))
         }
-        function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return } } if (state.selectedHandle && !state.dragStart.active) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${state.selectedHandle.hex.toUpperCase()}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${state.selectedHandle.hex}`; return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return } const hitPos = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))); const hex = rgbToHex(...getSurfaceColor(hitPos, Vec3.normalize(hitPos))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}` }) }
+        function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || state.hasRotated || document.getElementById('login-card')?.classList.contains('visible') || document.getElementById('dashboard-panel')?.classList.contains('active') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return } } if (state.selectedHandle && !state.dragStart.active) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${state.selectedHandle.hex.toUpperCase()}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${state.selectedHandle.hex}`; return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return } const hitPos = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))); const hex = rgbToHex(...getSurfaceColor(hitPos, Vec3.normalize(hitPos))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}` }) }
         window.resetSphereView = function (animateIn = false, keepRotation = false, clearHex = false, centerPoint = null) {
             const m = state.sphere.rotation
             const preserveRotation = keepRotation || !!centerPoint
