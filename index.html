@@ -921,7 +921,7 @@
             inset: 0 auto 0 0;
             width: var(--file-progress, 0%);
             background: var(--file-color, #999);
-            opacity: 0.16;
+            opacity: 0.24;
             pointer-events: none;
             transition: width 0.12s linear;
             z-index: 0;
@@ -965,6 +965,10 @@
         .file-size {
             color: #777;
             font-size: 12px;
+        }
+
+        .file-owner-name {
+            font-weight: bold;
         }
 
         .editor-line:hover,
@@ -3360,6 +3364,7 @@
                 this.outgoing = new Map()
                 this.incoming = new Map()
                 this.completed = new Map()
+                this.downloadTargets = new Map()
                 this.chunkSize = 8 * 1024
                 this.bindEvents()
             }
@@ -3383,6 +3388,7 @@
                 this.outgoing.clear()
                 this.incoming.clear()
                 this.completed.clear()
+                this.downloadTargets.clear()
                 this.mesh = null
             }
 
@@ -3446,14 +3452,15 @@
                 const base = this.getBaseContent(line)
                 const entry = { file, meta, base, lineId: line.id, roomId: this.app.roomId, ready: null }
                 this.outgoing.set(meta.id, entry)
-                line.innerHTML = this.buildContent(meta, base)
+                const content = this.buildContent(meta, base)
+                line.innerHTML = content
                 this.hydrateLine(line)
-                this.setProgress(meta.id, 0, meta.ownerColor)
+                this.setProgress(meta.id, 0.08, meta.ownerColor)
                 this.app.currentLineId = line.id
                 this.app.scheduleCursorSave()
                 entry.ready = this.prepareOutgoing(entry, parsed.index)
                 entry.ready.catch(error => console.error('[FileTransfer]', error))
-                await this.app.store.handleLocalUpdate(parsed.index, line.innerHTML, this.app.user.color)
+                await this.app.store.handleLocalUpdate(parsed.index, content, this.app.user.color)
             }
 
             async prepareOutgoing(entry, index) {
@@ -3483,7 +3490,8 @@
                 const cached = this.completed.get(meta.id)
                 if (cached) { this.saveBlob(cached.blob, cached.meta); return }
                 this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
-                this.setProgress(meta.id, 0, meta.ownerColor)
+                this.setProgress(meta.id, 0.08, meta.ownerColor)
+                if (this.isMobileBrowser()) this.downloadTargets.set(meta.id, this.openDownloadTarget(meta))
                 this.app.mesh.broadcastFile({ type: 'request', fileId: meta.id })
                 setTimeout(() => { if (!this.incoming.has(meta.id) && !this.completed.has(meta.id)) this.setButtonState(meta.id, 'RETRY ' + meta.name, false) }, 10000)
             }
@@ -3564,8 +3572,11 @@
                 this.completed.set(fileId, { blob, meta: incoming.meta })
                 this.incoming.delete(fileId)
                 this.setProgress(fileId, 1, incoming.meta.ownerColor)
-                this.setButtonState(fileId, 'DOWNLOAD ' + incoming.meta.name, false)
-                this.saveBlob(blob, incoming.meta)
+                const target = this.downloadTargets.get(fileId)
+                if (target) this.saveBlob(blob, incoming.meta, target)
+                else if (!this.isMobileBrowser()) this.saveBlob(blob, incoming.meta)
+                this.setButtonState(fileId, 'SAVE ' + incoming.meta.name, false)
+                this.downloadTargets.delete(fileId)
             }
 
             hydrateAll() {
@@ -3579,13 +3590,34 @@
                 line.classList.add('file-transfer-line')
                 line.style.setProperty('--file-color', meta.ownerColor)
                 if (!line.style.getPropertyValue('--file-progress')) line.style.setProperty('--file-progress', '0%')
+                this.setOwnerView(attachment, meta)
                 if (this.incoming.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
-                else if (this.completed.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOAD ' + meta.name, false)
+                else if (this.completed.has(meta.id)) this.setButtonState(meta.id, 'SAVE ' + meta.name, false)
             }
 
             findMeta(fileId) {
                 const attachment = Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).find(el => el.dataset.fileId === fileId)
                 return attachment ? this.metaFromElement(attachment) : null
+            }
+
+            setOwnerView(attachment, meta) {
+                const button = attachment.querySelector('.file-download-btn')
+                const label = attachment.querySelector('.file-owner-name')
+                if (this.isMine(meta)) {
+                    if (button) {
+                        const ownerName = document.createElement('span')
+                        ownerName.className = 'file-owner-name'
+                        ownerName.textContent = meta.name
+                        button.replaceWith(ownerName)
+                    }
+                } else if (!button) {
+                    const newButton = document.createElement('button')
+                    newButton.type = 'button'
+                    newButton.className = 'file-download-btn'
+                    newButton.textContent = 'DOWNLOAD ' + meta.name
+                    if (label) label.replaceWith(newButton)
+                    else attachment.insertBefore(newButton, attachment.querySelector('.file-size'))
+                }
             }
 
             setProgress(fileId, progress, color) {
@@ -3667,8 +3699,13 @@
                 return bytes
             }
 
-            saveBlob(blob, meta) {
+            saveBlob(blob, meta, target = null) {
                 const url = URL.createObjectURL(blob)
+                if (target && !target.closed) {
+                    try { target.location.href = url } catch (error) { }
+                    setTimeout(() => URL.revokeObjectURL(url), 10000)
+                    return
+                }
                 const link = document.createElement('a')
                 link.href = url
                 link.download = meta.name || 'file'
@@ -3681,6 +3718,27 @@
 
             safeColor(color) {
                 return /^#[0-9a-fA-F]{6}$/.test(color || '') ? color : '#999999'
+            }
+
+            isMine(meta) {
+                return this.safeColor(meta.ownerColor).toLowerCase() === this.safeColor(this.app.user.color).toLowerCase()
+            }
+
+            isMobileBrowser() {
+                return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
+            }
+
+            openDownloadTarget(meta) {
+                try {
+                    const win = window.open('', '_blank')
+                    if (win?.document) {
+                        win.document.title = meta.name || 'download'
+                        win.document.body.textContent = 'Preparing download...'
+                    }
+                    return win
+                } catch (error) {
+                    return null
+                }
             }
 
             escapeHtml(value) {
