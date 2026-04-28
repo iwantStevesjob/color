@@ -955,6 +955,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            text-decoration: none;
         }
 
         .file-download-btn:disabled {
@@ -965,6 +966,17 @@
         .file-size {
             color: #777;
             font-size: 12px;
+        }
+
+        .file-attachment.media-ready {
+            display: inline-block;
+        }
+
+        .file-preview {
+            display: block;
+            max-width: min(420px, 100%);
+            max-height: 260px;
+            margin-top: 4px;
         }
 
         .file-owner-name {
@@ -3364,7 +3376,6 @@
                 this.outgoing = new Map()
                 this.incoming = new Map()
                 this.completed = new Map()
-                this.downloadTargets = new Map()
                 this.chunkSize = 8 * 1024
                 this.bindEvents()
             }
@@ -3392,7 +3403,6 @@
                 this.outgoing.clear()
                 this.incoming.clear()
                 this.completed.clear()
-                this.downloadTargets.clear()
                 this.mesh = null
             }
 
@@ -3436,6 +3446,7 @@
                 if (!button) return
                 const attachment = button.closest('.file-attachment')
                 if (!attachment) return
+                if (button.tagName === 'A' && button.href) { console.log('[FileTransfer] native save link click', this.metaFromElement(attachment)); return }
                 event.preventDefault()
                 event.stopPropagation()
                 console.log('[FileTransfer] download click', this.metaFromElement(attachment), { disabled: button.disabled, mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
@@ -3454,6 +3465,7 @@
                 const button = event.target.closest?.('.file-download-btn')
                 const attachment = button?.closest('.file-attachment')
                 if (!button || !attachment || button.disabled) return
+                if (button.tagName === 'A' && button.href) { console.log('[FileTransfer] native save link activate', source, this.metaFromElement(attachment)); return }
                 const meta = this.metaFromElement(attachment)
                 const now = Date.now()
                 if (this.lastDownloadTap?.id === meta.id && now - this.lastDownloadTap.ts < 700) return
@@ -3519,10 +3531,14 @@
                 console.log('[FileTransfer] request download start', meta, { mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile, mobile: this.isMobileBrowser() })
                 if (!meta?.id || !this.app.mesh?.broadcastFile) { console.warn('[FileTransfer] request download blocked', meta); return }
                 const cached = this.completed.get(meta.id)
-                if (cached) { console.log('[FileTransfer] using cached file', meta.id); this.saveBlob(cached.blob, cached.meta); return }
+                if (cached) {
+                    console.log('[FileTransfer] using cached file', meta.id)
+                    if (this.isMediaFile(cached.meta)) this.renderInlineMedia(meta.id, cached.blob, cached.meta)
+                    else this.saveBlob(cached.blob, cached.meta)
+                    return
+                }
                 this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
                 this.setProgress(meta.id, 0.08, meta.ownerColor)
-                if (this.isMobileBrowser()) this.downloadTargets.set(meta.id, this.openDownloadTarget(meta))
                 console.log('[FileTransfer] sending file request', { fileId: meta.id })
                 this.app.mesh.broadcastFile({ type: 'request', fileId: meta.id })
                 setTimeout(() => { if (!this.incoming.has(meta.id) && !this.completed.has(meta.id)) this.setButtonState(meta.id, 'RETRY ' + meta.name, false) }, 10000)
@@ -3611,11 +3627,11 @@
                 this.completed.set(fileId, { blob, meta: incoming.meta })
                 this.incoming.delete(fileId)
                 this.setProgress(fileId, 1, incoming.meta.ownerColor)
-                const target = this.downloadTargets.get(fileId)
-                if (target) this.saveBlob(blob, incoming.meta, target)
-                else if (!this.isMobileBrowser()) this.saveBlob(blob, incoming.meta)
-                this.setButtonState(fileId, 'SAVE ' + incoming.meta.name, false)
-                this.downloadTargets.delete(fileId)
+                if (this.isMediaFile(incoming.meta)) this.renderInlineMedia(fileId, blob, incoming.meta)
+                else {
+                    if (!this.isMobileBrowser()) this.saveBlob(blob, incoming.meta)
+                    this.setSaveLink(fileId, blob, incoming.meta)
+                }
             }
 
             hydrateAll() {
@@ -3631,7 +3647,11 @@
                 if (!line.style.getPropertyValue('--file-progress')) line.style.setProperty('--file-progress', '0%')
                 this.setOwnerView(attachment, meta)
                 if (this.incoming.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
-                else if (this.completed.has(meta.id)) this.setButtonState(meta.id, 'SAVE ' + meta.name, false)
+                else if (this.completed.has(meta.id)) {
+                    const cached = this.completed.get(meta.id)
+                    if (this.isMediaFile(cached.meta)) this.renderInlineMedia(meta.id, cached.blob, cached.meta)
+                    else this.setSaveLink(meta.id, cached.blob, cached.meta)
+                }
             }
 
             findMeta(fileId) {
@@ -3678,6 +3698,41 @@
                     button.textContent = text
                     button.disabled = !!disabled
                 })
+            }
+
+            renderInlineMedia(fileId, blob, meta) {
+                const record = this.completed.get(fileId)
+                const url = record?.previewUrl || URL.createObjectURL(blob)
+                if (record) record.previewUrl = url
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    el.classList.add('media-ready')
+                    el.querySelector('.file-preview')?.remove()
+                    const media = document.createElement(this.isVideoFile(meta) ? 'video' : 'img')
+                    media.className = 'file-preview'
+                    media.src = url
+                    media.title = meta.name || 'file'
+                    if (media.tagName === 'VIDEO') media.controls = true
+                    else media.alt = meta.name || 'image'
+                    const current = el.querySelector('.file-download-btn')
+                    if (current) current.replaceWith(media)
+                    else el.insertBefore(media, el.querySelector('.file-size'))
+                })
+                console.log('[FileTransfer] inline media ready', { fileId, name: meta.name, type: meta.type })
+            }
+
+            setSaveLink(fileId, blob, meta) {
+                const url = URL.createObjectURL(blob)
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    const current = el.querySelector('.file-download-btn')
+                    if (!current) return
+                    const link = document.createElement('a')
+                    link.className = 'file-download-btn'
+                    link.href = url
+                    link.download = meta.name || 'file'
+                    link.textContent = 'SAVE ' + (meta.name || 'file')
+                    current.replaceWith(link)
+                })
+                console.log('[FileTransfer] save link ready', { fileId, name: meta.name, mobile: this.isMobileBrowser() })
             }
 
             broadcastProgress(fileId, progress, ownerColor) {
@@ -3739,14 +3794,9 @@
                 return bytes
             }
 
-            saveBlob(blob, meta, target = null) {
+            saveBlob(blob, meta) {
                 const url = URL.createObjectURL(blob)
-                console.log('[FileTransfer] save blob', { name: meta.name, size: blob.size, type: blob.type, target: !!target, mobile: this.isMobileBrowser() })
-                if (target && !target.closed) {
-                    try { target.location.href = url } catch (error) { }
-                    setTimeout(() => URL.revokeObjectURL(url), 10000)
-                    return
-                }
+                console.log('[FileTransfer] save blob', { name: meta.name, size: blob.size, type: blob.type, mobile: this.isMobileBrowser() })
                 const link = document.createElement('a')
                 link.href = url
                 link.download = meta.name || 'file'
@@ -3765,21 +3815,20 @@
                 return this.safeColor(meta.ownerColor).toLowerCase() === this.safeColor(this.app.user.color).toLowerCase()
             }
 
-            isMobileBrowser() {
-                return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
+            isMediaFile(meta) {
+                const type = String(meta.type || '').toLowerCase()
+                const name = String(meta.name || '').toLowerCase()
+                return type.startsWith('image/') || type.startsWith('video/') || /\.(png|jpe?g|gif|webp|bmp|svg|mp4|webm|ogg|mov|m4v)$/i.test(name)
             }
 
-            openDownloadTarget(meta) {
-                try {
-                    const win = window.open('', '_blank')
-                    if (win?.document) {
-                        win.document.title = meta.name || 'download'
-                        win.document.body.textContent = 'Preparing download...'
-                    }
-                    return win
-                } catch (error) {
-                    return null
-                }
+            isVideoFile(meta) {
+                const type = String(meta.type || '').toLowerCase()
+                const name = String(meta.name || '').toLowerCase()
+                return type.startsWith('video/') || /\.(mp4|webm|ogg|mov|m4v)$/i.test(name)
+            }
+
+            isMobileBrowser() {
+                return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')
             }
 
             escapeHtml(value) {
