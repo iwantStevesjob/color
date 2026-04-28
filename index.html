@@ -979,6 +979,49 @@
             margin-top: 4px;
         }
 
+        .file-video-preview {
+            position: relative;
+            display: block;
+            width: fit-content;
+            max-width: 100%;
+            margin-top: 4px;
+            background: #111;
+        }
+
+        .file-video-preview img,
+        .file-video-preview video {
+            display: block;
+            max-width: min(420px, 100%);
+            max-height: 260px;
+        }
+
+        .file-video-preview video {
+            display: none;
+        }
+
+        .file-play-btn {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 48px;
+            height: 48px;
+            transform: translate(-50%, -50%);
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.55);
+            cursor: pointer;
+        }
+
+        .file-play-btn::before {
+            content: '';
+            position: absolute;
+            left: 19px;
+            top: 13px;
+            border-left: 16px solid #fff;
+            border-top: 10px solid transparent;
+            border-bottom: 10px solid transparent;
+        }
+
         .file-owner-name {
             font-weight: bold;
         }
@@ -3376,7 +3419,7 @@
                 this.outgoing = new Map()
                 this.incoming = new Map()
                 this.completed = new Map()
-                this.chunkSize = 8 * 1024
+                this.chunkSize = 32 * 1024
                 this.bindEvents()
             }
 
@@ -3485,7 +3528,8 @@
                     size: file.size || 0,
                     type: file.type || 'application/octet-stream',
                     ownerColor: this.safeColor(this.app.user.color),
-                    hash: ''
+                    hash: '',
+                    poster: ''
                 }
                 const parsed = this.app.parseId(line.id)
                 if (!parsed) return
@@ -3506,6 +3550,20 @@
             async prepareOutgoing(entry, index) {
                 const { file, meta, base } = entry
                 console.log('[FileTransfer] prepare outgoing start', { fileId: meta.id, name: meta.name, size: meta.size, index })
+                if (this.isVideoFile(meta)) {
+                    meta.poster = await this.createVideoPoster(file).catch(() => '')
+                    if (this.app.roomId !== entry.roomId) return
+                    const line = document.getElementById(entry.lineId)
+                    const content = this.buildContent(meta, base)
+                    if (line) {
+                        line.innerHTML = content
+                        this.hydrateLine(line)
+                        this.setProgress(meta.id, 1, meta.ownerColor)
+                    }
+                    await this.app.store.handleLocalUpdate(index, content, this.app.user.color)
+                    console.log('[FileTransfer] prepare outgoing video ready', { fileId: meta.id, poster: !!meta.poster })
+                    return
+                }
                 const buffer = await this.readFile(file, progress => {
                     if (this.app.roomId !== entry.roomId) return
                     const value = Math.min(0.9, Math.max(0.02, progress * 0.9))
@@ -3567,7 +3625,7 @@
                 const { file, meta } = entry
                 const totalChunks = Math.ceil((file.size || 0) / this.chunkSize)
                 console.log('[FileTransfer] send file start', { fileId: meta.id, pid, size: file.size, chunks: totalChunks })
-                this.app.mesh.broadcastFile({ type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, chunks: totalChunks }, pid)
+                this.app.mesh.broadcastFile({ type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, poster: meta.poster || '', chunks: totalChunks }, pid)
                 if (!file.size) {
                     this.setProgress(meta.id, 1, meta.ownerColor)
                     this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
@@ -3595,19 +3653,23 @@
                     size: Number(data.size || localMeta.size || 0),
                     type: data.mime || localMeta.type || 'application/octet-stream',
                     ownerColor: this.safeColor(data.ownerColor || localMeta.ownerColor),
-                    hash: data.hash || localMeta.hash || ''
+                    hash: data.hash || localMeta.hash || '',
+                    poster: data.poster || localMeta.poster || ''
                 }
-                this.incoming.set(data.fileId, { pid, meta, chunks: new Array(data.chunks || 0), received: 0 })
-                console.log('[FileTransfer] incoming start', { fileId: data.fileId, pid, size: meta.size, chunks: data.chunks })
+                const stream = this.isVideoFile(meta) ? this.startVideoStream(data.fileId, meta) : null
+                this.incoming.set(data.fileId, { pid, meta, chunks: stream ? null : new Array(data.chunks || 0), seen: new Set(), received: 0, stream })
+                console.log('[FileTransfer] incoming start', { fileId: data.fileId, pid, size: meta.size, chunks: data.chunks, streaming: !!stream })
                 this.setProgress(data.fileId, 0, meta.ownerColor)
             }
 
             receiveChunk(data, pid) {
                 const incoming = this.incoming.get(data.fileId)
                 if (!incoming || incoming.pid !== pid || typeof data.index !== 'number' || !data.data) return
-                if (incoming.chunks[data.index]) return
+                if (incoming.seen.has(data.index)) return
+                incoming.seen.add(data.index)
                 const bytes = this.base64ToBytes(data.data)
-                incoming.chunks[data.index] = bytes
+                if (incoming.stream) this.appendVideoChunk(incoming.stream, bytes)
+                else incoming.chunks[data.index] = bytes
                 incoming.received += bytes.byteLength
                 if (data.index === 0 || incoming.received >= incoming.meta.size) console.log('[FileTransfer] incoming progress', { fileId: data.fileId, received: incoming.received, size: incoming.meta.size })
                 this.setProgress(data.fileId, incoming.meta.size ? incoming.received / incoming.meta.size : 1, incoming.meta.ownerColor)
@@ -3617,6 +3679,12 @@
                 const incoming = this.incoming.get(fileId)
                 if (!incoming || incoming.pid !== pid) return
                 console.log('[FileTransfer] incoming end', { fileId, pid, received: incoming.received, size: incoming.meta.size })
+                if (incoming.stream) {
+                    this.endVideoStream(incoming.stream)
+                    this.incoming.delete(fileId)
+                    this.setProgress(fileId, 1, incoming.meta.ownerColor)
+                    return
+                }
                 if (incoming.chunks.some(chunk => !chunk)) { this.setButtonState(fileId, 'RETRY ' + incoming.meta.name, false); return }
                 const blob = new Blob(incoming.chunks, { type: incoming.meta.type })
                 if (incoming.meta.hash && await this.hashBuffer(await blob.arrayBuffer()) !== incoming.meta.hash) {
@@ -3646,6 +3714,7 @@
                 line.style.setProperty('--file-color', meta.ownerColor)
                 if (!line.style.getPropertyValue('--file-progress')) line.style.setProperty('--file-progress', '0%')
                 this.setOwnerView(attachment, meta)
+                if (!this.isMine(meta) && this.isVideoFile(meta) && !this.incoming.has(meta.id) && !this.completed.has(meta.id) && !attachment.querySelector('.file-video-preview')) this.renderVideoPreview(meta.id, meta)
                 if (this.incoming.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
                 else if (this.completed.has(meta.id)) {
                     const cached = this.completed.get(meta.id)
@@ -3700,7 +3769,123 @@
                 })
             }
 
+            startVideoStream(fileId, meta) {
+                const MediaSourceCtor = window.MediaSource || window.WebKitMediaSource
+                if (!MediaSourceCtor) return null
+                const mime = this.getVideoStreamMime(meta, MediaSourceCtor)
+                if (!mime) return null
+                const video = this.renderVideoPreview(fileId, meta)
+                if (!video) return null
+                const mediaSource = new MediaSourceCtor()
+                const stream = { fileId, meta, mediaSource, sourceBuffer: null, queue: [], ended: false, failed: false }
+                video.src = URL.createObjectURL(mediaSource)
+                mediaSource.addEventListener('sourceopen', () => {
+                    try {
+                        stream.sourceBuffer = mediaSource.addSourceBuffer(mime)
+                        stream.sourceBuffer.addEventListener('updateend', () => this.flushVideoStream(stream))
+                        this.flushVideoStream(stream)
+                    } catch (error) {
+                        console.warn('[FileTransfer] video stream unsupported', { fileId, mime, error })
+                        stream.failed = true
+                    }
+                }, { once: true })
+                return stream
+            }
+
+            appendVideoChunk(stream, bytes) {
+                if (stream.failed) return false
+                stream.queue.push(bytes)
+                this.flushVideoStream(stream)
+                return true
+            }
+
+            flushVideoStream(stream) {
+                if (!stream.sourceBuffer || stream.sourceBuffer.updating || !stream.queue.length) {
+                    if (stream.ended && stream.mediaSource.readyState === 'open' && stream.sourceBuffer && !stream.sourceBuffer.updating && !stream.queue.length) {
+                        try { stream.mediaSource.endOfStream() } catch (error) { }
+                    }
+                    return
+                }
+                try {
+                    stream.sourceBuffer.appendBuffer(stream.queue.shift())
+                } catch (error) {
+                    console.warn('[FileTransfer] video stream append failed', { fileId: stream.fileId, error })
+                    stream.failed = true
+                    stream.queue = []
+                }
+            }
+
+            endVideoStream(stream) {
+                stream.ended = true
+                this.flushVideoStream(stream)
+            }
+
+            getVideoStreamMime(meta, MediaSourceCtor) {
+                const type = String(meta.type || '').toLowerCase()
+                const candidates = [type]
+                if (/\.webm$/i.test(meta.name || '')) candidates.push('video/webm')
+                if (/\.(mp4|m4v|mov)$/i.test(meta.name || '')) candidates.push('video/mp4')
+                return candidates.find(value => value && (!MediaSourceCtor.isTypeSupported || MediaSourceCtor.isTypeSupported(value))) || ''
+            }
+
+            renderVideoPreview(fileId, meta, src = '') {
+                let video = null
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    el.classList.add('media-ready')
+                    el.querySelector('.file-video-preview')?.remove()
+                    const wrap = document.createElement('span')
+                    wrap.className = 'file-video-preview'
+                    const poster = document.createElement('img')
+                    if (meta.poster) poster.src = meta.poster
+                    else {
+                        poster.style.width = '220px'
+                        poster.style.height = '124px'
+                    }
+                    poster.alt = meta.name || 'video'
+                    const player = document.createElement('video')
+                    player.className = 'file-preview'
+                    player.controls = true
+                    player.playsInline = true
+                    player.preload = 'metadata'
+                    player.title = meta.name || 'video'
+                    if (src) player.src = src
+                    const play = document.createElement('button')
+                    play.type = 'button'
+                    play.className = 'file-play-btn'
+                    play.setAttribute('aria-label', 'Play video')
+                    play.addEventListener('click', e => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (!player.src) {
+                            console.log('[FileTransfer] video play requested', { fileId, name: meta.name })
+                            this.requestDownload(meta)
+                            return
+                        }
+                        poster.style.display = 'none'
+                        play.style.display = 'none'
+                        player.style.display = 'block'
+                        player.play().catch(() => { })
+                    })
+                    wrap.appendChild(poster)
+                    wrap.appendChild(player)
+                    wrap.appendChild(play)
+                    const current = el.querySelector('.file-download-btn')
+                    if (current) current.replaceWith(wrap)
+                    else el.insertBefore(wrap, el.querySelector('.file-size'))
+                    video = player
+                })
+                console.log('[FileTransfer] video preview ready', { fileId, name: meta.name, poster: !!meta.poster })
+                return video
+            }
+
             renderInlineMedia(fileId, blob, meta) {
+                if (this.isVideoFile(meta)) {
+                    const record = this.completed.get(fileId)
+                    const url = record?.previewUrl || URL.createObjectURL(blob)
+                    if (record) record.previewUrl = url
+                    this.renderVideoPreview(fileId, meta, url)
+                    return
+                }
                 const record = this.completed.get(fileId)
                 const url = record?.previewUrl || URL.createObjectURL(blob)
                 if (record) record.previewUrl = url
@@ -3747,7 +3932,7 @@
 
             buildContent(meta, base = '') {
                 const color = this.safeColor(meta.ownerColor)
-                return `${base}<span class="file-transfer-progress"></span><span class="file-attachment" contenteditable="false" data-file-id="${this.escapeAttr(meta.id)}" data-file-name="${this.escapeAttr(meta.name)}" data-file-size="${Number(meta.size) || 0}" data-file-type="${this.escapeAttr(meta.type)}" data-file-owner="${color}" data-file-hash="${this.escapeAttr(meta.hash || '')}"><span class="file-icon">&#128196;</span><button type="button" class="file-download-btn">DOWNLOAD ${this.escapeHtml(meta.name)}</button><span class="file-size">${this.formatSize(meta.size)}</span></span>`
+                return `${base}<span class="file-transfer-progress"></span><span class="file-attachment" contenteditable="false" data-file-id="${this.escapeAttr(meta.id)}" data-file-name="${this.escapeAttr(meta.name)}" data-file-size="${Number(meta.size) || 0}" data-file-type="${this.escapeAttr(meta.type)}" data-file-owner="${color}" data-file-hash="${this.escapeAttr(meta.hash || '')}" data-file-poster="${this.escapeAttr(meta.poster || '')}"><span class="file-icon">&#128196;</span><button type="button" class="file-download-btn">DOWNLOAD ${this.escapeHtml(meta.name)}</button><span class="file-size">${this.formatSize(meta.size)}</span></span>`
             }
 
             metaFromElement(el) {
@@ -3757,7 +3942,8 @@
                     size: Number(el.dataset.fileSize || 0),
                     type: el.dataset.fileType || 'application/octet-stream',
                     ownerColor: this.safeColor(el.dataset.fileOwner),
-                    hash: el.dataset.fileHash || ''
+                    hash: el.dataset.fileHash || '',
+                    poster: el.dataset.filePoster || ''
                 }
             }
 
@@ -3778,6 +3964,41 @@
             async hashBuffer(buffer) {
                 const hash = await crypto.subtle.digest('SHA-256', buffer)
                 return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('')
+            }
+
+            createVideoPoster(file) {
+                return new Promise(resolve => {
+                    const url = URL.createObjectURL(file)
+                    const video = document.createElement('video')
+                    let settled = false
+                    const done = value => {
+                        if (settled) return
+                        settled = true
+                        URL.revokeObjectURL(url)
+                        resolve(value || '')
+                    }
+                    const timer = setTimeout(() => done(''), 4000)
+                    video.muted = true
+                    video.playsInline = true
+                    video.preload = 'metadata'
+                    video.onloadeddata = () => {
+                        try {
+                            const scale = Math.min(1, 320 / (video.videoWidth || 320))
+                            const canvas = document.createElement('canvas')
+                            canvas.width = Math.max(1, Math.round((video.videoWidth || 320) * scale))
+                            canvas.height = Math.max(1, Math.round((video.videoHeight || 180) * scale))
+                            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
+                            clearTimeout(timer)
+                            done(canvas.toDataURL('image/jpeg', 0.72))
+                        } catch (error) {
+                            clearTimeout(timer)
+                            done('')
+                        }
+                    }
+                    video.onerror = () => { clearTimeout(timer); done('') }
+                    video.src = url
+                    video.load()
+                })
             }
 
             arrayBufferToBase64(buffer) {
@@ -5864,7 +6085,7 @@
                 })
             }
 
-            sanitize(str) { return DOMPurify.sanitize(str, { ALLOWED_TAGS: ['b', 'i', 'u', 'a', 'br', 'div', 'span', 'button'], ALLOWED_ATTR: ['href', 'style', 'class', 'target', 'type', 'contenteditable', 'disabled', 'data-file-id', 'data-file-name', 'data-file-size', 'data-file-type', 'data-file-owner', 'data-file-hash'] }) }
+            sanitize(str) { return DOMPurify.sanitize(str, { ALLOWED_TAGS: ['b', 'i', 'u', 'a', 'br', 'div', 'span', 'button'], ALLOWED_ATTR: ['href', 'style', 'class', 'target', 'type', 'contenteditable', 'disabled', 'data-file-id', 'data-file-name', 'data-file-size', 'data-file-type', 'data-file-owner', 'data-file-hash', 'data-file-poster'] }) }
 
             reapplyVisualLocks() {
                 document.querySelectorAll('.locked-line').forEach(el => {
