@@ -905,10 +905,66 @@
         .editor-line {
             min-height: 24px;
             display: block;
+            position: relative;
             padding-left: 5px;
             border-left: 4px solid transparent;
             white-space: pre-wrap;
             transition: border-left-color 0.4s ease;
+        }
+
+        .editor-line.file-drop-target {
+            background: #f1f1f1;
+        }
+
+        .file-transfer-progress {
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: var(--file-progress, 0%);
+            background: var(--file-color, #999);
+            opacity: 0.16;
+            pointer-events: none;
+            transition: width 0.12s linear;
+            z-index: 0;
+        }
+
+        .file-attachment {
+            position: relative;
+            z-index: 1;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            max-width: 100%;
+            vertical-align: top;
+        }
+
+        .file-icon {
+            font-size: 13px;
+            line-height: 1;
+        }
+
+        .file-download-btn {
+            border: 1px solid #bbb;
+            background: #fff;
+            color: #222;
+            font: inherit;
+            font-size: 13px;
+            line-height: 18px;
+            padding: 1px 6px;
+            cursor: pointer;
+            max-width: 280px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-download-btn:disabled {
+            cursor: default;
+            opacity: 0.6;
+        }
+
+        .file-size {
+            color: #777;
+            font-size: 12px;
         }
 
         .editor-line:hover,
@@ -3035,6 +3091,10 @@
                 this.send('fragment', fragMap)
             }
 
+            broadcastFile(data) {
+                this.send('file', data)
+            }
+
             broadcastLock(data) {
                 this.send('lock', data)
             }
@@ -3106,7 +3166,8 @@
                 const [sendReq, onReq] = this.room.makeAction('req')
                 const [sendId, onId] = this.room.makeAction('identity')
                 const [sendCursor, onCursor] = this.room.makeAction('sync-cursor')
-                this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId; this.rawSendCursor = sendCursor
+                const [sendFile, onFile] = this.room.makeAction('file')
+                this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId; this.rawSendCursor = sendCursor; this.rawSendFile = sendFile
 
                 this.room.onPeerJoin(async pid => {
                     console.log(`%c[P2P] Peer Joined: ${pid}`, 'color: cyan; font-weight: bold;')
@@ -3175,6 +3236,9 @@
                 onCursor((d, p) => {
                     if (this.verifiedPeers.has(p)) this.emit('sync-cursor', d, p)
                 })
+                onFile((d, p) => {
+                    if (this.verifiedPeers.has(p)) this.emit('file', d, p)
+                })
                 this.room.onPeerLeave(p => { this.peerIdentities.delete(p); this.emit('peer-leave', p) })
             }
 
@@ -3206,6 +3270,10 @@
                         this.rawSendFrag(fragMap, pid)
                     }
                 }
+            }
+            broadcastFile(data, targetPeerId = null) {
+                if (targetPeerId) this.rawSendFile(data, targetPeerId)
+                else for (const pid of this.verifiedPeers) this.rawSendFile(data, pid)
             }
             async generateInvite() { return this.room.createManualOffer() }
             async acceptManualOffer(inviteData) { return this.room.acceptManualOffer(inviteData) }
@@ -3284,6 +3352,353 @@
             }
         }
 
+        class FileTransferModule {
+            constructor(app) {
+                this.app = app
+                this.mesh = null
+                this.hoverLine = null
+                this.outgoing = new Map()
+                this.incoming = new Map()
+                this.completed = new Map()
+                this.chunkSize = 8 * 1024
+                this.bindEvents()
+            }
+
+            bindEvents() {
+                const display = this.app.ui.display
+                display.addEventListener('dragover', e => this.handleDragOver(e))
+                display.addEventListener('dragleave', e => { if (!display.contains(e.relatedTarget)) this.setHoverLine(null) })
+                display.addEventListener('drop', e => this.handleDrop(e))
+                display.addEventListener('click', e => this.handleClick(e))
+            }
+
+            attachMesh(mesh) {
+                if (this.mesh === mesh) return
+                this.mesh = mesh
+                if (mesh) mesh.on('file', (data, pid) => this.handleFileMessage(data, pid))
+            }
+
+            reset() {
+                this.setHoverLine(null)
+                this.outgoing.clear()
+                this.incoming.clear()
+                this.completed.clear()
+                this.mesh = null
+            }
+
+            hasFiles(event) {
+                return Array.from(event.dataTransfer?.types || []).includes('Files')
+            }
+
+            lineFromPoint(event) {
+                return document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.editor-line') || null
+            }
+
+            setHoverLine(line) {
+                if (this.hoverLine === line) return
+                if (this.hoverLine) this.hoverLine.classList.remove('file-drop-target')
+                this.hoverLine = line
+                if (this.hoverLine) this.hoverLine.classList.add('file-drop-target')
+            }
+
+            handleDragOver(event) {
+                if (!this.hasFiles(event)) return
+                const line = this.lineFromPoint(event)
+                if (!line || line.isContentEditable === false) { this.setHoverLine(null); return }
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'copy'
+                this.setHoverLine(line)
+            }
+
+            handleDrop(event) {
+                if (!this.hasFiles(event)) return
+                const line = this.lineFromPoint(event)
+                this.setHoverLine(null)
+                if (!line || line.isContentEditable === false) return
+                const file = event.dataTransfer?.files?.[0]
+                if (!file) return
+                event.preventDefault()
+                this.dropFile(line, file).catch(error => console.error('[FileTransfer]', error))
+            }
+
+            handleClick(event) {
+                const button = event.target.closest?.('.file-download-btn')
+                if (!button) return
+                const attachment = button.closest('.file-attachment')
+                if (!attachment) return
+                event.preventDefault()
+                event.stopPropagation()
+                this.requestDownload(this.metaFromElement(attachment))
+            }
+
+            async dropFile(line, file) {
+                if (!this.app.store || !this.app.mesh || !this.app.roomId) return
+                const meta = {
+                    id: this.makeFileId(),
+                    name: file.name || 'file',
+                    size: file.size || 0,
+                    type: file.type || 'application/octet-stream',
+                    ownerColor: this.safeColor(this.app.user.color),
+                    hash: ''
+                }
+                const parsed = this.app.parseId(line.id)
+                if (!parsed) return
+                const base = this.getBaseContent(line)
+                const entry = { file, meta, base, lineId: line.id, roomId: this.app.roomId, ready: null }
+                this.outgoing.set(meta.id, entry)
+                line.innerHTML = this.buildContent(meta, base)
+                this.hydrateLine(line)
+                this.setProgress(meta.id, 0, meta.ownerColor)
+                this.app.currentLineId = line.id
+                this.app.scheduleCursorSave()
+                entry.ready = this.prepareOutgoing(entry, parsed.index)
+                entry.ready.catch(error => console.error('[FileTransfer]', error))
+                await this.app.store.handleLocalUpdate(parsed.index, line.innerHTML, this.app.user.color)
+            }
+
+            async prepareOutgoing(entry, index) {
+                const { file, meta, base } = entry
+                const buffer = await this.readFile(file, progress => {
+                    if (this.app.roomId !== entry.roomId) return
+                    const value = Math.min(0.9, Math.max(0.02, progress * 0.9))
+                    this.setProgress(meta.id, value, meta.ownerColor)
+                    this.broadcastProgress(meta.id, value, meta.ownerColor)
+                })
+                meta.hash = await this.hashBuffer(buffer)
+                if (this.app.roomId !== entry.roomId) return
+                const line = document.getElementById(entry.lineId)
+                const content = this.buildContent(meta, base)
+                if (line) {
+                    line.innerHTML = content
+                    this.hydrateLine(line)
+                    this.setProgress(meta.id, 1, meta.ownerColor)
+                }
+                await new Promise(resolve => setTimeout(resolve, 1))
+                await this.app.store.handleLocalUpdate(index, content, this.app.user.color)
+                this.broadcastProgress(meta.id, 1, meta.ownerColor)
+            }
+
+            requestDownload(meta) {
+                if (!meta?.id || !this.app.mesh?.broadcastFile) return
+                const cached = this.completed.get(meta.id)
+                if (cached) { this.saveBlob(cached.blob, cached.meta); return }
+                this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
+                this.setProgress(meta.id, 0, meta.ownerColor)
+                this.app.mesh.broadcastFile({ type: 'request', fileId: meta.id })
+                setTimeout(() => { if (!this.incoming.has(meta.id) && !this.completed.has(meta.id)) this.setButtonState(meta.id, 'RETRY ' + meta.name, false) }, 10000)
+            }
+
+            async handleFileMessage(data, pid) {
+                if (!data?.type || !data.fileId) return
+                if (data.type === 'request') return this.handleRequest(data.fileId, pid)
+                if (data.type === 'progress') return this.setProgress(data.fileId, data.progress, data.ownerColor)
+                if (data.type === 'start') return this.startIncoming(data, pid)
+                if (data.type === 'chunk') return this.receiveChunk(data, pid)
+                if (data.type === 'end') return this.finishIncoming(data.fileId, pid)
+            }
+
+            async handleRequest(fileId, pid) {
+                const entry = this.outgoing.get(fileId)
+                if (!entry || !this.app.mesh?.broadcastFile) return
+                if (entry.ready) try { await entry.ready } catch (error) { return }
+                await this.sendFile(entry, pid)
+            }
+
+            async sendFile(entry, pid) {
+                if (this.app.roomId !== entry.roomId) return
+                const { file, meta } = entry
+                const totalChunks = Math.ceil((file.size || 0) / this.chunkSize)
+                this.app.mesh.broadcastFile({ type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, chunks: totalChunks }, pid)
+                if (!file.size) {
+                    this.setProgress(meta.id, 1, meta.ownerColor)
+                    this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
+                    return
+                }
+                for (let offset = 0, index = 0; offset < file.size; offset += this.chunkSize, index++) {
+                    const end = Math.min(offset + this.chunkSize, file.size)
+                    const chunk = await file.slice(offset, end).arrayBuffer()
+                    this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, data: this.arrayBufferToBase64(chunk) }, pid)
+                    const progress = end / file.size
+                    this.setProgress(meta.id, progress, meta.ownerColor)
+                    this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
+                    await new Promise(resolve => setTimeout(resolve, 5))
+                }
+                this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
+            }
+
+            startIncoming(data, pid) {
+                const localMeta = this.findMeta(data.fileId) || {}
+                if (localMeta.hash && data.hash && localMeta.hash !== data.hash) return
+                const meta = {
+                    id: data.fileId,
+                    name: data.name || localMeta.name || 'file',
+                    size: Number(data.size || localMeta.size || 0),
+                    type: data.mime || localMeta.type || 'application/octet-stream',
+                    ownerColor: this.safeColor(data.ownerColor || localMeta.ownerColor),
+                    hash: data.hash || localMeta.hash || ''
+                }
+                this.incoming.set(data.fileId, { pid, meta, chunks: new Array(data.chunks || 0), received: 0 })
+                this.setProgress(data.fileId, 0, meta.ownerColor)
+            }
+
+            receiveChunk(data, pid) {
+                const incoming = this.incoming.get(data.fileId)
+                if (!incoming || incoming.pid !== pid || typeof data.index !== 'number' || !data.data) return
+                if (incoming.chunks[data.index]) return
+                const bytes = this.base64ToBytes(data.data)
+                incoming.chunks[data.index] = bytes
+                incoming.received += bytes.byteLength
+                this.setProgress(data.fileId, incoming.meta.size ? incoming.received / incoming.meta.size : 1, incoming.meta.ownerColor)
+            }
+
+            async finishIncoming(fileId, pid) {
+                const incoming = this.incoming.get(fileId)
+                if (!incoming || incoming.pid !== pid) return
+                if (incoming.chunks.some(chunk => !chunk)) { this.setButtonState(fileId, 'RETRY ' + incoming.meta.name, false); return }
+                const blob = new Blob(incoming.chunks, { type: incoming.meta.type })
+                if (incoming.meta.hash && await this.hashBuffer(await blob.arrayBuffer()) !== incoming.meta.hash) {
+                    this.setButtonState(fileId, 'RETRY ' + incoming.meta.name, false)
+                    this.incoming.delete(fileId)
+                    return
+                }
+                this.completed.set(fileId, { blob, meta: incoming.meta })
+                this.incoming.delete(fileId)
+                this.setProgress(fileId, 1, incoming.meta.ownerColor)
+                this.setButtonState(fileId, 'DOWNLOAD ' + incoming.meta.name, false)
+                this.saveBlob(blob, incoming.meta)
+            }
+
+            hydrateAll() {
+                this.app.ui.display.querySelectorAll('.editor-line').forEach(line => this.hydrateLine(line))
+            }
+
+            hydrateLine(line) {
+                const attachment = line?.querySelector?.('.file-attachment')
+                if (!attachment) return
+                const meta = this.metaFromElement(attachment)
+                line.classList.add('file-transfer-line')
+                line.style.setProperty('--file-color', meta.ownerColor)
+                if (!line.style.getPropertyValue('--file-progress')) line.style.setProperty('--file-progress', '0%')
+                if (this.incoming.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
+                else if (this.completed.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOAD ' + meta.name, false)
+            }
+
+            findMeta(fileId) {
+                const attachment = Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).find(el => el.dataset.fileId === fileId)
+                return attachment ? this.metaFromElement(attachment) : null
+            }
+
+            setProgress(fileId, progress, color) {
+                const pct = Math.max(0, Math.min(100, Number(progress || 0) * 100))
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    const line = el.closest('.editor-line')
+                    if (!line) return
+                    line.classList.add('file-transfer-line')
+                    line.style.setProperty('--file-color', this.safeColor(color || el.dataset.fileOwner))
+                    line.style.setProperty('--file-progress', pct + '%')
+                })
+            }
+
+            setButtonState(fileId, text, disabled) {
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    const button = el.querySelector('.file-download-btn')
+                    if (!button) return
+                    button.textContent = text
+                    button.disabled = !!disabled
+                })
+            }
+
+            broadcastProgress(fileId, progress, ownerColor) {
+                this.app.mesh?.broadcastFile?.({ type: 'progress', fileId, progress, ownerColor })
+            }
+
+            getBaseContent(line) {
+                const html = line.innerHTML || ''
+                if (!html || html === '<br>' || line.innerText.trim() === '') return ''
+                return html + ' '
+            }
+
+            buildContent(meta, base = '') {
+                const color = this.safeColor(meta.ownerColor)
+                return `${base}<span class="file-transfer-progress"></span><span class="file-attachment" contenteditable="false" data-file-id="${this.escapeAttr(meta.id)}" data-file-name="${this.escapeAttr(meta.name)}" data-file-size="${Number(meta.size) || 0}" data-file-type="${this.escapeAttr(meta.type)}" data-file-owner="${color}" data-file-hash="${this.escapeAttr(meta.hash || '')}"><span class="file-icon">&#128196;</span><button type="button" class="file-download-btn">DOWNLOAD ${this.escapeHtml(meta.name)}</button><span class="file-size">${this.formatSize(meta.size)}</span></span>`
+            }
+
+            metaFromElement(el) {
+                return {
+                    id: el.dataset.fileId || '',
+                    name: el.dataset.fileName || 'file',
+                    size: Number(el.dataset.fileSize || 0),
+                    type: el.dataset.fileType || 'application/octet-stream',
+                    ownerColor: this.safeColor(el.dataset.fileOwner),
+                    hash: el.dataset.fileHash || ''
+                }
+            }
+
+            makeFileId() {
+                return `${this.app.roomId.replace('color-', '')}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+            }
+
+            async readFile(file, onProgress) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader()
+                    reader.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
+                    reader.onload = () => { onProgress(1); resolve(reader.result) }
+                    reader.onerror = () => reject(reader.error)
+                    reader.readAsArrayBuffer(file)
+                })
+            }
+
+            async hashBuffer(buffer) {
+                const hash = await crypto.subtle.digest('SHA-256', buffer)
+                return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('')
+            }
+
+            arrayBufferToBase64(buffer) {
+                const bytes = new Uint8Array(buffer)
+                let binary = ''
+                for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+                return btoa(binary)
+            }
+
+            base64ToBytes(value) {
+                const binary = atob(value)
+                const bytes = new Uint8Array(binary.length)
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+                return bytes
+            }
+
+            saveBlob(blob, meta) {
+                const url = URL.createObjectURL(blob)
+                const link = document.createElement('a')
+                link.href = url
+                link.download = meta.name || 'file'
+                link.style.display = 'none'
+                document.body.appendChild(link)
+                link.click()
+                link.remove()
+                setTimeout(() => URL.revokeObjectURL(url), 2000)
+            }
+
+            safeColor(color) {
+                return /^#[0-9a-fA-F]{6}$/.test(color || '') ? color : '#999999'
+            }
+
+            escapeHtml(value) {
+                return String(value || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+            }
+
+            escapeAttr(value) {
+                return this.escapeHtml(value)
+            }
+
+            formatSize(size) {
+                const value = Number(size) || 0
+                if (value < 1024) return value + ' B'
+                if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB'
+                return (value / 1024 / 1024).toFixed(1) + ' MB'
+            }
+        }
+
         class EditorApp {
             constructor() {
                 this.identity = new SecureIdentity()
@@ -3346,6 +3761,7 @@
                     panel: 'closed',
                     mining: 'idle'
                 }
+                this.fileTransfers = new FileTransferModule(this)
 
                 Promise.all([this.identity.init(), this.db.init()]).then(async () => {
                     const rooms = await this.db.getAllRooms()
@@ -4131,6 +4547,7 @@
                 this.connectionMode = this.pendingSecureSession ? 'secure-direct' : 'tracked'
 
                 if (this.mesh) { this.mesh.leave(); this.mesh = null }
+                this.fileTransfers.reset()
 
                 this.ui.display.innerHTML = ''
                 this.ui.minimap.innerHTML = ''
@@ -4233,6 +4650,7 @@
 
                 this.store = new StateStore(this.db, this.mesh, this.identity)
                 this.store.setRoom(this.roomId.replace('color-', ''))
+                this.fileTransfers.attachMesh(this.mesh)
 
                 this.store.subscribe((index, content, owner) => {
                     this.renderUpdate(index, content, owner)
@@ -4368,6 +4786,7 @@
                     const isEmpty = !newContent || newContent.trim() === '' || newContent === '<br>'
                     const amOwner = (newOwner === myHex)
                     el.contentEditable = (isEmpty || amOwner) ? 'true' : 'false'
+                    this.fileTransfers.hydrateLine(el)
                     if (!isEmpty) {
                         clearTimeout(this.syncRetryTimeout)
                         this.syncRetryTimeout = null
@@ -5162,6 +5581,7 @@
                 window.history.replaceState(null, null, window.location.pathname.replace(/\/index\.html$/, '/'))
                 document.getElementById('freeze-btn').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M9 18h6" /><path d="M10 22h4" /><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" /></svg>'
                 if (this.mesh) { this.mesh.leave(); this.mesh = null }
+                this.fileTransfers.reset()
                 this.ui.display.innerHTML = ''; this.ui.minimap.innerHTML = ''; this.activeLocks = {}
                 this.currentLineId = null
                 clearTimeout(this.syncRetryTimeout)
@@ -5201,7 +5621,7 @@
             renderInitialState(data, centerIndex) {
                 let html = ''; const roomHex = this.roomId.replace('color-', '')
                 for (let i = centerIndex - 50; i <= centerIndex + 50; i++) html += this.reconstructLine(roomHex + i, data[i]?.content, data[i]?.owner)
-                this.ui.display.innerHTML = html; this.focusLine(centerIndex)
+                this.ui.display.innerHTML = html; this.fileTransfers.hydrateAll(); this.focusLine(centerIndex)
             }
 
             focusLine(index) {
@@ -5296,7 +5716,7 @@
                 })
             }
 
-            sanitize(str) { return DOMPurify.sanitize(str, { ALLOWED_TAGS: ['b', 'i', 'u', 'a', 'br', 'div', 'span'], ALLOWED_ATTR: ['href', 'style', 'class', 'target'] }) }
+            sanitize(str) { return DOMPurify.sanitize(str, { ALLOWED_TAGS: ['b', 'i', 'u', 'a', 'br', 'div', 'span', 'button'], ALLOWED_ATTR: ['href', 'style', 'class', 'target', 'type', 'contenteditable', 'disabled', 'data-file-id', 'data-file-name', 'data-file-size', 'data-file-type', 'data-file-owner', 'data-file-hash'] }) }
 
             reapplyVisualLocks() {
                 document.querySelectorAll('.locked-line').forEach(el => {
