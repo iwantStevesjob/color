@@ -3375,7 +3375,9 @@
                 display.addEventListener('dragleave', e => { if (!display.contains(e.relatedTarget)) this.setHoverLine(null) })
                 display.addEventListener('drop', e => this.handleDrop(e))
                 display.addEventListener('pointerdown', e => this.logDownloadPointer(e))
+                display.addEventListener('pointerup', e => this.handleDownloadActivate(e, 'pointerup'))
                 display.addEventListener('touchstart', e => this.logDownloadPointer(e), { passive: true })
+                display.addEventListener('touchend', e => this.handleDownloadActivate(e, 'touchend'), { passive: false })
                 display.addEventListener('click', e => this.handleClick(e))
             }
 
@@ -3437,7 +3439,7 @@
                 event.preventDefault()
                 event.stopPropagation()
                 console.log('[FileTransfer] download click', this.metaFromElement(attachment), { disabled: button.disabled, mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
-                this.requestDownload(this.metaFromElement(attachment))
+                this.handleDownloadActivate(event, 'click')
             }
 
             logDownloadPointer(event) {
@@ -3445,6 +3447,21 @@
                 if (!button) return
                 const attachment = button.closest('.file-attachment')
                 console.log('[FileTransfer] download pointer', event.type, attachment ? this.metaFromElement(attachment) : null, { disabled: button.disabled })
+            }
+
+            handleDownloadActivate(event, source) {
+                if (source !== 'click' && !this.isMobileBrowser()) return
+                const button = event.target.closest?.('.file-download-btn')
+                const attachment = button?.closest('.file-attachment')
+                if (!button || !attachment || button.disabled) return
+                const meta = this.metaFromElement(attachment)
+                const now = Date.now()
+                if (this.lastDownloadTap?.id === meta.id && now - this.lastDownloadTap.ts < 700) return
+                this.lastDownloadTap = { id: meta.id, ts: now }
+                if (event.cancelable) event.preventDefault()
+                event.stopPropagation()
+                console.log('[FileTransfer] download activate', source, meta, { mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
+                this.requestDownload(meta)
             }
 
             async dropFile(line, file) {
