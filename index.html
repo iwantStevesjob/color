@@ -3430,8 +3430,10 @@
                 display.addEventListener('drop', e => this.handleDrop(e))
                 display.addEventListener('pointerdown', e => this.logDownloadPointer(e))
                 display.addEventListener('pointerup', e => this.handleDownloadActivate(e, 'pointerup'))
+                display.addEventListener('pointerup', e => this.handleVideoPlayActivate(e, 'pointerup'))
                 display.addEventListener('touchstart', e => this.logDownloadPointer(e), { passive: true })
                 display.addEventListener('touchend', e => this.handleDownloadActivate(e, 'touchend'), { passive: false })
+                display.addEventListener('touchend', e => this.handleVideoPlayActivate(e, 'touchend'), { passive: false })
                 display.addEventListener('click', e => this.handleClick(e))
             }
 
@@ -3446,6 +3448,7 @@
                 this.outgoing.clear()
                 this.incoming.clear()
                 this.completed.clear()
+                this.pendingVideoPlay = null
                 this.mesh = null
             }
 
@@ -3485,6 +3488,7 @@
             }
 
             handleClick(event) {
+                if (this.handleVideoPlayActivate(event, 'click')) return
                 const button = event.target.closest?.('.file-download-btn')
                 if (!button) return
                 const attachment = button.closest('.file-attachment')
@@ -3517,6 +3521,29 @@
                 event.stopPropagation()
                 console.log('[FileTransfer] download activate', source, meta, { mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
                 this.requestDownload(meta)
+            }
+
+            handleVideoPlayActivate(event, source) {
+                if (source !== 'click' && !this.isMobileBrowser()) return false
+                const play = event.target.closest?.('.file-play-btn')
+                const attachment = play?.closest('.file-attachment')
+                if (!play || !attachment) return false
+                const meta = this.metaFromElement(attachment)
+                const player = attachment.querySelector('video.file-preview')
+                const poster = attachment.querySelector('.file-video-preview img')
+                if (event.cancelable) event.preventDefault()
+                event.stopPropagation()
+                console.log('[FileTransfer] video play activate', source, meta, { hasSrc: !!player?.src, mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
+                if (!player?.src) {
+                    this.pendingVideoPlay = meta.id
+                    this.requestDownload(meta)
+                    return true
+                }
+                if (poster) poster.style.display = 'none'
+                play.style.display = 'none'
+                player.style.display = 'block'
+                player.play().catch(error => console.warn('[FileTransfer] video play failed', error))
+                return true
             }
 
             async dropFile(line, file) {
@@ -3779,11 +3806,13 @@
                 const mediaSource = new MediaSourceCtor()
                 const stream = { fileId, meta, mediaSource, sourceBuffer: null, queue: [], ended: false, failed: false }
                 video.src = URL.createObjectURL(mediaSource)
+                if (this.pendingVideoPlay === fileId) this.showVideoPlayer(fileId)
                 mediaSource.addEventListener('sourceopen', () => {
                     try {
                         stream.sourceBuffer = mediaSource.addSourceBuffer(mime)
                         stream.sourceBuffer.addEventListener('updateend', () => this.flushVideoStream(stream))
                         this.flushVideoStream(stream)
+                        if (this.pendingVideoPlay === fileId) video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error))
                     } catch (error) {
                         console.warn('[FileTransfer] video stream unsupported', { fileId, mime, error })
                         stream.failed = true
@@ -3828,6 +3857,17 @@
                 return candidates.find(value => value && (!MediaSourceCtor.isTypeSupported || MediaSourceCtor.isTypeSupported(value))) || ''
             }
 
+            showVideoPlayer(fileId) {
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    const poster = el.querySelector('.file-video-preview img')
+                    const play = el.querySelector('.file-play-btn')
+                    const player = el.querySelector('video.file-preview')
+                    if (poster) poster.style.display = 'none'
+                    if (play) play.style.display = 'none'
+                    if (player) player.style.display = 'block'
+                })
+            }
+
             renderVideoPreview(fileId, meta, src = '') {
                 let video = null
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
@@ -3853,19 +3893,6 @@
                     play.type = 'button'
                     play.className = 'file-play-btn'
                     play.setAttribute('aria-label', 'Play video')
-                    play.addEventListener('click', e => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        if (!player.src) {
-                            console.log('[FileTransfer] video play requested', { fileId, name: meta.name })
-                            this.requestDownload(meta)
-                            return
-                        }
-                        poster.style.display = 'none'
-                        play.style.display = 'none'
-                        player.style.display = 'block'
-                        player.play().catch(() => { })
-                    })
                     wrap.appendChild(poster)
                     wrap.appendChild(player)
                     wrap.appendChild(play)
@@ -3981,7 +4008,7 @@
                     video.muted = true
                     video.playsInline = true
                     video.preload = 'metadata'
-                    video.onloadeddata = () => {
+                    const capture = () => {
                         try {
                             const scale = Math.min(1, 320 / (video.videoWidth || 320))
                             const canvas = document.createElement('canvas')
@@ -3994,6 +4021,17 @@
                             clearTimeout(timer)
                             done('')
                         }
+                    }
+                    video.onloadedmetadata = () => {
+                        try {
+                            video.currentTime = Math.min(0.2, Math.max(0, (video.duration || 1) / 20))
+                        } catch (error) {
+                            capture()
+                        }
+                    }
+                    video.onseeked = capture
+                    video.onloadeddata = () => {
+                        if (!settled && video.currentTime === 0) capture()
                     }
                     video.onerror = () => { clearTimeout(timer); done('') }
                     video.src = url
