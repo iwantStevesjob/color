@@ -999,6 +999,76 @@
             display: none;
         }
 
+        .file-video-controls {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 5px;
+            background: #111;
+        }
+
+        .file-video-preview.is-playing .file-video-controls {
+            display: flex;
+        }
+
+        .file-video-toggle {
+            position: relative;
+            width: 24px;
+            height: 24px;
+            border: 1px solid #777;
+            background: #222;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        .file-video-toggle::before {
+            content: '';
+            position: absolute;
+            left: 9px;
+            top: 6px;
+            border-left: 8px solid #fff;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+        }
+
+        .file-video-toggle.playing::before {
+            left: 7px;
+            top: 5px;
+            width: 3px;
+            height: 12px;
+            border: 0;
+            border-left: 4px solid #fff;
+            border-right: 4px solid #fff;
+        }
+
+        .file-video-progress {
+            --video-loaded: 0%;
+            --video-played: 0%;
+            appearance: none;
+            width: min(360px, 72vw);
+            height: 6px;
+            border-radius: 999px;
+            accent-color: var(--file-color, #999);
+            background: linear-gradient(to right, #fff 0 var(--video-played), var(--file-color, #999) var(--video-played) var(--video-loaded), #555 var(--video-loaded) 100%);
+            cursor: pointer;
+        }
+
+        .file-video-progress::-webkit-slider-thumb {
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #fff;
+        }
+
+        .file-video-progress::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border: 0;
+            border-radius: 50%;
+            background: #fff;
+        }
+
         .file-play-btn {
             position: absolute;
             left: 50%;
@@ -3419,6 +3489,7 @@
                 this.outgoing = new Map()
                 this.incoming = new Map()
                 this.completed = new Map()
+                this.pendingRequests = new Set()
                 this.chunkSize = 32 * 1024
                 this.bindEvents()
             }
@@ -3448,6 +3519,7 @@
                 this.outgoing.clear()
                 this.incoming.clear()
                 this.completed.clear()
+                this.pendingRequests.clear()
                 this.pendingVideoPlay = null
                 this.mesh = null
             }
@@ -3530,7 +3602,6 @@
                 if (!play || !attachment) return false
                 const meta = this.metaFromElement(attachment)
                 const player = attachment.querySelector('video.file-preview')
-                const poster = attachment.querySelector('.file-video-preview img')
                 if (event.cancelable) event.preventDefault()
                 event.stopPropagation()
                 console.log('[FileTransfer] video play activate', source, meta, { hasSrc: !!player?.src, mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
@@ -3539,9 +3610,7 @@
                     this.requestDownload(meta)
                     return true
                 }
-                if (poster) poster.style.display = 'none'
-                play.style.display = 'none'
-                player.style.display = 'block'
+                this.showVideoPlayer(meta.id)
                 player.play().catch(error => console.warn('[FileTransfer] video play failed', error))
                 return true
             }
@@ -3622,32 +3691,36 @@
                     else this.saveBlob(cached.blob, cached.meta)
                     return
                 }
+                if (this.incoming.has(meta.id) || this.pendingRequests.has(meta.id)) return
+                this.pendingRequests.add(meta.id)
                 this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
                 this.setProgress(meta.id, 0.08, meta.ownerColor)
                 console.log('[FileTransfer] sending file request', { fileId: meta.id })
                 this.app.mesh.broadcastFile({ type: 'request', fileId: meta.id })
-                setTimeout(() => { if (!this.incoming.has(meta.id) && !this.completed.has(meta.id)) this.setButtonState(meta.id, 'RETRY ' + meta.name, false) }, 10000)
+                setTimeout(() => { if (!this.incoming.has(meta.id) && !this.completed.has(meta.id)) { this.pendingRequests.delete(meta.id); this.setButtonState(meta.id, 'RETRY ' + meta.name, false) } }, 10000)
             }
 
             async handleFileMessage(data, pid) {
                 if (!data?.type || !data.fileId) return
                 console.log('[FileTransfer] file message', data.type, { fileId: data.fileId, pid, index: data.index, progress: data.progress })
-                if (data.type === 'request') return this.handleRequest(data.fileId, pid)
+                if (data.type === 'request') return this.handleRequest(data, pid)
                 if (data.type === 'progress') return this.setProgress(data.fileId, data.progress, data.ownerColor)
                 if (data.type === 'start') return this.startIncoming(data, pid)
                 if (data.type === 'chunk') return this.receiveChunk(data, pid)
                 if (data.type === 'end') return this.finishIncoming(data.fileId, pid)
             }
 
-            async handleRequest(fileId, pid) {
+            async handleRequest(data, pid) {
+                const fileId = data.fileId
                 const entry = this.outgoing.get(fileId)
-                console.log('[FileTransfer] received file request', { fileId, pid, hasEntry: !!entry, canSend: !!this.app.mesh?.broadcastFile })
+                console.log('[FileTransfer] received file request', { fileId, pid, index: data.index, hasEntry: !!entry, canSend: !!this.app.mesh?.broadcastFile })
                 if (!entry || !this.app.mesh?.broadcastFile) return
                 if (entry.ready) try { await entry.ready } catch (error) { return }
-                await this.sendFile(entry, pid)
+                if (typeof data.index === 'number') return this.sendFileChunk(entry, pid, data.index)
+                await this.sendFile(entry, pid, this.isVideoFile(entry.meta) && !data.full)
             }
 
-            async sendFile(entry, pid) {
+            async sendFile(entry, pid, startOnly = false) {
                 if (this.app.roomId !== entry.roomId) return
                 const { file, meta } = entry
                 const totalChunks = Math.ceil((file.size || 0) / this.chunkSize)
@@ -3658,6 +3731,7 @@
                     this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
                     return
                 }
+                if (startOnly) return
                 for (let offset = 0, index = 0; offset < file.size; offset += this.chunkSize, index++) {
                     const end = Math.min(offset + this.chunkSize, file.size)
                     const chunk = await file.slice(offset, end).arrayBuffer()
@@ -3671,7 +3745,26 @@
                 this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
             }
 
+            async sendFileChunk(entry, pid, index) {
+                if (this.app.roomId !== entry.roomId) return
+                const { file, meta } = entry
+                const offset = index * this.chunkSize
+                if (offset < 0 || offset >= file.size) return
+                const end = Math.min(offset + this.chunkSize, file.size)
+                const chunk = await file.slice(offset, end).arrayBuffer()
+                this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, data: this.arrayBufferToBase64(chunk) }, pid)
+                const progress = end / file.size
+                this.setProgress(meta.id, progress, meta.ownerColor)
+                this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
+                if (end >= file.size) {
+                    console.log('[FileTransfer] send file end', { fileId: meta.id, pid })
+                    this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
+                }
+            }
+
             startIncoming(data, pid) {
+                if (this.incoming.has(data.fileId)) return
+                this.pendingRequests.delete(data.fileId)
                 const localMeta = this.findMeta(data.fileId) || {}
                 if (localMeta.hash && data.hash && localMeta.hash !== data.hash) return
                 const meta = {
@@ -3684,29 +3777,35 @@
                     poster: data.poster || localMeta.poster || ''
                 }
                 const stream = this.isVideoFile(meta) ? this.startVideoStream(data.fileId, meta) : null
-                this.incoming.set(data.fileId, { pid, meta, chunks: stream ? null : new Array(data.chunks || 0), seen: new Set(), received: 0, stream })
+                const incoming = { pid, meta, chunks: new Array(data.chunks || 0), seen: new Set(), received: 0, stream, totalChunks: Number(data.chunks || 0), nextIndex: 0, requested: new Set(), fullFallback: false }
+                this.incoming.set(data.fileId, incoming)
                 console.log('[FileTransfer] incoming start', { fileId: data.fileId, pid, size: meta.size, chunks: data.chunks, streaming: !!stream })
                 this.setProgress(data.fileId, 0, meta.ownerColor)
+                if (stream) this.requestVideoChunks(incoming)
+                else if (this.isVideoFile(meta)) this.app.mesh?.broadcastFile?.({ type: 'request', fileId: data.fileId, full: true }, pid)
             }
 
             receiveChunk(data, pid) {
                 const incoming = this.incoming.get(data.fileId)
                 if (!incoming || incoming.pid !== pid || typeof data.index !== 'number' || !data.data) return
                 if (incoming.seen.has(data.index)) return
+                incoming.requested?.delete(data.index)
                 incoming.seen.add(data.index)
                 const bytes = this.base64ToBytes(data.data)
-                if (incoming.stream) this.appendVideoChunk(incoming.stream, bytes)
-                else incoming.chunks[data.index] = bytes
+                incoming.chunks[data.index] = bytes
+                if (incoming.stream && !this.appendVideoChunk(incoming.stream, bytes)) incoming.fullFallback = true
                 incoming.received += bytes.byteLength
                 if (data.index === 0 || incoming.received >= incoming.meta.size) console.log('[FileTransfer] incoming progress', { fileId: data.fileId, received: incoming.received, size: incoming.meta.size })
                 this.setProgress(data.fileId, incoming.meta.size ? incoming.received / incoming.meta.size : 1, incoming.meta.ownerColor)
+                if (incoming.stream || incoming.fullFallback) this.requestVideoChunks(incoming)
             }
 
             async finishIncoming(fileId, pid) {
                 const incoming = this.incoming.get(fileId)
                 if (!incoming || incoming.pid !== pid) return
+                this.pendingRequests.delete(fileId)
                 console.log('[FileTransfer] incoming end', { fileId, pid, received: incoming.received, size: incoming.meta.size })
-                if (incoming.stream) {
+                if (incoming.stream && !incoming.fullFallback && !incoming.stream.failed) {
                     this.endVideoStream(incoming.stream)
                     this.incoming.delete(fileId)
                     this.setProgress(fileId, 1, incoming.meta.ownerColor)
@@ -3784,6 +3883,7 @@
                     line.classList.add('file-transfer-line')
                     line.style.setProperty('--file-color', this.safeColor(color || el.dataset.fileOwner))
                     line.style.setProperty('--file-progress', pct + '%')
+                    el.querySelector('.file-video-progress')?.style.setProperty('--video-loaded', pct + '%')
                 })
             }
 
@@ -3804,8 +3904,12 @@
                 const video = this.renderVideoPreview(fileId, meta)
                 if (!video) return null
                 const mediaSource = new MediaSourceCtor()
-                const stream = { fileId, meta, mediaSource, sourceBuffer: null, queue: [], ended: false, failed: false }
+                const stream = { fileId, meta, video, mediaSource, sourceBuffer: null, queue: [], ended: false, failed: false, wantsPlay: this.pendingVideoPlay === fileId }
                 video.src = URL.createObjectURL(mediaSource)
+                video.addEventListener('play', () => { stream.wantsPlay = true; this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('pause', () => { stream.wantsPlay = false })
+                video.addEventListener('timeupdate', () => { this.updateVideoControls(fileId, video); this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('waiting', () => this.requestVideoChunks(this.incoming.get(fileId)))
                 if (this.pendingVideoPlay === fileId) this.showVideoPlayer(fileId)
                 mediaSource.addEventListener('sourceopen', () => {
                     try {
@@ -3849,6 +3953,32 @@
                 this.flushVideoStream(stream)
             }
 
+            requestVideoChunks(incoming) {
+                if ((!incoming?.stream && !incoming?.fullFallback) || !this.app.mesh?.broadcastFile) return
+                const total = incoming.totalChunks || Math.ceil((incoming.meta.size || 0) / this.chunkSize)
+                if (!total || incoming.nextIndex >= total) return
+                const video = incoming.stream?.video
+                const playing = incoming.fullFallback || incoming.stream?.wantsPlay || (video && !video.paused && !video.ended)
+                if (!playing && incoming.nextIndex > 0) return
+                const watched = video?.duration && Number.isFinite(video.duration) ? video.currentTime / video.duration : 0
+                const allowed = incoming.fullFallback ? total - 1 : Math.min(total - 1, Math.max(32, Math.ceil(total * watched) + 32))
+                while (incoming.nextIndex <= allowed && incoming.nextIndex < total && incoming.requested.size < 4) {
+                    const index = incoming.nextIndex++
+                    incoming.requested.add(index)
+                    this.app.mesh.broadcastFile({ type: 'request', fileId: incoming.meta.id, index }, incoming.pid)
+                }
+            }
+
+            updateVideoControls(fileId, video) {
+                const pct = video?.duration && Number.isFinite(video.duration) ? Math.max(0, Math.min(100, (video.currentTime / video.duration) * 100)) : 0
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    const progress = el.querySelector('.file-video-progress')
+                    if (!progress) return
+                    progress.value = Math.round(pct * 10)
+                    progress.style.setProperty('--video-played', pct + '%')
+                })
+            }
+
             getVideoStreamMime(meta, MediaSourceCtor) {
                 const type = String(meta.type || '').toLowerCase()
                 const candidates = [type]
@@ -3859,9 +3989,11 @@
 
             showVideoPlayer(fileId) {
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    const wrap = el.querySelector('.file-video-preview')
                     const poster = el.querySelector('.file-video-preview img')
                     const play = el.querySelector('.file-play-btn')
                     const player = el.querySelector('video.file-preview')
+                    if (wrap) wrap.classList.add('is-playing')
                     if (poster) poster.style.display = 'none'
                     if (play) play.style.display = 'none'
                     if (player) player.style.display = 'block'
@@ -3884,7 +4016,7 @@
                     poster.alt = meta.name || 'video'
                     const player = document.createElement('video')
                     player.className = 'file-preview'
-                    player.controls = true
+                    player.controls = false
                     player.playsInline = true
                     player.preload = 'metadata'
                     player.title = meta.name || 'video'
@@ -3893,9 +4025,45 @@
                     play.type = 'button'
                     play.className = 'file-play-btn'
                     play.setAttribute('aria-label', 'Play video')
+                    const controls = document.createElement('span')
+                    controls.className = 'file-video-controls'
+                    const toggle = document.createElement('button')
+                    toggle.type = 'button'
+                    toggle.className = 'file-video-toggle'
+                    toggle.setAttribute('aria-label', 'Play or pause video')
+                    const progress = document.createElement('input')
+                    progress.type = 'range'
+                    progress.className = 'file-video-progress'
+                    progress.min = '0'
+                    progress.max = '1000'
+                    progress.value = '0'
+                    const togglePlay = event => {
+                        if (event?.cancelable) event.preventDefault()
+                        event?.stopPropagation?.()
+                        if (!player.src) {
+                            this.pendingVideoPlay = fileId
+                            this.requestDownload(meta)
+                            return
+                        }
+                        this.showVideoPlayer(fileId)
+                        if (player.paused) player.play().catch(error => console.warn('[FileTransfer] video play failed', error))
+                        else player.pause()
+                    }
+                    toggle.addEventListener('click', togglePlay)
+                    player.addEventListener('click', togglePlay)
+                    player.addEventListener('play', () => toggle.classList.add('playing'))
+                    player.addEventListener('pause', () => toggle.classList.remove('playing'))
+                    player.addEventListener('timeupdate', () => this.updateVideoControls(fileId, player))
+                    progress.addEventListener('input', () => {
+                        if (player.duration && Number.isFinite(player.duration)) player.currentTime = player.duration * (Number(progress.value) / 1000)
+                        this.requestVideoChunks(this.incoming.get(fileId))
+                    })
+                    controls.appendChild(toggle)
+                    controls.appendChild(progress)
                     wrap.appendChild(poster)
                     wrap.appendChild(player)
                     wrap.appendChild(play)
+                    wrap.appendChild(controls)
                     const current = el.querySelector('.file-download-btn')
                     if (current) current.replaceWith(wrap)
                     else el.insertBefore(wrap, el.querySelector('.file-size'))
@@ -3910,7 +4078,11 @@
                     const record = this.completed.get(fileId)
                     const url = record?.previewUrl || URL.createObjectURL(blob)
                     if (record) record.previewUrl = url
-                    this.renderVideoPreview(fileId, meta, url)
+                    const player = this.renderVideoPreview(fileId, meta, url)
+                    if (this.pendingVideoPlay === fileId) {
+                        this.showVideoPlayer(fileId)
+                        player?.play().catch(error => console.warn('[FileTransfer] video play failed', error))
+                    }
                     return
                 }
                 const record = this.completed.get(fileId)
