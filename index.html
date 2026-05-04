@@ -3959,11 +3959,14 @@
             }
 
             startVideoStream(fileId, meta) {
+                const existingStream = this.pendingStreams.get(fileId) || this.incoming.get(fileId)?.stream
+                if (existingStream) return existingStream
                 const MediaSourceCtor = window.MediaSource || window.WebKitMediaSource
                 if (!MediaSourceCtor) return null
                 const mime = this.getVideoStreamMime(meta, MediaSourceCtor)
                 if (!mime) return null
-                const video = this.renderVideoPreview(fileId, meta)
+                const attachment = Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).find(el => el.dataset.fileId === fileId)
+                const video = attachment?.querySelector('video.file-preview') || this.renderVideoPreview(fileId, meta)
                 if (!video) return null
                 const mediaSource = new MediaSourceCtor()
                 const stream = { fileId, meta, video, mediaSource, sourceBuffer: null, queue: [], ended: false, failed: false, wantsPlay: this.pendingVideoPlay === fileId, bufferingPause: false }
@@ -3972,6 +3975,7 @@
                 video.addEventListener('pause', () => { if (!stream.bufferingPause) stream.wantsPlay = false })
                 video.addEventListener('timeupdate', () => { this.updateVideoControls(fileId, video); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('waiting', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('stalled', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
                 if (this.pendingVideoPlay === fileId) this.showVideoPlayer(fileId)
                 mediaSource.addEventListener('sourceopen', () => {
                     try {
@@ -4023,7 +4027,7 @@
                 const playing = incoming.fullFallback || incoming.stream?.wantsPlay || (video && !video.paused && !video.ended)
                 if (!playing && incoming.nextIndex > 0) return
                 const watched = video?.duration && Number.isFinite(video.duration) ? video.currentTime / video.duration : 0
-                const allowed = incoming.fullFallback ? total - 1 : Math.min(total - 1, Math.max(32, Math.ceil(total * 0.2), Math.ceil(total * watched) + 32))
+                const allowed = incoming.fullFallback ? total - 1 : Math.min(total - 1, Math.max(32, Math.ceil(total * 0.2), incoming.stream?.bufferingPause ? incoming.nextIndex + 8 : Math.ceil(total * watched) + 32))
                 while (incoming.nextIndex <= allowed && incoming.nextIndex < total && incoming.requested.size < 8) {
                     const index = incoming.nextIndex++
                     incoming.requested.add(index)
