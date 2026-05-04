@@ -8,7 +8,7 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" type="text/javascript"></script>
-<script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 
 
     <style>
@@ -1104,7 +1104,9 @@
         }
 
         @keyframes file-video-spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         .file-play-btn {
@@ -3601,7 +3603,7 @@
             }
 
             hasFiles(event) {
-                return Array.from(event.dataTransfer?.types ||[]).includes('Files')
+                return Array.from(event.dataTransfer?.types || []).includes('Files')
             }
 
             lineFromPoint(event) {
@@ -3632,7 +3634,6 @@
                 const file = event.dataTransfer?.files?.[0]
                 if (!file) return
                 event.preventDefault()
-                if (this.app) this.app.isFresh = false
                 this.dropFile(line, file).catch(error => console.error('[FileTransfer]', error))
             }
 
@@ -3674,14 +3675,11 @@
                 const play = event.target.closest?.('.file-play-btn')
                 const attachment = play?.closest('.file-attachment')
                 if (!play || !attachment) return false
-                
-                if (this.app) this.app.isFresh = false
-                
                 const meta = this.metaFromElement(attachment)
                 const player = attachment.querySelector('video.file-preview')
                 if (event.cancelable) event.preventDefault()
                 event.stopPropagation()
-                
+
                 if (!player?.src && !player?.srcObject) {
                     this.pendingVideoPlay = meta.id
                     this.requestBufferedVideo(meta)
@@ -3767,7 +3765,7 @@
                     return
                 }
                 if (this.incoming.has(meta.id) || this.pendingRequests.has(meta.id)) return
-                
+
                 console.log(`[FileTransfer] Sending download request for: ${meta.name}`);
                 this.pendingRequests.add(meta.id)
                 this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
@@ -3780,15 +3778,17 @@
                 if (!meta?.id || !this.app.mesh?.broadcastFile) return false
                 this.showVideoPlayer(meta.id)
                 this.setVideoBuffering(meta.id, true)
-                
+
+                // FIX: Proactively initialize the stream. This assigns a srcObject/src to the video tag, 
+                // protecting the element from being destroyed by incoming DOM syncs from the EditorApp!
                 if (!this.pendingStreams.has(meta.id) && !this.incoming.has(meta.id)) {
                     console.log(`[FileTransfer] Proactively locking video stream to DOM: ${meta.name}`);
                     const stream = this.startVideoStream(meta.id, meta)
                     if (stream) this.pendingStreams.set(meta.id, stream)
                 }
-                
+
                 if (this.incoming.has(meta.id) || this.pendingRequests.has(meta.id)) return true
-                
+
                 console.log(`[FileTransfer] Sending request for video buffering: ${meta.name}`);
                 this.pendingRequests.add(meta.id)
                 this.app.mesh.broadcastFile({ type: 'request', fileId: meta.id })
@@ -3808,10 +3808,10 @@
                 const fileId = data.fileId
                 const entry = this.outgoing.get(fileId)
                 if (!entry || !this.app.mesh?.broadcastFile) return
-                
+
                 console.log(`[FileTransfer] Peer ${pid} requested file: ${entry.meta.name} (Chunk: ${data.index !== undefined ? data.index : 'ALL'})`);
                 if (entry.ready) try { await entry.ready } catch (error) { return }
-                
+
                 if (typeof data.index === 'number') return this.queueFileChunk(entry, pid, data.index)
                 await this.sendFile(entry, pid, this.isVideoFile(entry.meta) && !data.full)
             }
@@ -3828,7 +3828,7 @@
                 if (this.app.roomId !== entry.roomId) return
                 const { file, meta } = entry
                 const totalChunks = Math.ceil((file.size || 0) / this.chunkSize)
-                
+
                 console.log(`[FileTransfer] Starting file send to ${pid}: ${meta.name} (${totalChunks} chunks)`);
                 this.app.mesh.broadcastFile({ type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, poster: meta.poster || '', chunks: totalChunks, full: !startOnly }, pid)
                 if (!file.size) {
@@ -3837,7 +3837,7 @@
                     return
                 }
                 if (startOnly) return
-                
+
                 for (let offset = 0, index = 0; offset < file.size; offset += this.chunkSize, index++) {
                     const end = Math.min(offset + this.chunkSize, file.size)
                     const chunk = await file.slice(offset, end).arrayBuffer()
@@ -3860,15 +3860,11 @@
                 const end = Math.min(offset + this.chunkSize, file.size)
                 const chunk = await file.slice(offset, end).arrayBuffer()
                 await this.waitForPeerBuffer(pid)
-                
+
                 this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, bytes: new Uint8Array(chunk) }, pid)
                 const progress = end / file.size
                 this.setProgress(meta.id, progress, meta.ownerColor)
                 this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
-                if (end >= file.size) {
-                    console.log(`[FileTransfer] Send chunk ${index} reached end of file`);
-                    this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
-                }
             }
 
             async waitForPeerBuffer(pid) {
@@ -3877,8 +3873,6 @@
             }
 
             startIncoming(data, pid) {
-                if (this.app) this.app.isFresh = false 
-                
                 if (this.incoming.has(data.fileId)) return
                 this.pendingRequests.delete(data.fileId)
                 const localMeta = this.findMeta(data.fileId) || {}
@@ -3892,25 +3886,25 @@
                     hash: data.hash || localMeta.hash || '',
                     poster: data.poster || localMeta.poster || ''
                 }
-                
+
                 console.log(`[FileTransfer] Incoming stream established from ${pid}: ${meta.name}`);
-                
+
                 const stream = !data.full && this.isVideoFile(meta) ? this.pendingStreams.get(data.fileId) || this.startVideoStream(data.fileId, meta) : null
                 this.pendingStreams.delete(data.fileId)
                 if (stream) stream.meta = meta
-                
-                const incoming = { 
-                    pid, meta, chunks: new Array(data.chunks || 0), 
-                    seen: new Set(), received: 0, stream, 
-                    totalChunks: Number(data.chunks || 0), 
-                    nextIndex: 0, requested: new Set(), 
+
+                const incoming = {
+                    pid, meta, chunks: new Array(data.chunks || 0),
+                    seen: new Set(), received: 0, stream,
+                    totalChunks: Number(data.chunks || 0),
+                    nextIndex: 0, requested: new Set(),
                     fullFallback: false,
-                    moovFetched: false 
+                    moovFetched: false
                 }
-                
+
                 this.incoming.set(data.fileId, incoming)
                 this.setProgress(data.fileId, 0, meta.ownerColor)
-                
+
                 if (stream) this.requestVideoChunks(incoming)
                 else if (this.isVideoFile(meta) && !data.full) this.app.mesh?.broadcastFile?.({ type: 'request', fileId: data.fileId, full: true }, pid)
             }
@@ -3921,42 +3915,45 @@
                 if (incoming.seen.has(data.index)) return
                 incoming.requested?.delete(data.index)
                 incoming.seen.add(data.index)
-                
+
                 const bytes = data.bytes ? (data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes)) : this.base64ToBytes(data.data)
                 incoming.chunks[data.index] = bytes
-                
+
                 if (incoming.stream && !incoming.stream.failed) {
                     if (incoming.stream.isWebM) {
                         if (!this.appendVideoChunk(incoming.stream, bytes)) incoming.fullFallback = true
                     } else if (incoming.stream.mp4boxfile) {
+                        // Crucial: MP4Box works correctly when fed arraybuffers with fileStart
                         const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
                         copy.fileStart = data.index * this.chunkSize
                         try {
                             incoming.stream.mp4boxfile.appendBuffer(copy)
-                        } catch(e) {
+                        } catch (e) {
                             console.warn("[FileTransfer] MP4Box Append Error", e)
                             incoming.fullFallback = true
                         }
                     }
                 }
-                
+
                 incoming.received += bytes.byteLength
                 this.setProgress(data.fileId, incoming.meta.size ? incoming.received / incoming.meta.size : 1, incoming.meta.ownerColor)
                 if (incoming.stream || incoming.fullFallback) this.requestVideoChunks(incoming)
+                if (incoming.totalChunks && incoming.seen.size >= incoming.totalChunks) this.finishIncoming(data.fileId, pid).catch(error => console.error('[FileTransfer]', error))
             }
 
             async finishIncoming(fileId, pid) {
                 const incoming = this.incoming.get(fileId)
                 if (!incoming || incoming.pid !== pid) return
+                if (incoming.totalChunks && incoming.seen.size < incoming.totalChunks) return
                 this.pendingRequests.delete(fileId)
-                
+
                 console.log(`[FileTransfer] Stream download complete: ${incoming.meta.name}`);
-                
+
                 if (incoming.stream && !incoming.fullFallback && !incoming.stream.failed) {
                     if (incoming.stream.isWebM) {
                         this.endVideoStream(incoming.stream)
                     } else if (incoming.stream.mp4boxfile) {
-                        try { incoming.stream.mp4boxfile.flush() } catch(e) {}
+                        try { incoming.stream.mp4boxfile.flush() } catch (e) { }
                     }
                     this.incoming.delete(fileId)
                     this.setProgress(fileId, 1, incoming.meta.ownerColor)
@@ -3985,7 +3982,6 @@
             }
 
             hydrateLine(line) {
-                if (this.app) this.app.isFresh = false // PROACTIVE DOM PROTECT
                 const attachment = line?.querySelector?.('.file-attachment')
                 if (!attachment) return
                 const meta = this.metaFromElement(attachment)
@@ -3994,40 +3990,7 @@
                 if (!line.style.getPropertyValue('--file-progress')) line.style.setProperty('--file-progress', '0%')
                 if (this.isVideoFile(meta)) line.querySelector('.file-transfer-progress')?.remove()
                 this.setOwnerView(attachment, meta)
-                
-                if (!this.isMine(meta) && this.isVideoFile(meta) && !this.incoming.has(meta.id) && !this.completed.has(meta.id) && !attachment.querySelector('.file-video-preview')) {
-                    this.renderVideoPreview(meta.id, meta)
-                }
-
-                // ==========================================
-                // THE FIX: Heal detached elements
-                // If EditorApp wipes the DOM via sync-cursor, 
-                // we reconnect the background stream to the new video tag!
-                // ==========================================
-                const stream = this.pendingStreams.get(meta.id) || this.incoming.get(meta.id)?.stream;
-                if (stream) {
-                    const currentVideo = attachment.querySelector('video.file-preview');
-                    if (currentVideo && currentVideo !== stream.video) {
-                        console.log(`[FileTransfer] Healing detached video stream after Editor sync: ${meta.name}`);
-                        stream.video = currentVideo;
-                        currentVideo.src = URL.createObjectURL(stream.mediaSource);
-                        
-                        // Rebind all event listeners to the resurrected DOM node
-                        currentVideo.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(meta.id, Number(currentVideo.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 20); this.requestVideoChunks(this.incoming.get(meta.id)) });
-                        currentVideo.addEventListener('pause', () => { if (!stream.bufferingPause) stream.wantsPlay = false });
-                        currentVideo.addEventListener('loadedmetadata', () => this.updateVideoBuffered(meta.id, currentVideo));
-                        currentVideo.addEventListener('progress', () => this.updateVideoBuffered(meta.id, currentVideo));
-                        currentVideo.addEventListener('timeupdate', () => { this.updateVideoControls(meta.id, currentVideo); this.requestVideoChunks(this.incoming.get(meta.id)) });
-                        currentVideo.addEventListener('waiting', () => { stream.bufferingPause = true; this.setVideoBuffering(meta.id, true); this.requestVideoChunks(this.incoming.get(meta.id)) });
-                        currentVideo.addEventListener('stalled', () => { stream.bufferingPause = true; this.setVideoBuffering(meta.id, true); this.requestVideoChunks(this.incoming.get(meta.id)) });
-                        
-                        if (stream.wantsPlay) {
-                            this.showVideoPlayer(meta.id);
-                            currentVideo.play().catch(e => console.warn('[FileTransfer] Resumed play failed', e));
-                        }
-                    }
-                }
-
+                if (!this.isMine(meta) && this.isVideoFile(meta) && !this.incoming.has(meta.id) && !this.completed.has(meta.id) && !attachment.querySelector('.file-video-preview')) this.renderVideoPreview(meta.id, meta)
                 if (this.incoming.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
                 else if (this.completed.has(meta.id)) {
                     const cached = this.completed.get(meta.id)
@@ -4109,58 +4072,57 @@
             startVideoStream(fileId, meta) {
                 const existingStream = this.pendingStreams.get(fileId) || this.incoming.get(fileId)?.stream
                 if (existingStream) return existingStream
-                
+
                 const MediaSourceCtor = window.MediaSource || window.WebKitMediaSource
                 if (!MediaSourceCtor) return null
-                
+
                 const attachment = Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).find(el => el.dataset.fileId === fileId)
                 const video = attachment?.querySelector('video.file-preview') || this.renderVideoPreview(fileId, meta)
                 if (!video) return null
 
                 const mediaSource = new MediaSourceCtor()
                 const isWebM = /\.webm$/i.test(meta.name || '') || meta.type === 'video/webm'
-                
-                const stream = { 
-                    fileId, meta, video, mediaSource, 
-                    sourceBuffer: null, mp4boxfile: null, buffers: [], queue:[], parser: null, 
-                    ended: false, failed: false, 
-                    wantsPlay: this.pendingVideoPlay === fileId, 
+
+                const stream = {
+                    fileId, meta, video, mediaSource,
+                    sourceBuffer: null, mp4boxfile: null, buffers: [], queue: [], parser: null,
+                    ended: false, failed: false,
+                    wantsPlay: this.pendingVideoPlay === fileId,
                     bufferingPause: false,
                     isWebM: isWebM
                 }
-                
+
                 video.src = URL.createObjectURL(mediaSource)
-                
-                video.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(fileId, Number(stream.video.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 20); this.requestVideoChunks(this.incoming.get(fileId)) })
+
+                video.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(fileId, Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 20); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('pause', () => { if (!stream.bufferingPause) stream.wantsPlay = false })
-                video.addEventListener('loadedmetadata', () => this.updateVideoBuffered(fileId, stream.video))
-                video.addEventListener('progress', () => this.updateVideoBuffered(fileId, stream.video))
-                video.addEventListener('timeupdate', () => { this.updateVideoControls(fileId, stream.video); this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('loadedmetadata', () => this.updateVideoBuffered(fileId, video))
+                video.addEventListener('progress', () => this.updateVideoBuffered(fileId, video))
+                video.addEventListener('timeupdate', () => { this.updateVideoControls(fileId, video); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('waiting', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('stalled', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
-                
+
                 if (this.pendingVideoPlay === fileId) this.showVideoPlayer(fileId)
 
                 mediaSource.addEventListener('sourceopen', () => {
                     if (isWebM) {
                         try {
                             stream.sourceBuffer = mediaSource.addSourceBuffer('video/webm; codecs="vp8, vorbis"')
-                            stream.sourceBuffer.addEventListener('updateend', () => { 
-                                this.updateVideoBuffered(fileId, stream.video); 
-                                this.flushVideoStream(stream); 
-                                const loaded = Number(stream.video.closest('.file-video-preview')?.dataset.videoLoaded || 0); 
-                                const played = stream.video.duration && Number.isFinite(stream.video.duration) ? (stream.video.currentTime / stream.video.duration) * 100 : 0; 
-                                if (stream.wantsPlay && loaded < 20) { 
-                                    stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) 
-                                } else if (stream.wantsPlay && played <= loaded) { 
-                                    stream.bufferingPause = false; this.setVideoBuffering(fileId, false); 
-                                    if (document.body.contains(stream.video)) stream.video.play().catch(e => console.warn(e)) 
-                                } 
+                            stream.sourceBuffer.addEventListener('updateend', () => {
+                                this.updateVideoBuffered(fileId, video);
+                                this.flushVideoStream(stream);
+                                const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0);
+                                const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0;
+                                if (stream.wantsPlay && loaded < 20) {
+                                    stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId))
+                                } else if (stream.wantsPlay && played <= loaded) {
+                                    stream.bufferingPause = false; this.setVideoBuffering(fileId, false); video.play().catch(e => console.warn(e))
+                                }
                             })
-                            stream.sourceBuffer.addEventListener('error', () => { 
-                                stream.failed = true; stream.queue =[]; 
-                                const incoming = this.incoming.get(fileId); 
-                                if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) } 
+                            stream.sourceBuffer.addEventListener('error', () => {
+                                stream.failed = true; stream.queue = [];
+                                const incoming = this.incoming.get(fileId);
+                                if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) }
                             })
                             this.flushVideoStream(stream)
                             if (this.pendingVideoPlay === fileId) this.setVideoBuffering(fileId, true)
@@ -4170,6 +4132,7 @@
                             if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) }
                         }
                     } else {
+                        // MP4Box.js Initialization & Setup
                         if (typeof MP4Box === 'undefined') {
                             console.warn("[FileTransfer] MP4Box.js not loaded. Falling back to full download.");
                             stream.failed = true;
@@ -4177,7 +4140,7 @@
                             if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming); }
                             return;
                         }
-                        
+
                         stream.mp4boxfile = MP4Box.createFile();
                         stream.mp4boxfile.onError = (e) => {
                             console.warn("[FileTransfer] MP4Box Error", e);
@@ -4185,58 +4148,58 @@
                             const incoming = this.incoming.get(fileId);
                             if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming); }
                         };
-                        
+
                         stream.mp4boxfile.onReady = (info) => {
                             let initCount = 0;
                             let initializedCount = 0;
-                            
+
                             info.tracks.forEach(track => {
                                 const isVideo = !track.audio && track.name !== 'SoundHandler';
                                 const mime = (isVideo ? 'video/mp4' : 'audio/mp4') + '; codecs="' + track.codec + '"';
-                                
+
                                 if (MediaSourceCtor.isTypeSupported(mime)) {
                                     try {
                                         const sb = mediaSource.addSourceBuffer(mime);
-                                        const bufObj = { id: track.id, sb: sb, queue:[], isVideo: isVideo };
+                                        const bufObj = { id: track.id, sb: sb, queue: [], isVideo: isVideo };
                                         stream.buffers.push(bufObj);
                                         stream.mp4boxfile.setSegmentOptions(track.id, sb, { nbSamples: 1000 });
                                         initCount++;
                                     } catch (e) { console.warn('[FileTransfer] SourceBuffer error', e); }
                                 }
                             });
-                            
+
                             if (initCount === 0) {
-                                stream.failed = true; 
+                                stream.failed = true;
                                 const incoming = this.incoming.get(fileId);
                                 if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming); }
                                 return;
                             }
-                            
+
                             const initSegs = stream.mp4boxfile.initializeSegmentation();
-                            
+
                             initSegs.forEach(seg => {
                                 const bufObj = stream.buffers.find(b => b.sb === seg.user);
                                 if (bufObj) {
                                     const onInitEnd = () => {
                                         bufObj.sb.removeEventListener('updateend', onInitEnd);
                                         initializedCount++;
-                                        
+
+                                        // Handle subsequent segment chunks
                                         bufObj.sb.addEventListener('updateend', () => {
                                             this.pumpMp4Queue(stream, bufObj);
-                                            
+
                                             if (bufObj.isVideo || stream.buffers.length === 1) {
-                                                this.updateVideoBuffered(fileId, stream.video);
-                                                const loaded = Number(stream.video.closest('.file-video-preview')?.dataset.videoLoaded || 0); 
-                                                const played = stream.video.duration && Number.isFinite(stream.video.duration) ? (stream.video.currentTime / stream.video.duration) * 100 : 0; 
-                                                if (stream.wantsPlay && loaded < 20) { 
+                                                this.updateVideoBuffered(fileId, video);
+                                                const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0);
+                                                const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0;
+                                                if (stream.wantsPlay && loaded < 20) {
                                                     stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId));
-                                                } else if (stream.wantsPlay && played <= loaded) { 
-                                                    stream.bufferingPause = false; this.setVideoBuffering(fileId, false); 
-                                                    if (document.body.contains(stream.video)) stream.video.play().catch(e => {});
-                                                } 
+                                                } else if (stream.wantsPlay && played <= loaded) {
+                                                    stream.bufferingPause = false; this.setVideoBuffering(fileId, false); video.play().catch(e => { });
+                                                }
                                             }
                                         });
-                                        
+
                                         if (initializedCount === initCount) {
                                             stream.mp4boxfile.start();
                                         }
@@ -4246,7 +4209,7 @@
                                 }
                             });
                         };
-                        
+
                         stream.mp4boxfile.onSegment = (id, user, buffer, sampleNum, is_last) => {
                             const bufObj = stream.buffers.find(b => b.sb === user);
                             if (bufObj) {
@@ -4263,7 +4226,7 @@
                 if (bufObj.sb.updating || bufObj.queue.length === 0) return;
                 try {
                     bufObj.sb.appendBuffer(bufObj.queue.shift());
-                } catch(e) {
+                } catch (e) {
                     console.warn("[FileTransfer] MP4 Queue Pump Error", e);
                     stream.failed = true;
                 }
@@ -4272,12 +4235,13 @@
             appendVideoChunk(stream, bytes) {
                 if (stream.failed) return false
                 const segments = this.extractVideoSegments(stream, bytes)
-                if (!segments) { stream.failed = true; stream.queue =[]; return false }
+                if (!segments) { stream.failed = true; stream.queue = []; return false }
                 segments.forEach(segment => stream.queue.push(segment))
                 this.flushVideoStream(stream)
                 return true
             }
 
+            // Exclusively for WebM backwards compatibility 
             extractVideoSegments(stream, bytes, final = false) {
                 if (!stream.parser) {
                     stream.parser = { buffer: new Uint8Array(0), initDone: false };
@@ -4289,7 +4253,7 @@
 
             extractWebmSegments(parser, final = false) {
                 const segments = []
-                const cluster =[0x1f, 0x43, 0xb6, 0x75]
+                const cluster = [0x1f, 0x43, 0xb6, 0x75]
                 if (!parser.initDone) {
                     const firstCluster = this.indexOfBytes(parser.buffer, cluster, 0)
                     if (firstCluster < 0) return parser.buffer.length > 4 * 1024 * 1024 ? null : segments
@@ -4339,7 +4303,7 @@
                 } catch (error) {
                     console.warn('[FileTransfer] video stream append failed', { fileId: stream.fileId, error })
                     stream.failed = true
-                    stream.queue =[]
+                    stream.queue = []
                     const incoming = this.incoming.get(stream.fileId)
                     if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) }
                 }
@@ -4357,17 +4321,15 @@
                 if ((!incoming?.stream && !incoming?.fullFallback) || !this.app.mesh?.broadcastFile) return;
                 const total = incoming.totalChunks || Math.ceil((incoming.meta.size || 0) / this.chunkSize);
                 if (!total || incoming.nextIndex >= total) return;
-                
+
+                // Fetch the MOOV atom from the end of the file instantly for MP4Box
                 if (!incoming.moovFetched && !incoming.stream?.isWebM && total > 20) {
                     incoming.moovFetched = true;
-                    const endChunks = Math.min(total, Math.ceil((1 * 1024 * 1024) / this.chunkSize)); 
-                    let requestCount = 0;
+                    const endChunks = Math.min(total, Math.ceil((5 * 1024 * 1024) / this.chunkSize)); // Last 5MB
                     for (let i = total - endChunks; i < total; i++) {
                         if (!incoming.seen.has(i) && !incoming.requested.has(i)) {
                             incoming.requested.add(i);
                             this.app.mesh.broadcastFile({ type: 'request', fileId: incoming.meta.id, index: i }, incoming.pid);
-                            requestCount++;
-                            if (requestCount > 32) break; 
                         }
                     }
                 }
@@ -4375,9 +4337,10 @@
                 const video = incoming.stream?.video;
                 const playing = incoming.fullFallback || incoming.stream?.wantsPlay || (video && !video.paused && !video.ended);
                 if (!playing && incoming.nextIndex > 0) return;
-                
-                const allowed = incoming.fullFallback ? total - 1 : incoming.nextIndex + 64; 
-                
+
+                // Do not skip chunks when scrubbing! MP4Box needs all the sequential chunks.
+                const allowed = incoming.fullFallback ? total - 1 : incoming.nextIndex + 64;
+
                 while (incoming.nextIndex <= allowed && incoming.nextIndex < total && incoming.requested.size < 16) {
                     const index = incoming.nextIndex++;
                     if (!incoming.seen.has(index)) {
@@ -4390,17 +4353,11 @@
             updateVideoBuffered(fileId, video, fallbackPct = null) {
                 const duration = video?.duration && Number.isFinite(video.duration) ? video.duration : 0
                 let pct = Number.isFinite(fallbackPct) ? fallbackPct : Number(video?.closest('.file-video-preview')?.dataset.videoLoaded || 0)
-                
                 if (duration && video.buffered?.length) {
-                    let continuousEnd = 0
-                    for (let i = 0; i < video.buffered.length; i++) {
-                        if (video.buffered.start(i) <= continuousEnd + 0.5) {
-                            continuousEnd = Math.max(continuousEnd, video.buffered.end(i))
-                        }
-                    }
-                    pct = (continuousEnd / duration) * 100
+                    let bufferedEnd = 0
+                    for (let i = 0; i < video.buffered.length; i++) bufferedEnd = Math.max(bufferedEnd, video.buffered.end(i))
+                    pct = (bufferedEnd / duration) * 100
                 }
-                
                 pct = Math.max(0, Math.min(100, pct))
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
                     const wrap = el.querySelector('.file-video-preview')
