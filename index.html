@@ -3898,10 +3898,11 @@
                 incoming.seen.add(data.index)
                 const bytes = data.bytes ? (data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes)) : this.base64ToBytes(data.data)
                 incoming.chunks[data.index] = bytes
-                if (incoming.stream && !this.appendVideoChunk(incoming.stream, bytes)) incoming.fullFallback = true
+                if (incoming.stream && !this.appendVideoChunk(incoming.stream, bytes)) { incoming.fullFallback = true; this.updatePartialVideoFallback(incoming) }
                 incoming.received += bytes.byteLength
                 if (data.index === 0 || incoming.received >= incoming.meta.size) console.log('[FileTransfer] incoming progress', { fileId: data.fileId, received: incoming.received, size: incoming.meta.size })
                 this.setProgress(data.fileId, incoming.meta.size ? incoming.received / incoming.meta.size : 1, incoming.meta.ownerColor)
+                if (incoming.fullFallback) this.updatePartialVideoFallback(incoming)
                 if (incoming.stream || incoming.fullFallback) this.requestVideoChunks(incoming)
             }
 
@@ -3918,6 +3919,7 @@
                 }
                 if (incoming.chunks.some(chunk => !chunk)) { this.setButtonState(fileId, 'RETRY ' + incoming.meta.name, false); return }
                 const blob = new Blob(incoming.chunks, { type: incoming.meta.type })
+                if (incoming.stream?.partialUrl) URL.revokeObjectURL(incoming.stream.partialUrl)
                 if (incoming.meta.hash && await this.hashBuffer(await blob.arrayBuffer()) !== incoming.meta.hash) {
                     this.setButtonState(fileId, 'RETRY ' + incoming.meta.name, false)
                     this.incoming.delete(fileId)
@@ -3992,14 +3994,15 @@
                     const wrap = el.querySelector('.file-video-preview')
                     if (wrap) {
                         const video = wrap.querySelector('video.file-preview')
-                        const stream = this.incoming.get(fileId)?.stream || this.pendingStreams.get(fileId)
+                        const incoming = this.incoming.get(fileId)
+                        const stream = incoming?.stream || this.pendingStreams.get(fileId)
                         if (stream?.sourceBuffer && video) this.updateVideoBuffered(fileId, video, pct)
                         else {
                             wrap.style.setProperty('--video-loaded', pct + '%')
                             wrap.dataset.videoLoaded = String(pct)
                         }
                         if (video) this.updateVideoControls(fileId, video)
-                        if (stream?.wantsPlay) {
+                        if (stream?.wantsPlay && !incoming?.fullFallback) {
                             const played = video?.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0
                             const loaded = Number(wrap.dataset.videoLoaded || pct)
                             const buffering = loaded < 20 || played > loaded
@@ -4044,13 +4047,13 @@
                 video.addEventListener('loadedmetadata', () => this.updateVideoBuffered(fileId, video))
                 video.addEventListener('progress', () => this.updateVideoBuffered(fileId, video))
                 video.addEventListener('timeupdate', () => { this.updateVideoControls(fileId, video); this.requestVideoChunks(this.incoming.get(fileId)) })
-                video.addEventListener('waiting', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
-                video.addEventListener('stalled', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('waiting', () => { const incoming = this.incoming.get(fileId); stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.updatePartialVideoFallback(incoming); this.requestVideoChunks(incoming) })
+                video.addEventListener('stalled', () => { const incoming = this.incoming.get(fileId); stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.updatePartialVideoFallback(incoming); this.requestVideoChunks(incoming) })
                 if (this.pendingVideoPlay === fileId) this.showVideoPlayer(fileId)
                 mediaSource.addEventListener('sourceopen', () => {
                     try {
                         stream.sourceBuffer = mediaSource.addSourceBuffer(mime)
-                        stream.sourceBuffer.addEventListener('updateend', () => { this.updateVideoBuffered(fileId, video); this.flushVideoStream(stream); const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0); const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0; if (stream.wantsPlay && loaded < 20) { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) } else if (stream.wantsPlay && played <= loaded) { stream.bufferingPause = false; this.setVideoBuffering(fileId, false); video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) } })
+                        stream.sourceBuffer.addEventListener('updateend', () => { const incoming = this.incoming.get(fileId); if (incoming?.fullFallback) { this.updatePartialVideoFallback(incoming); return } this.updateVideoBuffered(fileId, video); this.flushVideoStream(stream); const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0); const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0; if (stream.wantsPlay && loaded < 20) { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) } else if (stream.wantsPlay && played <= loaded) { stream.bufferingPause = false; this.setVideoBuffering(fileId, false); video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) } })
                         stream.sourceBuffer.addEventListener('error', () => { stream.failed = true; stream.queue = []; const incoming = this.incoming.get(fileId); if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) } })
                         this.flushVideoStream(stream)
                         if (this.pendingVideoPlay === fileId) this.setVideoBuffering(fileId, true)
@@ -4067,7 +4070,7 @@
             appendVideoChunk(stream, bytes) {
                 if (stream.failed) return false
                 const segments = this.extractVideoSegments(stream, bytes)
-                if (!segments) { stream.failed = true; stream.queue = []; return false }
+                if (!segments) { stream.partialBlobFallback = !!stream.parser?.partialBlobFallback; stream.failed = true; stream.queue = []; return false }
                 segments.forEach(segment => stream.queue.push(segment))
                 this.flushVideoStream(stream)
                 return true
@@ -4098,9 +4101,9 @@
                         size = view.getUint32(8) * 4294967296 + view.getUint32(12)
                         header = 16
                     }
-                    if (size === 0) return ((!parser.initDone || !parser.waitingForMdat) && type === 'mdat') ? null : segments
+                    if (size === 0) { if ((!parser.initDone || !parser.waitingForMdat) && type === 'mdat') { parser.partialBlobFallback = !!parser.sawMoov; return null } return segments }
                     if (size < header || size > Number.MAX_SAFE_INTEGER) return null
-                    if ((!parser.initDone || !parser.waitingForMdat) && type === 'mdat') return null
+                    if ((!parser.initDone || !parser.waitingForMdat) && type === 'mdat') { parser.partialBlobFallback = !!parser.sawMoov; return null }
                     if (parser.buffer.length < size) return segments
                     const box = parser.buffer.slice(0, size)
                     parser.buffer = parser.buffer.slice(size)
@@ -4238,6 +4241,41 @@
                     wrap.style.setProperty('--video-loaded', pct + '%')
                     wrap.dataset.videoLoaded = String(pct)
                 })
+            }
+
+            updatePartialVideoFallback(incoming) {
+                const stream = incoming?.stream
+                if (!incoming?.fullFallback || !stream?.partialBlobFallback || !stream.wantsPlay || !stream.video) return false
+                let count = 0
+                while (count < incoming.chunks.length && incoming.chunks[count]) count++
+                if (!count) return false
+                const total = incoming.totalChunks || incoming.chunks.length
+                const loadedBytes = incoming.chunks.slice(0, count).reduce((sum, chunk) => sum + chunk.byteLength, 0)
+                const loadedPct = incoming.meta.size ? loadedBytes / incoming.meta.size * 100 : 100
+                if (loadedPct < 20 && count < total) return false
+                if (stream.partialChunkCount && count < total && loadedPct < (stream.nextPartialPct || 100)) return false
+                const video = stream.video
+                const resumeAt = video.currentTime || stream.partialResumeAt || 0
+                const oldUrl = stream.partialUrl
+                const url = URL.createObjectURL(new Blob(incoming.chunks.slice(0, count), { type: incoming.meta.type }))
+                stream.partialUrl = url
+                stream.partialChunkCount = count
+                stream.nextPartialPct = Math.min(100, loadedPct + 10)
+                stream.partialResumeAt = resumeAt
+                const resume = () => {
+                    try { if (resumeAt && video.duration && Number.isFinite(video.duration) && resumeAt < video.duration) video.currentTime = resumeAt } catch (error) { }
+                    stream.bufferingPause = false
+                    this.setVideoBuffering(incoming.meta.id, false)
+                    video.play().catch(error => { this.setVideoBuffering(incoming.meta.id, true); console.warn('[FileTransfer] video fallback play failed', error) })
+                }
+                video.addEventListener('loadeddata', resume, { once: true })
+                stream.bufferingPause = true
+                video.src = url
+                video.load()
+                this.showVideoPlayer(incoming.meta.id)
+                this.setVideoBuffering(incoming.meta.id, true)
+                if (oldUrl) setTimeout(() => URL.revokeObjectURL(oldUrl), 1000)
+                return true
             }
 
             updateVideoControls(fileId, video) {
@@ -5029,7 +5067,8 @@
             requestInitialSyncFromPeer(data, pid) {
                 if (this.connectionMode === 'secure-direct') return
                 if (!this.mesh || typeof data?.cursor !== 'number') return
-                if (!this.isFresh && this.hasRenderedContent() && (this.peerCursorReady || (this.connectionSource !== 'url' && !this.isQrConnectionSource()))) return
+                const isOwner = this.user.color.replace('#', '').toLowerCase() === this.roomId.replace('color-', '').toLowerCase()
+                if (this.hasRenderedContent() && (isOwner || this.peerCursorReady || (this.connectionSource !== 'url' && !this.isQrConnectionSource()))) return
 
                 const cursor = data.cursor
                 console.log(`[EditorApp] 🎯 Peer is at line ${cursor}. Syncing range...`)
