@@ -2229,6 +2229,31 @@
                 .replace(/=+$/, '')
         }
 
+        const fileChunkMagic = [0x51, 0x46, 0x43, 0x31]
+        const decoder = new TextDecoder()
+
+        function encodeFileChunkMessage(data) {
+            const id = encoder.encode(data.fileId || '')
+            const bytes = data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes || [])
+            const out = new Uint8Array(10 + id.length + bytes.byteLength)
+            const view = new DataView(out.buffer)
+            out.set(fileChunkMagic, 0)
+            view.setUint32(4, Number(data.index || 0))
+            view.setUint16(8, id.length)
+            out.set(id, 10)
+            out.set(bytes, 10 + id.length)
+            return out.buffer
+        }
+
+        function decodeFileChunkMessage(buffer) {
+            const bytes = new Uint8Array(buffer)
+            if (bytes.length < 10 || fileChunkMagic.some((value, index) => bytes[index] !== value)) return null
+            const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+            const idLength = view.getUint16(8)
+            if (10 + idLength > bytes.length) return null
+            return { type: 'chunk', fileId: decoder.decode(bytes.subarray(10, 10 + idLength)), index: view.getUint32(4), bytes: bytes.slice(10 + idLength) }
+        }
+
         function bytesEqual(left, right) {
             if (!left || !right || left.length !== right.length) return false
             for (let i = 0; i < left.length; i++) {
@@ -2833,6 +2858,11 @@
                 dc.onclose = () => { delete connectedPeers[peerId]; peerLeaveCallbacks.forEach(cb => cb(peerId)) }
                 dc.onmessage = e => {
                     try {
+                        if (e.data instanceof ArrayBuffer) {
+                            const msg = decodeFileChunkMessage(e.data)
+                            if (msg && actionHandlers.file) actionHandlers.file.forEach(cb => cb(msg, peerId))
+                            return
+                        }
                         const msg = JSON.parse(e.data)
                         if (msg.action && actionHandlers[msg.action]) actionHandlers[msg.action].forEach(cb => cb(msg.data, peerId))
                     } catch (err) { }
@@ -2840,7 +2870,7 @@
             }
 
             function sendToAllPeers(action, data, targetPeerId = null) {
-                const message = JSON.stringify({ action, data })
+                const message = action === 'file' && data?.type === 'chunk' && data.bytes ? encodeFileChunkMessage(data) : JSON.stringify({ action, data })
                 for (const [peerId, peer] of Object.entries(connectedPeers)) {
                     if (targetPeerId && peerId !== targetPeerId) continue
                     if (peer.dc && peer.dc.readyState === 'open') {
@@ -3214,7 +3244,7 @@
             send(action, data) {
                 if (this.left || this.channel?.readyState !== 'open') return
                 try {
-                    this.channel.send(JSON.stringify({ action, data }))
+                    this.channel.send(action === 'file' && data?.type === 'chunk' && data.bytes ? encodeFileChunkMessage(data) : JSON.stringify({ action, data }))
                 } catch (error) { }
             }
 
@@ -3222,6 +3252,11 @@
                 let message = null
 
                 try {
+                    if (event.data instanceof ArrayBuffer) {
+                        const data = decodeFileChunkMessage(event.data)
+                        if (data) this.emit('file', data, this.peerId)
+                        return
+                    }
                     message = JSON.parse(event.data)
                 } catch (error) {
                     return
@@ -3527,6 +3562,7 @@
                 this.completed = new Map()
                 this.pendingRequests = new Set()
                 this.pendingStreams = new Map()
+                this.chunkSends = new Map()
                 this.chunkSize = 32 * 1024
                 this.bindEvents()
             }
@@ -3558,6 +3594,7 @@
                 this.completed.clear()
                 this.pendingRequests.clear()
                 this.pendingStreams.clear()
+                this.chunkSends.clear()
                 this.pendingVideoPlay = null
                 this.mesh = null
             }
@@ -3643,11 +3680,9 @@
                 if (event.cancelable) event.preventDefault()
                 event.stopPropagation()
                 console.log('[FileTransfer] video play activate', source, meta, { hasSrc: !!player?.src, mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
-                if (!player?.src) {
+                if (!player?.src && !player?.srcObject) {
                     this.pendingVideoPlay = meta.id
-                    const stream = this.startVideoStream(meta.id, meta)
-                    if (stream) { this.pendingStreams.set(meta.id, stream); this.setVideoBuffering(meta.id, true); stream.video.play().catch(error => console.warn('[FileTransfer] video play failed', error)) }
-                    this.requestDownload(meta)
+                    this.requestBufferedVideo(meta)
                     return true
                 }
                 this.showVideoPlayer(meta.id)
@@ -3742,6 +3777,17 @@
                 setTimeout(() => { if (!this.incoming.has(meta.id) && !this.completed.has(meta.id)) { this.pendingRequests.delete(meta.id); this.setButtonState(meta.id, 'RETRY ' + meta.name, false) } }, 10000)
             }
 
+            async requestBufferedVideo(meta) {
+                console.log('[FileTransfer] buffered video request', meta, { mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
+                if (!meta?.id || !this.app.mesh?.broadcastFile) { console.warn('[FileTransfer] buffered video blocked', meta); return false }
+                this.showVideoPlayer(meta.id)
+                this.setVideoBuffering(meta.id, true)
+                if (this.incoming.has(meta.id) || this.pendingRequests.has(meta.id)) return true
+                this.pendingRequests.add(meta.id)
+                this.app.mesh.broadcastFile({ type: 'request', fileId: meta.id })
+                return true
+            }
+
             async handleFileMessage(data, pid) {
                 if (!data?.type || !data.fileId) return
                 console.log('[FileTransfer] file message', data.type, { fileId: data.fileId, pid, index: data.index, progress: data.progress })
@@ -3758,8 +3804,16 @@
                 console.log('[FileTransfer] received file request', { fileId, pid, index: data.index, hasEntry: !!entry, canSend: !!this.app.mesh?.broadcastFile })
                 if (!entry || !this.app.mesh?.broadcastFile) return
                 if (entry.ready) try { await entry.ready } catch (error) { return }
-                if (typeof data.index === 'number') return this.sendFileChunk(entry, pid, data.index)
+                if (typeof data.index === 'number') return this.queueFileChunk(entry, pid, data.index)
                 await this.sendFile(entry, pid, this.isVideoFile(entry.meta) && !data.full)
+            }
+
+            queueFileChunk(entry, pid, index) {
+                const key = pid + ':' + entry.meta.id
+                const queued = (this.chunkSends.get(key) || Promise.resolve()).catch(() => { }).then(() => this.sendFileChunk(entry, pid, index))
+                this.chunkSends.set(key, queued)
+                queued.finally(() => { if (this.chunkSends.get(key) === queued) this.chunkSends.delete(key) })
+                return queued
             }
 
             async sendFile(entry, pid, startOnly = false) {
@@ -3767,7 +3821,7 @@
                 const { file, meta } = entry
                 const totalChunks = Math.ceil((file.size || 0) / this.chunkSize)
                 console.log('[FileTransfer] send file start', { fileId: meta.id, pid, size: file.size, chunks: totalChunks })
-                this.app.mesh.broadcastFile({ type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, poster: meta.poster || '', chunks: totalChunks }, pid)
+                this.app.mesh.broadcastFile({ type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, poster: meta.poster || '', chunks: totalChunks, full: !startOnly }, pid)
                 if (!file.size) {
                     this.setProgress(meta.id, 1, meta.ownerColor)
                     this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
@@ -3777,7 +3831,8 @@
                 for (let offset = 0, index = 0; offset < file.size; offset += this.chunkSize, index++) {
                     const end = Math.min(offset + this.chunkSize, file.size)
                     const chunk = await file.slice(offset, end).arrayBuffer()
-                    this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, data: this.arrayBufferToBase64(chunk) }, pid)
+                    await this.waitForPeerBuffer(pid)
+                    this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, bytes: new Uint8Array(chunk) }, pid)
                     const progress = end / file.size
                     this.setProgress(meta.id, progress, meta.ownerColor)
                     this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
@@ -3794,7 +3849,8 @@
                 if (offset < 0 || offset >= file.size) return
                 const end = Math.min(offset + this.chunkSize, file.size)
                 const chunk = await file.slice(offset, end).arrayBuffer()
-                this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, data: this.arrayBufferToBase64(chunk) }, pid)
+                await this.waitForPeerBuffer(pid)
+                this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, bytes: new Uint8Array(chunk) }, pid)
                 const progress = end / file.size
                 this.setProgress(meta.id, progress, meta.ownerColor)
                 this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
@@ -3802,6 +3858,11 @@
                     console.log('[FileTransfer] send file end', { fileId: meta.id, pid })
                     this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
                 }
+            }
+
+            async waitForPeerBuffer(pid) {
+                const dc = this.app.mesh?.getPeers?.()?.[pid]?.dc
+                while (dc?.readyState === 'open' && dc.bufferedAmount > 512 * 1024) await new Promise(resolve => setTimeout(resolve, 25))
             }
 
             startIncoming(data, pid) {
@@ -3818,7 +3879,7 @@
                     hash: data.hash || localMeta.hash || '',
                     poster: data.poster || localMeta.poster || ''
                 }
-                const stream = this.isVideoFile(meta) ? this.pendingStreams.get(data.fileId) || this.startVideoStream(data.fileId, meta) : null
+                const stream = !data.full && this.isVideoFile(meta) ? this.pendingStreams.get(data.fileId) || this.startVideoStream(data.fileId, meta) : null
                 this.pendingStreams.delete(data.fileId)
                 if (stream) stream.meta = meta
                 const incoming = { pid, meta, chunks: new Array(data.chunks || 0), seen: new Set(), received: 0, stream, totalChunks: Number(data.chunks || 0), nextIndex: 0, requested: new Set(), fullFallback: false }
@@ -3826,16 +3887,16 @@
                 console.log('[FileTransfer] incoming start', { fileId: data.fileId, pid, size: meta.size, chunks: data.chunks, streaming: !!stream })
                 this.setProgress(data.fileId, 0, meta.ownerColor)
                 if (stream) this.requestVideoChunks(incoming)
-                else if (this.isVideoFile(meta)) this.app.mesh?.broadcastFile?.({ type: 'request', fileId: data.fileId, full: true }, pid)
+                else if (this.isVideoFile(meta) && !data.full) this.app.mesh?.broadcastFile?.({ type: 'request', fileId: data.fileId, full: true }, pid)
             }
 
             receiveChunk(data, pid) {
                 const incoming = this.incoming.get(data.fileId)
-                if (!incoming || incoming.pid !== pid || typeof data.index !== 'number' || !data.data) return
+                if (!incoming || incoming.pid !== pid || typeof data.index !== 'number' || (!data.bytes && !data.data)) return
                 if (incoming.seen.has(data.index)) return
                 incoming.requested?.delete(data.index)
                 incoming.seen.add(data.index)
-                const bytes = this.base64ToBytes(data.data)
+                const bytes = data.bytes ? (data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes)) : this.base64ToBytes(data.data)
                 incoming.chunks[data.index] = bytes
                 if (incoming.stream && !this.appendVideoChunk(incoming.stream, bytes)) incoming.fullFallback = true
                 incoming.received += bytes.byteLength
@@ -3930,14 +3991,19 @@
                     line.style.setProperty('--file-progress', pct + '%')
                     const wrap = el.querySelector('.file-video-preview')
                     if (wrap) {
-                        wrap.style.setProperty('--video-loaded', pct + '%')
-                        wrap.dataset.videoLoaded = String(pct)
                         const video = wrap.querySelector('video.file-preview')
-                        if (video) this.updateVideoControls(fileId, video)
                         const stream = this.incoming.get(fileId)?.stream || this.pendingStreams.get(fileId)
+                        if (stream?.sourceBuffer && video) this.updateVideoBuffered(fileId, video, pct)
+                        else {
+                            wrap.style.setProperty('--video-loaded', pct + '%')
+                            wrap.dataset.videoLoaded = String(pct)
+                        }
+                        if (video) this.updateVideoControls(fileId, video)
                         if (stream?.wantsPlay) {
                             const played = video?.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0
-                            const buffering = pct < 20 || played > pct
+                            const loaded = Number(wrap.dataset.videoLoaded || pct)
+                            const buffering = loaded < 20 || played > loaded
+                            if (buffering) stream.bufferingPause = true
                             this.setVideoBuffering(fileId, buffering)
                             if (!buffering) { stream.bufferingPause = false; stream.video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) }
                         }
@@ -3971,10 +4037,12 @@
                 const video = attachment?.querySelector('video.file-preview') || this.renderVideoPreview(fileId, meta)
                 if (!video) return null
                 const mediaSource = new MediaSourceCtor()
-                const stream = { fileId, meta, video, mediaSource, sourceBuffer: null, queue: [], ended: false, failed: false, wantsPlay: this.pendingVideoPlay === fileId, bufferingPause: false }
+                const stream = { fileId, meta, video, mediaSource, sourceBuffer: null, queue: [], parser: null, ended: false, failed: false, wantsPlay: this.pendingVideoPlay === fileId, bufferingPause: false }
                 video.src = URL.createObjectURL(mediaSource)
                 video.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(fileId, Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 20); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('pause', () => { if (!stream.bufferingPause) stream.wantsPlay = false })
+                video.addEventListener('loadedmetadata', () => this.updateVideoBuffered(fileId, video))
+                video.addEventListener('progress', () => this.updateVideoBuffered(fileId, video))
                 video.addEventListener('timeupdate', () => { this.updateVideoControls(fileId, video); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('waiting', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('stalled', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
@@ -3982,12 +4050,15 @@
                 mediaSource.addEventListener('sourceopen', () => {
                     try {
                         stream.sourceBuffer = mediaSource.addSourceBuffer(mime)
-                        stream.sourceBuffer.addEventListener('updateend', () => { this.flushVideoStream(stream); const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0); const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0; if (stream.wantsPlay && loaded >= 20 && played <= loaded) video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) })
+                        stream.sourceBuffer.addEventListener('updateend', () => { this.updateVideoBuffered(fileId, video); this.flushVideoStream(stream); const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0); const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0; if (stream.wantsPlay && loaded < 20) { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) } else if (stream.wantsPlay && played <= loaded) { stream.bufferingPause = false; this.setVideoBuffering(fileId, false); video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) } })
+                        stream.sourceBuffer.addEventListener('error', () => { stream.failed = true; stream.queue = []; const incoming = this.incoming.get(fileId); if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) } })
                         this.flushVideoStream(stream)
                         if (this.pendingVideoPlay === fileId) this.setVideoBuffering(fileId, true)
                     } catch (error) {
                         console.warn('[FileTransfer] video stream unsupported', { fileId, mime, error })
                         stream.failed = true
+                        const incoming = this.incoming.get(fileId)
+                        if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) }
                     }
                 }, { once: true })
                 return stream
@@ -3995,9 +4066,119 @@
 
             appendVideoChunk(stream, bytes) {
                 if (stream.failed) return false
-                stream.queue.push(bytes)
+                const segments = this.extractVideoSegments(stream, bytes)
+                if (!segments) { stream.failed = true; stream.queue = []; return false }
+                segments.forEach(segment => stream.queue.push(segment))
                 this.flushVideoStream(stream)
                 return true
+            }
+
+            extractVideoSegments(stream, bytes, final = false) {
+                if (!stream.parser) {
+                    const name = String(stream.meta?.name || '').toLowerCase()
+                    const type = String(stream.meta?.type || '').toLowerCase()
+                    const kind = type.includes('webm') || name.endsWith('.webm') ? 'webm' : (type.includes('mp4') || /\.(mp4|m4v|mov)$/i.test(name) ? 'mp4' : '')
+                    if (!kind) return null
+                    stream.parser = { kind, buffer: new Uint8Array(0), initDone: false, initParts: [], prefixParts: [], mediaParts: [], waitingForMdat: false, sawMoov: false }
+                }
+                const parser = stream.parser
+                if (bytes?.byteLength) parser.buffer = this.concatBytes([parser.buffer, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)])
+                return parser.kind === 'webm' ? this.extractWebmSegments(parser, final) : this.extractMp4Segments(parser)
+            }
+
+            extractMp4Segments(parser) {
+                const segments = []
+                const prefixBoxes = ['styp', 'sidx', 'emsg', 'prft']
+                while (parser.buffer.length >= 8) {
+                    const view = new DataView(parser.buffer.buffer, parser.buffer.byteOffset, parser.buffer.byteLength)
+                    let size = view.getUint32(0), header = 8
+                    const type = String.fromCharCode(...parser.buffer.subarray(4, 8))
+                    if (size === 1) {
+                        if (parser.buffer.length < 16) return segments
+                        size = view.getUint32(8) * 4294967296 + view.getUint32(12)
+                        header = 16
+                    }
+                    if (size === 0) return ((!parser.initDone || !parser.waitingForMdat) && type === 'mdat') ? null : segments
+                    if (size < header || size > Number.MAX_SAFE_INTEGER) return null
+                    if ((!parser.initDone || !parser.waitingForMdat) && type === 'mdat') return null
+                    if (parser.buffer.length < size) return segments
+                    const box = parser.buffer.slice(0, size)
+                    parser.buffer = parser.buffer.slice(size)
+                    if (!parser.initDone) {
+                        if (type === 'moof') {
+                            if (!parser.sawMoov) return null
+                            parser.initDone = true
+                            if (parser.initParts.length) segments.push(this.concatBytes(parser.initParts))
+                            parser.mediaParts = [box]
+                            parser.waitingForMdat = true
+                            continue
+                        }
+                        if (parser.sawMoov && prefixBoxes.includes(type)) {
+                            parser.initDone = true
+                            if (parser.initParts.length) segments.push(this.concatBytes(parser.initParts))
+                            parser.prefixParts.push(box)
+                            continue
+                        }
+                        parser.initParts.push(box)
+                        if (type === 'moov') parser.sawMoov = true
+                        continue
+                    }
+                    if (type === 'moof') {
+                        parser.mediaParts = parser.prefixParts.splice(0)
+                        parser.mediaParts.push(box)
+                        parser.waitingForMdat = true
+                    } else if (parser.waitingForMdat) {
+                        parser.mediaParts.push(box)
+                        if (type === 'mdat') {
+                            segments.push(this.concatBytes(parser.mediaParts))
+                            parser.mediaParts = []
+                            parser.waitingForMdat = false
+                        }
+                    } else if (prefixBoxes.includes(type) || type === 'free' || type === 'skip') {
+                        parser.prefixParts.push(box)
+                    } else if (type === 'mdat') return null
+                }
+                return segments
+            }
+
+            extractWebmSegments(parser, final = false) {
+                const segments = []
+                const cluster = [0x1f, 0x43, 0xb6, 0x75]
+                if (!parser.initDone) {
+                    const firstCluster = this.indexOfBytes(parser.buffer, cluster, 0)
+                    if (firstCluster < 0) return parser.buffer.length > 4 * 1024 * 1024 ? null : segments
+                    if (firstCluster > 0) segments.push(parser.buffer.slice(0, firstCluster))
+                    parser.buffer = parser.buffer.slice(firstCluster)
+                    parser.initDone = true
+                }
+                let nextCluster = this.indexOfBytes(parser.buffer, cluster, 4)
+                while (nextCluster > 0) {
+                    segments.push(parser.buffer.slice(0, nextCluster))
+                    parser.buffer = parser.buffer.slice(nextCluster)
+                    nextCluster = this.indexOfBytes(parser.buffer, cluster, 4)
+                }
+                if (final && parser.buffer.length) {
+                    segments.push(parser.buffer)
+                    parser.buffer = new Uint8Array(0)
+                }
+                return segments
+            }
+
+            concatBytes(parts) {
+                const total = parts.reduce((sum, part) => sum + part.byteLength, 0)
+                const out = new Uint8Array(total)
+                let offset = 0
+                parts.forEach(part => { out.set(part, offset); offset += part.byteLength })
+                return out
+            }
+
+            indexOfBytes(buffer, pattern, start = 0) {
+                for (let i = start; i <= buffer.length - pattern.length; i++) {
+                    let found = true
+                    for (let j = 0; j < pattern.length; j++) if (buffer[i + j] !== pattern[j]) { found = false; break }
+                    if (found) return i
+                }
+                return -1
             }
 
             flushVideoStream(stream) {
@@ -4013,10 +4194,15 @@
                     console.warn('[FileTransfer] video stream append failed', { fileId: stream.fileId, error })
                     stream.failed = true
                     stream.queue = []
+                    const incoming = this.incoming.get(stream.fileId)
+                    if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) }
                 }
             }
 
             endVideoStream(stream) {
+                const segments = this.extractVideoSegments(stream, null, true)
+                if (!segments) stream.failed = true
+                else segments.forEach(segment => stream.queue.push(segment))
                 stream.ended = true
                 this.flushVideoStream(stream)
             }
@@ -4037,11 +4223,29 @@
                 }
             }
 
-            updateVideoControls(fileId, video) {
-                const pct = video?.duration && Number.isFinite(video.duration) ? Math.max(0, Math.min(100, (video.currentTime / video.duration) * 100)) : 0
+            updateVideoBuffered(fileId, video, fallbackPct = null) {
+                const duration = video?.duration && Number.isFinite(video.duration) ? video.duration : 0
+                let pct = Number.isFinite(fallbackPct) ? fallbackPct : Number(video?.closest('.file-video-preview')?.dataset.videoLoaded || 0)
+                if (duration && video.buffered?.length) {
+                    let bufferedEnd = 0
+                    for (let i = 0; i < video.buffered.length; i++) bufferedEnd = Math.max(bufferedEnd, video.buffered.end(i))
+                    pct = (bufferedEnd / duration) * 100
+                }
+                pct = Math.max(0, Math.min(100, pct))
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
                     const wrap = el.querySelector('.file-video-preview')
                     if (!wrap) return
+                    wrap.style.setProperty('--video-loaded', pct + '%')
+                    wrap.dataset.videoLoaded = String(pct)
+                })
+            }
+
+            updateVideoControls(fileId, video) {
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    const wrap = el.querySelector('.file-video-preview')
+                    if (!wrap) return
+                    const duration = video?.duration && Number.isFinite(video.duration) ? video.duration : Number(wrap.dataset.videoDuration || 0)
+                    const pct = duration ? Math.max(0, Math.min(100, (video.currentTime / duration) * 100)) : 0
                     const loaded = Number(wrap.dataset.videoLoaded || 0)
                     wrap.style.setProperty('--video-played', pct + '%')
                     if (video && !video.paused && loaded < 100 && pct > loaded) {
@@ -4123,11 +4327,9 @@
                     const togglePlay = event => {
                         if (event?.cancelable) event.preventDefault()
                         event?.stopPropagation?.()
-                        if (!player.src) {
+                        if (!player.src && !player.srcObject) {
                             this.pendingVideoPlay = fileId
-                            const stream = this.startVideoStream(fileId, meta)
-                            if (stream) { this.pendingStreams.set(fileId, stream); this.setVideoBuffering(fileId, true); stream.video.play().catch(error => console.warn('[FileTransfer] video play failed', error)) }
-                            this.requestDownload(meta)
+                            this.requestBufferedVideo(meta)
                             return
                         }
                         this.showVideoPlayer(fileId)
@@ -4165,7 +4367,17 @@
                     const record = this.completed.get(fileId)
                     const url = record?.previewUrl || URL.createObjectURL(blob)
                     if (record) record.previewUrl = url
-                    const player = this.renderVideoPreview(fileId, meta, url)
+                    let player = null
+                    Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                        const wrap = el.querySelector('.file-video-preview')
+                        player = el.querySelector('video.file-preview') || player
+                        if (player) {
+                            player.src = url
+                            wrap?.style.setProperty('--video-loaded', '100%')
+                            if (wrap) wrap.dataset.videoLoaded = '100'
+                        }
+                    })
+                    if (!player) player = this.renderVideoPreview(fileId, meta, url)
                     if (this.pendingVideoPlay === fileId) {
                         this.showVideoPlayer(fileId)
                         player?.play().catch(error => console.warn('[FileTransfer] video play failed', error))
@@ -5448,7 +5660,9 @@
                 }
 
                 if (el) {
-                    if (el.innerHTML !== newContent) el.innerHTML = this.sanitize(newContent || '<br>')
+                    const activeFileId = el.querySelector('.file-attachment')?.dataset.fileId
+                    const keepLiveFile = activeFileId && (this.fileTransfers.incoming.has(activeFileId) || this.fileTransfers.pendingStreams.has(activeFileId) || el.querySelector('video.file-preview')?.src) && String(newContent || '').includes(`data-file-id="${activeFileId}"`)
+                    if (el.innerHTML !== newContent && !keepLiveFile) el.innerHTML = this.sanitize(newContent || '<br>')
                     const myHex = this.user.color.replace('#', '')
                     const isEmpty = !newContent || newContent.trim() === '' || newContent === '<br>'
                     const amOwner = (newOwner === myHex)
