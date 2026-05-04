@@ -982,6 +982,8 @@
         .file-video-preview {
             position: relative;
             display: block;
+            --video-loaded: 0%;
+            --video-played: 0%;
             width: fit-content;
             max-width: 100%;
             margin-top: 4px;
@@ -1019,10 +1021,12 @@
 
         .file-video-toggle {
             position: relative;
-            width: 24px;
-            height: 24px;
-            border: 1px solid #777;
-            background: #222;
+            flex: 0 0 26px;
+            width: 26px;
+            height: 26px;
+            border: 1px solid rgba(255, 255, 255, 0.75);
+            border-radius: 50%;
+            background: var(--file-color, #999);
             color: #fff;
             cursor: pointer;
         }
@@ -1039,7 +1043,7 @@
 
         .file-video-toggle.playing::before {
             left: 7px;
-            top: 5px;
+            top: 6px;
             width: 3px;
             height: 12px;
             border: 0;
@@ -1048,33 +1052,57 @@
         }
 
         .file-video-progress {
-            --video-loaded: 0%;
-            --video-played: 0%;
-            appearance: none;
+            position: relative;
+            display: block;
             flex: 1;
             min-width: 0;
             width: min(360px, 72vw);
-            height: 6px;
+            height: 8px;
             border-radius: 999px;
-            accent-color: var(--file-color, #999);
-            background: linear-gradient(to right, #fff 0 var(--video-played), var(--file-color, #999) var(--video-played) var(--video-loaded), #555 var(--video-loaded) 100%);
+            background: rgba(255, 255, 255, 0.22);
+            overflow: hidden;
             cursor: pointer;
         }
 
-        .file-video-progress::-webkit-slider-thumb {
-            appearance: none;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #fff;
+        .file-video-loaded,
+        .file-video-played {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            border-radius: inherit;
+            pointer-events: none;
         }
 
-        .file-video-progress::-moz-range-thumb {
-            width: 12px;
-            height: 12px;
-            border: 0;
-            border-radius: 50%;
+        .file-video-loaded {
+            width: var(--video-loaded);
+            background: var(--file-color, #999);
+            opacity: 0.55;
+        }
+
+        .file-video-played {
+            width: var(--video-played);
             background: #fff;
+            z-index: 1;
+        }
+
+        .file-video-buffer {
+            display: none;
+            flex: 0 0 18px;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: file-video-spin 0.8s linear infinite;
+        }
+
+        .file-video-preview.is-buffering .file-video-buffer {
+            display: block;
+        }
+
+        @keyframes file-video-spin {
+            to { transform: rotate(360deg); }
         }
 
         .file-play-btn {
@@ -1086,7 +1114,7 @@
             transform: translate(-50%, -50%);
             border: 1px solid rgba(255, 255, 255, 0.8);
             border-radius: 50%;
-            background: rgba(0, 0, 0, 0.55);
+            background: var(--file-color, #999);
             cursor: pointer;
         }
 
@@ -3618,7 +3646,7 @@
                 if (!player?.src) {
                     this.pendingVideoPlay = meta.id
                     const stream = this.startVideoStream(meta.id, meta)
-                    if (stream) { this.pendingStreams.set(meta.id, stream); stream.video.play().catch(error => console.warn('[FileTransfer] video play failed', error)) }
+                    if (stream) { this.pendingStreams.set(meta.id, stream); this.setVideoBuffering(meta.id, true); stream.video.play().catch(error => console.warn('[FileTransfer] video play failed', error)) }
                     this.requestDownload(meta)
                     return true
                 }
@@ -3898,7 +3926,20 @@
                     line.classList.add('file-transfer-line')
                     line.style.setProperty('--file-color', this.safeColor(color || el.dataset.fileOwner))
                     line.style.setProperty('--file-progress', pct + '%')
-                    el.querySelector('.file-video-progress')?.style.setProperty('--video-loaded', pct + '%')
+                    const wrap = el.querySelector('.file-video-preview')
+                    if (wrap) {
+                        wrap.style.setProperty('--video-loaded', pct + '%')
+                        wrap.dataset.videoLoaded = String(pct)
+                        const video = wrap.querySelector('video.file-preview')
+                        if (video) this.updateVideoControls(fileId, video)
+                        const stream = this.incoming.get(fileId)?.stream || this.pendingStreams.get(fileId)
+                        if (stream?.wantsPlay) {
+                            const played = video?.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0
+                            const buffering = pct < 20 || played > pct
+                            this.setVideoBuffering(fileId, buffering)
+                            if (!buffering) { stream.bufferingPause = false; stream.video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) }
+                        }
+                    }
                 })
             }
 
@@ -3911,6 +3952,12 @@
                 })
             }
 
+            setVideoBuffering(fileId, active) {
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    el.querySelector('.file-video-preview')?.classList.toggle('is-buffering', !!active)
+                })
+            }
+
             startVideoStream(fileId, meta) {
                 const MediaSourceCtor = window.MediaSource || window.WebKitMediaSource
                 if (!MediaSourceCtor) return null
@@ -3919,19 +3966,19 @@
                 const video = this.renderVideoPreview(fileId, meta)
                 if (!video) return null
                 const mediaSource = new MediaSourceCtor()
-                const stream = { fileId, meta, video, mediaSource, sourceBuffer: null, queue: [], ended: false, failed: false, wantsPlay: this.pendingVideoPlay === fileId }
+                const stream = { fileId, meta, video, mediaSource, sourceBuffer: null, queue: [], ended: false, failed: false, wantsPlay: this.pendingVideoPlay === fileId, bufferingPause: false }
                 video.src = URL.createObjectURL(mediaSource)
-                video.addEventListener('play', () => { stream.wantsPlay = true; this.requestVideoChunks(this.incoming.get(fileId)) })
-                video.addEventListener('pause', () => { stream.wantsPlay = false })
+                video.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(fileId, Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 20); this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('pause', () => { if (!stream.bufferingPause) stream.wantsPlay = false })
                 video.addEventListener('timeupdate', () => { this.updateVideoControls(fileId, video); this.requestVideoChunks(this.incoming.get(fileId)) })
-                video.addEventListener('waiting', () => this.requestVideoChunks(this.incoming.get(fileId)))
+                video.addEventListener('waiting', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
                 if (this.pendingVideoPlay === fileId) this.showVideoPlayer(fileId)
                 mediaSource.addEventListener('sourceopen', () => {
                     try {
                         stream.sourceBuffer = mediaSource.addSourceBuffer(mime)
-                        stream.sourceBuffer.addEventListener('updateend', () => { this.flushVideoStream(stream); if (stream.wantsPlay) video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) })
+                        stream.sourceBuffer.addEventListener('updateend', () => { this.flushVideoStream(stream); const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0); const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0; if (stream.wantsPlay && loaded >= 20 && played <= loaded) video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) })
                         this.flushVideoStream(stream)
-                        if (this.pendingVideoPlay === fileId) video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error))
+                        if (this.pendingVideoPlay === fileId) this.setVideoBuffering(fileId, true)
                     } catch (error) {
                         console.warn('[FileTransfer] video stream unsupported', { fileId, mime, error })
                         stream.failed = true
@@ -3976,8 +4023,8 @@
                 const playing = incoming.fullFallback || incoming.stream?.wantsPlay || (video && !video.paused && !video.ended)
                 if (!playing && incoming.nextIndex > 0) return
                 const watched = video?.duration && Number.isFinite(video.duration) ? video.currentTime / video.duration : 0
-                const allowed = incoming.fullFallback ? total - 1 : Math.min(total - 1, Math.max(32, Math.ceil(total * watched) + 32))
-                while (incoming.nextIndex <= allowed && incoming.nextIndex < total && incoming.requested.size < 4) {
+                const allowed = incoming.fullFallback ? total - 1 : Math.min(total - 1, Math.max(32, Math.ceil(total * 0.2), Math.ceil(total * watched) + 32))
+                while (incoming.nextIndex <= allowed && incoming.nextIndex < total && incoming.requested.size < 8) {
                     const index = incoming.nextIndex++
                     incoming.requested.add(index)
                     this.app.mesh.broadcastFile({ type: 'request', fileId: incoming.meta.id, index }, incoming.pid)
@@ -3987,10 +4034,16 @@
             updateVideoControls(fileId, video) {
                 const pct = video?.duration && Number.isFinite(video.duration) ? Math.max(0, Math.min(100, (video.currentTime / video.duration) * 100)) : 0
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
-                    const progress = el.querySelector('.file-video-progress')
-                    if (!progress) return
-                    progress.value = Math.round(pct * 10)
-                    progress.style.setProperty('--video-played', pct + '%')
+                    const wrap = el.querySelector('.file-video-preview')
+                    if (!wrap) return
+                    const loaded = Number(wrap.dataset.videoLoaded || 0)
+                    wrap.style.setProperty('--video-played', pct + '%')
+                    if (video && !video.paused && loaded < 100 && pct > loaded) {
+                        const stream = this.incoming.get(fileId)?.stream || this.pendingStreams.get(fileId)
+                        if (stream) { stream.wantsPlay = true; stream.bufferingPause = true }
+                        this.setVideoBuffering(fileId, true)
+                        video.pause()
+                    }
                 })
             }
 
@@ -3998,8 +4051,9 @@
                 const type = String(meta.type || '').toLowerCase()
                 const candidates = [type]
                 if (/\.webm$/i.test(meta.name || '')) candidates.push('video/webm')
-                if (/\.(mp4|m4v|mov)$/i.test(meta.name || '')) candidates.push('video/mp4')
-                return candidates.find(value => value && (!MediaSourceCtor.isTypeSupported || MediaSourceCtor.isTypeSupported(value))) || ''
+                if (/\.webm$/i.test(meta.name || '')) candidates.push('video/webm; codecs="vp8, vorbis"', 'video/webm; codecs="vp9, opus"')
+                if (/\.(mp4|m4v|mov)$/i.test(meta.name || '')) candidates.push('video/mp4', 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"', 'video/mp4; codecs="avc1.4d401e, mp4a.40.2"', 'video/mp4; codecs="avc1.64001f, mp4a.40.2"')
+                return [...new Set(candidates)].find(value => value && (!MediaSourceCtor.isTypeSupported || MediaSourceCtor.isTypeSupported(value))) || ''
             }
 
             showVideoPlayer(fileId) {
@@ -4022,6 +4076,7 @@
                     el.querySelector('.file-video-preview')?.remove()
                     const wrap = document.createElement('span')
                     wrap.className = 'file-video-preview'
+                    if (src) { wrap.style.setProperty('--video-loaded', '100%'); wrap.dataset.videoLoaded = '100' }
                     const poster = document.createElement('img')
                     if (meta.poster) poster.src = meta.poster
                     else {
@@ -4032,7 +4087,10 @@
                     const player = document.createElement('video')
                     player.className = 'file-preview'
                     player.controls = false
+                    player.removeAttribute('controls')
                     player.playsInline = true
+                    player.setAttribute('playsinline', '')
+                    player.setAttribute('webkit-playsinline', '')
                     player.preload = 'metadata'
                     player.title = meta.name || 'video'
                     if (src) player.src = src
@@ -4046,17 +4104,23 @@
                     toggle.type = 'button'
                     toggle.className = 'file-video-toggle'
                     toggle.setAttribute('aria-label', 'Play or pause video')
-                    const progress = document.createElement('input')
-                    progress.type = 'range'
+                    const progress = document.createElement('span')
                     progress.className = 'file-video-progress'
-                    progress.min = '0'
-                    progress.max = '1000'
-                    progress.value = '0'
+                    const loaded = document.createElement('span')
+                    loaded.className = 'file-video-loaded'
+                    const played = document.createElement('span')
+                    played.className = 'file-video-played'
+                    const spinner = document.createElement('span')
+                    spinner.className = 'file-video-buffer'
+                    progress.appendChild(loaded)
+                    progress.appendChild(played)
                     const togglePlay = event => {
                         if (event?.cancelable) event.preventDefault()
                         event?.stopPropagation?.()
                         if (!player.src) {
                             this.pendingVideoPlay = fileId
+                            const stream = this.startVideoStream(fileId, meta)
+                            if (stream) { this.pendingStreams.set(fileId, stream); this.setVideoBuffering(fileId, true); stream.video.play().catch(error => console.warn('[FileTransfer] video play failed', error)) }
                             this.requestDownload(meta)
                             return
                         }
@@ -4069,12 +4133,14 @@
                     player.addEventListener('play', () => toggle.classList.add('playing'))
                     player.addEventListener('pause', () => toggle.classList.remove('playing'))
                     player.addEventListener('timeupdate', () => this.updateVideoControls(fileId, player))
-                    progress.addEventListener('input', () => {
-                        if (player.duration && Number.isFinite(player.duration)) player.currentTime = player.duration * (Number(progress.value) / 1000)
+                    progress.addEventListener('click', event => {
+                        const rect = progress.getBoundingClientRect()
+                        if (player.duration && Number.isFinite(player.duration) && rect.width) player.currentTime = player.duration * Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
                         this.requestVideoChunks(this.incoming.get(fileId))
                     })
                     controls.appendChild(toggle)
                     controls.appendChild(progress)
+                    controls.appendChild(spinner)
                     wrap.appendChild(poster)
                     wrap.appendChild(player)
                     wrap.appendChild(play)
@@ -4106,12 +4172,11 @@
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
                     el.classList.add('media-ready')
                     el.querySelector('.file-preview')?.remove()
-                    const media = document.createElement(this.isVideoFile(meta) ? 'video' : 'img')
+                    const media = document.createElement('img')
                     media.className = 'file-preview'
                     media.src = url
                     media.title = meta.name || 'file'
-                    if (media.tagName === 'VIDEO') media.controls = true
-                    else media.alt = meta.name || 'image'
+                    media.alt = meta.name || 'image'
                     const current = el.querySelector('.file-download-btn')
                     if (current) current.replaceWith(media)
                     else el.insertBefore(media, el.querySelector('.file-size'))
