@@ -986,6 +986,7 @@
             max-width: 100%;
             margin-top: 4px;
             background: #111;
+            overflow: hidden;
         }
 
         .file-video-preview img,
@@ -1001,10 +1002,15 @@
 
         .file-video-controls {
             display: none;
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
             align-items: center;
             gap: 6px;
             padding: 5px;
-            background: #111;
+            box-sizing: border-box;
+            background: rgba(0, 0, 0, 0.72);
         }
 
         .file-video-preview.is-playing .file-video-controls {
@@ -1045,6 +1051,8 @@
             --video-loaded: 0%;
             --video-played: 0%;
             appearance: none;
+            flex: 1;
+            min-width: 0;
             width: min(360px, 72vw);
             height: 6px;
             border-radius: 999px;
@@ -3490,6 +3498,7 @@
                 this.incoming = new Map()
                 this.completed = new Map()
                 this.pendingRequests = new Set()
+                this.pendingStreams = new Map()
                 this.chunkSize = 32 * 1024
                 this.bindEvents()
             }
@@ -3520,6 +3529,7 @@
                 this.incoming.clear()
                 this.completed.clear()
                 this.pendingRequests.clear()
+                this.pendingStreams.clear()
                 this.pendingVideoPlay = null
                 this.mesh = null
             }
@@ -3607,6 +3617,8 @@
                 console.log('[FileTransfer] video play activate', source, meta, { hasSrc: !!player?.src, mesh: !!this.app.mesh, canSend: !!this.app.mesh?.broadcastFile })
                 if (!player?.src) {
                     this.pendingVideoPlay = meta.id
+                    const stream = this.startVideoStream(meta.id, meta)
+                    if (stream) { this.pendingStreams.set(meta.id, stream); stream.video.play().catch(error => console.warn('[FileTransfer] video play failed', error)) }
                     this.requestDownload(meta)
                     return true
                 }
@@ -3776,7 +3788,9 @@
                     hash: data.hash || localMeta.hash || '',
                     poster: data.poster || localMeta.poster || ''
                 }
-                const stream = this.isVideoFile(meta) ? this.startVideoStream(data.fileId, meta) : null
+                const stream = this.isVideoFile(meta) ? this.pendingStreams.get(data.fileId) || this.startVideoStream(data.fileId, meta) : null
+                this.pendingStreams.delete(data.fileId)
+                if (stream) stream.meta = meta
                 const incoming = { pid, meta, chunks: new Array(data.chunks || 0), seen: new Set(), received: 0, stream, totalChunks: Number(data.chunks || 0), nextIndex: 0, requested: new Set(), fullFallback: false }
                 this.incoming.set(data.fileId, incoming)
                 console.log('[FileTransfer] incoming start', { fileId: data.fileId, pid, size: meta.size, chunks: data.chunks, streaming: !!stream })
@@ -3839,6 +3853,7 @@
                 line.classList.add('file-transfer-line')
                 line.style.setProperty('--file-color', meta.ownerColor)
                 if (!line.style.getPropertyValue('--file-progress')) line.style.setProperty('--file-progress', '0%')
+                if (this.isVideoFile(meta)) line.querySelector('.file-transfer-progress')?.remove()
                 this.setOwnerView(attachment, meta)
                 if (!this.isMine(meta) && this.isVideoFile(meta) && !this.incoming.has(meta.id) && !this.completed.has(meta.id) && !attachment.querySelector('.file-video-preview')) this.renderVideoPreview(meta.id, meta)
                 if (this.incoming.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
@@ -3914,7 +3929,7 @@
                 mediaSource.addEventListener('sourceopen', () => {
                     try {
                         stream.sourceBuffer = mediaSource.addSourceBuffer(mime)
-                        stream.sourceBuffer.addEventListener('updateend', () => this.flushVideoStream(stream))
+                        stream.sourceBuffer.addEventListener('updateend', () => { this.flushVideoStream(stream); if (stream.wantsPlay) video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) })
                         this.flushVideoStream(stream)
                         if (this.pendingVideoPlay === fileId) video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error))
                     } catch (error) {
@@ -4131,7 +4146,7 @@
 
             buildContent(meta, base = '') {
                 const color = this.safeColor(meta.ownerColor)
-                return `${base}<span class="file-transfer-progress"></span><span class="file-attachment" contenteditable="false" data-file-id="${this.escapeAttr(meta.id)}" data-file-name="${this.escapeAttr(meta.name)}" data-file-size="${Number(meta.size) || 0}" data-file-type="${this.escapeAttr(meta.type)}" data-file-owner="${color}" data-file-hash="${this.escapeAttr(meta.hash || '')}" data-file-poster="${this.escapeAttr(meta.poster || '')}"><span class="file-icon">&#128196;</span><button type="button" class="file-download-btn">DOWNLOAD ${this.escapeHtml(meta.name)}</button><span class="file-size">${this.formatSize(meta.size)}</span></span>`
+                return `${base}${this.isVideoFile(meta) ? '' : '<span class="file-transfer-progress"></span>'}<span class="file-attachment" contenteditable="false" data-file-id="${this.escapeAttr(meta.id)}" data-file-name="${this.escapeAttr(meta.name)}" data-file-size="${Number(meta.size) || 0}" data-file-type="${this.escapeAttr(meta.type)}" data-file-owner="${color}" data-file-hash="${this.escapeAttr(meta.hash || '')}" data-file-poster="${this.escapeAttr(meta.poster || '')}"><span class="file-icon">&#128196;</span><button type="button" class="file-download-btn">DOWNLOAD ${this.escapeHtml(meta.name)}</button><span class="file-size">${this.formatSize(meta.size)}</span></span>`
             }
 
             metaFromElement(el) {
