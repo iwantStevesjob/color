@@ -3898,7 +3898,7 @@
                 incoming.seen.add(data.index)
                 const bytes = data.bytes ? (data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes)) : this.base64ToBytes(data.data)
                 incoming.chunks[data.index] = bytes
-                if (incoming.stream && !this.appendVideoChunk(incoming.stream, bytes)) { incoming.fullFallback = true; this.updatePartialVideoFallback(incoming) }
+                if (incoming.stream && !this.appendVideoChunk(incoming.stream, bytes, incoming)) { incoming.fullFallback = true; this.updatePartialVideoFallback(incoming) }
                 incoming.received += bytes.byteLength
                 if (data.index === 0 || incoming.received >= incoming.meta.size) console.log('[FileTransfer] incoming progress', { fileId: data.fileId, received: incoming.received, size: incoming.meta.size })
                 this.setProgress(data.fileId, incoming.meta.size ? incoming.received / incoming.meta.size : 1, incoming.meta.ownerColor)
@@ -3911,7 +3911,7 @@
                 if (!incoming || incoming.pid !== pid) return
                 this.pendingRequests.delete(fileId)
                 console.log('[FileTransfer] incoming end', { fileId, pid, received: incoming.received, size: incoming.meta.size })
-                if (incoming.stream && !incoming.fullFallback && !incoming.stream.failed) {
+                if (incoming.stream && !incoming.fullFallback && !incoming.stream.failed && (!incoming.stream.mp4Remuxer || incoming.stream.mp4Remuxer.parsed)) {
                     this.endVideoStream(incoming.stream)
                     this.incoming.delete(fileId)
                     this.setProgress(fileId, 1, incoming.meta.ownerColor)
@@ -4034,13 +4034,14 @@
                 if (existingStream) return existingStream
                 const MediaSourceCtor = window.MediaSource || window.WebKitMediaSource
                 if (!MediaSourceCtor) return null
-                const mime = this.getVideoStreamMime(meta, MediaSourceCtor)
+                let mime = this.getVideoStreamMime(meta, MediaSourceCtor)
+                if (!mime && this.isMp4File(meta)) mime = 'video/mp4'
                 if (!mime) return null
                 const attachment = Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).find(el => el.dataset.fileId === fileId)
                 const video = attachment?.querySelector('video.file-preview') || this.renderVideoPreview(fileId, meta)
                 if (!video) return null
                 const mediaSource = new MediaSourceCtor()
-                const stream = { fileId, meta, video, mediaSource, sourceBuffer: null, queue: [], parser: null, ended: false, failed: false, wantsPlay: this.pendingVideoPlay === fileId, bufferingPause: false }
+                const stream = { fileId, meta, video, mediaSource, mime, sourceOpen: false, sourceBuffer: null, queue: [], parser: null, ended: false, failed: false, wantsPlay: this.pendingVideoPlay === fileId, bufferingPause: false }
                 video.src = URL.createObjectURL(mediaSource)
                 video.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(fileId, Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 20); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('pause', () => { if (!stream.bufferingPause) stream.wantsPlay = false })
@@ -4051,27 +4052,63 @@
                 video.addEventListener('stalled', () => { const incoming = this.incoming.get(fileId); stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.updatePartialVideoFallback(incoming); this.requestVideoChunks(incoming) })
                 if (this.pendingVideoPlay === fileId) this.showVideoPlayer(fileId)
                 mediaSource.addEventListener('sourceopen', () => {
-                    try {
-                        stream.sourceBuffer = mediaSource.addSourceBuffer(mime)
-                        stream.sourceBuffer.addEventListener('updateend', () => { const incoming = this.incoming.get(fileId); if (incoming?.fullFallback) { this.updatePartialVideoFallback(incoming); return } this.updateVideoBuffered(fileId, video); this.flushVideoStream(stream); const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0); const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0; if (stream.wantsPlay && loaded < 20) { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) } else if (stream.wantsPlay && played <= loaded) { stream.bufferingPause = false; this.setVideoBuffering(fileId, false); video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) } })
-                        stream.sourceBuffer.addEventListener('error', () => { stream.failed = true; stream.queue = []; const incoming = this.incoming.get(fileId); if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) } })
-                        this.flushVideoStream(stream)
-                        if (this.pendingVideoPlay === fileId) this.setVideoBuffering(fileId, true)
-                    } catch (error) {
-                        console.warn('[FileTransfer] video stream unsupported', { fileId, mime, error })
-                        stream.failed = true
-                        const incoming = this.incoming.get(fileId)
-                        if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) }
-                    }
+                    stream.sourceOpen = true
+                    this.flushVideoStream(stream)
+                    if (this.pendingVideoPlay === fileId) this.setVideoBuffering(fileId, true)
                 }, { once: true })
                 return stream
             }
 
-            appendVideoChunk(stream, bytes) {
+            ensureVideoSourceBuffer(stream) {
+                if (stream.sourceBuffer) return true
+                if (!stream.sourceOpen || stream.failed || !stream.mime) return false
+                try {
+                    stream.sourceBuffer = stream.mediaSource.addSourceBuffer(stream.mime)
+                    stream.sourceBuffer.addEventListener('updateend', () => { const incoming = this.incoming.get(stream.fileId); if (incoming?.fullFallback) { this.updatePartialVideoFallback(incoming); return } this.updateVideoBuffered(stream.fileId, stream.video); if (incoming?.stream?.mp4Remuxer) this.processMp4Stream(stream, incoming); else this.flushVideoStream(stream); const loaded = Number(stream.video.closest('.file-video-preview')?.dataset.videoLoaded || 0); const played = stream.video.duration && Number.isFinite(stream.video.duration) ? (stream.video.currentTime / stream.video.duration) * 100 : 0; if (stream.wantsPlay && loaded < 20) { stream.bufferingPause = true; this.setVideoBuffering(stream.fileId, true); this.requestVideoChunks(this.incoming.get(stream.fileId)) } else if (stream.wantsPlay && played <= loaded) { stream.bufferingPause = false; this.setVideoBuffering(stream.fileId, false); stream.video.play().catch(error => console.warn('[FileTransfer] video autoplay failed', error)) } })
+                    stream.sourceBuffer.addEventListener('error', () => { stream.failed = true; stream.queue = []; const incoming = this.incoming.get(stream.fileId); if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) } })
+                    return true
+                } catch (error) {
+                    console.warn('[FileTransfer] video stream unsupported', { fileId: stream.fileId, mime: stream.mime, error })
+                    stream.failed = true
+                    const incoming = this.incoming.get(stream.fileId)
+                    if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming) }
+                    return false
+                }
+            }
+
+            appendVideoChunk(stream, bytes, incoming = null) {
                 if (stream.failed) return false
+                if (this.isMp4File(stream.meta) && incoming) return this.processMp4Stream(stream, incoming, bytes)
                 const segments = this.extractVideoSegments(stream, bytes)
                 if (!segments) { stream.partialBlobFallback = !!stream.parser?.partialBlobFallback; stream.failed = true; stream.queue = []; return false }
                 segments.forEach(segment => stream.queue.push(segment))
+                this.flushVideoStream(stream)
+                return true
+            }
+
+            processMp4Stream(stream, incoming, bytes = null) {
+                if (!stream.mp4Remuxer && bytes?.byteLength) {
+                    const segments = this.extractVideoSegments(stream, bytes)
+                    if (segments) {
+                        segments.forEach(segment => stream.queue.push(segment))
+                        this.flushVideoStream(stream)
+                        return true
+                    }
+                    stream.parser = null
+                    stream.mp4Remuxer = { needed: [], sequence: 1, parsed: false, initQueued: false, nextVideoSample: 0, nextByTrack: {}, unsupported: false }
+                }
+                const remuxer = stream.mp4Remuxer
+                if (!remuxer) return true
+                this.parseMp4Remuxer(stream, incoming)
+                if (remuxer.unsupported) return false
+                if (remuxer.parsed && !remuxer.initQueued) {
+                    stream.mime = remuxer.mime || stream.mime
+                    stream.queue.push(remuxer.initSegment)
+                    remuxer.initQueued = true
+                }
+                if (remuxer.parsed) {
+                    while (stream.queue.length < 4 && this.queueNextMp4RemuxSegment(stream, incoming)) { }
+                }
                 this.flushVideoStream(stream)
                 return true
             }
@@ -4112,13 +4149,12 @@
                             if (!parser.sawMoov) return null
                             parser.initDone = true
                             if (parser.initParts.length) segments.push(this.concatBytes(parser.initParts))
-                            parser.mediaParts = [box]
+                            parser.mediaParts = parser.prefixParts.splice(0)
+                            parser.mediaParts.push(box)
                             parser.waitingForMdat = true
                             continue
                         }
                         if (parser.sawMoov && prefixBoxes.includes(type)) {
-                            parser.initDone = true
-                            if (parser.initParts.length) segments.push(this.concatBytes(parser.initParts))
                             parser.prefixParts.push(box)
                             continue
                         }
@@ -4167,6 +4203,409 @@
                 return segments
             }
 
+            parseMp4Remuxer(stream, incoming) {
+                const remuxer = stream.mp4Remuxer
+                remuxer.needed = []
+                const fileSize = incoming.meta.size || 0
+                let offset = 0
+                while (!remuxer.moovBytes && offset + 8 <= fileSize) {
+                    const header = this.readByteRange(incoming, offset, Math.min(fileSize, offset + 16))
+                    if (!header || header.byteLength < 8) { this.addNeededRange(remuxer, incoming, offset, Math.min(fileSize, offset + 16)); return }
+                    let size = this.mp4U32(header, 0), headerSize = 8
+                    const type = this.mp4Type(header, 4)
+                    if (size === 1) {
+                        if (header.byteLength < 16) { this.addNeededRange(remuxer, incoming, offset, Math.min(fileSize, offset + 16)); return }
+                        size = this.mp4U64(header, 8)
+                        headerSize = 16
+                    } else if (size === 0) size = fileSize - offset
+                    if (size < headerSize || !Number.isFinite(size)) { remuxer.unsupported = true; return }
+                    if (type === 'ftyp') {
+                        remuxer.ftyp = this.readByteRange(incoming, offset, offset + size)
+                        if (!remuxer.ftyp) { this.addNeededRange(remuxer, incoming, offset, offset + size); return }
+                    } else if (type === 'moov') {
+                        remuxer.moovBytes = this.readByteRange(incoming, offset, offset + size)
+                        if (!remuxer.moovBytes) { this.addNeededRange(remuxer, incoming, offset, offset + size); return }
+                    }
+                    offset += size
+                }
+                if (!remuxer.moovBytes || remuxer.parsed) return
+                const parsed = this.parseMp4Moov(remuxer.moovBytes)
+                const videoTrack = parsed.tracks.find(track => track.handler === 'vide' && track.samples.length)
+                if (!videoTrack) { remuxer.unsupported = true; return }
+                remuxer.tracks = parsed.tracks.filter(track => track.samples.length && (track.handler === 'vide' || track.handler === 'soun'))
+                remuxer.videoTrack = videoTrack
+                remuxer.mime = this.getRemuxedMp4Mime(remuxer.tracks, stream.mime)
+                remuxer.initSegment = this.buildMp4InitSegment(remuxer.ftyp, remuxer.moovBytes, remuxer.tracks)
+                remuxer.parsed = true
+            }
+
+            queueNextMp4RemuxSegment(stream, incoming) {
+                const remuxer = stream.mp4Remuxer
+                const video = remuxer.videoTrack
+                if (!video || remuxer.nextVideoSample >= video.samples.length) return false
+                let start = remuxer.nextVideoSample
+                while (start < video.samples.length && !video.samples[start].isSync) start++
+                if (start >= video.samples.length) return false
+                let end = start + 1
+                while (end < video.samples.length) {
+                    const seconds = (video.samples[end].dts - video.samples[start].dts) / video.timescale
+                    if (seconds >= 2 && video.samples[end].isSync) break
+                    end++
+                }
+                const startSec = video.samples[start].dts / video.timescale
+                const endSec = end < video.samples.length ? video.samples[end].dts / video.timescale : (video.samples[video.samples.length - 1].dts + video.samples[video.samples.length - 1].duration) / video.timescale
+                const fragments = []
+                for (const track of remuxer.tracks) {
+                    let from = 0, to = 0
+                    if (track === video) {
+                        from = start
+                        to = end
+                    } else {
+                        const startTs = Math.floor(startSec * track.timescale)
+                        const endTs = Math.ceil(endSec * track.timescale)
+                        from = remuxer.nextByTrack[track.id] || track.samples.findIndex(sample => sample.dts + sample.duration > startTs)
+                        if (from < 0) continue
+                        to = from
+                        while (to < track.samples.length && track.samples[to].dts < endTs) to++
+                    }
+                    if (to <= from) continue
+                    fragments.push({ track, from, to, samples: track.samples.slice(from, to) })
+                }
+                const missing = []
+                fragments.forEach(fragment => fragment.samples.forEach(sample => this.rangeChunkIndexes(incoming, sample.offset, sample.offset + sample.size).forEach(index => { if (!incoming.seen.has(index)) missing.push(index) })))
+                if (missing.length) {
+                    remuxer.needed = [...new Set(missing)]
+                    return false
+                }
+                remuxer.needed = []
+                const readyFragments = fragments.map(fragment => ({
+                    track: fragment.track,
+                    from: fragment.from,
+                    to: fragment.to,
+                    samples: fragment.samples.map(sample => ({ ...sample, data: this.readByteRange(incoming, sample.offset, sample.offset + sample.size) }))
+                }))
+                stream.queue.push(this.buildMp4MediaSegment(remuxer.sequence++, readyFragments))
+                remuxer.nextVideoSample = end
+                readyFragments.forEach(fragment => { if (fragment.track !== video) remuxer.nextByTrack[fragment.track.id] = fragment.to })
+                return true
+            }
+
+            parseMp4Moov(moovBytes) {
+                const root = { dataStart: this.mp4HeaderSize(moovBytes, 0), end: moovBytes.byteLength }
+                const tracks = this.mp4Boxes(moovBytes, root.dataStart, root.end).filter(box => box.type === 'trak').map(trak => this.parseMp4Track(moovBytes, trak)).filter(Boolean)
+                return { tracks }
+            }
+
+            parseMp4Track(bytes, trak) {
+                const tkhd = this.mp4FindPath(bytes, trak, ['tkhd'])
+                const mdhd = this.mp4FindPath(bytes, trak, ['mdia', 'mdhd'])
+                const hdlr = this.mp4FindPath(bytes, trak, ['mdia', 'hdlr'])
+                const stsd = this.mp4FindPath(bytes, trak, ['mdia', 'minf', 'stbl', 'stsd'])
+                const stsz = this.mp4FindPath(bytes, trak, ['mdia', 'minf', 'stbl', 'stsz'])
+                const stsc = this.mp4FindPath(bytes, trak, ['mdia', 'minf', 'stbl', 'stsc'])
+                const stco = this.mp4FindPath(bytes, trak, ['mdia', 'minf', 'stbl', 'stco']) || this.mp4FindPath(bytes, trak, ['mdia', 'minf', 'stbl', 'co64'])
+                const stts = this.mp4FindPath(bytes, trak, ['mdia', 'minf', 'stbl', 'stts'])
+                if (!tkhd || !mdhd || !hdlr || !stsd || !stsz || !stsc || !stco || !stts) return null
+                const id = this.parseTkhdId(bytes, tkhd)
+                const handler = this.mp4Type(bytes, hdlr.dataStart + 8)
+                const timescale = this.parseMdhdTimescale(bytes, mdhd)
+                const sizes = this.parseStsz(bytes, stsz)
+                const sampleCount = sizes.length
+                const durations = this.expandMp4Durations(bytes, stts, sampleCount)
+                const ctts = this.mp4FindPath(bytes, trak, ['mdia', 'minf', 'stbl', 'ctts'])
+                const compositionOffsets = ctts ? this.expandMp4CompositionOffsets(bytes, ctts, sampleCount) : new Array(sampleCount).fill(0)
+                const stss = this.mp4FindPath(bytes, trak, ['mdia', 'minf', 'stbl', 'stss'])
+                const syncSamples = stss ? this.parseStss(bytes, stss) : null
+                const chunkOffsets = this.parseChunkOffsets(bytes, stco)
+                const stscEntries = this.parseStsc(bytes, stsc)
+                const codec = this.parseMp4Codec(bytes, stsd, handler)
+                const samples = []
+                let sampleIndex = 0, dts = 0, stscIndex = 0
+                for (let chunkIndex = 0; chunkIndex < chunkOffsets.length && sampleIndex < sampleCount; chunkIndex++) {
+                    const chunkNumber = chunkIndex + 1
+                    while (stscIndex + 1 < stscEntries.length && stscEntries[stscIndex + 1].firstChunk <= chunkNumber) stscIndex++
+                    const entry = stscEntries[stscIndex]
+                    let offset = chunkOffsets[chunkIndex]
+                    for (let i = 0; i < entry.samplesPerChunk && sampleIndex < sampleCount; i++) {
+                        const number = sampleIndex + 1
+                        const size = sizes[sampleIndex]
+                        const duration = durations[sampleIndex] || durations[durations.length - 1] || 1
+                        samples.push({ number, offset, size, duration, dts, cts: compositionOffsets[sampleIndex] || 0, isSync: handler !== 'vide' || !syncSamples || syncSamples.has(number) })
+                        offset += size
+                        dts += duration
+                        sampleIndex++
+                    }
+                }
+                return { id, handler, timescale, codec, samples }
+            }
+
+            parseTkhdId(bytes, box) {
+                return this.mp4U32(bytes, box.dataStart + (bytes[box.dataStart] === 1 ? 20 : 12))
+            }
+
+            parseMdhdTimescale(bytes, box) {
+                return this.mp4U32(bytes, box.dataStart + (bytes[box.dataStart] === 1 ? 20 : 12)) || 1
+            }
+
+            parseMp4Codec(bytes, stsd, handler) {
+                const entryStart = stsd.dataStart + 8
+                if (entryStart + 8 > stsd.end) return ''
+                const codec = this.mp4Type(bytes, entryStart + 4)
+                if (handler === 'vide' && /^avc[13]$/.test(codec)) {
+                    const avcC = this.mp4Boxes(bytes, entryStart + 86, entryStart + this.mp4U32(bytes, entryStart)).find(box => box.type === 'avcC')
+                    if (avcC && avcC.dataStart + 4 <= avcC.end) return `${codec}.${[bytes[avcC.dataStart + 1], bytes[avcC.dataStart + 2], bytes[avcC.dataStart + 3]].map(value => value.toString(16).padStart(2, '0')).join('')}`
+                }
+                if (handler === 'soun' && codec === 'mp4a') return 'mp4a.40.2'
+                return codec
+            }
+
+            parseStsz(bytes, box) {
+                const sampleSize = this.mp4U32(bytes, box.dataStart + 4)
+                const count = this.mp4U32(bytes, box.dataStart + 8)
+                if (sampleSize) return new Array(count).fill(sampleSize)
+                const sizes = []
+                for (let i = 0, offset = box.dataStart + 12; i < count && offset + 4 <= box.end; i++, offset += 4) sizes.push(this.mp4U32(bytes, offset))
+                return sizes
+            }
+
+            expandMp4Durations(bytes, box, sampleCount) {
+                const values = []
+                const count = this.mp4U32(bytes, box.dataStart + 4)
+                for (let i = 0, offset = box.dataStart + 8; i < count && offset + 8 <= box.end && values.length < sampleCount; i++, offset += 8) {
+                    const sampleRun = this.mp4U32(bytes, offset)
+                    const delta = this.mp4U32(bytes, offset + 4)
+                    for (let j = 0; j < sampleRun && values.length < sampleCount; j++) values.push(delta)
+                }
+                return values
+            }
+
+            expandMp4CompositionOffsets(bytes, box, sampleCount) {
+                const values = []
+                const version = bytes[box.dataStart]
+                const count = this.mp4U32(bytes, box.dataStart + 4)
+                const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+                for (let i = 0, offset = box.dataStart + 8; i < count && offset + 8 <= box.end && values.length < sampleCount; i++, offset += 8) {
+                    const sampleRun = this.mp4U32(bytes, offset)
+                    const delta = version === 1 ? view.getInt32(offset + 4) : this.mp4U32(bytes, offset + 4)
+                    for (let j = 0; j < sampleRun && values.length < sampleCount; j++) values.push(delta)
+                }
+                return values
+            }
+
+            parseStsc(bytes, box) {
+                const entries = []
+                const count = this.mp4U32(bytes, box.dataStart + 4)
+                for (let i = 0, offset = box.dataStart + 8; i < count && offset + 12 <= box.end; i++, offset += 12) entries.push({ firstChunk: this.mp4U32(bytes, offset), samplesPerChunk: this.mp4U32(bytes, offset + 4), sampleDescriptionIndex: this.mp4U32(bytes, offset + 8) })
+                return entries
+            }
+
+            parseChunkOffsets(bytes, box) {
+                const offsets = []
+                const count = this.mp4U32(bytes, box.dataStart + 4)
+                for (let i = 0, offset = box.dataStart + 8; i < count && offset + (box.type === 'co64' ? 8 : 4) <= box.end; i++, offset += box.type === 'co64' ? 8 : 4) offsets.push(box.type === 'co64' ? this.mp4U64(bytes, offset) : this.mp4U32(bytes, offset))
+                return offsets
+            }
+
+            parseStss(bytes, box) {
+                const values = new Set()
+                const count = this.mp4U32(bytes, box.dataStart + 4)
+                for (let i = 0, offset = box.dataStart + 8; i < count && offset + 4 <= box.end; i++, offset += 4) values.add(this.mp4U32(bytes, offset))
+                return values
+            }
+
+            buildMp4InitSegment(ftyp, moov, tracks) {
+                const fallbackFtyp = this.mp4Box('ftyp', [new Uint8Array([0x69, 0x73, 0x6f, 0x36, 0, 0, 0, 1, 0x69, 0x73, 0x6f, 0x36, 0x6d, 0x70, 0x34, 0x31])])
+                return this.concatBytes([ftyp || fallbackFtyp, this.patchMoovForFragments(moov, tracks)])
+            }
+
+            patchMoovForFragments(bytes, tracks) {
+                const root = { type: 'moov', start: 0, dataStart: this.mp4HeaderSize(bytes, 0), end: bytes.byteLength }
+                return this.rebuildMp4InitBox(bytes, root, tracks)
+            }
+
+            rebuildMp4InitBox(bytes, box, tracks) {
+                if (box.type === 'stbl') {
+                    const stsd = this.mp4Boxes(bytes, box.dataStart, box.end).find(child => child.type === 'stsd')
+                    return this.mp4Box('stbl', [stsd ? bytes.slice(stsd.start, stsd.end) : new Uint8Array(0), this.mp4EmptyFullBox('stts', 4), this.mp4EmptyFullBox('stsc', 4), this.mp4EmptyFullBox('stsz', 8), this.mp4EmptyFullBox('stco', 4)])
+                }
+                if (!['moov', 'trak', 'mdia', 'minf'].includes(box.type)) return bytes.slice(box.start, box.end)
+                const children = this.mp4Boxes(bytes, box.dataStart, box.end).filter(child => child.type !== 'mvex').map(child => this.rebuildMp4InitBox(bytes, child, tracks))
+                if (box.type === 'moov') children.push(this.mp4Box('mvex', tracks.map(track => this.mp4Trex(track.id))))
+                return this.mp4Box(box.type, children)
+            }
+
+            buildMp4MediaSegment(sequence, fragments) {
+                const firstMoof = this.buildMp4Moof(sequence, fragments, new Map())
+                let dataOffset = firstMoof.byteLength + 8
+                const offsets = new Map()
+                fragments.forEach(fragment => {
+                    offsets.set(fragment.track.id, dataOffset)
+                    dataOffset += fragment.samples.reduce((sum, sample) => sum + sample.data.byteLength, 0)
+                })
+                const moof = this.buildMp4Moof(sequence, fragments, offsets)
+                return this.concatBytes([moof, this.mp4Box('mdat', fragments.flatMap(fragment => fragment.samples.map(sample => sample.data)))])
+            }
+
+            buildMp4Moof(sequence, fragments, offsets) {
+                return this.mp4Box('moof', [this.mp4Mfhd(sequence), ...fragments.map(fragment => this.mp4Traf(fragment, offsets.get(fragment.track.id) || 0))])
+            }
+
+            mp4Mfhd(sequence) {
+                const body = new Uint8Array(4)
+                new DataView(body.buffer).setUint32(0, sequence)
+                return this.mp4FullBox('mfhd', 0, 0, body)
+            }
+
+            mp4Traf(fragment, dataOffset) {
+                return this.mp4Box('traf', [this.mp4Tfhd(fragment.track.id), this.mp4Tfdt(fragment.samples[0].dts), this.mp4Trun(fragment, dataOffset)])
+            }
+
+            mp4Tfhd(trackId) {
+                const body = new Uint8Array(4)
+                new DataView(body.buffer).setUint32(0, trackId)
+                return this.mp4FullBox('tfhd', 0, 0x020000, body)
+            }
+
+            mp4Tfdt(baseDts) {
+                const version = baseDts > 0xffffffff ? 1 : 0
+                const body = new Uint8Array(version ? 8 : 4)
+                const view = new DataView(body.buffer)
+                if (version) { view.setUint32(0, Math.floor(baseDts / 4294967296)); view.setUint32(4, baseDts >>> 0) }
+                else view.setUint32(0, baseDts >>> 0)
+                return this.mp4FullBox('tfdt', version, 0, body)
+            }
+
+            mp4Trun(fragment, dataOffset) {
+                const body = new Uint8Array(8 + fragment.samples.length * 16)
+                const view = new DataView(body.buffer)
+                view.setUint32(0, fragment.samples.length)
+                view.setInt32(4, dataOffset)
+                fragment.samples.forEach((sample, index) => {
+                    const offset = 8 + index * 16
+                    view.setUint32(offset, sample.duration >>> 0)
+                    view.setUint32(offset + 4, sample.size >>> 0)
+                    view.setUint32(offset + 8, fragment.track.handler === 'vide' && !sample.isSync ? 0x01010000 : 0x02000000)
+                    view.setInt32(offset + 12, sample.cts || 0)
+                })
+                return this.mp4FullBox('trun', 1, 0x000f01, body)
+            }
+
+            mp4Trex(trackId) {
+                const body = new Uint8Array(20)
+                const view = new DataView(body.buffer)
+                view.setUint32(0, trackId)
+                view.setUint32(4, 1)
+                return this.mp4FullBox('trex', 0, 0, body)
+            }
+
+            mp4EmptyFullBox(type, extraBytes) {
+                return this.mp4FullBox(type, 0, 0, new Uint8Array(extraBytes))
+            }
+
+            mp4FullBox(type, version, flags, body) {
+                const full = new Uint8Array(4 + body.byteLength)
+                full[0] = version & 255
+                full[1] = (flags >> 16) & 255
+                full[2] = (flags >> 8) & 255
+                full[3] = flags & 255
+                full.set(body, 4)
+                return this.mp4Box(type, [full])
+            }
+
+            mp4Box(type, parts) {
+                const payloadSize = parts.reduce((sum, part) => sum + part.byteLength, 0)
+                const box = new Uint8Array(8 + payloadSize)
+                const view = new DataView(box.buffer)
+                view.setUint32(0, box.byteLength)
+                for (let i = 0; i < 4; i++) box[4 + i] = type.charCodeAt(i)
+                let offset = 8
+                parts.forEach(part => { box.set(part, offset); offset += part.byteLength })
+                return box
+            }
+
+            getRemuxedMp4Mime(tracks, fallback) {
+                const codecs = tracks.map(track => track.codec).filter(Boolean).join(', ')
+                const mime = codecs ? `video/mp4; codecs="${codecs}"` : fallback
+                const MediaSourceCtor = window.MediaSource || window.WebKitMediaSource
+                return mime && (!MediaSourceCtor?.isTypeSupported || MediaSourceCtor.isTypeSupported(mime)) ? mime : fallback
+            }
+
+            mp4Boxes(bytes, start, end) {
+                const boxes = []
+                let offset = start
+                while (offset + 8 <= end) {
+                    let size = this.mp4U32(bytes, offset), header = 8
+                    if (size === 1) { if (offset + 16 > end) break; size = this.mp4U64(bytes, offset + 8); header = 16 }
+                    else if (size === 0) size = end - offset
+                    if (size < header || offset + size > end) break
+                    boxes.push({ type: this.mp4Type(bytes, offset + 4), start: offset, end: offset + size, size, header, dataStart: offset + header })
+                    offset += size
+                }
+                return boxes
+            }
+
+            mp4FindPath(bytes, parent, path) {
+                let box = parent
+                for (const type of path) {
+                    box = this.mp4Boxes(bytes, box.dataStart, box.end).find(child => child.type === type)
+                    if (!box) return null
+                }
+                return box
+            }
+
+            mp4HeaderSize(bytes, offset) {
+                return this.mp4U32(bytes, offset) === 1 ? 16 : 8
+            }
+
+            mp4U32(bytes, offset) {
+                return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(offset)
+            }
+
+            mp4U64(bytes, offset) {
+                return this.mp4U32(bytes, offset) * 4294967296 + this.mp4U32(bytes, offset + 4)
+            }
+
+            mp4Type(bytes, offset) {
+                return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3])
+            }
+
+            addNeededRange(remuxer, incoming, start, end) {
+                remuxer.needed.push(...this.rangeChunkIndexes(incoming, start, end))
+                remuxer.needed = [...new Set(remuxer.needed)]
+            }
+
+            rangeChunkIndexes(incoming, start, end) {
+                const first = Math.max(0, Math.floor(start / this.chunkSize))
+                const last = Math.min((incoming.totalChunks || incoming.chunks.length) - 1, Math.floor((Math.max(start + 1, end) - 1) / this.chunkSize))
+                const indexes = []
+                for (let index = first; index <= last; index++) indexes.push(index)
+                return indexes
+            }
+
+            readByteRange(incoming, start, end) {
+                if (end <= start) return new Uint8Array(0)
+                const parts = []
+                for (const index of this.rangeChunkIndexes(incoming, start, end)) {
+                    const chunk = incoming.chunks[index]
+                    if (!chunk) return null
+                    const chunkStart = index * this.chunkSize
+                    parts.push(chunk.subarray(Math.max(0, start - chunkStart), Math.min(chunk.byteLength, end - chunkStart)))
+                }
+                return this.concatBytes(parts)
+            }
+
+            requestChunkIndexes(incoming, indexes, limit = 8) {
+                let sent = 0
+                for (const index of [...new Set(indexes || [])]) {
+                    if (sent >= limit || incoming.requested.size >= limit) break
+                    if (index < 0 || index >= incoming.totalChunks || incoming.seen.has(index) || incoming.requested.has(index)) continue
+                    incoming.requested.add(index)
+                    this.app.mesh.broadcastFile({ type: 'request', fileId: incoming.meta.id, index }, incoming.pid)
+                    sent++
+                }
+                return sent
+            }
+
             concatBytes(parts) {
                 const total = parts.reduce((sum, part) => sum + part.byteLength, 0)
                 const out = new Uint8Array(total)
@@ -4185,6 +4624,8 @@
             }
 
             flushVideoStream(stream) {
+                if (!stream.sourceBuffer && !stream.queue.length && !stream.ended) return
+                if (!stream.sourceBuffer && !this.ensureVideoSourceBuffer(stream)) return
                 if (!stream.sourceBuffer || stream.sourceBuffer.updating || !stream.queue.length) {
                     if (stream.ended && stream.mediaSource.readyState === 'open' && stream.sourceBuffer && !stream.sourceBuffer.updating && !stream.queue.length) {
                         try { stream.mediaSource.endOfStream() } catch (error) { }
@@ -4203,6 +4644,16 @@
             }
 
             endVideoStream(stream) {
+                if (stream.mp4Remuxer) {
+                    const incoming = this.incoming.get(stream.fileId)
+                    if (incoming) {
+                        this.processMp4Stream(stream, incoming)
+                        while (this.queueNextMp4RemuxSegment(stream, incoming)) { }
+                    }
+                    stream.ended = true
+                    this.flushVideoStream(stream)
+                    return
+                }
                 const segments = this.extractVideoSegments(stream, null, true)
                 if (!segments) stream.failed = true
                 else segments.forEach(segment => stream.queue.push(segment))
@@ -4213,7 +4664,12 @@
             requestVideoChunks(incoming) {
                 if ((!incoming?.stream && !incoming?.fullFallback) || !this.app.mesh?.broadcastFile) return
                 const total = incoming.totalChunks || Math.ceil((incoming.meta.size || 0) / this.chunkSize)
-                if (!total || incoming.nextIndex >= total) return
+                if (!total) return
+                if (incoming.stream?.mp4Remuxer) {
+                    this.processMp4Stream(incoming.stream, incoming)
+                    if (this.requestChunkIndexes(incoming, incoming.stream.mp4Remuxer.needed, 8)) return
+                }
+                if (incoming.nextIndex >= total) return
                 const video = incoming.stream?.video
                 const playing = incoming.fullFallback || incoming.stream?.wantsPlay || (video && !video.paused && !video.ended)
                 if (!playing && incoming.nextIndex > 0) return
@@ -4594,6 +5050,12 @@
                 const type = String(meta.type || '').toLowerCase()
                 const name = String(meta.name || '').toLowerCase()
                 return type.startsWith('video/') || /\.(mp4|webm|ogg|mov|m4v)$/i.test(name)
+            }
+
+            isMp4File(meta) {
+                const type = String(meta.type || '').toLowerCase()
+                const name = String(meta.name || '').toLowerCase()
+                return type.includes('mp4') || /\.(mp4|m4v|mov)$/i.test(name)
             }
 
             isMobileBrowser() {
