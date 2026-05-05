@@ -3566,6 +3566,10 @@
                 this.pendingRequests = new Set()
                 this.pendingStreams = new Map()
                 this.chunkSends = new Map()
+                this.videoSwarms = new Map()
+                this.peerVideoState = new Map()
+                this.uploadSlots = new Map()
+                this.haveTimers = new Map()
                 this.chunkSize = 32 * 1024
                 this.bindEvents()
             }
@@ -3598,6 +3602,11 @@
                 this.pendingRequests.clear()
                 this.pendingStreams.clear()
                 this.chunkSends.clear()
+                this.videoSwarms.clear()
+                this.peerVideoState.clear()
+                this.uploadSlots.clear()
+                this.haveTimers.forEach(timer => clearTimeout(timer))
+                this.haveTimers.clear()
                 this.pendingVideoPlay = null
                 this.mesh = null
             }
@@ -3791,12 +3800,15 @@
 
                 console.log(`[FileTransfer] Sending request for video buffering: ${meta.name}`);
                 this.pendingRequests.add(meta.id)
+                this.app.mesh.broadcastFile({ type: 'capacity', fileId: meta.id, capacity: this.getLocalVideoCapacity() })
                 this.app.mesh.broadcastFile({ type: 'request', fileId: meta.id })
                 return true
             }
 
             async handleFileMessage(data, pid) {
                 if (!data?.type || !data.fileId) return
+                if (data.type === 'have') return this.handleVideoHave(data, pid)
+                if (data.type === 'capacity') return this.handleVideoCapacity(data, pid)
                 if (data.type === 'request') return this.handleRequest(data, pid)
                 if (data.type === 'progress') return this.setProgress(data.fileId, data.progress, data.ownerColor)
                 if (data.type === 'start') return this.startIncoming(data, pid)
@@ -3807,13 +3819,61 @@
             async handleRequest(data, pid) {
                 const fileId = data.fileId
                 const entry = this.outgoing.get(fileId)
-                if (!entry || !this.app.mesh?.broadcastFile) return
+                if (!this.app.mesh?.broadcastFile) return
+                if (!entry) {
+                    const swarm = this.getVideoSwarm(fileId)
+                    if (!swarm || !this.isVideoFile(swarm.meta) || data.full) return
+                    if (typeof data.index === 'number') return this.queueVideoSwarmChunk(swarm, pid, data.index)
+                    if (swarm.seen?.size) this.sendVideoStartFromSwarm(swarm, pid)
+                    return
+                }
 
                 console.log(`[FileTransfer] Peer ${pid} requested file: ${entry.meta.name} (Chunk: ${data.index !== undefined ? data.index : 'ALL'})`);
                 if (entry.ready) try { await entry.ready } catch (error) { return }
 
                 if (typeof data.index === 'number') return this.queueFileChunk(entry, pid, data.index)
                 await this.sendFile(entry, pid, this.isVideoFile(entry.meta) && !data.full)
+            }
+
+            sendVideoStartFromSwarm(swarm, pid) {
+                const ranges = this.getLocalVideoRanges(swarm.meta.id, swarm.totalChunks)
+                if (!ranges.length || !this.app.mesh?.broadcastFile) return
+                this.app.mesh.broadcastFile({
+                    type: 'start',
+                    fileId: swarm.meta.id,
+                    name: swarm.meta.name,
+                    size: swarm.meta.size,
+                    mime: swarm.meta.type,
+                    ownerColor: swarm.meta.ownerColor,
+                    hash: swarm.meta.hash,
+                    poster: swarm.meta.poster || '',
+                    chunks: swarm.totalChunks,
+                    full: false,
+                    ranges,
+                    capacity: this.getLocalVideoCapacity(),
+                    seed: this.outgoing.has(swarm.meta.id)
+                }, pid)
+                this.announceVideoHave(swarm.meta.id, pid, true)
+            }
+
+            queueVideoSwarmChunk(swarm, pid, index) {
+                const key = 'swarm:' + pid + ':' + swarm.meta.id
+                const queued = (this.chunkSends.get(key) || Promise.resolve()).catch(() => { }).then(() => this.sendVideoSwarmChunk(swarm, pid, index))
+                this.chunkSends.set(key, queued)
+                queued.finally(() => { if (this.chunkSends.get(key) === queued) this.chunkSends.delete(key) })
+                return queued
+            }
+
+            async sendVideoSwarmChunk(swarm, pid, index) {
+                const bytes = swarm?.chunks?.[index]
+                if (!bytes || !this.canServeVideoUpload(swarm.meta.id)) return
+                const slotKey = this.beginVideoUploadSlot(swarm.meta.id, pid)
+                try {
+                    await this.waitForPeerBuffer(pid)
+                    this.app.mesh.broadcastFile({ type: 'chunk', fileId: swarm.meta.id, index, bytes: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes) }, pid)
+                } finally {
+                    this.endVideoUploadSlot(slotKey)
+                }
             }
 
             queueFileChunk(entry, pid, index) {
@@ -3830,7 +3890,10 @@
                 const totalChunks = Math.ceil((file.size || 0) / this.chunkSize)
 
                 console.log(`[FileTransfer] Starting file send to ${pid}: ${meta.name} (${totalChunks} chunks)`);
-                this.app.mesh.broadcastFile({ type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, poster: meta.poster || '', chunks: totalChunks, full: !startOnly }, pid)
+                const start = { type: 'start', fileId: meta.id, name: meta.name, size: meta.size, mime: meta.type, ownerColor: meta.ownerColor, hash: meta.hash, poster: meta.poster || '', chunks: totalChunks, full: !startOnly }
+                if (this.isVideoFile(meta)) Object.assign(start, { ranges: totalChunks ? [[0, totalChunks - 1]] : [], capacity: this.getLocalVideoCapacity(), seed: true })
+                this.app.mesh.broadcastFile(start, pid)
+                if (this.isVideoFile(meta)) this.announceVideoHave(meta.id, pid, true)
                 if (!file.size) {
                     this.setProgress(meta.id, 1, meta.ownerColor)
                     this.app.mesh.broadcastFile({ type: 'end', fileId: meta.id }, pid)
@@ -3855,16 +3918,25 @@
             async sendFileChunk(entry, pid, index) {
                 if (this.app.roomId !== entry.roomId) return
                 const { file, meta } = entry
+                let slotKey = null
+                if (this.isVideoFile(meta)) {
+                    if (!this.canServeVideoUpload(meta.id)) return
+                    slotKey = this.beginVideoUploadSlot(meta.id, pid)
+                }
                 const offset = index * this.chunkSize
-                if (offset < 0 || offset >= file.size) return
-                const end = Math.min(offset + this.chunkSize, file.size)
-                const chunk = await file.slice(offset, end).arrayBuffer()
-                await this.waitForPeerBuffer(pid)
+                try {
+                    if (offset < 0 || offset >= file.size) return
+                    const end = Math.min(offset + this.chunkSize, file.size)
+                    const chunk = await file.slice(offset, end).arrayBuffer()
+                    await this.waitForPeerBuffer(pid)
 
-                this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, bytes: new Uint8Array(chunk) }, pid)
-                const progress = end / file.size
-                this.setProgress(meta.id, progress, meta.ownerColor)
-                this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
+                    this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index, bytes: new Uint8Array(chunk) }, pid)
+                    const progress = end / file.size
+                    this.setProgress(meta.id, progress, meta.ownerColor)
+                    this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
+                } finally {
+                    if (slotKey) this.endVideoUploadSlot(slotKey)
+                }
             }
 
             async waitForPeerBuffer(pid) {
@@ -3872,7 +3944,166 @@
                 while (dc?.readyState === 'open' && dc.bufferedAmount > 512 * 1024) await new Promise(resolve => setTimeout(resolve, 25))
             }
 
+            getLocalVideoCapacity() {
+                const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection || {}
+                const mobile = this.isMobileBrowser() || !!window.matchMedia?.('(pointer: coarse)')?.matches
+                const cores = navigator.hardwareConcurrency || 1
+                const memory = navigator.deviceMemory || 0
+                const effectiveType = connection.effectiveType || ''
+                const saveData = !!connection.saveData
+                const downlink = Number(connection.downlink || 0)
+                const lowCapacity = mobile || saveData || /2g/i.test(effectiveType) || cores <= 2 || (memory && memory <= 2)
+                const uploadSlots = lowCapacity ? 1 : (cores >= 8 || memory >= 8 || downlink >= 10 ? 3 : 2)
+                return { mobile, cores, memory, downlink, effectiveType, saveData, uploadSlots }
+            }
+
+            getLocalUploadLimit(fileId) {
+                const capacity = this.getLocalVideoCapacity()
+                if (!this.outgoing.has(fileId) && this.isLocalVideoBuffering(fileId)) return 0
+                if (this.outgoing.has(fileId)) return (capacity.mobile || capacity.saveData) ? 1 : 4
+                return capacity.uploadSlots
+            }
+
+            activeVideoUploads() {
+                let total = 0
+                this.uploadSlots.forEach(count => { total += count })
+                return total
+            }
+
+            isLocalVideoBuffering(fileId) {
+                const stream = this.incoming.get(fileId)?.stream || this.videoSwarms.get(fileId)?.stream || this.pendingStreams.get(fileId)
+                if (stream?.bufferingPause) return true
+                return Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).some(el => el.dataset.fileId === fileId && el.querySelector('.file-video-preview.is-buffering'))
+            }
+
+            canServeVideoUpload(fileId) {
+                const limit = this.getLocalUploadLimit(fileId)
+                return limit > 0 && this.activeVideoUploads() < limit
+            }
+
+            beginVideoUploadSlot(fileId, pid) {
+                const key = fileId + ':' + pid
+                this.uploadSlots.set(key, (this.uploadSlots.get(key) || 0) + 1)
+                return key
+            }
+
+            endVideoUploadSlot(key) {
+                const next = (this.uploadSlots.get(key) || 1) - 1
+                if (next > 0) this.uploadSlots.set(key, next)
+                else this.uploadSlots.delete(key)
+            }
+
+            getVideoSwarm(fileId) {
+                return this.incoming.get(fileId) || this.videoSwarms.get(fileId) || null
+            }
+
+            normalizeRanges(ranges, totalChunks = 0) {
+                const total = Number(totalChunks || 0)
+                return (Array.isArray(ranges) ? ranges : [])
+                    .map(range => [Number(range?.[0]), Number(range?.[1])])
+                    .filter(([start, end]) => Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end >= start && (!total || start < total))
+                    .map(([start, end]) => [start, total ? Math.min(end, total - 1) : end])
+                    .sort((a, b) => a[0] - b[0])
+                    .reduce((out, range) => {
+                        const last = out[out.length - 1]
+                        if (last && range[0] <= last[1] + 1) last[1] = Math.max(last[1], range[1])
+                        else out.push(range)
+                        return out
+                    }, [])
+            }
+
+            rangesFromSet(indexes, totalChunks = 0) {
+                const sorted = Array.from(indexes || []).filter(index => Number.isInteger(index) && index >= 0 && (!totalChunks || index < totalChunks)).sort((a, b) => a - b)
+                const ranges = []
+                sorted.forEach(index => {
+                    const last = ranges[ranges.length - 1]
+                    if (last && index === last[1] + 1) last[1] = index
+                    else ranges.push([index, index])
+                })
+                return ranges
+            }
+
+            rangeHasIndex(ranges, index) {
+                return Array.isArray(ranges) && ranges.some(([start, end]) => index >= start && index <= end)
+            }
+
+            getPeerFileState(pid, fileId) {
+                let peerFiles = this.peerVideoState.get(pid)
+                if (!peerFiles) {
+                    peerFiles = new Map()
+                    this.peerVideoState.set(pid, peerFiles)
+                }
+                let state = peerFiles.get(fileId)
+                if (!state) {
+                    state = { ranges: [], capacity: null, rtt: 0, throughput: 0, lastSeen: 0, seed: false }
+                    peerFiles.set(fileId, state)
+                }
+                return state
+            }
+
+            mergeVideoPeerState(swarm, pid, data = {}) {
+                if (!swarm || !pid) return null
+                const state = this.getPeerFileState(pid, swarm.meta.id)
+                const total = Number(data.totalChunks || swarm.totalChunks || 0)
+                if (data.capacity) state.capacity = data.capacity
+                if (data.seed) {
+                    state.seed = true
+                    if (total) state.ranges = [[0, total - 1]]
+                    swarm.ownerPid = pid
+                } else if (data.ranges) {
+                    state.ranges = this.normalizeRanges([...(state.ranges || []), ...data.ranges], total)
+                }
+                state.lastSeen = Date.now()
+                swarm.peers?.set(pid, state)
+                return state
+            }
+
+            getLocalVideoRanges(fileId, totalChunks = 0) {
+                const entry = this.outgoing.get(fileId)
+                if (entry && this.isVideoFile(entry.meta)) {
+                    const total = totalChunks || Math.ceil((entry.file.size || 0) / this.chunkSize)
+                    return total ? [[0, total - 1]] : []
+                }
+                const swarm = this.getVideoSwarm(fileId)
+                return swarm ? this.rangesFromSet(swarm.seen, swarm.totalChunks) : []
+            }
+
+            announceVideoHave(fileId, targetPid = null, immediate = false) {
+                const send = () => {
+                    const swarm = this.getVideoSwarm(fileId)
+                    const entry = this.outgoing.get(fileId)
+                    const totalChunks = swarm?.totalChunks || (entry ? Math.ceil((entry.file.size || 0) / this.chunkSize) : 0)
+                    const ranges = this.getLocalVideoRanges(fileId, totalChunks)
+                    if (!ranges.length || !this.app.mesh?.broadcastFile) return
+                    this.app.mesh.broadcastFile({ type: 'have', fileId, ranges, totalChunks, capacity: this.getLocalVideoCapacity(), seed: !!entry }, targetPid)
+                }
+                if (immediate || targetPid) return send()
+                clearTimeout(this.haveTimers.get(fileId))
+                this.haveTimers.set(fileId, setTimeout(() => { this.haveTimers.delete(fileId); send() }, 300))
+            }
+
+            handleVideoHave(data, pid) {
+                const swarm = this.getVideoSwarm(data.fileId)
+                if (!swarm || !this.isVideoFile(swarm.meta)) return
+                this.mergeVideoPeerState(swarm, pid, data)
+                this.requestVideoChunks(swarm)
+            }
+
+            handleVideoCapacity(data, pid) {
+                const swarm = this.getVideoSwarm(data.fileId)
+                if (!swarm) { this.getPeerFileState(pid, data.fileId).capacity = data.capacity; return }
+                if (!this.isVideoFile(swarm.meta)) return
+                this.mergeVideoPeerState(swarm, pid, { capacity: data.capacity })
+            }
+
             startIncoming(data, pid) {
+                const existing = this.getVideoSwarm(data.fileId)
+                if (existing && this.isVideoFile(existing.meta)) {
+                    this.pendingRequests.delete(data.fileId)
+                    this.mergeVideoPeerState(existing, pid, data)
+                    this.requestVideoChunks(existing)
+                    return
+                }
                 if (this.incoming.has(data.fileId)) return
                 this.pendingRequests.delete(data.fileId)
                 const localMeta = this.findMeta(data.fileId) || {}
@@ -3889,7 +4120,8 @@
 
                 console.log(`[FileTransfer] Incoming stream established from ${pid}: ${meta.name}`);
 
-                const stream = !data.full && this.isVideoFile(meta) ? this.pendingStreams.get(data.fileId) || this.startVideoStream(data.fileId, meta) : null
+                const isVideo = this.isVideoFile(meta)
+                const stream = !data.full && isVideo ? this.pendingStreams.get(data.fileId) || this.startVideoStream(data.fileId, meta) : null
                 this.pendingStreams.delete(data.fileId)
                 if (stream) stream.meta = meta
 
@@ -3897,41 +4129,45 @@
                     pid, meta, chunks: new Array(data.chunks || 0),
                     seen: new Set(), received: 0, stream,
                     totalChunks: Number(data.chunks || 0),
-                    nextIndex: 0, requested: new Set(),
+                    nextIndex: 0, requested: new Set(), inflight: new Map(), peers: new Map(),
                     fullFallback: false,
-                    moovFetched: false
+                    moovFetched: false,
+                    completed: false,
+                    ownerPid: data.seed ? pid : null
                 }
 
                 this.incoming.set(data.fileId, incoming)
+                if (isVideo) {
+                    this.videoSwarms.set(data.fileId, incoming)
+                    this.mergeVideoPeerState(incoming, pid, data)
+                }
                 this.setProgress(data.fileId, 0, meta.ownerColor)
 
                 if (stream) this.requestVideoChunks(incoming)
-                else if (this.isVideoFile(meta) && !data.full) this.app.mesh?.broadcastFile?.({ type: 'request', fileId: data.fileId, full: true }, pid)
+                else if (isVideo && !data.full) this.app.mesh?.broadcastFile?.({ type: 'request', fileId: data.fileId, full: true }, pid)
             }
 
             receiveChunk(data, pid) {
-                const incoming = this.incoming.get(data.fileId)
-                if (!incoming || incoming.pid !== pid || typeof data.index !== 'number' || (!data.bytes && !data.data)) return
+                const incoming = this.getVideoSwarm(data.fileId)
+                const isVideo = incoming && this.isVideoFile(incoming.meta)
+                if (!incoming || (!isVideo && incoming.pid !== pid) || typeof data.index !== 'number' || (!data.bytes && !data.data)) return
                 if (incoming.seen.has(data.index)) return
                 incoming.requested?.delete(data.index)
                 incoming.seen.add(data.index)
 
                 const bytes = data.bytes ? (data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes)) : this.base64ToBytes(data.data)
                 incoming.chunks[data.index] = bytes
+                if (isVideo) {
+                    this.completeVideoRequest(incoming, pid, data.index, bytes.byteLength)
+                    this.mergeVideoPeerState(incoming, pid, { ranges: [[data.index, data.index]] })
+                    this.announceVideoHave(data.fileId)
+                }
 
                 if (incoming.stream && !incoming.stream.failed) {
                     if (incoming.stream.isWebM) {
                         if (!this.appendVideoChunk(incoming.stream, bytes)) incoming.fullFallback = true
                     } else if (incoming.stream.mp4boxfile) {
-                        // Crucial: MP4Box works correctly when fed arraybuffers with fileStart
-                        const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-                        copy.fileStart = data.index * this.chunkSize
-                        try {
-                            incoming.stream.mp4boxfile.appendBuffer(copy)
-                        } catch (e) {
-                            console.warn("[FileTransfer] MP4Box Append Error", e)
-                            incoming.fullFallback = true
-                        }
+                        if (!this.appendMp4ChunkToRemuxer(incoming, data.index, bytes)) incoming.fullFallback = true
                     }
                 }
 
@@ -3942,8 +4178,10 @@
             }
 
             async finishIncoming(fileId, pid) {
-                const incoming = this.incoming.get(fileId)
-                if (!incoming || incoming.pid !== pid) return
+                const incoming = this.getVideoSwarm(fileId)
+                const isVideo = incoming && this.isVideoFile(incoming.meta)
+                if (!incoming || (!isVideo && incoming.pid !== pid)) return
+                if (isVideo && incoming.completed) return
                 if (incoming.totalChunks && incoming.seen.size < incoming.totalChunks) return
                 this.pendingRequests.delete(fileId)
 
@@ -3954,6 +4192,14 @@
                         this.endVideoStream(incoming.stream)
                     } else if (incoming.stream.mp4boxfile) {
                         try { incoming.stream.mp4boxfile.flush() } catch (e) { }
+                        incoming.stream.ended = true
+                        incoming.stream.buffers.forEach(buffer => this.pumpMp4Queue(incoming.stream, buffer))
+                        this.maybeEndMediaSource(incoming.stream)
+                    }
+                    if (isVideo) {
+                        incoming.completed = true
+                        this.clearVideoInflight(incoming)
+                        this.announceVideoHave(fileId, null, true)
                     }
                     this.incoming.delete(fileId)
                     this.setProgress(fileId, 1, incoming.meta.ownerColor)
@@ -3966,6 +4212,11 @@
                     this.setButtonState(fileId, 'RETRY ' + incoming.meta.name, false)
                     this.incoming.delete(fileId)
                     return
+                }
+                if (isVideo) {
+                    incoming.completed = true
+                    this.clearVideoInflight(incoming)
+                    this.announceVideoHave(fileId, null, true)
                 }
                 this.completed.set(fileId, { blob, meta: incoming.meta })
                 this.incoming.delete(fileId)
@@ -4035,7 +4286,7 @@
                     const wrap = el.querySelector('.file-video-preview')
                     if (wrap) {
                         const video = wrap.querySelector('video.file-preview')
-                        const stream = this.incoming.get(fileId)?.stream || this.pendingStreams.get(fileId)
+                        const stream = this.incoming.get(fileId)?.stream || this.videoSwarms.get(fileId)?.stream || this.pendingStreams.get(fileId)
                         if (stream?.sourceBuffer && video) this.updateVideoBuffered(fileId, video, pct)
                         else {
                             wrap.style.setProperty('--video-loaded', pct + '%')
@@ -4089,7 +4340,8 @@
                     ended: false, failed: false,
                     wantsPlay: this.pendingVideoPlay === fileId,
                     bufferingPause: false,
-                    isWebM: isWebM
+                    isWebM: isWebM,
+                    mp4Fed: new Set()
                 }
 
                 video.src = URL.createObjectURL(mediaSource)
@@ -4217,13 +4469,116 @@
                                 this.pumpMp4Queue(stream, bufObj);
                             }
                         };
+                        this.feedStoredMp4Chunks(stream);
                     }
                 }, { once: true });
                 return stream;
             }
 
+            appendMp4ChunkToRemuxer(incoming, index, bytes) {
+                const stream = incoming.stream
+                if (!stream?.mp4boxfile || stream.mp4Fed.has(index)) return true
+                const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+                copy.fileStart = index * this.chunkSize
+                try {
+                    stream.mp4boxfile.appendBuffer(copy)
+                    stream.mp4Fed.add(index)
+                    return true
+                } catch (e) {
+                    console.warn("[FileTransfer] MP4Box Append Error", e)
+                    return false
+                }
+            }
+
+            feedStoredMp4Chunks(stream) {
+                const incoming = this.getVideoSwarm(stream.fileId)
+                if (!incoming?.chunks?.length) return
+                incoming.chunks.forEach((bytes, index) => {
+                    if (bytes && !this.appendMp4ChunkToRemuxer(incoming, index, bytes)) incoming.fullFallback = true
+                })
+            }
+
+            completeVideoRequest(swarm, pid, index, byteLength) {
+                const active = swarm.inflight?.get(index)
+                if (active) {
+                    clearTimeout(active.timer)
+                    swarm.inflight.delete(index)
+                    const elapsed = Math.max(1, Date.now() - active.ts)
+                    const state = this.getPeerFileState(pid, swarm.meta.id)
+                    state.rtt = state.rtt ? (state.rtt * 0.7) + (elapsed * 0.3) : elapsed
+                    const throughput = byteLength / (elapsed / 1000)
+                    state.throughput = state.throughput ? (state.throughput * 0.7) + (throughput * 0.3) : throughput
+                }
+                swarm.requested?.delete(index)
+            }
+
+            clearVideoInflight(swarm, index = null) {
+                if (!swarm?.inflight) return
+                if (index !== null) {
+                    const active = swarm.inflight.get(index)
+                    if (active) clearTimeout(active.timer)
+                    swarm.inflight.delete(index)
+                    swarm.requested?.delete(index)
+                    return
+                }
+                swarm.inflight.forEach(active => clearTimeout(active.timer))
+                swarm.inflight.clear()
+                swarm.requested?.clear()
+            }
+
+            chooseVideoPeer(swarm, index) {
+                const peers = this.app.mesh?.getPeers?.() || {}
+                const candidates = []
+                swarm.peers?.forEach((state, pid) => {
+                    const peer = peers[pid]
+                    if (!peer?.dc || peer.dc.readyState !== 'open' || !this.rangeHasIndex(state.ranges, index)) return
+                    const buffered = peer.dc.bufferedAmount || 0
+                    if (buffered > 1024 * 1024) return
+                    let inflight = 0
+                    swarm.inflight?.forEach(active => { if (active.pid === pid) inflight++ })
+                    const uploadSlots = Number(state.capacity?.uploadSlots || (state.capacity?.mobile ? 1 : 2))
+                    const seedPenalty = (state.seed || pid === swarm.ownerPid) ? 50 : 0
+                    const score = seedPenalty + (inflight * 100) + (buffered / 4096) + (state.rtt || 500) - ((state.throughput || 0) / 4096) - (uploadSlots * 25)
+                    candidates.push({ pid, score })
+                })
+                if (candidates.length) return candidates.sort((a, b) => a.score - b.score)[0].pid
+                const owner = swarm.ownerPid
+                return owner && peers[owner]?.dc?.readyState === 'open' ? owner : null
+            }
+
+            requestVideoIndex(swarm, index) {
+                if (!swarm || swarm.completed || swarm.seen.has(index) || swarm.requested.has(index)) return false
+                const pid = this.chooseVideoPeer(swarm, index)
+                if (!pid) return false
+                swarm.requested.add(index)
+                const timer = setTimeout(() => {
+                    const active = swarm.inflight?.get(index)
+                    if (!active || active.pid !== pid) return
+                    swarm.inflight.delete(index)
+                    swarm.requested.delete(index)
+                    const total = swarm.totalChunks || Math.ceil((swarm.meta.size || 0) / this.chunkSize)
+                    const tailStart = total - Math.min(total, Math.ceil((5 * 1024 * 1024) / this.chunkSize))
+                    if (!swarm.stream?.isWebM && index >= tailStart) {
+                        swarm.moovFetched = false
+                        swarm.moovNextIndex = Math.min(swarm.moovNextIndex ?? index, index)
+                    }
+                    this.requestVideoChunks(swarm)
+                }, 7000)
+                swarm.inflight.set(index, { pid, ts: Date.now(), timer })
+                this.app.mesh.broadcastFile({ type: 'request', fileId: swarm.meta.id, index }, pid)
+                return true
+            }
+
+            maybeEndMediaSource(stream) {
+                if (!stream?.ended || stream.mediaSource?.readyState !== 'open') return
+                if (stream.sourceBuffer && (stream.sourceBuffer.updating || stream.queue.length)) return
+                if (stream.buffers?.some(buffer => buffer.sb.updating || buffer.queue.length)) return
+                try { stream.mediaSource.endOfStream() } catch (error) { }
+            }
+
             pumpMp4Queue(stream, bufObj) {
-                if (bufObj.sb.updating || bufObj.queue.length === 0) return;
+                if (bufObj.sb.updating) return;
+                if (bufObj.queue.length === 0) { this.maybeEndMediaSource(stream); return }
                 try {
                     bufObj.sb.appendBuffer(bufObj.queue.shift());
                 } catch (e) {
@@ -4320,18 +4675,21 @@
             requestVideoChunks(incoming) {
                 if ((!incoming?.stream && !incoming?.fullFallback) || !this.app.mesh?.broadcastFile) return;
                 const total = incoming.totalChunks || Math.ceil((incoming.meta.size || 0) / this.chunkSize);
-                if (!total || incoming.nextIndex >= total) return;
+                if (!total || incoming.completed) return;
+                const maxInflight = 16
 
                 // Fetch the MOOV atom from the end of the file instantly for MP4Box
                 if (!incoming.moovFetched && !incoming.stream?.isWebM && total > 20) {
-                    incoming.moovFetched = true;
                     const endChunks = Math.min(total, Math.ceil((5 * 1024 * 1024) / this.chunkSize)); // Last 5MB
-                    for (let i = total - endChunks; i < total; i++) {
-                        if (!incoming.seen.has(i) && !incoming.requested.has(i)) {
-                            incoming.requested.add(i);
-                            this.app.mesh.broadcastFile({ type: 'request', fileId: incoming.meta.id, index: i }, incoming.pid);
-                        }
+                    const tailStart = total - endChunks
+                    const tailInflightLimit = Math.min(8, maxInflight)
+                    if (incoming.moovNextIndex === undefined) incoming.moovNextIndex = tailStart
+                    for (let i = incoming.moovNextIndex; i < total; i++) {
+                        if ((incoming.inflight?.size || 0) >= tailInflightLimit) break
+                        if (!incoming.seen.has(i) && !incoming.requested.has(i) && !this.requestVideoIndex(incoming, i)) break
+                        incoming.moovNextIndex = i + 1
                     }
+                    incoming.moovFetched = incoming.moovNextIndex >= total
                 }
 
                 const video = incoming.stream?.video;
@@ -4339,14 +4697,12 @@
                 if (!playing && incoming.nextIndex > 0) return;
 
                 // Do not skip chunks when scrubbing! MP4Box needs all the sequential chunks.
-                const allowed = incoming.fullFallback ? total - 1 : incoming.nextIndex + 64;
+                while (incoming.nextIndex < total && incoming.seen.has(incoming.nextIndex)) incoming.nextIndex++
+                const allowed = incoming.fullFallback ? total - 1 : Math.min(total - 1, incoming.nextIndex + 64);
 
-                while (incoming.nextIndex <= allowed && incoming.nextIndex < total && incoming.requested.size < 16) {
-                    const index = incoming.nextIndex++;
-                    if (!incoming.seen.has(index)) {
-                        incoming.requested.add(index);
-                        this.app.mesh.broadcastFile({ type: 'request', fileId: incoming.meta.id, index }, incoming.pid);
-                    }
+                for (let index = incoming.nextIndex; index <= allowed && index < total && (incoming.inflight?.size || 0) < maxInflight; index++) {
+                    if (incoming.seen.has(index) || incoming.requested.has(index)) continue
+                    if (!this.requestVideoIndex(incoming, index)) break
                 }
             }
 
@@ -4376,7 +4732,7 @@
                     const loaded = Number(wrap.dataset.videoLoaded || 0)
                     wrap.style.setProperty('--video-played', pct + '%')
                     if (video && !video.paused && loaded < 100 && pct > loaded) {
-                        const stream = this.incoming.get(fileId)?.stream || this.pendingStreams.get(fileId)
+                        const stream = this.incoming.get(fileId)?.stream || this.videoSwarms.get(fileId)?.stream || this.pendingStreams.get(fileId)
                         if (stream) { stream.wantsPlay = true; stream.bufferingPause = true }
                         this.setVideoBuffering(fileId, true)
                         video.pause()
