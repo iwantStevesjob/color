@@ -970,6 +970,12 @@
             font-size: 12px;
         }
 
+        .file-source {
+            color: #777;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
         .file-attachment.media-ready {
             display: inline-block;
         }
@@ -1010,6 +1016,7 @@
             left: 0;
             right: 0;
             bottom: 0;
+            z-index: 2;
             align-items: center;
             gap: 6px;
             padding: 5px;
@@ -1113,6 +1120,7 @@
             position: absolute;
             left: 50%;
             top: 50%;
+            z-index: 2;
             width: 48px;
             height: 48px;
             transform: translate(-50%, -50%);
@@ -3705,6 +3713,9 @@
                     return true
                 }
                 this.showVideoPlayer(meta.id)
+                if (player.ended) this.seekVideo(meta.id, player, 0)
+                const stream = this.getVideoSwarm(meta.id)?.stream || this.pendingStreams.get(meta.id)
+                if (stream) { stream.wantsPlay = true; stream.bufferingPause = false }
                 player.play().catch(error => console.warn('[FileTransfer] video play failed', error))
                 return true
             }
@@ -4208,6 +4219,7 @@
                     this.mergeVideoPeerState(incoming, pid, data)
                 }
                 this.setProgress(data.fileId, 0, meta.ownerColor)
+                if (isVideo) this.setVideoSource(data.fileId, pid)
 
                 if (stream) this.requestVideoChunks(incoming)
                 else if (isVideo && !data.full) this.app.mesh?.broadcastFile?.({ type: 'request', fileId: data.fileId, full: true }, pid)
@@ -4219,6 +4231,7 @@
                 const isRange = isVideo && typeof data.offset === 'number'
                 if (!incoming || (!isVideo && incoming.pid !== pid) || (!isRange && typeof data.index !== 'number') || (!data.bytes && !data.data)) return
                 const bytes = data.bytes ? (data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes)) : this.base64ToBytes(data.data)
+                if (isVideo) this.setVideoSource(data.fileId, pid)
                 if (isRange) {
                     if (incoming.mp4Range?.offset === data.offset) {
                         clearTimeout(incoming.mp4Range.timer)
@@ -4318,6 +4331,7 @@
                 if (!line.style.getPropertyValue('--file-progress')) line.style.setProperty('--file-progress', '0%')
                 if (this.isVideoFile(meta)) line.querySelector('.file-transfer-progress')?.remove()
                 this.setOwnerView(attachment, meta)
+                if (this.isVideoFile(meta)) this.ensureVideoSourceLabel(attachment)
                 if (!this.isMine(meta) && this.isVideoFile(meta) && !this.incoming.has(meta.id) && !this.completed.has(meta.id) && !attachment.querySelector('.file-video-preview')) this.renderVideoPreview(meta.id, meta)
                 if (this.incoming.has(meta.id)) this.setButtonState(meta.id, 'DOWNLOADING ' + meta.name, true)
                 else if (this.completed.has(meta.id)) {
@@ -4407,6 +4421,26 @@
             setVideoBuffering(fileId, active) {
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
                     el.querySelector('.file-video-preview')?.classList.toggle('is-buffering', !!active)
+                })
+            }
+
+            ensureVideoSourceLabel(attachment) {
+                if (!attachment || attachment.querySelector('.file-source')) return
+                const source = document.createElement('span')
+                source.className = 'file-source'
+                attachment.querySelector('.file-size')?.after(source)
+            }
+
+            setVideoSource(fileId, pid) {
+                const peerColor = this.app.peerColors?.[pid]
+                const label = peerColor || (pid ? pid.slice(0, 8) : '')
+                if (!label) return
+                Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
+                    this.ensureVideoSourceLabel(el)
+                    const source = el.querySelector('.file-source')
+                    if (!source) return
+                    source.textContent = 'FROM ' + label.toUpperCase()
+                    source.style.color = this.safeColor(peerColor) === peerColor ? peerColor : ''
                 })
             }
 
@@ -4912,6 +4946,26 @@
                 })
             }
 
+            seekVideo(fileId, player, time) {
+                if (!player?.duration || !Number.isFinite(player.duration)) return
+                const target = Math.max(0, Math.min(player.duration - 0.05, time))
+                const swarm = this.getVideoSwarm(fileId)
+                player.currentTime = target
+                if (swarm?.stream?.mp4boxfile && swarm.stream.mp4Ready && !swarm.completed) {
+                    try {
+                        const seek = swarm.stream.mp4boxfile.seek(target, true)
+                        if (Number.isFinite(seek?.offset)) {
+                            swarm.stream.mp4NextStart = seek.offset
+                            swarm.mp4NextIndex = Math.floor(seek.offset / this.chunkSize)
+                        }
+                    } catch (e) { }
+                }
+                if (swarm?.stream && !player.paused) swarm.stream.wantsPlay = true
+                this.updateVideoControls(fileId, player)
+                this.setVideoBuffering(fileId, this.shouldVideoBuffer(player))
+                this.requestVideoChunks(swarm)
+            }
+
             renderVideoPreview(fileId, meta, src = '') {
                 let video = null
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
@@ -4966,20 +5020,32 @@
                             return
                         }
                         this.showVideoPlayer(fileId)
-                        if (player.paused) player.play().catch(error => console.warn('[FileTransfer] video play failed', error))
-                        else player.pause()
+                        const stream = this.getVideoSwarm(fileId)?.stream || this.pendingStreams.get(fileId)
+                        if (player.ended) this.seekVideo(fileId, player, 0)
+                        if (player.paused) {
+                            if (stream) { stream.wantsPlay = true; stream.bufferingPause = false }
+                            player.play().catch(error => console.warn('[FileTransfer] video play failed', error))
+                        } else {
+                            if (stream) { stream.wantsPlay = false; stream.bufferingPause = false }
+                            this.setVideoBuffering(fileId, false)
+                            player.pause()
+                        }
                     }
                     toggle.addEventListener('click', togglePlay)
                     player.addEventListener('click', togglePlay)
                     player.addEventListener('play', () => toggle.classList.add('playing'))
                     player.addEventListener('pause', () => toggle.classList.remove('playing'))
+                    player.addEventListener('ended', () => { const stream = this.getVideoSwarm(fileId)?.stream || this.pendingStreams.get(fileId); if (stream) { stream.wantsPlay = false; stream.bufferingPause = false }; this.setVideoBuffering(fileId, false); toggle.classList.remove('playing'); this.updateVideoControls(fileId, player) })
                     player.addEventListener('timeupdate', () => this.updateVideoControls(fileId, player))
                     progress.addEventListener('click', event => {
+                        if (event.cancelable) event.preventDefault()
+                        event.stopPropagation()
                         const rect = progress.getBoundingClientRect()
                         if (player.duration && Number.isFinite(player.duration) && rect.width) {
-                            player.currentTime = player.duration * Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+                            const wasPlaying = !player.paused && !player.ended
+                            this.seekVideo(fileId, player, player.duration * Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)))
+                            if (wasPlaying) player.play().catch(error => console.warn('[FileTransfer] video play failed', error))
                         }
-                        this.requestVideoChunks(this.incoming.get(fileId));
                     })
                     controls.appendChild(toggle)
                     controls.appendChild(progress)
@@ -5061,7 +5127,7 @@
 
             buildContent(meta, base = '') {
                 const color = this.safeColor(meta.ownerColor)
-                return `${base}${this.isVideoFile(meta) ? '' : '<span class="file-transfer-progress"></span>'}<span class="file-attachment" contenteditable="false" data-file-id="${this.escapeAttr(meta.id)}" data-file-name="${this.escapeAttr(meta.name)}" data-file-size="${Number(meta.size) || 0}" data-file-type="${this.escapeAttr(meta.type)}" data-file-owner="${color}" data-file-hash="${this.escapeAttr(meta.hash || '')}" data-file-poster="${this.escapeAttr(meta.poster || '')}"><span class="file-icon">&#128196;</span><button type="button" class="file-download-btn">DOWNLOAD ${this.escapeHtml(meta.name)}</button><span class="file-size">${this.formatSize(meta.size)}</span></span>`
+                return `${base}${this.isVideoFile(meta) ? '' : '<span class="file-transfer-progress"></span>'}<span class="file-attachment" contenteditable="false" data-file-id="${this.escapeAttr(meta.id)}" data-file-name="${this.escapeAttr(meta.name)}" data-file-size="${Number(meta.size) || 0}" data-file-type="${this.escapeAttr(meta.type)}" data-file-owner="${color}" data-file-hash="${this.escapeAttr(meta.hash || '')}" data-file-poster="${this.escapeAttr(meta.poster || '')}"><span class="file-icon">&#128196;</span><button type="button" class="file-download-btn">DOWNLOAD ${this.escapeHtml(meta.name)}</button><span class="file-size">${this.formatSize(meta.size)}</span>${this.isVideoFile(meta) ? '<span class="file-source"></span>' : ''}</span>`
             }
 
             metaFromElement(el) {
