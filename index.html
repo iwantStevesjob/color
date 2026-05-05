@@ -3823,6 +3823,7 @@
                 if (!entry) {
                     const swarm = this.getVideoSwarm(fileId)
                     if (!swarm || !this.isVideoFile(swarm.meta) || data.full) return
+                    if (typeof data.offset === 'number') return this.queueVideoSwarmRange(swarm, pid, data.offset, data.length)
                     if (typeof data.index === 'number') return this.queueVideoSwarmChunk(swarm, pid, data.index)
                     if (swarm.seen?.size) this.sendVideoStartFromSwarm(swarm, pid)
                     return
@@ -3831,6 +3832,7 @@
                 console.log(`[FileTransfer] Peer ${pid} requested file: ${entry.meta.name} (Chunk: ${data.index !== undefined ? data.index : 'ALL'})`);
                 if (entry.ready) try { await entry.ready } catch (error) { return }
 
+                if (typeof data.offset === 'number') return this.queueFileRange(entry, pid, data.offset, data.length)
                 if (typeof data.index === 'number') return this.queueFileChunk(entry, pid, data.index)
                 await this.sendFile(entry, pid, this.isVideoFile(entry.meta) && !data.full)
             }
@@ -3864,6 +3866,14 @@
                 return queued
             }
 
+            queueVideoSwarmRange(swarm, pid, offset, length) {
+                const key = 'swarm-range:' + pid + ':' + swarm.meta.id
+                const queued = (this.chunkSends.get(key) || Promise.resolve()).catch(() => { }).then(() => this.sendVideoSwarmRange(swarm, pid, offset, length))
+                this.chunkSends.set(key, queued)
+                queued.finally(() => { if (this.chunkSends.get(key) === queued) this.chunkSends.delete(key) })
+                return queued
+            }
+
             async sendVideoSwarmChunk(swarm, pid, index) {
                 const bytes = swarm?.chunks?.[index]
                 if (!bytes || !this.canServeVideoUpload(swarm.meta.id)) return
@@ -3876,9 +3886,33 @@
                 }
             }
 
+            async sendVideoSwarmRange(swarm, pid, offset, length) {
+                const index = Math.floor(offset / this.chunkSize)
+                const chunk = swarm?.chunks?.[index]
+                if (!chunk || !this.canServeVideoUpload(swarm.meta.id)) return
+                const start = offset - (index * this.chunkSize)
+                const end = Math.min(chunk.byteLength, start + Math.max(1, Number(length) || this.chunkSize))
+                if (start < 0 || start >= end) return
+                const slotKey = this.beginVideoUploadSlot(swarm.meta.id, pid)
+                try {
+                    await this.waitForPeerBuffer(pid)
+                    this.app.mesh.broadcastFile({ type: 'chunk', fileId: swarm.meta.id, index, offset, bytes: chunk.slice(start, end) }, pid)
+                } finally {
+                    this.endVideoUploadSlot(slotKey)
+                }
+            }
+
             queueFileChunk(entry, pid, index) {
                 const key = pid + ':' + entry.meta.id
                 const queued = (this.chunkSends.get(key) || Promise.resolve()).catch(() => { }).then(() => this.sendFileChunk(entry, pid, index))
+                this.chunkSends.set(key, queued)
+                queued.finally(() => { if (this.chunkSends.get(key) === queued) this.chunkSends.delete(key) })
+                return queued
+            }
+
+            queueFileRange(entry, pid, offset, length) {
+                const key = 'range:' + pid + ':' + entry.meta.id
+                const queued = (this.chunkSends.get(key) || Promise.resolve()).catch(() => { }).then(() => this.sendFileRange(entry, pid, offset, length))
                 this.chunkSends.set(key, queued)
                 queued.finally(() => { if (this.chunkSends.get(key) === queued) this.chunkSends.delete(key) })
                 return queued
@@ -3936,6 +3970,22 @@
                     this.app.mesh.broadcastFile({ type: 'progress', fileId: meta.id, progress, ownerColor: meta.ownerColor }, pid)
                 } finally {
                     if (slotKey) this.endVideoUploadSlot(slotKey)
+                }
+            }
+
+            async sendFileRange(entry, pid, offset, length) {
+                if (this.app.roomId !== entry.roomId || !this.isVideoFile(entry.meta)) return
+                const { file, meta } = entry
+                const start = Math.max(0, Number(offset) || 0)
+                const end = Math.min(file.size, start + Math.max(1, Number(length) || this.chunkSize))
+                if (start >= end || !this.canServeVideoUpload(meta.id)) return
+                const slotKey = this.beginVideoUploadSlot(meta.id, pid)
+                try {
+                    const chunk = await file.slice(start, end).arrayBuffer()
+                    await this.waitForPeerBuffer(pid)
+                    this.app.mesh.broadcastFile({ type: 'chunk', fileId: meta.id, index: Math.floor(start / this.chunkSize), offset: start, bytes: new Uint8Array(chunk) }, pid)
+                } finally {
+                    this.endVideoUploadSlot(slotKey)
                 }
             }
 
@@ -4150,12 +4200,22 @@
             receiveChunk(data, pid) {
                 const incoming = this.getVideoSwarm(data.fileId)
                 const isVideo = incoming && this.isVideoFile(incoming.meta)
-                if (!incoming || (!isVideo && incoming.pid !== pid) || typeof data.index !== 'number' || (!data.bytes && !data.data)) return
+                const isRange = isVideo && typeof data.offset === 'number'
+                if (!incoming || (!isVideo && incoming.pid !== pid) || (!isRange && typeof data.index !== 'number') || (!data.bytes && !data.data)) return
+                const bytes = data.bytes ? (data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes)) : this.base64ToBytes(data.data)
+                if (isRange) {
+                    if (incoming.mp4Range?.offset === data.offset) {
+                        clearTimeout(incoming.mp4Range.timer)
+                        incoming.mp4Range = null
+                    }
+                    if (incoming.stream?.mp4boxfile && !incoming.stream.failed && !this.appendMp4ChunkToRemuxer(incoming, data.index, bytes, data.offset)) incoming.fullFallback = true
+                    this.requestVideoChunks(incoming)
+                    return
+                }
                 if (incoming.seen.has(data.index)) return
                 incoming.requested?.delete(data.index)
                 incoming.seen.add(data.index)
 
-                const bytes = data.bytes ? (data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes)) : this.base64ToBytes(data.data)
                 incoming.chunks[data.index] = bytes
                 if (isVideo) {
                     this.completeVideoRequest(incoming, pid, data.index, bytes.byteLength)
@@ -4343,7 +4403,9 @@
                     bufferingPause: false,
                     isWebM: isWebM,
                     mp4Fed: new Set(),
-                    mp4SegmentCount: 0
+                    mp4SegmentCount: 0,
+                    mp4NextStart: 0,
+                    mp4Ready: false
                 }
 
                 video.src = URL.createObjectURL(mediaSource)
@@ -4408,9 +4470,12 @@
                             const incoming = this.incoming.get(fileId);
                             if (incoming) { incoming.fullFallback = true; this.requestVideoChunks(incoming); }
                         };
+                        stream.mp4boxfile.onMoovStart = () => console.log(`[FileTransfer][Remux] MP4Box moov parse started for ${meta.name}`)
 
                         stream.mp4boxfile.onReady = (info) => {
+                            stream.mp4Ready = true
                             console.log(`[FileTransfer][Remux] MP4Box onReady for ${meta.name}`, { duration: info.duration, timescale: info.timescale, tracks: info.tracks.map(track => ({ id: track.id, codec: track.codec, type: track.audio ? 'audio' : 'video', nb_samples: track.nb_samples })) })
+                            if (info.duration && info.timescale) try { mediaSource.duration = info.duration / info.timescale } catch (e) { }
                             let initCount = 0;
                             let initializedCount = 0;
 
@@ -4465,6 +4530,16 @@
                                         });
 
                                         if (initializedCount === initCount) {
+                                            const incoming = this.getVideoSwarm(fileId)
+                                            try {
+                                                const seek = stream.mp4boxfile.seek(0, true)
+                                                if (Number.isFinite(seek?.offset) && incoming) {
+                                                    stream.mp4NextStart = seek.offset
+                                                    incoming.mp4NextIndex = Math.floor(seek.offset / this.chunkSize)
+                                                    console.log(`[FileTransfer][Remux] MP4Box seek for ${meta.name}`, { offset: seek.offset, index: incoming.mp4NextIndex })
+                                                    this.requestVideoChunks(incoming)
+                                                }
+                                            } catch (e) { console.warn('[FileTransfer] MP4Box seek failed', e) }
                                             console.log(`[FileTransfer][Remux] MP4Box start for ${meta.name}`)
                                             stream.mp4boxfile.start();
                                         }
@@ -4491,15 +4566,22 @@
                 return stream;
             }
 
-            appendMp4ChunkToRemuxer(incoming, index, bytes) {
+            appendMp4ChunkToRemuxer(incoming, index, bytes, fileStart = null) {
                 const stream = incoming.stream
-                if (!stream?.mp4boxfile || stream.mp4Fed.has(index)) return true
+                const start = Number.isFinite(fileStart) ? fileStart : index * this.chunkSize
+                const fedKey = start + ':' + bytes.byteLength
+                if (!stream?.mp4boxfile || stream.mp4Fed.has(fedKey)) return true
                 const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-                copy.fileStart = index * this.chunkSize
+                copy.fileStart = start
                 try {
-                    stream.mp4boxfile.appendBuffer(copy)
-                    stream.mp4Fed.add(index)
-                    if (index < 4 || index >= incoming.totalChunks - 4 || stream.mp4Fed.size % 25 === 0) console.log(`[FileTransfer][Remux] chunk fed to MP4Box for ${incoming.meta.name}`, { index, totalChunks: incoming.totalChunks, fed: stream.mp4Fed.size, seen: incoming.seen.size, fileStart: copy.fileStart, bytes: bytes.byteLength })
+                    const nextStart = stream.mp4boxfile.appendBuffer(copy)
+                    stream.mp4Fed.add(fedKey)
+                    const chunkIndex = Number.isInteger(index) ? index : Math.floor(start / this.chunkSize)
+                    if (Number.isFinite(nextStart) && nextStart >= 0 && nextStart < (incoming.meta.size || Infinity)) {
+                        stream.mp4NextStart = nextStart
+                        incoming.mp4NextIndex = Math.floor(nextStart / this.chunkSize)
+                    }
+                    if (chunkIndex < 4 || chunkIndex >= incoming.totalChunks - 4 || stream.mp4Fed.size % 25 === 0 || Math.abs((stream.mp4NextStart || 0) - (copy.fileStart + bytes.byteLength)) > this.chunkSize) console.log(`[FileTransfer][Remux] chunk fed to MP4Box for ${incoming.meta.name}`, { index: chunkIndex, totalChunks: incoming.totalChunks, fed: stream.mp4Fed.size, seen: incoming.seen.size, fileStart: copy.fileStart, bytes: bytes.byteLength, nextStart: stream.mp4NextStart, nextIndex: incoming.mp4NextIndex })
                     return true
                 } catch (e) {
                     console.warn("[FileTransfer] MP4Box Append Error", e)
@@ -4542,6 +4624,10 @@
                 swarm.inflight.forEach(active => clearTimeout(active.timer))
                 swarm.inflight.clear()
                 swarm.requested?.clear()
+                if (swarm.mp4Range) {
+                    clearTimeout(swarm.mp4Range.timer)
+                    swarm.mp4Range = null
+                }
             }
 
             chooseVideoPeer(swarm, index) {
@@ -4584,6 +4670,27 @@
                 }, 7000)
                 swarm.inflight.set(index, { pid, ts: Date.now(), timer })
                 this.app.mesh.broadcastFile({ type: 'request', fileId: swarm.meta.id, index }, pid)
+                return true
+            }
+
+            requestVideoRange(swarm, offset) {
+                if (!swarm || swarm.completed || swarm.mp4Range || !Number.isFinite(offset)) return false
+                const fileSize = Number(swarm.meta.size || 0)
+                if (offset < 0 || offset >= fileSize) return false
+                const index = Math.floor(offset / this.chunkSize)
+                const inChunk = offset - (index * this.chunkSize)
+                if (!inChunk) return this.requestVideoIndex(swarm, index)
+                const pid = this.chooseVideoPeer(swarm, index)
+                if (!pid) return false
+                const length = Math.min(this.chunkSize - inChunk, fileSize - offset)
+                const timer = setTimeout(() => {
+                    if (swarm.mp4Range?.offset !== offset) return
+                    swarm.mp4Range = null
+                    this.requestVideoChunks(swarm)
+                }, 7000)
+                swarm.mp4Range = { pid, offset, length, timer }
+                console.log(`[FileTransfer][Remux] MP4Box exact range request for ${swarm.meta.name}`, { offset, length, index, pid })
+                this.app.mesh.broadcastFile({ type: 'request', fileId: swarm.meta.id, offset, length }, pid)
                 return true
             }
 
@@ -4695,6 +4802,14 @@
                 const total = incoming.totalChunks || Math.ceil((incoming.meta.size || 0) / this.chunkSize);
                 if (!total || incoming.completed) return;
                 const maxInflight = 16
+
+                if (!incoming.fullFallback && incoming.stream?.mp4boxfile && (incoming.inflight?.size || 0) < maxInflight) {
+                    const offset = Number(incoming.stream.mp4NextStart || 0)
+                    const index = Number.isInteger(incoming.mp4NextIndex) ? incoming.mp4NextIndex : Math.floor(offset / this.chunkSize)
+                    const length = Math.min(this.chunkSize - (offset % this.chunkSize), (incoming.meta.size || 0) - offset)
+                    const aligned = offset % this.chunkSize === 0
+                    if (Number.isFinite(offset) && offset >= 0 && offset < (incoming.meta.size || 0) && !incoming.stream.mp4Fed.has(offset + ':' + length) && index >= 0 && index < total && (!aligned || !incoming.requested.has(index))) this.requestVideoRange(incoming, offset)
+                }
 
                 // Fetch the MOOV atom from the end of the file instantly for MP4Box
                 if (!incoming.moovFetched && !incoming.stream?.isWebM && total > 20) {
