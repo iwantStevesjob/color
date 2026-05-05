@@ -4161,6 +4161,7 @@
                     this.completeVideoRequest(incoming, pid, data.index, bytes.byteLength)
                     this.mergeVideoPeerState(incoming, pid, { ranges: [[data.index, data.index]] })
                     this.announceVideoHave(data.fileId)
+                    if (data.index < 4 || data.index >= incoming.totalChunks - 4 || incoming.seen.size % 25 === 0) console.log(`[FileTransfer][Remux] video chunk received for ${incoming.meta.name}`, { index: data.index, from: pid, seen: incoming.seen.size, totalChunks: incoming.totalChunks, hasMp4Box: !!incoming.stream?.mp4boxfile })
                 }
 
                 if (incoming.stream && !incoming.stream.failed) {
@@ -4341,22 +4342,28 @@
                     wantsPlay: this.pendingVideoPlay === fileId,
                     bufferingPause: false,
                     isWebM: isWebM,
-                    mp4Fed: new Set()
+                    mp4Fed: new Set(),
+                    mp4SegmentCount: 0
                 }
 
                 video.src = URL.createObjectURL(mediaSource)
+                console.log(`[FileTransfer][Remux] MediaSource assigned for ${meta.name} (${isWebM ? 'webm' : 'mp4'})`)
 
                 video.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(fileId, Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 20); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('pause', () => { if (!stream.bufferingPause) stream.wantsPlay = false })
-                video.addEventListener('loadedmetadata', () => this.updateVideoBuffered(fileId, video))
+                video.addEventListener('loadedmetadata', () => { console.log(`[FileTransfer][Remux] video loadedmetadata for ${meta.name}`, { duration: video.duration, buffered: video.buffered?.length || 0 }); this.updateVideoBuffered(fileId, video) })
+                video.addEventListener('canplay', () => console.log(`[FileTransfer][Remux] video canplay for ${meta.name}`, { currentTime: video.currentTime, buffered: video.buffered?.length || 0 }))
+                video.addEventListener('playing', () => console.log(`[FileTransfer][Remux] video playing for ${meta.name}`, { currentTime: video.currentTime }))
+                video.addEventListener('error', () => console.warn(`[FileTransfer][Remux] video error for ${meta.name}`, video.error))
                 video.addEventListener('progress', () => this.updateVideoBuffered(fileId, video))
                 video.addEventListener('timeupdate', () => { this.updateVideoControls(fileId, video); this.requestVideoChunks(this.incoming.get(fileId)) })
-                video.addEventListener('waiting', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
-                video.addEventListener('stalled', () => { stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('waiting', () => { console.log(`[FileTransfer][Remux] video waiting for ${meta.name}`, { currentTime: video.currentTime }); stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('stalled', () => { console.log(`[FileTransfer][Remux] video stalled for ${meta.name}`, { currentTime: video.currentTime }); stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId)) })
 
                 if (this.pendingVideoPlay === fileId) this.showVideoPlayer(fileId)
 
                 mediaSource.addEventListener('sourceopen', () => {
+                    console.log(`[FileTransfer][Remux] MediaSource sourceopen for ${meta.name}`)
                     if (isWebM) {
                         try {
                             stream.sourceBuffer = mediaSource.addSourceBuffer('video/webm; codecs="vp8, vorbis"')
@@ -4394,6 +4401,7 @@
                         }
 
                         stream.mp4boxfile = MP4Box.createFile();
+                        console.log(`[FileTransfer][Remux] MP4Box created for ${meta.name}`)
                         stream.mp4boxfile.onError = (e) => {
                             console.warn("[FileTransfer] MP4Box Error", e);
                             stream.failed = true;
@@ -4402,6 +4410,7 @@
                         };
 
                         stream.mp4boxfile.onReady = (info) => {
+                            console.log(`[FileTransfer][Remux] MP4Box onReady for ${meta.name}`, { duration: info.duration, timescale: info.timescale, tracks: info.tracks.map(track => ({ id: track.id, codec: track.codec, type: track.audio ? 'audio' : 'video', nb_samples: track.nb_samples })) })
                             let initCount = 0;
                             let initializedCount = 0;
 
@@ -4415,6 +4424,7 @@
                                         const bufObj = { id: track.id, sb: sb, queue: [], isVideo: isVideo };
                                         stream.buffers.push(bufObj);
                                         stream.mp4boxfile.setSegmentOptions(track.id, sb, { nbSamples: 1000 });
+                                        console.log(`[FileTransfer][Remux] SourceBuffer added for ${meta.name}`, { mime, trackId: track.id })
                                         initCount++;
                                     } catch (e) { console.warn('[FileTransfer] SourceBuffer error', e); }
                                 }
@@ -4428,6 +4438,7 @@
                             }
 
                             const initSegs = stream.mp4boxfile.initializeSegmentation();
+                            console.log(`[FileTransfer][Remux] init segments for ${meta.name}`, { count: initSegs.length })
 
                             initSegs.forEach(seg => {
                                 const bufObj = stream.buffers.find(b => b.sb === seg.user);
@@ -4435,6 +4446,7 @@
                                     const onInitEnd = () => {
                                         bufObj.sb.removeEventListener('updateend', onInitEnd);
                                         initializedCount++;
+                                        console.log(`[FileTransfer][Remux] init segment appended for ${meta.name}`, { initializedCount, initCount, trackId: bufObj.id })
 
                                         // Handle subsequent segment chunks
                                         bufObj.sb.addEventListener('updateend', () => {
@@ -4453,6 +4465,7 @@
                                         });
 
                                         if (initializedCount === initCount) {
+                                            console.log(`[FileTransfer][Remux] MP4Box start for ${meta.name}`)
                                             stream.mp4boxfile.start();
                                         }
                                     };
@@ -4465,10 +4478,13 @@
                         stream.mp4boxfile.onSegment = (id, user, buffer, sampleNum, is_last) => {
                             const bufObj = stream.buffers.find(b => b.sb === user);
                             if (bufObj) {
+                                stream.mp4SegmentCount++;
+                                if (stream.mp4SegmentCount <= 6 || stream.mp4SegmentCount % 20 === 0 || is_last) console.log(`[FileTransfer][Remux] segment emitted for ${meta.name}`, { trackId: id, sampleNum, bytes: buffer.byteLength, is_last, queued: bufObj.queue.length, segmentCount: stream.mp4SegmentCount })
                                 bufObj.queue.push(buffer);
                                 this.pumpMp4Queue(stream, bufObj);
                             }
                         };
+                        console.log(`[FileTransfer][Remux] feeding stored chunks into MP4Box for ${meta.name}`)
                         this.feedStoredMp4Chunks(stream);
                     }
                 }, { once: true });
@@ -4483,6 +4499,7 @@
                 try {
                     stream.mp4boxfile.appendBuffer(copy)
                     stream.mp4Fed.add(index)
+                    if (index < 4 || index >= incoming.totalChunks - 4 || stream.mp4Fed.size % 25 === 0) console.log(`[FileTransfer][Remux] chunk fed to MP4Box for ${incoming.meta.name}`, { index, totalChunks: incoming.totalChunks, fed: stream.mp4Fed.size, seen: incoming.seen.size, fileStart: copy.fileStart, bytes: bytes.byteLength })
                     return true
                 } catch (e) {
                     console.warn("[FileTransfer] MP4Box Append Error", e)
@@ -4493,6 +4510,7 @@
             feedStoredMp4Chunks(stream) {
                 const incoming = this.getVideoSwarm(stream.fileId)
                 if (!incoming?.chunks?.length) return
+                console.log(`[FileTransfer][Remux] stored chunks available for ${incoming.meta.name}`, { stored: incoming.seen.size, totalChunks: incoming.totalChunks })
                 incoming.chunks.forEach((bytes, index) => {
                     if (bytes && !this.appendMp4ChunkToRemuxer(incoming, index, bytes)) incoming.fullFallback = true
                 })
@@ -4573,7 +4591,7 @@
                 if (!stream?.ended || stream.mediaSource?.readyState !== 'open') return
                 if (stream.sourceBuffer && (stream.sourceBuffer.updating || stream.queue.length)) return
                 if (stream.buffers?.some(buffer => buffer.sb.updating || buffer.queue.length)) return
-                try { stream.mediaSource.endOfStream() } catch (error) { }
+                try { console.log(`[FileTransfer][Remux] MediaSource endOfStream for ${stream.meta?.name || stream.fileId}`); stream.mediaSource.endOfStream() } catch (error) { }
             }
 
             pumpMp4Queue(stream, bufObj) {
@@ -4684,12 +4702,14 @@
                     const tailStart = total - endChunks
                     const tailInflightLimit = Math.min(8, maxInflight)
                     if (incoming.moovNextIndex === undefined) incoming.moovNextIndex = tailStart
+                    if (!incoming.moovLogStarted) { incoming.moovLogStarted = true; console.log(`[FileTransfer][Remux] requesting MP4 tail/moov chunks for ${incoming.meta.name}`, { tailStart, total, endChunks }) }
                     for (let i = incoming.moovNextIndex; i < total; i++) {
                         if ((incoming.inflight?.size || 0) >= tailInflightLimit) break
                         if (!incoming.seen.has(i) && !incoming.requested.has(i) && !this.requestVideoIndex(incoming, i)) break
                         incoming.moovNextIndex = i + 1
                     }
                     incoming.moovFetched = incoming.moovNextIndex >= total
+                    if (incoming.moovFetched && !incoming.moovLogDone) { incoming.moovLogDone = true; console.log(`[FileTransfer][Remux] MP4 tail/moov requests queued for ${incoming.meta.name}`, { tailStart, total }) }
                 }
 
                 const video = incoming.stream?.video;
