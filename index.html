@@ -4423,7 +4423,7 @@
                                         const sb = mediaSource.addSourceBuffer(mime);
                                         const bufObj = { id: track.id, sb: sb, queue: [], isVideo: isVideo };
                                         stream.buffers.push(bufObj);
-                                        stream.mp4boxfile.setSegmentOptions(track.id, sb, { nbSamples: 1000 });
+                                        stream.mp4boxfile.setSegmentOptions(track.id, sb, { nbSamples: isVideo ? 30 : 48 });
                                         console.log(`[FileTransfer][Remux] SourceBuffer added for ${meta.name}`, { mime, trackId: track.id })
                                         initCount++;
                                     } catch (e) { console.warn('[FileTransfer] SourceBuffer error', e); }
@@ -4578,7 +4578,7 @@
                     const tailStart = total - Math.min(total, Math.ceil((5 * 1024 * 1024) / this.chunkSize))
                     if (!swarm.stream?.isWebM && index >= tailStart) {
                         swarm.moovFetched = false
-                        swarm.moovNextIndex = Math.min(swarm.moovNextIndex ?? index, index)
+                        swarm.moovNextIndex = Math.max(swarm.moovNextIndex ?? index, index)
                     }
                     this.requestVideoChunks(swarm)
                 }, 7000)
@@ -4701,14 +4701,14 @@
                     const endChunks = Math.min(total, Math.ceil((5 * 1024 * 1024) / this.chunkSize)); // Last 5MB
                     const tailStart = total - endChunks
                     const tailInflightLimit = Math.min(8, maxInflight)
-                    if (incoming.moovNextIndex === undefined) incoming.moovNextIndex = tailStart
+                    if (incoming.moovNextIndex === undefined) incoming.moovNextIndex = total - 1
                     if (!incoming.moovLogStarted) { incoming.moovLogStarted = true; console.log(`[FileTransfer][Remux] requesting MP4 tail/moov chunks for ${incoming.meta.name}`, { tailStart, total, endChunks }) }
-                    for (let i = incoming.moovNextIndex; i < total; i++) {
+                    for (let i = incoming.moovNextIndex; i >= tailStart; i--) {
                         if ((incoming.inflight?.size || 0) >= tailInflightLimit) break
                         if (!incoming.seen.has(i) && !incoming.requested.has(i) && !this.requestVideoIndex(incoming, i)) break
-                        incoming.moovNextIndex = i + 1
+                        incoming.moovNextIndex = i - 1
                     }
-                    incoming.moovFetched = incoming.moovNextIndex >= total
+                    incoming.moovFetched = incoming.moovNextIndex < tailStart
                     if (incoming.moovFetched && !incoming.moovLogDone) { incoming.moovLogDone = true; console.log(`[FileTransfer][Remux] MP4 tail/moov requests queued for ${incoming.meta.name}`, { tailStart, total }) }
                 }
 
