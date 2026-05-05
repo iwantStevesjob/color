@@ -2030,6 +2030,16 @@
                             <div class="settings-input" id="diag-lang">...</div>
                         </div>
                     </div>
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <div style="flex: 1;">
+                            <label class="settings-label">Internet Estimate</label>
+                            <div class="settings-input" id="diag-network">...</div>
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="settings-label">Video Buffer Profile</label>
+                            <div class="settings-input" id="diag-video-profile">...</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="settings-group">
@@ -3716,6 +3726,7 @@
                 const base = this.getBaseContent(line)
                 const entry = { file, meta, base, lineId: line.id, roomId: this.app.roomId, ready: null }
                 this.outgoing.set(meta.id, entry)
+                this.app.isFresh = false
                 const content = this.buildContent(meta, base)
                 line.innerHTML = content
                 this.hydrateLine(line)
@@ -4002,9 +4013,14 @@
                 const effectiveType = connection.effectiveType || ''
                 const saveData = !!connection.saveData
                 const downlink = Number(connection.downlink || 0)
+                const rtt = Number(connection.rtt || 0)
                 const lowCapacity = mobile || saveData || /2g/i.test(effectiveType) || cores <= 2 || (memory && memory <= 2)
-                const uploadSlots = lowCapacity ? 1 : (cores >= 8 || memory >= 8 || downlink >= 10 ? 3 : 2)
-                return { mobile, cores, memory, downlink, effectiveType, saveData, uploadSlots }
+                const fastDevice = !mobile && cores >= 4 && (!memory || memory >= 4)
+                const fastNetwork = !saveData && (downlink >= 10 || effectiveType === '4g') && (!rtt || rtt <= 150)
+                const highCapacity = !lowCapacity && fastDevice && fastNetwork
+                const uploadSlots = lowCapacity ? 1 : (highCapacity ? 3 : 2)
+                const videoInflightLimit = highCapacity ? 32 : 16
+                return { mobile, cores, memory, downlink, effectiveType, saveData, rtt, uploadSlots, fastDevice, fastNetwork, highCapacity, videoInflightLimit }
             }
 
             getLocalUploadLimit(fileId) {
@@ -4336,6 +4352,21 @@
                 }
             }
 
+            getVideoBufferAhead(video) {
+                const current = Number(video?.currentTime || 0)
+                for (let i = 0; video?.buffered && i < video.buffered.length; i++) if (video.buffered.start(i) <= current && video.buffered.end(i) >= current) return video.buffered.end(i) - current
+                return 0
+            }
+
+            shouldVideoBuffer(video, fallbackPct = null) {
+                const duration = video?.duration && Number.isFinite(video.duration) ? video.duration : 0
+                if (!duration) return Number(fallbackPct ?? video?.closest('.file-video-preview')?.dataset.videoLoaded ?? 0) < 20
+                const remaining = Math.max(0, duration - Number(video.currentTime || 0))
+                if (remaining <= 1) return false
+                const target = Math.min(8, Math.max(3, duration * 0.12), remaining)
+                return Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 99 && this.getVideoBufferAhead(video) < target
+            }
+
             setProgress(fileId, progress, color) {
                 const pct = Math.max(0, Math.min(100, Number(progress || 0) * 100))
                 Array.from(this.app.ui.display.querySelectorAll('.file-attachment')).filter(el => el.dataset.fileId === fileId).forEach(el => {
@@ -4355,9 +4386,7 @@
                         }
                         if (video) this.updateVideoControls(fileId, video)
                         if (stream?.wantsPlay) {
-                            const played = video?.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0
-                            const loaded = Number(wrap.dataset.videoLoaded || pct)
-                            const buffering = loaded < 20 || played > loaded
+                            const buffering = this.shouldVideoBuffer(video, pct)
                             if (buffering) stream.bufferingPause = true
                             this.setVideoBuffering(fileId, buffering)
                             if (!buffering) { stream.bufferingPause = false; stream.video.play().catch(error => console.warn('[FileTransfer]', error)) }
@@ -4411,7 +4440,7 @@
                 video.src = URL.createObjectURL(mediaSource)
                 console.log(`[FileTransfer][Remux] MediaSource assigned for ${meta.name} (${isWebM ? 'webm' : 'mp4'})`)
 
-                video.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(fileId, Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0) < 20); this.requestVideoChunks(this.incoming.get(fileId)) })
+                video.addEventListener('play', () => { stream.wantsPlay = true; stream.bufferingPause = false; this.setVideoBuffering(fileId, this.shouldVideoBuffer(video)); this.requestVideoChunks(this.incoming.get(fileId)) })
                 video.addEventListener('pause', () => { if (!stream.bufferingPause) stream.wantsPlay = false })
                 video.addEventListener('loadedmetadata', () => { console.log(`[FileTransfer][Remux] video loadedmetadata for ${meta.name}`, { duration: video.duration, buffered: video.buffered?.length || 0 }); this.updateVideoBuffered(fileId, video) })
                 video.addEventListener('canplay', () => console.log(`[FileTransfer][Remux] video canplay for ${meta.name}`, { currentTime: video.currentTime, buffered: video.buffered?.length || 0 }))
@@ -4432,11 +4461,9 @@
                             stream.sourceBuffer.addEventListener('updateend', () => {
                                 this.updateVideoBuffered(fileId, video);
                                 this.flushVideoStream(stream);
-                                const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0);
-                                const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0;
-                                if (stream.wantsPlay && loaded < 20) {
+                                if (stream.wantsPlay && this.shouldVideoBuffer(video)) {
                                     stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId))
-                                } else if (stream.wantsPlay && played <= loaded) {
+                                } else if (stream.wantsPlay) {
                                     stream.bufferingPause = false; this.setVideoBuffering(fileId, false); video.play().catch(e => console.warn(e))
                                 }
                             })
@@ -4519,11 +4546,9 @@
 
                                             if (bufObj.isVideo || stream.buffers.length === 1) {
                                                 this.updateVideoBuffered(fileId, video);
-                                                const loaded = Number(video.closest('.file-video-preview')?.dataset.videoLoaded || 0);
-                                                const played = video.duration && Number.isFinite(video.duration) ? (video.currentTime / video.duration) * 100 : 0;
-                                                if (stream.wantsPlay && loaded < 20) {
+                                                if (stream.wantsPlay && this.shouldVideoBuffer(video)) {
                                                     stream.bufferingPause = true; this.setVideoBuffering(fileId, true); this.requestVideoChunks(this.incoming.get(fileId));
-                                                } else if (stream.wantsPlay && played <= loaded) {
+                                                } else if (stream.wantsPlay) {
                                                     stream.bufferingPause = false; this.setVideoBuffering(fileId, false); video.play().catch(e => { });
                                                 }
                                             }
@@ -4801,7 +4826,7 @@
                 if ((!incoming?.stream && !incoming?.fullFallback) || !this.app.mesh?.broadcastFile) return;
                 const total = incoming.totalChunks || Math.ceil((incoming.meta.size || 0) / this.chunkSize);
                 if (!total || incoming.completed) return;
-                const maxInflight = 16
+                const maxInflight = this.getLocalVideoCapacity().videoInflightLimit || 16
 
                 if (!incoming.fullFallback && incoming.stream?.mp4boxfile && (incoming.inflight?.size || 0) < maxInflight) {
                     const offset = Number(incoming.stream.mp4NextStart || 0)
@@ -4864,9 +4889,8 @@
                     if (!wrap) return
                     const duration = video?.duration && Number.isFinite(video.duration) ? video.duration : Number(wrap.dataset.videoDuration || 0)
                     const pct = duration ? Math.max(0, Math.min(100, (video.currentTime / duration) * 100)) : 0
-                    const loaded = Number(wrap.dataset.videoLoaded || 0)
                     wrap.style.setProperty('--video-played', pct + '%')
-                    if (video && !video.paused && loaded < 100 && pct > loaded) {
+                    if (video && !video.paused && this.shouldVideoBuffer(video)) {
                         const stream = this.incoming.get(fileId)?.stream || this.videoSwarms.get(fileId)?.stream || this.pendingStreams.get(fileId)
                         if (stream) { stream.wantsPlay = true; stream.bufferingPause = true }
                         this.setVideoBuffering(fileId, true)
@@ -5635,7 +5659,7 @@
             requestInitialSyncFromPeer(data, pid) {
                 if (this.connectionMode === 'secure-direct') return
                 if (!this.mesh || typeof data?.cursor !== 'number') return
-                if (!this.isFresh && this.hasRenderedContent() && (this.peerCursorReady || (this.connectionSource !== 'url' && !this.isQrConnectionSource()))) return
+                if (this.hasRenderedContent() && (this.peerCursorReady || (this.connectionSource !== 'url' && !this.isQrConnectionSource()))) return
 
                 const cursor = data.cursor
                 console.log(`[EditorApp] 🎯 Peer is at line ${cursor}. Syncing range...`)
@@ -5645,7 +5669,7 @@
                 this.focusAnchorUntil = Date.now() + 5000
                 this.peerCursorReady = true
                 this.updateStatus()
-                this.renderInitialState({}, cursor)
+                if (!this.hasRenderedContent()) this.renderInitialState({}, cursor)
                 this.isFresh = false
 
                 const roomHex = this.roomId.replace('color-', '')
@@ -5689,6 +5713,18 @@
                 document.getElementById('diag-cores').textContent = navigator.hardwareConcurrency || 'Unknown';
                 document.getElementById('diag-memory').textContent = navigator.deviceMemory ? `${navigator.deviceMemory}GB+` : 'Unknown';
                 document.getElementById('diag-lang').textContent = navigator.language || 'Unknown';
+                const updateConnectionDiagnostics = () => {
+                    const capacity = this.fileTransfers.getLocalVideoCapacity();
+                    const network = [capacity.effectiveType || 'type unknown', capacity.downlink ? `${capacity.downlink} Mbps` : 'speed unknown', capacity.rtt ? `${capacity.rtt}ms RTT` : 'RTT unknown'];
+                    if (capacity.saveData) network.push('save-data');
+                    document.getElementById('diag-network').textContent = network.join(' / ');
+                    const profile = `${capacity.videoInflightLimit} inflight chunks${capacity.highCapacity ? ' (fast)' : ''}`;
+                    const profileEl = document.getElementById('diag-video-profile');
+                    profileEl.textContent = profile;
+                    profileEl.style.color = capacity.highCapacity ? '#00e676' : '#888';
+                };
+                updateConnectionDiagnostics();
+                (navigator.connection || navigator.mozConnection || navigator.webkitConnection)?.addEventListener?.('change', updateConnectionDiagnostics);
 
                 // 2. Perform a "Dummy" WebRTC connection to trick the browser into revealing Network Routing Info
                 let hasIPv4 = false;
