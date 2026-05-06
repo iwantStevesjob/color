@@ -1366,6 +1366,131 @@
             letter-spacing: -1px;
         }
 
+        .blocks-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .block-card {
+            position: relative;
+            min-height: 130px;
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            border-radius: 8px;
+            padding: 16px;
+            background: #fff;
+            color: #111;
+        }
+
+        .block-icon {
+            width: 38px;
+            height: 38px;
+            margin-bottom: 18px;
+        }
+
+        .block-icon svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .block-name {
+            font-weight: 900;
+            font-size: 1rem;
+            letter-spacing: 0;
+        }
+
+        .block-add-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            border: 0;
+            border-radius: 50%;
+            background: #111;
+            color: #fff;
+            font-size: 20px;
+            line-height: 30px;
+            cursor: pointer;
+        }
+
+        .block-form-title {
+            margin: 0 0 18px;
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: #111;
+        }
+
+        .editor-line.block-line {
+            padding: 6px 0 6px 5px;
+        }
+
+        .color-block-widget {
+            display: block;
+            max-width: 520px;
+            border: 1px solid rgba(0, 0, 0, 0.14);
+            border-radius: 8px;
+            padding: 14px;
+            background: #fff;
+            color: #111;
+            font-family: 'Inter', sans-serif;
+            white-space: normal;
+        }
+
+        .color-block-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            font-weight: 900;
+        }
+
+        .color-block-header .block-icon {
+            width: 26px;
+            height: 26px;
+            margin: 0;
+            flex: 0 0 auto;
+        }
+
+        .color-block-meta {
+            display: grid;
+            gap: 6px;
+            font-size: 0.88rem;
+        }
+
+        .color-block-meta div {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+            padding-bottom: 4px;
+        }
+
+        .color-block-meta b {
+            font-size: 0.72rem;
+            opacity: 0.58;
+        }
+
+        .block-buy-btn {
+            margin-top: 12px;
+            width: 100%;
+            border: 0;
+            border-radius: 4px;
+            padding: 10px;
+            background: #111;
+            color: #fff;
+            font-weight: 900;
+            cursor: pointer;
+        }
+
+        .block-purchases {
+            margin-top: 10px;
+            display: grid;
+            gap: 5px;
+            font-size: 0.8rem;
+        }
+
         .settings-group {
             margin-top: 20px;
             background: rgba(0, 0, 0, 0.05);
@@ -1874,14 +1999,8 @@
 
     <div id="create-block-panel">
         <div class="create-block-form">
-            <label class="settings-label" for="create-block-title">Title</label>
-            <input id="create-block-title" class="settings-input" type="text" autocomplete="off">
-            <label class="settings-label" for="create-block-html">HTML</label>
-            <textarea id="create-block-html" class="settings-input"></textarea>
-            <label class="settings-label" for="create-block-js">JS</label>
-            <textarea id="create-block-js" class="settings-input"></textarea>
-            <label class="settings-label" for="create-block-css">CSS</label>
-            <textarea id="create-block-css" class="settings-input"></textarea>
+            <h2 id="block-form-title" class="block-form-title">BLOCK</h2>
+            <div id="block-form-fields"></div>
             <button class="create-block-submit" type="button">SUBMIT</button>
         </div>
     </div>
@@ -2001,7 +2120,7 @@
         <div id="view-blocks" class="content-view">
             <div id="tab-discover" class="blocks-pane active">
                 <h2>Discover new</h2>
-                <div class="dummy-content">BUILDING BLOCK</div>
+                <div id="blocks-discovery-grid" class="blocks-grid"></div>
             </div>
             <div id="tab-installed" class="blocks-pane">
                 <h2>Installed</h2>
@@ -3389,7 +3508,8 @@
                 const [sendId, onId] = this.room.makeAction('identity')
                 const [sendCursor, onCursor] = this.room.makeAction('sync-cursor')
                 const [sendFile, onFile] = this.room.makeAction('file')
-                this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId; this.rawSendCursor = sendCursor; this.rawSendFile = sendFile
+                const [sendStoreOps, onStoreOps] = this.room.makeAction('store_ops')
+                this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId; this.rawSendCursor = sendCursor; this.rawSendFile = sendFile; this.rawSendStoreOps = sendStoreOps
 
                 this.room.onPeerJoin(async pid => {
                     console.log(`%c[P2P] Peer Joined: ${pid}`, 'color: cyan; font-weight: bold;')
@@ -3461,6 +3581,7 @@
                 onFile((d, p) => {
                     if (this.verifiedPeers.has(p)) this.emit('file', d, p)
                 })
+                onStoreOps((d, p) => this.emit('store_ops', d, p))
                 this.room.onPeerLeave(p => { this.peerIdentities.delete(p); this.emit('peer-leave', p) })
             }
 
@@ -3517,6 +3638,7 @@
                 if (targetPeerId) this.rawSendCursor(data, targetPeerId)
                 else for (const pid of this.verifiedPeers) this.rawSendCursor(data, pid)
             }
+            sendStoreOps(data, targetPeerId = null) { this.rawSendStoreOps(data, targetPeerId) }
             getPeers() { return this.room.getPeers() }
             getDiscoveredPeers() { return this.room.getDiscoveredPeers() }
             enableSync() { this.room.enableSync() }
@@ -5325,6 +5447,10 @@
                 this.proofRoomHex = null
                 this.roomExists = false
                 this.roomSignature = null
+                this.blocks = []
+                this.blockDefs = new Map()
+                this.activeBlockDefinition = null
+                this.blockRuntime = { buyers: new Map() }
                 this.secureQrBootstrap = new SecureQrRoomBootstrap(session => {
                     this.enterSecureSharedRoom(session).catch(error => {
                         console.error('Secure room transition failed:', error)
@@ -5350,8 +5476,347 @@
 
                 this.bindEvents()
                 this.setupGlobalExposure()
+                this.loadBlockDefinitions()
 
                 this.runSystemDiagnostics()
+            }
+
+            escapeHtml(value) {
+                return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+            }
+
+            escapeAttr(value) {
+                return this.escapeHtml(value).replace(/`/g, '&#96;')
+            }
+
+            bufferToBase64(buffer) {
+                const bytes = new Uint8Array(buffer)
+                let binary = ''
+                bytes.forEach(byte => binary += String.fromCharCode(byte))
+                return btoa(binary)
+            }
+
+            async loadBlockDefinitions() {
+                const grid = document.getElementById('blocks-discovery-grid')
+                if (grid) grid.innerHTML = '<div class="settings-hint">Loading blocks...</div>'
+                try {
+                    const res = await fetch('blocks.json', { cache: 'no-store' })
+                    if (!res.ok) throw new Error('blocks.json failed to load')
+                    const json = await res.json()
+                    this.blocks = Array.isArray(json) ? json : (json.blocks || [])
+                    this.blockDefs = new Map(this.blocks.map(block => [block.id, block]))
+                    this.renderBlockDiscovery()
+                    this.hydrateBlockLines()
+                } catch (error) {
+                    console.error('[Blocks]', error)
+                    if (grid) grid.innerHTML = '<div class="settings-hint">Blocks unavailable.</div>'
+                }
+            }
+
+            renderBlockDiscovery() {
+                const grid = document.getElementById('blocks-discovery-grid')
+                if (!grid) return
+                grid.innerHTML = this.blocks.map(block => `
+                    <div class="block-card" data-block-id="${this.escapeAttr(block.id)}">
+                        <button class="block-add-btn" type="button" data-add-block="${this.escapeAttr(block.id)}" title="Add ${this.escapeAttr(block.name)}">+</button>
+                        <div class="block-icon">${block.svgIcon || ''}</div>
+                        <div class="block-name">${this.escapeHtml(block.name || block.id)}</div>
+                    </div>
+                `).join('')
+            }
+
+            openBlockForm(blockId) {
+                const def = this.blockDefs.get(blockId)
+                if (!def) return
+                this.activeBlockDefinition = def
+                const title = document.getElementById('block-form-title')
+                const fields = document.getElementById('block-form-fields')
+                if (title) title.textContent = def.name || blockId
+                if (fields) {
+                    fields.innerHTML = (def.fields || []).map(field => {
+                        const id = 'block-field-' + field.id
+                        const type = field.secret ? 'password' : (field.type || 'text')
+                        const input = type === 'textarea'
+                            ? `<textarea id="${this.escapeAttr(id)}" class="settings-input" data-block-field="${this.escapeAttr(field.id)}"></textarea>`
+                            : `<input id="${this.escapeAttr(id)}" class="settings-input" type="${this.escapeAttr(type)}" data-block-field="${this.escapeAttr(field.id)}" autocomplete="off">`
+                        return `<label class="settings-label" for="${this.escapeAttr(id)}">${this.escapeHtml(field.label || field.id)}</label>${input}`
+                    }).join('')
+                }
+                document.body.classList.add('create-block-mode')
+                document.getElementById('create-block-panel')?.classList.add('visible')
+                this.peeking = true
+                this.setPanelState('peek')
+                this.ui.dashboardPanel.classList.remove('revealed', 'step-down', 'half-peek')
+                this.ui.dashboardPanel.classList.add('peek-mode')
+                this.ui.subNavLayer.classList.remove('half-slide', 'peek-slide')
+                this.updatePeekState(0)
+            }
+
+            closeBlockForm() {
+                document.body.classList.remove('create-block-mode')
+                document.getElementById('create-block-panel')?.classList.remove('visible')
+                this.activeBlockDefinition = null
+            }
+
+            async collectBlockFormData(def) {
+                const raw = {}
+                document.querySelectorAll('#block-form-fields [data-block-field]').forEach(input => {
+                    raw[input.dataset.blockField] = input.value.trim()
+                })
+                const data = {}
+                for (const field of def.fields || []) {
+                    const value = raw[field.id] || ''
+                    if (field.secret) {
+                        data[field.id] = value ? { secret: true, encrypted: this.bufferToBase64(await this.identity._call('encrypt', value)), savedAt: Date.now() } : null
+                    } else {
+                        data[field.id] = value
+                    }
+                }
+                return data
+            }
+
+            makeBlockInstanceId(blockId) {
+                return `${blockId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+            }
+
+            isLineEmpty(line) {
+                if (!line) return false
+                if (line.querySelector('[data-block-payload]')) return false
+                const html = (line.innerHTML || '').trim()
+                return !html || html === '<br>' || line.innerText.trim() === ''
+            }
+
+            findBlockInsertLine() {
+                let line = this.currentLineId ? document.getElementById(this.currentLineId) : null
+                if (!line) line = Array.from(this.ui.display.children).find(el => this.isLineEmpty(el))
+                if (this.isLineEmpty(line)) return line
+                while (line?.nextElementSibling) {
+                    line = line.nextElementSibling
+                    if (this.isLineEmpty(line)) return line
+                }
+                const lastMeta = this.parseId(this.ui.display.lastElementChild?.id)
+                const index = lastMeta?.index ?? ((this.currentLineId && this.parseId(this.currentLineId)?.index) || 0)
+                const temp = document.createElement('div')
+                temp.innerHTML = this.createRow(index + 1)
+                this.ui.display.appendChild(temp.firstElementChild)
+                return this.ui.display.lastElementChild
+            }
+
+            async submitBlockForm() {
+                const def = this.activeBlockDefinition
+                if (!def || !this.store || !this.roomId) return
+                try {
+                    const payload = {
+                        type: 'block',
+                        blockId: def.id,
+                        instanceId: this.makeBlockInstanceId(def.id),
+                        data: await this.collectBlockFormData(def),
+                        created: Date.now()
+                    }
+                    const line = this.findBlockInsertLine()
+                    const meta = this.parseId(line?.id)
+                    if (!line || !meta) return
+                    const content = JSON.stringify(payload)
+                    line.classList.add('block-line')
+                    line.contentEditable = 'false'
+                    line.innerHTML = this.renderBlockContent(payload, this.user.color.replace('#', ''))
+                    this.currentLineId = line.id
+                    await this.store.handleLocalUpdate(meta.index, content, this.user.color)
+                    this.closeBlockForm()
+                    this.openMainSection('home', document.querySelector('.nav-item[data-target="home"]'))
+                } catch (error) {
+                    console.error('[Blocks] submit failed', error)
+                    alert('Could not add block: ' + error.message)
+                }
+            }
+
+            parseBlockPayload(content) {
+                if (!content || typeof content !== 'string') return null
+                const text = content.trim()
+                if (!text.startsWith('{')) return null
+                try {
+                    const payload = JSON.parse(text)
+                    return payload?.type === 'block' && payload.blockId && payload.instanceId ? payload : null
+                } catch (error) {
+                    return null
+                }
+            }
+
+            getLineContentForSave(line) {
+                const blockPayload = line?.querySelector?.('[data-block-payload]')?.dataset.blockPayload
+                if (blockPayload) return blockPayload
+                return line?.innerText.trim().length > 0 ? line.innerHTML : null
+            }
+
+            blockSecretSaved(data, fieldId) {
+                const value = data?.[fieldId]
+                return !!(value && typeof value === 'object' && value.secret && value.encrypted)
+            }
+
+            getBuyerCount(instanceId) {
+                const buyers = this.blockRuntime.buyers.get(instanceId)
+                if (!buyers) return 0
+                const now = Date.now()
+                for (const [pid, buyer] of buyers.entries()) if (now - buyer.ts > 120000) buyers.delete(pid)
+                return buyers.size
+            }
+
+            getPublicBlockData(payload) {
+                const def = this.blockDefs.get(payload.blockId)
+                const data = { blockInstanceId: payload.instanceId }
+                for (const field of def?.fields || []) {
+                    if (field.secret) continue
+                    if (field.public || def.peerView?.fields?.includes(field.id) || def.buyerView?.fields?.includes(field.id)) data[field.id] = payload.data?.[field.id] || ''
+                }
+                return data
+            }
+
+            renderBlockContent(payload, ownerHex) {
+                const def = this.blockDefs.get(payload.blockId) || { id: payload.blockId, name: payload.blockId, fields: [] }
+                const myHex = this.user.color.replace('#', '').toLowerCase()
+                const isAdmin = String(ownerHex || '').replace('#', '').toLowerCase() === myHex
+                if (payload.blockId === 'store') return this.renderStoreBlock(payload, def, isAdmin)
+                if (payload.blockId === 'github') return this.renderGithubBlock(payload, def, isAdmin)
+                return this.renderGenericBlock(payload, def, isAdmin)
+            }
+
+            renderBlockShell(payload, def, body, extra = '') {
+                const encoded = this.escapeAttr(JSON.stringify(payload))
+                return `<div class="color-block-widget" contenteditable="false" data-block-id="${this.escapeAttr(payload.blockId)}" data-block-instance="${this.escapeAttr(payload.instanceId)}" data-block-payload="${encoded}"><div class="color-block-header"><span class="block-icon">${def.svgIcon || ''}</span><span>${this.escapeHtml(def.name || payload.blockId)}</span></div>${body}${extra}</div>`
+            }
+
+            renderStoreBlock(payload, def, isAdmin) {
+                const data = payload.data || {}
+                const product = data.productName || 'Product'
+                const price = data.productPrice || ''
+                const base = `<div class="color-block-meta">
+                    <div><b>STORE</b><span>${this.escapeHtml(data.storeName || 'Untitled store')}</span></div>
+                    <div><b>PRODUCT</b><span>${this.escapeHtml(product)}</span></div>
+                    <div><b>PRICE</b><span>${this.escapeHtml(price)}</span></div>
+                </div>`
+                if (!isAdmin) {
+                    const checkout = data.stripeCheckoutUrl || ''
+                    return this.renderBlockShell(payload, def, base, `<button class="block-buy-btn" type="button" data-block-buy="${this.escapeAttr(payload.instanceId)}" data-checkout-url="${this.escapeAttr(checkout)}">BUY</button>`)
+                }
+                const purchases = Array.isArray(data.purchases) ? data.purchases : []
+                const purchaseHtml = purchases.length ? purchases.slice(0, 5).map(item => `<div>${this.escapeHtml(item.buyerColor || 'buyer')} bought ${this.escapeHtml(item.productName || product)} ${this.escapeHtml(item.productPrice || price)}</div>`).join('') : '<div>No purchases yet</div>'
+                const admin = `<div class="color-block-meta" style="margin-top:10px;">
+                    <div><b>BUYERS</b><span class="block-buyers-count">${this.getBuyerCount(payload.instanceId)}</span></div>
+                    <div><b>STRIPE</b><span>${this.blockSecretSaved(data, 'stripeApiKey') ? 'API key saved' : 'No API key'}</span></div>
+                    <div><b>PRINTFUL</b><span>${this.blockSecretSaved(data, 'printfulApiKey') ? 'API key saved' : 'No API key'}</span></div>
+                </div><div class="block-purchases">${purchaseHtml}</div>`
+                return this.renderBlockShell(payload, def, base + admin)
+            }
+
+            renderGithubBlock(payload, def, isAdmin) {
+                const data = payload.data || {}
+                const body = `<div class="color-block-meta">
+                    <div><b>USER</b><span>${this.escapeHtml(data.username || 'not set')}</span></div>
+                    <div><b>REPO</b><span>${this.escapeHtml(data.repo || 'not set')}</span></div>
+                    <div><b>BRANCH</b><span>${this.escapeHtml(data.branch || 'main')}</span></div>
+                    ${isAdmin ? `<div><b>TOKEN</b><span>${this.blockSecretSaved(data, 'githubToken') ? 'Token saved' : 'No token'}</span></div>` : ''}
+                </div>`
+                return this.renderBlockShell(payload, def, body)
+            }
+
+            renderGenericBlock(payload, def, isAdmin) {
+                const rows = (def.fields || []).filter(field => isAdmin || !field.secret).map(field => `<div><b>${this.escapeHtml(field.label || field.id)}</b><span>${field.secret ? 'Saved' : this.escapeHtml(payload.data?.[field.id] || '')}</span></div>`).join('')
+                return this.renderBlockShell(payload, def, `<div class="color-block-meta">${rows}</div>`)
+            }
+
+            hydrateBlockLines() {
+                this.ui.display.querySelectorAll('.editor-line').forEach(line => {
+                    const payload = this.parseBlockPayload(this.getLineContentForSave(line))
+                    if (!payload) return
+                    const owner = line.getAttribute('data-lock-owner') || this.roomId?.replace('color-', '') || this.user.color.replace('#', '')
+                    line.classList.add('block-line')
+                    line.contentEditable = 'false'
+                    line.innerHTML = this.renderBlockContent(payload, owner)
+                })
+            }
+
+            getBlockPayloadByInstance(instanceId) {
+                const widget = Array.from(this.ui.display.querySelectorAll('[data-block-instance]')).find(el => el.dataset.blockInstance === instanceId)
+                return this.parseBlockPayload(widget?.dataset.blockPayload || '')
+            }
+
+            getFirstStoreBlockPayload() {
+                const widget = this.ui.display.querySelector('[data-block-id="store"][data-block-payload]')
+                return this.parseBlockPayload(widget?.dataset.blockPayload || '')
+            }
+
+            async updateBlockPayload(instanceId, updater) {
+                const widget = Array.from(this.ui.display.querySelectorAll('[data-block-instance]')).find(el => el.dataset.blockInstance === instanceId)
+                const line = widget?.closest('.editor-line')
+                const meta = this.parseId(line?.id)
+                const payload = this.parseBlockPayload(widget?.dataset.blockPayload || '')
+                if (!line || !meta || !payload || !this.store) return
+                const updated = updater(payload) || payload
+                const content = JSON.stringify(updated)
+                line.innerHTML = this.renderBlockContent(updated, this.user.color.replace('#', ''))
+                line.classList.add('block-line')
+                line.contentEditable = 'false'
+                await this.store.handleLocalUpdate(meta.index, content, this.user.color)
+            }
+
+            setStoreBuyerOnline(instanceId, pid, data = {}) {
+                if (!this.blockRuntime.buyers.has(instanceId)) this.blockRuntime.buyers.set(instanceId, new Map())
+                this.blockRuntime.buyers.get(instanceId).set(pid, { color: data.buyerColor || data.data?.buyerColor || '#ffffff', ts: Date.now() })
+                this.renderBlockRuntime(instanceId)
+            }
+
+            renderBlockRuntime(instanceId) {
+                this.ui.display.querySelectorAll(`[data-block-instance="${this.escapeAttr(instanceId)}"] .block-buyers-count`).forEach(el => {
+                    el.textContent = this.getBuyerCount(instanceId)
+                })
+            }
+
+            handleStorePeerLeave(pid) {
+                this.blockRuntime.buyers.forEach((buyers, instanceId) => {
+                    if (buyers.delete(pid)) this.renderBlockRuntime(instanceId)
+                })
+            }
+
+            handleStoreOps(data, pid) {
+                const type = data?.type
+                if (!type) return
+                if (type === 'PING') {
+                    const payload = this.getFirstStoreBlockPayload()
+                    if (!payload) return
+                    this.setStoreBuyerOnline(payload.instanceId, pid, data)
+                    this.mesh?.sendStoreOps?.({ type: 'CATALOG', blockInstanceId: payload.instanceId, data: this.getPublicBlockData(payload) }, pid)
+                    return
+                }
+                if (type !== 'ORDER' && type !== 'PURCHASE_INTENT') return
+                const payload = data.blockInstanceId ? this.getBlockPayloadByInstance(data.blockInstanceId) : this.getFirstStoreBlockPayload()
+                if (!payload) return
+                const purchase = {
+                    id: 'purchase-' + Date.now().toString(36),
+                    buyerColor: data.buyerColor || data.data?.buyerColor || this.peerColors[pid] || '#ffffff',
+                    productName: payload.data?.productName || data.data?.productName || 'Product',
+                    productPrice: payload.data?.productPrice || data.data?.productPrice || '',
+                    details: data.data || {},
+                    created: Date.now()
+                }
+                this.updateBlockPayload(payload.instanceId, next => {
+                    if (!next.data) next.data = {}
+                    next.data.purchases = [purchase, ...((Array.isArray(next.data.purchases) && next.data.purchases) || [])].slice(0, 20)
+                    return next
+                }).catch(error => console.error('[Blocks] purchase save failed', error))
+                this.mesh?.sendStoreOps?.({ type: 'CONFIRMED', id: purchase.id }, pid)
+            }
+
+            handleBlockBuy(button) {
+                const payload = this.getBlockPayloadByInstance(button.dataset.blockBuy)
+                if (!payload) return
+                const catalog = this.getPublicBlockData(payload)
+                this.mesh?.sendStoreOps?.({
+                    type: 'PURCHASE_INTENT',
+                    blockInstanceId: payload.instanceId,
+                    buyerColor: this.user.color,
+                    data: catalog
+                })
+                if (catalog.stripeCheckoutUrl) window.open(catalog.stripeCheckoutUrl, '_blank')
             }
 
             cloneSignature(signature) {
@@ -5619,6 +6084,7 @@
                 document.getElementById('password-security-status').style.display = 'none'
                 document.body.classList.remove('create-block-mode')
                 document.getElementById('create-block-panel')?.classList.remove('visible')
+                this.activeBlockDefinition = null
                 if (this.halfPeekMode) this.exitHalfPeek()
                 if (!this.peeking) return
                 this.togglePeek()
@@ -5881,9 +6347,12 @@
                 const myHex = this.user.color.replace('#', '')
                 const effectiveOwner = ownerHex || this.roomId.replace('color-', '')
                 const isEmpty = !content || content === '<br>' || content.trim() === ''
+                const blockPayload = this.parseBlockPayload(content)
                 const amOwner = (effectiveOwner === myHex)
-                const isEditable = (isEmpty || amOwner) ? 'true' : 'false'
-                return `<div id="${id}" class="editor-line" contenteditable="${isEditable}">${content || '<br>'}</div>`
+                const isEditable = blockPayload ? 'false' : ((isEmpty || amOwner) ? 'true' : 'false')
+                const blockClass = blockPayload ? ' block-line' : ''
+                const lineContent = blockPayload ? this.renderBlockContent(blockPayload, effectiveOwner) : (content || '<br>')
+                return `<div id="${id}" class="editor-line${blockClass}" contenteditable="${isEditable}">${lineContent}</div>`
             }
 
             createRow(index) {
@@ -5917,7 +6386,7 @@
                     if (el.id && (!visibleOnly || (el.offsetTop + el.offsetHeight > top && el.offsetTop < bot))) {
                         const meta = this.parseId(el.id)
                         if (meta) {
-                            const content = el.innerHTML
+                            const content = this.getLineContentForSave(el)
                             if (content && content !== '<br>' && content.trim().length > 0) {
                                 d[meta.index] = {
                                     content: content,
@@ -6286,7 +6755,8 @@
                     if (this.currentLineId) this.mesh.broadcastLock({ lineId: this.currentLineId, userColor: this.user.color })
                 })
 
-                this.mesh.on('peer-leave', pid => { this.joinApprovedPeers.delete(pid); this.updateStatus(); this.reapplyVisualLocks() })
+                this.mesh.on('peer-leave', pid => { this.joinApprovedPeers.delete(pid); this.handleStorePeerLeave(pid); this.updateStatus(); this.reapplyVisualLocks() })
+                this.mesh.on('store_ops', (data, pid) => this.handleStoreOps(data, pid))
 
                 this.mesh.on('peer-identity', async (data, pid) => {
                     this.peerColors[pid] = data?.color || '#ffffff'
@@ -6368,13 +6838,20 @@
                 }
 
                 if (el) {
+                    const blockPayload = this.parseBlockPayload(newContent)
                     const activeFileId = el.querySelector('.file-attachment')?.dataset.fileId
                     const keepLiveFile = activeFileId && (this.fileTransfers.incoming.has(activeFileId) || this.fileTransfers.pendingStreams.has(activeFileId) || el.querySelector('video.file-preview')?.src) && String(newContent || '').includes(`data-file-id="${activeFileId}"`)
-                    if (el.innerHTML !== newContent && !keepLiveFile) el.innerHTML = this.sanitize(newContent || '<br>')
+                    if (blockPayload) {
+                        el.innerHTML = this.renderBlockContent(blockPayload, newOwner)
+                        el.classList.add('block-line')
+                    } else {
+                        el.classList.remove('block-line')
+                        if (el.innerHTML !== newContent && !keepLiveFile) el.innerHTML = this.sanitize(newContent || '<br>')
+                    }
                     const myHex = this.user.color.replace('#', '')
                     const isEmpty = !newContent || newContent.trim() === '' || newContent === '<br>'
                     const amOwner = (newOwner === myHex)
-                    el.contentEditable = (isEmpty || amOwner) ? 'true' : 'false'
+                    el.contentEditable = blockPayload ? 'false' : ((isEmpty || amOwner) ? 'true' : 'false')
                     this.fileTransfers.hydrateLine(el)
                     if (!isEmpty) {
                         clearTimeout(this.syncRetryTimeout)
@@ -6401,7 +6878,7 @@
 
                 const el = document.getElementById(lineId)
                 if (!el) return
-                const content = el.innerText.trim().length > 0 ? el.innerHTML : null
+                const content = this.getLineContentForSave(el)
                 console.log('[EditorApp] triggerSave', lineId, content)
 
                 if (this.store) {
@@ -6515,14 +6992,16 @@
                     this.openMainSection('settings')
                 })
                 document.getElementById('create-app-btn').addEventListener('click', () => {
-                    document.body.classList.add('create-block-mode')
-                    document.getElementById('create-block-panel')?.classList.add('visible')
-                    this.peeking = true
-                    this.setPanelState('peek')
-                    this.ui.dashboardPanel.classList.remove('revealed', 'step-down', 'half-peek')
-                    this.ui.dashboardPanel.classList.add('peek-mode')
-                    this.ui.subNavLayer.classList.remove('half-slide', 'peek-slide')
-                    this.updatePeekState(0)
+                    if (this.blocks[0]) this.openBlockForm(this.blocks[0].id)
+                })
+                document.getElementById('blocks-discovery-grid')?.addEventListener('click', e => {
+                    const btn = e.target.closest('[data-add-block]')
+                    if (btn) this.openBlockForm(btn.dataset.addBlock)
+                })
+                document.querySelector('#create-block-panel .create-block-submit')?.addEventListener('click', () => this.submitBlockForm())
+                this.ui.display.addEventListener('click', e => {
+                    const buy = e.target.closest('[data-block-buy]')
+                    if (buy) this.handleBlockBuy(buy)
                 })
                 document.querySelectorAll('.sub-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
