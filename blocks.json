@@ -3,6 +3,7 @@
     {
       "id": "store",
       "name": "STORE",
+      "action": "store_ops",
       "svgIcon": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M4 10h16\"/><path d=\"M5 10l1-5h12l1 5\"/><path d=\"M6 10v9h12v-9\"/><path d=\"M9 19v-5h6v5\"/></svg>",
       "fields": [
         { "id": "storeName", "label": "STORE NAME", "type": "text", "public": true },
@@ -13,9 +14,25 @@
         { "id": "productName", "label": "PRODUCT NAME", "type": "text", "public": true },
         { "id": "productPrice", "label": "PRODUCT PRICE", "type": "text", "public": true }
       ],
-      "adminView": { "fields": ["storeName", "storeUrl", "productName", "productPrice"], "stats": ["buyers", "purchases"] },
-      "peerView": { "fields": ["storeName", "productName", "productPrice"], "actions": ["buy"] },
-      "buyerView": { "fields": ["storeName", "productName", "productPrice"], "actions": ["buy"] }
+      "adminView": {
+        "html": "<div class=\"color-block-meta\"><div><b>STORE</b><span>{{data.storeName}}</span></div><div><b>PRODUCT</b><span>{{data.productName}}</span></div><div><b>PRICE</b><span>{{data.productPrice}}</span></div></div><div class=\"store-admin-meta\"><div><b>BUYERS</b><span data-buyers>0</span></div><div><b>STRIPE</b><span>{{secrets.stripeApiKey}}</span></div><div><b>PRINTFUL</b><span>{{secrets.printfulApiKey}}</span></div></div><div class=\"store-purchases\" data-purchases></div>",
+        "css": ".store-admin-meta{display:grid;gap:6px;margin-top:10px;font-size:.88rem}.store-admin-meta div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid rgba(0,0,0,.06);padding-bottom:4px}.store-admin-meta b{font-size:.72rem;opacity:.58}.store-purchases{margin-top:10px;display:grid;gap:5px;font-size:.8rem}",
+        "js": "root.querySelector('[data-buyers]').textContent = runtimeCount('buyers'); const purchases = Array.isArray(data.purchases) ? data.purchases : []; root.querySelector('[data-purchases]').innerHTML = purchases.length ? purchases.slice(0, 5).map(item => '<div>' + escapeHtml(item.buyerColor || 'buyer') + ' bought ' + escapeHtml(item.productName || data.productName || 'Product') + ' ' + escapeHtml(item.productPrice || data.productPrice || '') + '</div>').join('') : '<div>No purchases yet</div>';"
+      },
+      "peerView": {
+        "html": "<div class=\"color-block-meta\"><div><b>STORE</b><span>{{data.storeName}}</span></div><div><b>PRODUCT</b><span>{{data.productName}}</span></div><div><b>PRICE</b><span>{{data.productPrice}}</span></div></div><button class=\"store-buy-btn\" type=\"button\" data-buy>BUY</button>",
+        "css": ".store-buy-btn{margin-top:12px;width:100%;border:0;border-radius:4px;padding:10px;background:#111;color:#fff;font-weight:900;cursor:pointer}",
+        "js": "root.querySelector('[data-buy]')?.addEventListener('click', () => { const catalog = publicData(payload); send({ type: 'PURCHASE_INTENT', blockInstanceId: payload.instanceId, buyerColor: userColor, data: catalog }); if (catalog.stripeCheckoutUrl) window.open(catalog.stripeCheckoutUrl, '_blank'); });"
+      },
+      "buyerView": {
+        "html": "<div class=\"color-block-meta\"><div><b>STORE</b><span>{{data.storeName}}</span></div><div><b>PRODUCT</b><span>{{data.productName}}</span></div><div><b>PRICE</b><span>{{data.productPrice}}</span></div></div><button class=\"store-buy-btn\" type=\"button\" data-buy>BUY</button>",
+        "css": ".store-buy-btn{margin-top:12px;width:100%;border:0;border-radius:4px;padding:10px;background:#111;color:#fff;font-weight:900;cursor:pointer}",
+        "js": ""
+      },
+      "actions": {
+        "namespace": "store_ops",
+        "js": "if (data.type === 'PING') { const block = findFirstBlock('store'); if (!block) return; setRuntimePeer(block.instanceId, 'buyers', pid, { color: data.buyerColor || '#ffffff', ts: Date.now() }); send({ type: 'CATALOG', blockInstanceId: block.instanceId, data: publicData(block) }, pid); return; } if (data.type === 'ORDER' || data.type === 'PURCHASE_INTENT') { const block = data.blockInstanceId ? getBlock(data.blockInstanceId) : findFirstBlock('store'); if (!block) return; const purchase = { id: 'purchase-' + Date.now().toString(36), buyerColor: data.buyerColor || data.data?.buyerColor || '#ffffff', productName: block.data?.productName || data.data?.productName || 'Product', productPrice: block.data?.productPrice || data.data?.productPrice || '', details: data.data || {}, created: Date.now() }; await updateBlock(block.instanceId, next => { next.data = next.data || {}; next.data.purchases = [purchase, ...((Array.isArray(next.data.purchases) && next.data.purchases) || [])].slice(0, 20); return next; }); send({ type: 'CONFIRMED', id: purchase.id }, pid); }"
+      }
     },
     {
       "id": "github",
@@ -25,8 +42,22 @@
         { "id": "githubToken", "label": "GITHUB FINE-GRAINED TOKEN", "type": "password", "secret": true }
       ],
       "detectedFields": ["username", "repo", "branch"],
-      "adminView": { "fields": ["username", "repo", "branch"] },
-      "peerView": { "fields": ["username", "repo", "branch"] }
+      "setupView": {
+        "submitLabel": "CONNECT & AUTO-DETECT REPO",
+        "html": "<p class=\"settings-hint\">Enter your Fine-Grained Token. We will automatically grab the repository it has access to.</p><label class=\"settings-label\" for=\"block-field-githubToken\">GITHUB FINE-GRAINED TOKEN</label><input id=\"block-field-githubToken\" class=\"settings-input\" type=\"password\" data-block-field=\"githubToken\" placeholder=\"github_pat_...\" autocomplete=\"off\"><div class=\"settings-group\"><p class=\"settings-hint\" style=\"margin-top:0;\">1. Go to <a href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\">GitHub Developer Settings (Fine-grained tokens)</a>.</p><p class=\"settings-hint\">2. Repository access: select only the repository for your site.</p><p class=\"settings-hint\">3. Repository permissions: Contents should be Read and write.</p><p class=\"settings-hint\" style=\"margin-bottom:0;\">4. Generate the token and paste it above.</p></div><div class=\"settings-group\" data-github-result style=\"display:none;\"></div><div data-github-manual style=\"display:none;\"><label class=\"settings-label\">USERNAME</label><input class=\"settings-input\" type=\"text\" data-github-user autocomplete=\"off\"><label class=\"settings-label\">REPOSITORY</label><input class=\"settings-input\" type=\"text\" data-github-repo autocomplete=\"off\"><label class=\"settings-label\">BRANCH</label><input class=\"settings-input\" type=\"text\" data-github-branch autocomplete=\"off\"></div>",
+        "css": "",
+        "js": "const token = fields.githubToken || ''; if (!token) { alert('Please enter a token first.'); return { stop: true }; } if (!state.detected || state.token !== token) { setSubmitLabel('SCANNING...'); try { const uRes = await fetch('https://api.github.com/user', { headers: { Authorization: 'token ' + token } }); if (!uRes.ok) throw new Error('Token invalid.'); const user = await uRes.json(); const rRes = await fetch('https://api.github.com/user/repos?sort=updated&per_page=100&type=all', { headers: { Authorization: 'token ' + token } }); const repos = await rRes.json(); const repo = Array.isArray(repos) && repos[0] ? repos[0] : null; state.token = token; state.detected = { username: user.login || '', repo: repo?.name || '', branch: repo?.default_branch || 'main' }; root.querySelector('[data-github-user]').value = state.detected.username; root.querySelector('[data-github-repo]').value = state.detected.repo; root.querySelector('[data-github-branch]').value = state.detected.branch; root.querySelector('[data-github-manual]').style.display = 'block'; const result = root.querySelector('[data-github-result]'); result.style.display = 'block'; result.textContent = repo ? 'Detected: ' + state.detected.username + '/' + state.detected.repo + ' (' + state.detected.branch + ')' : 'Token valid. Enter the repository name manually.'; setSubmitLabel('ADD GITHUB BLOCK'); return { stop: true }; } catch (error) { alert('Error: ' + error.message); setSubmitLabel('CONNECT & AUTO-DETECT REPO'); return { stop: true }; } } return { data: { githubToken: await encryptSecret(token), username: root.querySelector('[data-github-user]').value.trim(), repo: root.querySelector('[data-github-repo]').value.trim(), branch: root.querySelector('[data-github-branch]').value.trim() || 'main' } };"
+      },
+      "adminView": {
+        "html": "<div class=\"color-block-meta\"><div><b>USER</b><span>{{data.username}}</span></div><div><b>REPO</b><span>{{data.repo}}</span></div><div><b>BRANCH</b><span>{{data.branch}}</span></div><div><b>TOKEN</b><span>{{secrets.githubToken}}</span></div></div>",
+        "css": "",
+        "js": ""
+      },
+      "peerView": {
+        "html": "<div class=\"color-block-meta\"><div><b>USER</b><span>{{data.username}}</span></div><div><b>REPO</b><span>{{data.repo}}</span></div><div><b>BRANCH</b><span>{{data.branch}}</span></div></div>",
+        "css": "",
+        "js": ""
+      }
     }
   ]
 }
