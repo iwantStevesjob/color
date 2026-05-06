@@ -8,16 +8,17 @@ window.Color = {
         } = config;
 
         // Store Owner Room ID
-        const storeRoomId = "color-" + color;
+        const storeRoomId = "color-" + String(color).replace('#', '').toLowerCase();
 
 
         const Spectrum = (() => {
             const TRACKERS = [
+                'wss://relay.rollcall.network',
                 'wss://tracker.webtorrent.dev',
                 'wss://tracker.openwebtorrent.com',
                 'wss://tracker.btorrent.xyz'
             ];
-            const OFFER_POOL_SIZE = 5;
+            const OFFER_POOL_SIZE = 12;
             const OFFER_TTL = 57333;
             const ANNOUNCE_INTERVAL = 33333;
             const ICE_TIMEOUT = 5000;
@@ -67,7 +68,7 @@ window.Color = {
                     const listeners = { peerJoin: [], peerLeave: [] };
 
                     async function init() {
-                        infoHash = await sha1Hash(roomId);
+                        infoHash = await sha1Hash(config.appId + roomId);
                         await fillOfferPool();
                         TRACKERS.forEach(url => connectToTracker(url));
                         setInterval(() => {
@@ -167,7 +168,7 @@ window.Color = {
                         dc.onmessage = e => {
                             try {
                                 const payload = JSON.parse(e.data);
-                                const handlers = messageHandlers[payload.ns];
+                                const handlers = messageHandlers[payload.action || payload.ns];
                                 if (handlers) handlers.forEach(cb => cb(payload.data, peerId));
                             } catch (err) { }
                         };
@@ -180,13 +181,19 @@ window.Color = {
                             const hasPending = Object.values(pendingOffers).some(p => p.peerId === data.peer_id);
                             if (hasPending && selfId > data.peer_id) return;
                             try {
-                                const { pc, dc } = createPeerConnection(false, channel => { setupDataChannel(channel, data.peer_id); connectedPeers[data.peer_id].dc = channel; });
+                                const peerEntry = { pc: null, dc: null };
+                                connectedPeers[data.peer_id] = peerEntry;
+                                const { pc } = createPeerConnection(false, channel => {
+                                    setupDataChannel(channel, data.peer_id);
+                                    if (connectedPeers[data.peer_id]) connectedPeers[data.peer_id].dc = channel;
+                                    else connectedPeers[data.peer_id] = { pc, dc: channel };
+                                });
+                                peerEntry.pc = pc;
                                 await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
                                 await pc.setLocalDescription(await pc.createAnswer());
                                 const answer = await waitForIce(pc);
-                                connectedPeers[data.peer_id] = { pc, dc: null };
                                 ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer: { type: answer.type, sdp: answer.sdp } }));
-                            } catch (err) { }
+                            } catch (err) { delete connectedPeers[data.peer_id]; }
                         }
                         if (data.answer && data.offer_id) {
                             const pending = pendingOffers[data.offer_id];
@@ -204,7 +211,7 @@ window.Color = {
                             if (!messageHandlers[namespace]) messageHandlers[namespace] = [];
                             return [
                                 (data, targetPeer) => {
-                                    const msg = JSON.stringify({ ns: namespace, data });
+                                    const msg = JSON.stringify({ action: namespace, ns: namespace, data });
                                     if (targetPeer) {
                                         const p = connectedPeers[targetPeer];
                                         if (p && p.dc && p.dc.readyState === 'open') p.dc.send(msg);
@@ -217,7 +224,7 @@ window.Color = {
                         },
                         onPeerJoin: cb => listeners.peerJoin.push(cb),
                         onPeerLeave: cb => listeners.peerLeave.push(cb),
-                        getPeers: () => Object.keys(connectedPeers)
+                        getPeers: () => connectedPeers
                     };
                 }
             };
@@ -289,7 +296,7 @@ window.Color = {
             }
 
             // Handle Zoom Finished
-            if (event.data && event.data.type === 'zoom-finished') {
+            if (event.data && ['zoom-complete', 'zoom-finished', 'zoom-done'].includes(event.data.type)) {
                 window.dispatchEvent(new Event('color-zoom-finished'));
             }
         });
@@ -297,7 +304,7 @@ window.Color = {
         // Return Proxy Interface
         return {
             iframe,
-            send: (data) => { if (send) send(data); },
+            send: (data, target) => { if (send) send(data, target); },
             get: (cb) => {
                 if (get) get(cb);
                 else pendingGetCallbacks.push(cb);
