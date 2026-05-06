@@ -1472,25 +1472,6 @@
             opacity: 0.58;
         }
 
-        .block-buy-btn {
-            margin-top: 12px;
-            width: 100%;
-            border: 0;
-            border-radius: 4px;
-            padding: 10px;
-            background: #111;
-            color: #fff;
-            font-weight: 900;
-            cursor: pointer;
-        }
-
-        .block-purchases {
-            margin-top: 10px;
-            display: grid;
-            gap: 5px;
-            font-size: 0.8rem;
-        }
-
         .settings-group {
             margin-top: 20px;
             background: rgba(0, 0, 0, 0.05);
@@ -3491,6 +3472,7 @@
                 this.handlers = new Map()
                 this.verifiedPeers = new Set()
                 this.peerIdentities = new Map()
+                this.blockActionSenders = {}
                 this.outgoingQrSecret = null
                 this.expectedQrSecret = null
 
@@ -3508,8 +3490,9 @@
                 const [sendId, onId] = this.room.makeAction('identity')
                 const [sendCursor, onCursor] = this.room.makeAction('sync-cursor')
                 const [sendFile, onFile] = this.room.makeAction('file')
-                const [sendStoreOps, onStoreOps] = this.room.makeAction('store_ops')
-                this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId; this.rawSendCursor = sendCursor; this.rawSendFile = sendFile; this.rawSendStoreOps = sendStoreOps
+                const [sendBlockOps, onBlockOps] = this.room.makeAction('store_ops')
+                this.blockActionSenders.store_ops = sendBlockOps
+                this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId; this.rawSendCursor = sendCursor; this.rawSendFile = sendFile
 
                 this.room.onPeerJoin(async pid => {
                     console.log(`%c[P2P] Peer Joined: ${pid}`, 'color: cyan; font-weight: bold;')
@@ -3581,7 +3564,7 @@
                 onFile((d, p) => {
                     if (this.verifiedPeers.has(p)) this.emit('file', d, p)
                 })
-                onStoreOps((d, p) => this.emit('store_ops', d, p))
+                onBlockOps((d, p) => this.emit('block-action', 'store_ops', d, p))
                 this.room.onPeerLeave(p => { this.peerIdentities.delete(p); this.emit('peer-leave', p) })
             }
 
@@ -3638,7 +3621,7 @@
                 if (targetPeerId) this.rawSendCursor(data, targetPeerId)
                 else for (const pid of this.verifiedPeers) this.rawSendCursor(data, pid)
             }
-            sendStoreOps(data, targetPeerId = null) { this.rawSendStoreOps(data, targetPeerId) }
+            sendBlockAction(namespace, data, targetPeerId = null) { this.blockActionSenders[namespace]?.(data, targetPeerId) }
             getPeers() { return this.room.getPeers() }
             getDiscoveredPeers() { return this.room.getDiscoveredPeers() }
             enableSync() { this.room.enableSync() }
@@ -5450,7 +5433,8 @@
                 this.blocks = []
                 this.blockDefs = new Map()
                 this.activeBlockDefinition = null
-                this.blockRuntime = { buyers: new Map() }
+                this.blockSetupState = {}
+                this.blockRuntime = new Map()
                 this.secureQrBootstrap = new SecureQrRoomBootstrap(session => {
                     this.enterSecureSharedRoom(session).catch(error => {
                         console.error('Secure room transition failed:', error)
@@ -5476,7 +5460,6 @@
 
                 this.bindEvents()
                 this.setupGlobalExposure()
-                this.loadBlockDefinitions()
 
                 this.runSystemDiagnostics()
             }
@@ -5529,19 +5512,11 @@
                 const def = this.blockDefs.get(blockId)
                 if (!def) return
                 this.activeBlockDefinition = def
-                const title = document.getElementById('block-form-title')
-                const fields = document.getElementById('block-form-fields')
-                if (title) title.textContent = def.name || blockId
-                if (fields) {
-                    fields.innerHTML = (def.fields || []).map(field => {
-                        const id = 'block-field-' + field.id
-                        const type = field.secret ? 'password' : (field.type || 'text')
-                        const input = type === 'textarea'
-                            ? `<textarea id="${this.escapeAttr(id)}" class="settings-input" data-block-field="${this.escapeAttr(field.id)}"></textarea>`
-                            : `<input id="${this.escapeAttr(id)}" class="settings-input" type="${this.escapeAttr(type)}" data-block-field="${this.escapeAttr(field.id)}" autocomplete="off">`
-                        return `<label class="settings-label" for="${this.escapeAttr(id)}">${this.escapeHtml(field.label || field.id)}</label>${input}`
-                    }).join('')
-                }
+                this.blockSetupState = {}
+                document.getElementById('block-form-title').textContent = def.name || blockId
+                document.getElementById('block-form-fields').innerHTML = def.setupView?.html || this.renderDefaultBlockForm(def)
+                const submit = document.querySelector('#create-block-panel .create-block-submit')
+                if (submit) submit.textContent = def.setupView?.submitLabel || 'SUBMIT'
                 document.body.classList.add('create-block-mode')
                 document.getElementById('create-block-panel')?.classList.add('visible')
                 this.peeking = true
@@ -5552,27 +5527,76 @@
                 this.updatePeekState(0)
             }
 
+            renderDefaultBlockForm(def) {
+                return (def.fields || []).map(field => {
+                    const id = 'block-field-' + field.id
+                    const type = field.secret ? 'password' : (field.type || 'text')
+                    const input = type === 'textarea'
+                        ? `<textarea id="${this.escapeAttr(id)}" class="settings-input" data-block-field="${this.escapeAttr(field.id)}"></textarea>`
+                        : `<input id="${this.escapeAttr(id)}" class="settings-input" type="${this.escapeAttr(type)}" data-block-field="${this.escapeAttr(field.id)}" autocomplete="off">`
+                    return `<label class="settings-label" for="${this.escapeAttr(id)}">${this.escapeHtml(field.label || field.id)}</label>${input}`
+                }).join('')
+            }
+
             closeBlockForm() {
                 document.body.classList.remove('create-block-mode')
                 document.getElementById('create-block-panel')?.classList.remove('visible')
                 this.activeBlockDefinition = null
+                this.blockSetupState = {}
+            }
+
+            blockFormFields() {
+                const fields = {}
+                document.querySelectorAll('#block-form-fields [data-block-field]').forEach(input => {
+                    fields[input.dataset.blockField] = input.value.trim()
+                })
+                return fields
+            }
+
+            async encryptBlockSecret(value) {
+                return value ? { secret: true, encrypted: this.bufferToBase64(await this.identity._call('encrypt', value)), savedAt: Date.now() } : null
+            }
+
+            async runBlockScript(script, context) {
+                if (!script) return null
+                return new Function('context', `with (context) { return (async () => { ${script}\n })(); }`)(context)
             }
 
             async collectBlockFormData(def) {
-                const raw = {}
-                document.querySelectorAll('#block-form-fields [data-block-field]').forEach(input => {
-                    raw[input.dataset.blockField] = input.value.trim()
+                const fields = this.blockFormFields()
+                const setupResult = await this.runBlockScript(def.setupView?.js, {
+                    app: this,
+                    def,
+                    fields,
+                    root: document.getElementById('block-form-fields'),
+                    state: this.blockSetupState,
+                    encryptSecret: value => this.encryptBlockSecret(value),
+                    setSubmitLabel: text => {
+                        const submit = document.querySelector('#create-block-panel .create-block-submit')
+                        if (submit) submit.textContent = text
+                    },
+                    escapeHtml: value => this.escapeHtml(value)
                 })
+                if (setupResult?.stop || setupResult?.data) return setupResult
                 const data = {}
                 for (const field of def.fields || []) {
-                    const value = raw[field.id] || ''
-                    if (field.secret) {
-                        data[field.id] = value ? { secret: true, encrypted: this.bufferToBase64(await this.identity._call('encrypt', value)), savedAt: Date.now() } : null
-                    } else {
-                        data[field.id] = value
-                    }
+                    const value = fields[field.id] || ''
+                    data[field.id] = field.secret ? await this.encryptBlockSecret(value) : value
                 }
-                return data
+                return { data }
+            }
+
+            snapshotBlockDefinition(def) {
+                return JSON.parse(JSON.stringify(def || {}))
+            }
+
+            getBlockDefinition(payload) {
+                const blockId = typeof payload === 'string' ? payload : payload?.blockId
+                return payload?.definition || this.blockDefs.get(blockId) || { id: blockId, name: blockId, fields: [] }
+            }
+
+            getInstalledBlockPayloads() {
+                return Array.from(this.ui.display.querySelectorAll('[data-block-payload]')).map(widget => this.parseBlockPayload(widget.dataset.blockPayload || '')).filter(Boolean)
             }
 
             makeBlockInstanceId(blockId) {
@@ -5606,11 +5630,14 @@
                 const def = this.activeBlockDefinition
                 if (!def || !this.store || !this.roomId) return
                 try {
+                    const setup = await this.collectBlockFormData(def)
+                    if (setup?.stop) return
                     const payload = {
                         type: 'block',
                         blockId: def.id,
                         instanceId: this.makeBlockInstanceId(def.id),
-                        data: await this.collectBlockFormData(def),
+                        definition: this.snapshotBlockDefinition(def),
+                        data: setup?.data || {},
                         created: Date.now()
                     }
                     const line = this.findBlockInsertLine()
@@ -5620,6 +5647,7 @@
                     line.classList.add('block-line')
                     line.contentEditable = 'false'
                     line.innerHTML = this.renderBlockContent(payload, this.user.color.replace('#', ''))
+                    this.hydrateBlockLine(line, payload, this.user.color.replace('#', ''))
                     this.currentLineId = line.id
                     await this.store.handleLocalUpdate(meta.index, content, this.user.color)
                     this.closeBlockForm()
@@ -5648,80 +5676,96 @@
                 return line?.innerText.trim().length > 0 ? line.innerHTML : null
             }
 
-            blockSecretSaved(data, fieldId) {
-                const value = data?.[fieldId]
-                return !!(value && typeof value === 'object' && value.secret && value.encrypted)
+            readTemplatePath(source, path) {
+                return String(path || '').split('.').reduce((obj, key) => obj?.[key], source)
             }
 
-            getBuyerCount(instanceId) {
-                const buyers = this.blockRuntime.buyers.get(instanceId)
-                if (!buyers) return 0
+            renderTemplate(template, context) {
+                return String(template || '').replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, path) => this.escapeHtml(this.readTemplatePath(context, path) ?? ''))
+            }
+
+            blockSecretStatuses(data = {}, def = null) {
+                const statuses = {}
+                for (const field of def?.fields || []) if (field.secret) statuses[field.id] = data[field.id]?.encrypted ? 'Saved' : 'Not set'
+                Object.entries(data).forEach(([key, value]) => {
+                    if (value && typeof value === 'object' && value.secret) statuses[key] = value.encrypted ? 'Saved' : 'Not set'
+                })
+                return statuses
+            }
+
+            getRuntimeBucket(instanceId, key) {
+                if (!this.blockRuntime.has(instanceId)) this.blockRuntime.set(instanceId, new Map())
+                const block = this.blockRuntime.get(instanceId)
+                if (!block.has(key)) block.set(key, new Map())
+                return block.get(key)
+            }
+
+            setRuntimePeer(instanceId, key, peerId, value = {}) {
+                this.getRuntimeBucket(instanceId, key).set(peerId, { ...value, ts: Date.now() })
+                this.renderBlockRuntime(instanceId)
+            }
+
+            runtimeCount(instanceId, key) {
+                const bucket = this.getRuntimeBucket(instanceId, key)
                 const now = Date.now()
-                for (const [pid, buyer] of buyers.entries()) if (now - buyer.ts > 120000) buyers.delete(pid)
-                return buyers.size
+                for (const [peerId, value] of bucket.entries()) if (now - (value.ts || 0) > 120000) bucket.delete(peerId)
+                return bucket.size
             }
 
             getPublicBlockData(payload) {
-                const def = this.blockDefs.get(payload.blockId)
+                const def = this.getBlockDefinition(payload)
                 const data = { blockInstanceId: payload.instanceId }
-                for (const field of def?.fields || []) {
-                    if (field.secret) continue
-                    if (field.public || def.peerView?.fields?.includes(field.id) || def.buyerView?.fields?.includes(field.id)) data[field.id] = payload.data?.[field.id] || ''
-                }
+                for (const field of def?.fields || []) if (!field.secret && field.public) data[field.id] = payload.data?.[field.id] || ''
+                for (const fieldId of def?.detectedFields || []) data[fieldId] = payload.data?.[fieldId] || ''
                 return data
             }
 
+            getBlockView(def, isAdmin) {
+                return (isAdmin ? def.adminView : def.peerView) || def.peerView || def.adminView || {}
+            }
+
             renderBlockContent(payload, ownerHex) {
-                const def = this.blockDefs.get(payload.blockId) || { id: payload.blockId, name: payload.blockId, fields: [] }
+                const def = this.getBlockDefinition(payload)
                 const myHex = this.user.color.replace('#', '').toLowerCase()
                 const isAdmin = String(ownerHex || '').replace('#', '').toLowerCase() === myHex
-                if (payload.blockId === 'store') return this.renderStoreBlock(payload, def, isAdmin)
-                if (payload.blockId === 'github') return this.renderGithubBlock(payload, def, isAdmin)
-                return this.renderGenericBlock(payload, def, isAdmin)
+                const view = this.getBlockView(def, isAdmin)
+                const body = view.html ? this.renderTemplate(view.html, { payload, data: payload.data || {}, secrets: this.blockSecretStatuses(payload.data, def) }) : this.renderGenericBlockBody(payload, def, isAdmin)
+                return this.renderBlockShell(payload, def, view, body)
             }
 
-            renderBlockShell(payload, def, body, extra = '') {
+            renderBlockShell(payload, def, view, body) {
                 const encoded = this.escapeAttr(JSON.stringify(payload))
-                return `<div class="color-block-widget" contenteditable="false" data-block-id="${this.escapeAttr(payload.blockId)}" data-block-instance="${this.escapeAttr(payload.instanceId)}" data-block-payload="${encoded}"><div class="color-block-header"><span class="block-icon">${def.svgIcon || ''}</span><span>${this.escapeHtml(def.name || payload.blockId)}</span></div>${body}${extra}</div>`
+                const style = view.css ? `<style>${view.css}</style>` : ''
+                return `<div class="color-block-widget" contenteditable="false" data-block-id="${this.escapeAttr(payload.blockId)}" data-block-instance="${this.escapeAttr(payload.instanceId)}" data-block-payload="${encoded}">${style}<div class="color-block-header"><span class="block-icon">${def.svgIcon || ''}</span><span>${this.escapeHtml(def.name || payload.blockId)}</span></div>${body}</div>`
             }
 
-            renderStoreBlock(payload, def, isAdmin) {
-                const data = payload.data || {}
-                const product = data.productName || 'Product'
-                const price = data.productPrice || ''
-                const base = `<div class="color-block-meta">
-                    <div><b>STORE</b><span>${this.escapeHtml(data.storeName || 'Untitled store')}</span></div>
-                    <div><b>PRODUCT</b><span>${this.escapeHtml(product)}</span></div>
-                    <div><b>PRICE</b><span>${this.escapeHtml(price)}</span></div>
-                </div>`
-                if (!isAdmin) {
-                    const checkout = data.stripeCheckoutUrl || ''
-                    return this.renderBlockShell(payload, def, base, `<button class="block-buy-btn" type="button" data-block-buy="${this.escapeAttr(payload.instanceId)}" data-checkout-url="${this.escapeAttr(checkout)}">BUY</button>`)
-                }
-                const purchases = Array.isArray(data.purchases) ? data.purchases : []
-                const purchaseHtml = purchases.length ? purchases.slice(0, 5).map(item => `<div>${this.escapeHtml(item.buyerColor || 'buyer')} bought ${this.escapeHtml(item.productName || product)} ${this.escapeHtml(item.productPrice || price)}</div>`).join('') : '<div>No purchases yet</div>'
-                const admin = `<div class="color-block-meta" style="margin-top:10px;">
-                    <div><b>BUYERS</b><span class="block-buyers-count">${this.getBuyerCount(payload.instanceId)}</span></div>
-                    <div><b>STRIPE</b><span>${this.blockSecretSaved(data, 'stripeApiKey') ? 'API key saved' : 'No API key'}</span></div>
-                    <div><b>PRINTFUL</b><span>${this.blockSecretSaved(data, 'printfulApiKey') ? 'API key saved' : 'No API key'}</span></div>
-                </div><div class="block-purchases">${purchaseHtml}</div>`
-                return this.renderBlockShell(payload, def, base + admin)
-            }
-
-            renderGithubBlock(payload, def, isAdmin) {
-                const data = payload.data || {}
-                const body = `<div class="color-block-meta">
-                    <div><b>USER</b><span>${this.escapeHtml(data.username || 'not set')}</span></div>
-                    <div><b>REPO</b><span>${this.escapeHtml(data.repo || 'not set')}</span></div>
-                    <div><b>BRANCH</b><span>${this.escapeHtml(data.branch || 'main')}</span></div>
-                    ${isAdmin ? `<div><b>TOKEN</b><span>${this.blockSecretSaved(data, 'githubToken') ? 'Token saved' : 'No token'}</span></div>` : ''}
-                </div>`
-                return this.renderBlockShell(payload, def, body)
-            }
-
-            renderGenericBlock(payload, def, isAdmin) {
+            renderGenericBlockBody(payload, def, isAdmin) {
                 const rows = (def.fields || []).filter(field => isAdmin || !field.secret).map(field => `<div><b>${this.escapeHtml(field.label || field.id)}</b><span>${field.secret ? 'Saved' : this.escapeHtml(payload.data?.[field.id] || '')}</span></div>`).join('')
-                return this.renderBlockShell(payload, def, `<div class="color-block-meta">${rows}</div>`)
+                return `<div class="color-block-meta">${rows}</div>`
+            }
+
+            hydrateBlockLine(line, payload = null, ownerHex = null) {
+                const block = payload || this.parseBlockPayload(this.getLineContentForSave(line))
+                if (!block) return
+                const owner = ownerHex || line.getAttribute('data-lock-owner') || this.roomId?.replace('color-', '') || this.user.color.replace('#', '')
+                const def = this.getBlockDefinition(block)
+                const isAdmin = String(owner || '').replace('#', '').toLowerCase() === this.user.color.replace('#', '').toLowerCase()
+                const widget = line.querySelector('[data-block-instance]')
+                if (!def || !widget) return
+                this.runBlockScript(this.getBlockView(def, isAdmin).js, {
+                    app: this,
+                    root: widget,
+                    payload: block,
+                    data: block.data || {},
+                    def,
+                    isAdmin,
+                    userColor: this.user.color,
+                    escapeHtml: value => this.escapeHtml(value),
+                    publicData: next => this.getPublicBlockData(next),
+                    send: (message, targetPeer = null) => this.sendBlockMessage(def, message, targetPeer),
+                    runtimeCount: key => this.runtimeCount(block.instanceId, key),
+                    updateBlock: updater => this.updateBlockPayload(block.instanceId, updater)
+                }).catch(error => console.error('[Blocks] view script failed', error))
             }
 
             hydrateBlockLines() {
@@ -5732,6 +5776,7 @@
                     line.classList.add('block-line')
                     line.contentEditable = 'false'
                     line.innerHTML = this.renderBlockContent(payload, owner)
+                    this.hydrateBlockLine(line, payload, owner)
                 })
             }
 
@@ -5740,8 +5785,8 @@
                 return this.parseBlockPayload(widget?.dataset.blockPayload || '')
             }
 
-            getFirstStoreBlockPayload() {
-                const widget = this.ui.display.querySelector('[data-block-id="store"][data-block-payload]')
+            findFirstBlockPayload(blockId) {
+                const widget = this.ui.display.querySelector(`[data-block-id="${this.escapeAttr(blockId)}"][data-block-payload]`)
                 return this.parseBlockPayload(widget?.dataset.blockPayload || '')
             }
 
@@ -5756,67 +5801,51 @@
                 line.innerHTML = this.renderBlockContent(updated, this.user.color.replace('#', ''))
                 line.classList.add('block-line')
                 line.contentEditable = 'false'
+                this.hydrateBlockLine(line, updated, this.user.color.replace('#', ''))
                 await this.store.handleLocalUpdate(meta.index, content, this.user.color)
             }
 
-            setStoreBuyerOnline(instanceId, pid, data = {}) {
-                if (!this.blockRuntime.buyers.has(instanceId)) this.blockRuntime.buyers.set(instanceId, new Map())
-                this.blockRuntime.buyers.get(instanceId).set(pid, { color: data.buyerColor || data.data?.buyerColor || '#ffffff', ts: Date.now() })
-                this.renderBlockRuntime(instanceId)
-            }
-
             renderBlockRuntime(instanceId) {
-                this.ui.display.querySelectorAll(`[data-block-instance="${this.escapeAttr(instanceId)}"] .block-buyers-count`).forEach(el => {
-                    el.textContent = this.getBuyerCount(instanceId)
+                this.ui.display.querySelectorAll(`[data-block-instance="${this.escapeAttr(instanceId)}"]`).forEach(widget => {
+                    const line = widget.closest('.editor-line')
+                    const payload = this.parseBlockPayload(widget.dataset.blockPayload || '')
+                    if (line && payload) this.hydrateBlockLine(line, payload, this.user.color.replace('#', ''))
                 })
             }
 
-            handleStorePeerLeave(pid) {
-                this.blockRuntime.buyers.forEach((buyers, instanceId) => {
-                    if (buyers.delete(pid)) this.renderBlockRuntime(instanceId)
+            handleBlockPeerLeave(pid) {
+                this.blockRuntime.forEach((runtime, instanceId) => {
+                    runtime.forEach(bucket => bucket.delete(pid))
+                    this.renderBlockRuntime(instanceId)
                 })
             }
 
-            handleStoreOps(data, pid) {
-                const type = data?.type
-                if (!type) return
-                if (type === 'PING') {
-                    const payload = this.getFirstStoreBlockPayload()
-                    if (!payload) return
-                    this.setStoreBuyerOnline(payload.instanceId, pid, data)
-                    this.mesh?.sendStoreOps?.({ type: 'CATALOG', blockInstanceId: payload.instanceId, data: this.getPublicBlockData(payload) }, pid)
-                    return
-                }
-                if (type !== 'ORDER' && type !== 'PURCHASE_INTENT') return
-                const payload = data.blockInstanceId ? this.getBlockPayloadByInstance(data.blockInstanceId) : this.getFirstStoreBlockPayload()
-                if (!payload) return
-                const purchase = {
-                    id: 'purchase-' + Date.now().toString(36),
-                    buyerColor: data.buyerColor || data.data?.buyerColor || this.peerColors[pid] || '#ffffff',
-                    productName: payload.data?.productName || data.data?.productName || 'Product',
-                    productPrice: payload.data?.productPrice || data.data?.productPrice || '',
-                    details: data.data || {},
-                    created: Date.now()
-                }
-                this.updateBlockPayload(payload.instanceId, next => {
-                    if (!next.data) next.data = {}
-                    next.data.purchases = [purchase, ...((Array.isArray(next.data.purchases) && next.data.purchases) || [])].slice(0, 20)
-                    return next
-                }).catch(error => console.error('[Blocks] purchase save failed', error))
-                this.mesh?.sendStoreOps?.({ type: 'CONFIRMED', id: purchase.id }, pid)
+            sendBlockMessage(def, message, targetPeer = null) {
+                const namespace = def.actions?.namespace || def.action
+                if (namespace) this.mesh?.sendBlockAction?.(namespace, message, targetPeer)
             }
 
-            handleBlockBuy(button) {
-                const payload = this.getBlockPayloadByInstance(button.dataset.blockBuy)
-                if (!payload) return
-                const catalog = this.getPublicBlockData(payload)
-                this.mesh?.sendStoreOps?.({
-                    type: 'PURCHASE_INTENT',
-                    blockInstanceId: payload.instanceId,
-                    buyerColor: this.user.color,
-                    data: catalog
+            handleBlockAction(namespace, data, pid) {
+                const installed = this.getInstalledBlockPayloads().find(payload => {
+                    const def = this.getBlockDefinition(payload)
+                    return def.actions?.namespace === namespace || def.action === namespace
                 })
-                if (catalog.stripeCheckoutUrl) window.open(catalog.stripeCheckoutUrl, '_blank')
+                const def = installed ? this.getBlockDefinition(installed) : this.blocks.find(block => block.actions?.namespace === namespace || block.action === namespace)
+                if (!def?.actions?.js) return
+                this.runBlockScript(def.actions.js, {
+                    app: this,
+                    def,
+                    data,
+                    pid,
+                    userColor: this.user.color,
+                    escapeHtml: value => this.escapeHtml(value),
+                    publicData: payload => this.getPublicBlockData(payload),
+                    send: (message, targetPeer = pid) => this.sendBlockMessage(def, message, targetPeer),
+                    findFirstBlock: blockId => this.findFirstBlockPayload(blockId),
+                    getBlock: instanceId => this.getBlockPayloadByInstance(instanceId),
+                    updateBlock: (instanceId, updater) => this.updateBlockPayload(instanceId, updater),
+                    setRuntimePeer: (instanceId, key, peerId, value) => this.setRuntimePeer(instanceId, key, peerId, value)
+                }).catch(error => console.error('[Blocks] action script failed', error))
             }
 
             cloneSignature(signature) {
@@ -6085,6 +6114,7 @@
                 document.body.classList.remove('create-block-mode')
                 document.getElementById('create-block-panel')?.classList.remove('visible')
                 this.activeBlockDefinition = null
+                this.blockSetupState = {}
                 if (this.halfPeekMode) this.exitHalfPeek()
                 if (!this.peeking) return
                 this.togglePeek()
@@ -6109,6 +6139,7 @@
                 document.getElementById('view-' + targetId)?.classList.add('active')
 
                 if (targetId === 'blocks' || targetId === 'settings') this.resetSectionTabs(targetId)
+                if (targetId === 'blocks') this.loadBlockDefinitions()
 
                 const currentHashParts = window.location.hash.split('/').filter(Boolean)
                 const hex = currentHashParts[0] || this.roomId?.replace('color-', '#') || '#ffffff'
@@ -6755,8 +6786,8 @@
                     if (this.currentLineId) this.mesh.broadcastLock({ lineId: this.currentLineId, userColor: this.user.color })
                 })
 
-                this.mesh.on('peer-leave', pid => { this.joinApprovedPeers.delete(pid); this.handleStorePeerLeave(pid); this.updateStatus(); this.reapplyVisualLocks() })
-                this.mesh.on('store_ops', (data, pid) => this.handleStoreOps(data, pid))
+                this.mesh.on('peer-leave', pid => { this.joinApprovedPeers.delete(pid); this.handleBlockPeerLeave(pid); this.updateStatus(); this.reapplyVisualLocks() })
+                this.mesh.on('block-action', (namespace, data, pid) => this.handleBlockAction(namespace, data, pid))
 
                 this.mesh.on('peer-identity', async (data, pid) => {
                     this.peerColors[pid] = data?.color || '#ffffff'
@@ -6844,6 +6875,7 @@
                     if (blockPayload) {
                         el.innerHTML = this.renderBlockContent(blockPayload, newOwner)
                         el.classList.add('block-line')
+                        this.hydrateBlockLine(el, blockPayload, newOwner)
                     } else {
                         el.classList.remove('block-line')
                         if (el.innerHTML !== newContent && !keepLiveFile) el.innerHTML = this.sanitize(newContent || '<br>')
@@ -6991,7 +7023,8 @@
                 document.getElementById('settings-btn').addEventListener('click', () => {
                     this.openMainSection('settings')
                 })
-                document.getElementById('create-app-btn').addEventListener('click', () => {
+                document.getElementById('create-app-btn').addEventListener('click', async () => {
+                    if (!this.blocks.length) await this.loadBlockDefinitions()
                     if (this.blocks[0]) this.openBlockForm(this.blocks[0].id)
                 })
                 document.getElementById('blocks-discovery-grid')?.addEventListener('click', e => {
@@ -6999,10 +7032,6 @@
                     if (btn) this.openBlockForm(btn.dataset.addBlock)
                 })
                 document.querySelector('#create-block-panel .create-block-submit')?.addEventListener('click', () => this.submitBlockForm())
-                this.ui.display.addEventListener('click', e => {
-                    const buy = e.target.closest('[data-block-buy]')
-                    if (buy) this.handleBlockBuy(buy)
-                })
                 document.querySelectorAll('.sub-tab').forEach(tab => {
                     tab.addEventListener('click', () => {
                         const group = tab.getAttribute('data-group'), target = tab.getAttribute('data-tab')
@@ -7689,7 +7718,7 @@
             renderInitialState(data, centerIndex) {
                 let html = ''; const roomHex = this.roomId.replace('color-', '')
                 for (let i = centerIndex - 50; i <= centerIndex + 50; i++) html += this.reconstructLine(roomHex + i, data[i]?.content, data[i]?.owner)
-                this.ui.display.innerHTML = html; this.fileTransfers.hydrateAll(); this.focusLine(centerIndex)
+                this.ui.display.innerHTML = html; this.fileTransfers.hydrateAll(); this.hydrateBlockLines(); this.focusLine(centerIndex)
             }
 
             focusLine(index) {
