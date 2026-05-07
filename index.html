@@ -1525,6 +1525,26 @@
             cursor: pointer;
         }
 
+        .create-inline-block-btn {
+            position: absolute;
+            top: 0;
+            right: 0;
+            z-index: 4;
+            border: 0;
+            border-radius: 6px;
+            background: #111;
+            color: #fff;
+            padding: 5px 8px;
+            font-size: 0.68rem;
+            font-weight: 900;
+            letter-spacing: 0;
+            cursor: pointer;
+        }
+
+        .editor-line.custom-block-draft {
+            padding-right: 118px;
+        }
+
         .block-form-title {
             margin: 0 0 18px;
             font-size: 1.5rem;
@@ -5752,6 +5772,7 @@
                     const json = await res.json()
                     this.blocks = Array.isArray(json) ? json : (json.blocks || [])
                     this.blockDefs = new Map(this.blocks.map(block => [block.id, block]))
+                    this.registerBlockComponents()
                     this.blocksOffline = false
                     this.updateBlocksOfflineMode()
                     this.renderBlockDiscovery()
@@ -5778,6 +5799,18 @@
                 return ids
             }
 
+            blockComponentTag(blockId) {
+                const safe = String(blockId || 'block').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'block'
+                return safe.endsWith('-block') ? safe : safe + '-block'
+            }
+
+            registerBlockComponents() {
+                this.blocks.forEach(block => {
+                    const tag = this.blockComponentTag(block.id)
+                    if (window.customElements && !customElements.get(tag)) customElements.define(tag, class extends HTMLElement { })
+                })
+            }
+
             isBlockInstalled(blockId, installedPayloads = (this.localBlockPayloadCache?.length ? this.localBlockPayloadCache : this.getInstalledBlockPayloads())) {
                 return this.installedBlockIds(installedPayloads).has(blockId)
             }
@@ -5787,8 +5820,9 @@
             }
 
             blockCard(block, addable = true) {
+                const editable = !addable && String(block?.category || '').toUpperCase() === 'CUSTOM'
                 return `
-                    <div class="block-card" data-block-id="${this.escapeAttr(block.id)}">
+                    <div class="block-card" data-block-id="${this.escapeAttr(block.id)}"${editable ? ` data-edit-block="${this.escapeAttr(block.id)}"` : ''}>
                         ${addable ? `<button class="block-add-btn" type="button" data-add-block="${this.escapeAttr(block.id)}" title="Add ${this.escapeAttr(block.name)}">+</button>` : ''}
                         <div class="block-icon">${block.svgIcon || ''}</div>
                         <div class="block-name">${this.escapeHtml(block.name || block.id)}</div>
@@ -5845,6 +5879,11 @@
                 document.getElementById('block-form-title').textContent = def.name || blockId
                 document.getElementById('block-form-fields').innerHTML = def.setupView?.html || this.renderDefaultBlockForm(def)
                 document.querySelectorAll('#block-form-fields .settings-input').forEach(input => {
+                    input.setAttribute('inputmode', 'none')
+                    input.setAttribute('autocomplete', 'off')
+                    input.setAttribute('autocorrect', 'off')
+                    input.setAttribute('autocapitalize', 'off')
+                    if (window.__mobileKeyboardBind) window.__mobileKeyboardBind(input)
                     const sync = () => input.classList.toggle('has-value', !!input.value.trim())
                     input.addEventListener('input', sync)
                     input.addEventListener('change', sync)
@@ -5908,7 +5947,7 @@
                 })
             }
 
-            createCustomBlockFromHtml(source, root) {
+            createCustomBlockFromHtml(source, root, preferredId = null) {
                 if (!source) {
                     alert('Paste full HTML first.')
                     return { stop: true }
@@ -5932,19 +5971,26 @@
                     }
                     alert(message)
                 }
-                const name = (doc.querySelector('title')?.textContent || doc.querySelector('h1')?.textContent || 'CUSTOM HTML').trim().slice(0, 40) || 'CUSTOM HTML'
-                const id = 'custom-html-' + Date.now().toString(36)
+                const id = preferredId || 'custom-html-' + Date.now().toString(36)
+                const name = (preferredId || doc.querySelector('title')?.textContent || doc.querySelector('h1')?.textContent || 'CUSTOM HTML').trim().slice(0, 40).toUpperCase() || 'CUSTOM HTML'
+                return { definition: this.customBlockDefinition(id, name, source, html, css, js), data: {} }
+            }
+
+            customBlockDefinition(id, name, source, html = DOMPurify.sanitize(source || ''), css = '', js = '') {
+                const baseCss = `.color-block-widget[data-block-id="${this.escapeAttr(id)}"]{border:0;background:transparent;padding:0}.color-block-widget[data-block-id="${this.escapeAttr(id)}"] .color-block-header{display:none}`
                 return {
-                    definition: {
-                        id,
-                        name,
-                        category: 'CUSTOM',
-                        svgIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg>',
-                        fields: [],
-                        adminView: { html, css, js },
-                        peerView: { html, css, js }
+                    id,
+                    name,
+                    category: 'CUSTOM',
+                    svgIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg>',
+                    fields: [],
+                    setupView: {
+                        submitLabel: 'SAVE BLOCK',
+                        html: `<label class="settings-label" for="block-field-sourceHtml">HTML</label><textarea id="block-field-sourceHtml" class="settings-input" data-block-field="sourceHtml" style="min-height:320px">${this.escapeHtml(source || html || '')}</textarea><div class="settings-hint" data-custom-html-warning style="display:none"></div>`,
+                        js: 'return app.createCustomBlockFromHtml(fields.sourceHtml, root, def.id);'
                     },
-                    data: {}
+                    adminView: { html, css: baseCss + css, js },
+                    peerView: { html, css: baseCss + css, js }
                 }
             }
 
@@ -6078,7 +6124,7 @@
             }
 
             async openFirstMissingRequiredBlock(def) {
-                if (!this.blocks.length) await this.loadBlockDefinitions()
+                if (!this.blocks.length) return
                 const payloads = await this.getLocalBlockPayloads()
                 const next = this.firstMissingRequiredBlock(def, payloads)
                 if (next) this.openBlockForm(next)
@@ -6119,7 +6165,7 @@
                 if (!grid) return
                 this.getLocalBlockPayloads().then(payloads => {
                     const ids = this.installedBlockIds(payloads)
-                    const installed = Array.from(ids).map(id => this.blockDefs.get(id) || payloads.find(payload => payload.blockId === id)?.definition).filter(Boolean)
+                    const installed = Array.from(ids).map(id => [...payloads].reverse().find(payload => payload.blockId === id && String(payload.definition?.category || '').toUpperCase() === 'CUSTOM')?.definition || this.blockDefs.get(id) || payloads.find(payload => payload.blockId === id)?.definition).filter(Boolean)
                     const suggested = this.suggestedInstalledBlocks(payloads, ids)
                     const installedHtml = installed.length ? this.renderBlockGroups(installed, false) : '<div class="settings-hint">No installed blocks yet.</div>'
                     const suggestedHtml = this.renderSuggestedBlockLinks(suggested)
@@ -6128,6 +6174,12 @@
                     console.error('[Blocks] installed failed', error)
                     grid.innerHTML = '<div class="settings-hint">Installed blocks unavailable.</div>'
                 })
+            }
+
+            async openInstalledCustomBlock(blockId) {
+                const payloads = await this.getLocalBlockPayloads()
+                const payload = [...payloads].reverse().find(item => item.blockId === blockId && String(item.definition?.category || '').toUpperCase() === 'CUSTOM')
+                if (payload?.definition) this.openBlockForm(payload.definition)
             }
 
             activateBlocksTab(target) {
@@ -6148,6 +6200,85 @@
 
             makeBlockInstanceId(blockId) {
                 return `${blockId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+            }
+
+            lineCloneWithoutActions(line) {
+                const clone = line?.cloneNode?.(true)
+                clone?.querySelectorAll?.('[data-create-custom-block]').forEach(el => el.remove())
+                return clone
+            }
+
+            customBlockIdFromTag(tag) {
+                const raw = String(tag || '').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+                return raw.endsWith('-block') ? raw.slice(0, -6) : raw
+            }
+
+            customBlockDraftFromLine(line) {
+                const text = (this.lineCloneWithoutActions(line)?.innerText || '').trim()
+                const match = text.match(/^<([a-z][a-z0-9-]*)(?:\s[^<>]*)?>([\s\S]+)<\/\1>$/i)
+                if (!match) return null
+                const id = this.customBlockIdFromTag(match[1])
+                const html = match[2].trim()
+                return id && html ? { id, html, source: text } : null
+            }
+
+            renderCustomBlockDraftAction(line) {
+                const existing = line?.querySelector?.('[data-create-custom-block]')
+                const draft = line?.isContentEditable ? this.customBlockDraftFromLine(line) : null
+                line?.classList.toggle('custom-block-draft', !!draft)
+                if (!draft) {
+                    existing?.remove()
+                    return
+                }
+                if (!existing) line.insertAdjacentHTML('beforeend', '<button class="create-inline-block-btn" type="button" contenteditable="false" data-create-custom-block>CREATE BLOCK</button>')
+            }
+
+            renderCustomBlockDraftActions() {
+                this.ui.display.querySelectorAll('.editor-line').forEach(line => this.renderCustomBlockDraftAction(line))
+            }
+
+            customBlockPayloadFromLine(line) {
+                const draft = this.customBlockDraftFromLine(line)
+                if (!draft) return null
+                const def = this.customBlockDefinition(draft.id, draft.id.toUpperCase(), draft.html)
+                return { type: 'block', blockId: def.id, instanceId: this.makeBlockInstanceId(def.id), definition: this.snapshotBlockDefinition(def), data: {}, created: Date.now(), componentSource: draft.source }
+            }
+
+            async convertCustomBlockDraft(line) {
+                const meta = this.parseId(line?.id)
+                const payload = this.customBlockPayloadFromLine(line)
+                if (!meta || !payload) return
+                const content = JSON.stringify(payload)
+                line.classList.remove('custom-block-draft')
+                line.classList.add('block-line')
+                line.contentEditable = 'false'
+                line.innerHTML = this.renderBlockContent(payload, this.user.color.replace('#', ''))
+                this.hydrateBlockLine(line, payload, this.user.color.replace('#', ''))
+                if (this.store) await this.store.handleLocalUpdate(meta.index, content, this.user.color)
+                this.renderInstalledBlocks()
+            }
+
+            resolveBlockComponent(name) {
+                const raw = String(name || '').toLowerCase()
+                const payloads = [...(this.localBlockPayloadCache || []), ...this.getInstalledBlockPayloads()].reverse()
+                if (raw.endsWith('-block')) {
+                    const id = raw.slice(0, -6)
+                    const custom = payloads.find(payload => payload.blockId === id && String(payload.definition?.category || '').toUpperCase() === 'CUSTOM')
+                    const installed = payloads.find(payload => payload.blockId === id)
+                    return custom?.definition || installed?.definition || this.blockDefs.get(id) || null
+                }
+                const custom = payloads.find(payload => payload.blockId === raw && String(payload.definition?.category || '').toUpperCase() === 'CUSTOM')
+                if (custom) return custom.definition
+                return null
+            }
+
+            async componentPayloadFromLine(line) {
+                const text = (this.lineCloneWithoutActions(line)?.innerText || '').trim()
+                const match = text.match(/^<([a-z][a-z0-9-]*)(?:\s[^<>]*)?\/>$/i) || text.match(/^<([a-z][a-z0-9-]*)(?:\s[^<>]*)?><\/\1>$/i)
+                if (!match) return null
+                const def = this.resolveBlockComponent(match[1])
+                if (!def) return null
+                return { type: 'block', blockId: def.id, instanceId: this.makeBlockInstanceId(def.id), definition: this.snapshotBlockDefinition(def), data: {}, created: Date.now(), componentSource: text }
             }
 
             isLineEmpty(line) {
@@ -6228,7 +6359,8 @@
             getLineContentForSave(line) {
                 const blockPayload = line?.querySelector?.('[data-block-payload]')?.dataset.blockPayload
                 if (blockPayload) return blockPayload
-                return line?.innerText.trim().length > 0 ? line.innerHTML : null
+                const clone = this.lineCloneWithoutActions(line)
+                return clone?.innerText.trim().length > 0 ? clone.innerHTML : null
             }
 
             readTemplatePath(source, path) {
@@ -6291,7 +6423,9 @@
             renderBlockShell(payload, def, view, body) {
                 const encoded = this.escapeAttr(JSON.stringify(payload))
                 const style = view.css ? `<style>${view.css}</style>` : ''
-                return `<div class="color-block-widget" contenteditable="false" data-block-id="${this.escapeAttr(payload.blockId)}" data-block-instance="${this.escapeAttr(payload.instanceId)}" data-block-payload="${encoded}">${style}<div class="color-block-header"><span class="block-icon">${def.svgIcon || ''}</span><span>${this.escapeHtml(def.name || payload.blockId)}</span></div>${body}</div>`
+                const tag = this.blockComponentTag(payload.blockId)
+                if (window.customElements && !customElements.get(tag)) customElements.define(tag, class extends HTMLElement { })
+                return `<${tag} class="color-block-widget" contenteditable="false" data-block-id="${this.escapeAttr(payload.blockId)}" data-block-instance="${this.escapeAttr(payload.instanceId)}" data-block-payload="${encoded}">${style}<div class="color-block-header"><span class="block-icon">${def.svgIcon || ''}</span><span>${this.escapeHtml(def.name || payload.blockId)}</span></div>${body}</${tag}>`
             }
 
             renderGenericBlockBody(payload, def, isAdmin) {
@@ -6710,7 +6844,7 @@
                 document.getElementById('view-' + targetId)?.classList.add('active')
 
                 if (targetId === 'blocks' || targetId === 'settings') this.resetSectionTabs(targetId)
-                if (targetId === 'blocks') this.loadBlockDefinitions()
+                if (targetId === 'blocks' && document.getElementById('tab-discover')?.classList.contains('active')) this.loadBlockDefinitions()
 
                 const currentHashParts = window.location.hash.split('/').filter(Boolean)
                 const hex = currentHashParts[0] || this.roomId?.replace('color-', '#') || '#ffffff'
@@ -7446,6 +7580,7 @@
                     if (blockPayload) {
                         el.innerHTML = this.renderBlockContent(blockPayload, newOwner)
                         el.classList.add('block-line')
+                        el.classList.remove('custom-block-draft')
                         this.hydrateBlockLine(el, blockPayload, newOwner)
                     } else {
                         el.classList.remove('block-line')
@@ -7456,6 +7591,7 @@
                     const amOwner = (newOwner === myHex)
                     el.contentEditable = blockPayload ? 'false' : ((isEmpty || amOwner) ? 'true' : 'false')
                     this.fileTransfers.hydrateLine(el)
+                    if (!blockPayload) this.renderCustomBlockDraftAction(el)
                     if (!isEmpty) {
                         clearTimeout(this.syncRetryTimeout)
                         this.syncRetryTimeout = null
@@ -7481,11 +7617,23 @@
 
                 const el = document.getElementById(lineId)
                 if (!el) return
-                const content = this.getLineContentForSave(el)
+                this.renderCustomBlockDraftAction(el)
+                const componentPayload = await this.componentPayloadFromLine(el)
+                const content = componentPayload ? JSON.stringify(componentPayload) : this.getLineContentForSave(el)
+                if (componentPayload) {
+                    el.classList.add('block-line')
+                    el.contentEditable = 'false'
+                    el.innerHTML = this.renderBlockContent(componentPayload, this.user.color.replace('#', ''))
+                    this.hydrateBlockLine(el, componentPayload, this.user.color.replace('#', ''))
+                }
                 console.log('[EditorApp] triggerSave', lineId, content)
 
                 if (this.store) {
                     await this.store.handleLocalUpdate(meta.index, content, this.user.color)
+                }
+                if (componentPayload) {
+                    this.renderBlockDiscovery()
+                    this.renderInstalledBlocks()
                 }
             }
 
@@ -7502,9 +7650,18 @@
 
                     if (line) {
                         this.currentLineId = line.id
+                        this.renderCustomBlockDraftAction(line)
                         this.scheduleCursorSave()
                         this.saveTimeout = setTimeout(() => this.triggerSave(line.id), 500)
                     }
+                })
+
+                this.ui.display.addEventListener('click', e => {
+                    const btn = e.target.closest('[data-create-custom-block]')
+                    if (!btn) return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    this.convertCustomBlockDraft(btn.closest('.editor-line'))
                 })
 
                 this.ui.chatContainer.addEventListener('scroll', () => this.checkBuffers())
@@ -7601,6 +7758,10 @@
                     grid.addEventListener('click', e => {
                         const btn = e.target.closest('[data-add-block]')
                         if (btn) this.openBlockForm(btn.dataset.addBlock)
+                        else if (grid.id === 'blocks-installed-grid') {
+                            const card = e.target.closest('[data-edit-block]')
+                            if (card) this.openInstalledCustomBlock(card.dataset.editBlock)
+                        }
                     })
                     grid.addEventListener('wheel', e => {
                         const row = e.target.closest('.blocks-row')
@@ -7619,7 +7780,7 @@
                 window.addEventListener('online', () => {
                     this.blocksOffline = false
                     this.updateBlocksOfflineMode()
-                    if (document.getElementById('view-blocks')?.classList.contains('active')) this.loadBlockDefinitions()
+                    if (document.getElementById('view-blocks')?.classList.contains('active') && document.getElementById('tab-discover')?.classList.contains('active')) this.loadBlockDefinitions()
                 })
                 document.querySelector('#create-block-panel .create-block-submit')?.addEventListener('click', () => this.submitBlockForm())
                 document.querySelector('#create-block-panel .create-block-suggestion')?.addEventListener('click', e => {
@@ -7689,7 +7850,7 @@
                         document.querySelector(`.content-view.active`)?.querySelectorAll('.settings-pane, .blocks-pane').forEach(p => p.classList.remove('active'))
                         document.querySelector(`.content-view.active #tab-${target}`)?.classList.add('active')
                         if (group === 'blocks' && target === 'installed') this.renderInstalledBlocks()
-                        if (group === 'blocks' && target === 'discover') this.renderBlockDiscovery()
+                        if (group === 'blocks' && target === 'discover') this.loadBlockDefinitions()
                     })
                 })
 
@@ -7762,7 +7923,7 @@
                 })
 
                 let ts = 0, isDrag = false
-                window.addEventListener('touchstart', e => { ts = e.touches[0].clientY; if (this.ui.dashboardPanel.classList.contains('active') && (ts < 150 || this.peeking || this.halfPeekMode)) isDrag = true }, { passive: true })
+                window.addEventListener('touchstart', e => { if (e.target.closest?.('#create-block-panel')) { isDrag = false; return } ts = e.touches[0].clientY; if (this.ui.dashboardPanel.classList.contains('active') && (ts < 150 || this.peeking || this.halfPeekMode)) isDrag = true }, { passive: true })
                 window.addEventListener('touchmove', e => {
                     if (!isDrag) return
                     const currentY = e.touches[0].clientY
@@ -8315,7 +8476,7 @@
             renderInitialState(data, centerIndex) {
                 let html = ''; const roomHex = this.roomId.replace('color-', '')
                 for (let i = centerIndex - 50; i <= centerIndex + 50; i++) html += this.reconstructLine(roomHex + i, data[i]?.content, data[i]?.owner)
-                this.ui.display.innerHTML = html; this.fileTransfers.hydrateAll(); this.hydrateBlockLines(); this.focusLine(centerIndex)
+                this.ui.display.innerHTML = html; this.fileTransfers.hydrateAll(); this.hydrateBlockLines(); this.renderCustomBlockDraftActions(); this.focusLine(centerIndex)
             }
 
             focusLine(index) {
@@ -9729,16 +9890,20 @@ self.onmessage = async (e) => {
 
         function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated && !state.renderPath && !state.practice.active && !state.practice.awaitingRedraw) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])) } else if (document.body.classList.contains('light-mode') && (state.renderPath || state.practice.active || state.practice.awaitingRedraw)) { document.body.style.backgroundColor = '' } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05 } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]) } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ] } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = '' } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t) } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = state.returning.clearHex ? '' : '#FFFFFF'; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '' } } } if (state.practice.active && !state.landing.active && (!state.returning || !state.returning.active)) advancePractice(dt); let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.returning?.targetDist || state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ] } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx] } }) }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95) } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2) } }) } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); if (!state.practice.awaitingRedraw) document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) } } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)) } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95 } } renderCurrentFrame(renderBackgroundLayer, bgCameraPos); requestAnimationFrame(loop) }
         function renderCurrentFrame(renderBackgroundLayer, bgCameraPos) {
+            if (document.body.classList.contains('light-mode')) {
+                renderBackgroundLayer = true
+                if (!bgCameraPos?.[2]) bgCameraPos = [0, 0, state.landing.targetDist || 1.25]
+            }
             if (state.renderer === 'webgpu') return renderWithWebGPU(renderBackgroundLayer, bgCameraPos)
-            if (state.renderer === 'webgl') return renderWithWebGL()
+            if (state.renderer === 'webgl') return renderWithWebGL(renderBackgroundLayer, bgCameraPos)
         }
         function renderWithWebGPU(renderBackgroundLayer, bgCameraPos) {
             if (!state.device || !state.pipelines.sphere || !state.msaaTexture) return
-            const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp) => {
+            const drawSphere = (encoder, viewProjMatrix, loadOp, depthOp, cameraPos = state.cameraPos) => {
                 state.uniforms.sphere.set(Mat4.multiply(viewProjMatrix, state.sphere.rotation), 0)
                 state.uniforms.sphere.set(state.sphere.rotation, 16)
                 state.uniforms.sphere.set(state.sphere.rotation, 32)
-                state.uniforms.sphere.set(state.cameraPos, 48)
+                state.uniforms.sphere.set(cameraPos, 48)
                     ;[0, 1, 2].forEach(i => {
                         state.uniforms.sphere.set(state.cones[i].pos, 52 + i * 8)
                         state.uniforms.sphere.set(state.cones[i].active ? state.cones[i].color : [0, 0, 0], 56 + i * 8)
@@ -9833,7 +9998,7 @@ self.onmessage = async (e) => {
             if (renderBackgroundLayer) {
                 const bgEncoder = state.device.createCommandEncoder()
                 const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0]))
-                const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard')
+                const bgPass = drawSphere(bgEncoder, bgVpMatrix, 'clear', 'discard', bgCameraPos)
                 bgPass.end()
                 state.device.queue.submit([bgEncoder.finish()])
                 const fgEncoder = state.device.createCommandEncoder()
@@ -9849,7 +10014,7 @@ self.onmessage = async (e) => {
             pass.end()
             state.device.queue.submit([encoder.finish()])
         }
-        function renderWithWebGL() {
+        function renderWithWebGL(renderBackgroundLayer, bgCameraPos) {
             const gl = state.gl
             if (!gl || !state.glPrograms.sphere || !state.glPrograms.solid) return
             gl.viewport(0, 0, state.canvas.width, state.canvas.height)
@@ -9860,11 +10025,16 @@ self.onmessage = async (e) => {
             const clear = document.body.classList.contains('light-mode') ? [0, 0, 0, 0] : [0, 0, 0, 1]
             gl.clearColor(clear[0], clear[1], clear[2], clear[3])
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+            if (renderBackgroundLayer) {
+                const bgVpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(bgCameraPos, [0, 0, 0], [0, 1, 0]))
+                renderWebGLSphere(bgVpMatrix)
+                gl.clear(gl.DEPTH_BUFFER_BIT)
+            }
             renderWebGLSphere()
             renderWebGLPaths()
             renderWebGLMarkers()
         }
-        function renderWebGLSphere() {
+        function renderWebGLSphere(vpMatrix = state.vpMatrix) {
             const gl = state.gl
             const loc = state.glLocations.sphere
             const lightPositions = []
@@ -9882,7 +10052,7 @@ self.onmessage = async (e) => {
             gl.enableVertexAttribArray(loc.aNormal)
             gl.vertexAttribPointer(loc.aNormal, 3, gl.FLOAT, false, 0, 0)
             gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, state.buffers.sphereIndex)
-            gl.uniformMatrix4fv(loc.uMvp, false, new Float32Array(Mat4.multiply(state.vpMatrix, state.sphere.rotation)))
+            gl.uniformMatrix4fv(loc.uMvp, false, new Float32Array(Mat4.multiply(vpMatrix, state.sphere.rotation)))
             gl.uniformMatrix4fv(loc.uModel, false, new Float32Array(state.sphere.rotation))
             gl.uniformMatrix4fv(loc.uNormalMatrix, false, new Float32Array(state.sphere.rotation))
             gl.uniform3fv(loc.uLights, new Float32Array(lightPositions))
@@ -10095,7 +10265,7 @@ self.onmessage = async (e) => {
 
                 function getScrollContainer() {
                     if (activeEditor === display) return chatContainer
-                    return activeEditor?.closest?.('.settings-pane, .blocks-pane') || dashboardPanel
+                    return activeEditor?.closest?.('#create-block-panel, .settings-pane, .blocks-pane') || dashboardPanel
                 }
 
                 function settleLandscapeViewport() {
@@ -10236,7 +10406,8 @@ self.onmessage = async (e) => {
                     if (activeEditor === display) {
                         handleDisplayInput(action)
                     } else if (action === 'return') {
-                        hideKeyboard()
+                        if (activeEditor.tagName === 'TEXTAREA') mutateInput(activeEditor, '\n')
+                        else hideKeyboard()
                     } else {
                         mutateInput(activeEditor, action === 'space' ? ' ' : (!isSymbolMode && action.length === 1 && isShifted ? action.toUpperCase() : action), action === 'backspace')
                     }
@@ -10272,7 +10443,9 @@ self.onmessage = async (e) => {
                     showKeyboard()
                 }
 
-                    ;[display, ...editors].forEach(editor => {
+                function bindEditor(editor) {
+                    if (!editor || editor.__mobileKeyboardBound) return
+                    editor.__mobileKeyboardBound = true
                         let touchStartX = 0
                         let touchStartY = 0
                         let didScrollTouch = false
@@ -10303,11 +10476,15 @@ self.onmessage = async (e) => {
                             activeEditor = editor
                             showKeyboard()
                         })
-                    })
+                        editor.addEventListener('input', () => requestAnimationFrame(keepCursorVisible))
+                }
+
+                    ;[display, ...editors].forEach(bindEditor)
+                window.__mobileKeyboardBind = bindEditor
 
                 const handleOutsideClick = (e) => {
                     if (!isKeyboardVisible) return
-                    if ([display, ...editors].some(ed => ed && ed.contains(e.target))) return
+                    if (activeEditor?.contains?.(e.target) || [display, ...editors].some(ed => ed && ed.contains(e.target))) return
                     if (keyboardContainer.contains(e.target) || closeBtn.contains(e.target)) return
                     if (e.target.closest && e.target.closest('.editor-tools, #editor-tools, .my-line, .nav-item, .sub-tab')) hideKeyboard(true)
                     else hideKeyboard(true)
@@ -10326,8 +10503,7 @@ self.onmessage = async (e) => {
                     requestAnimationFrame(settleLandscapeViewport)
                 })
 
-                    ;[chatContainer, dashboardPanel, window].filter(Boolean).forEach(target => target.addEventListener('scroll', scheduleKeyboardVisibilityCheck, { passive: true }))
-                    ;[display, ...editors].forEach(editor => editor.addEventListener('input', () => requestAnimationFrame(keepCursorVisible)))
+                    ;[chatContainer, dashboardPanel, document.getElementById('create-block-panel'), window].filter(Boolean).forEach(target => target.addEventListener('scroll', scheduleKeyboardVisibilityCheck, { passive: true }))
 
                 renderKeyboard()
             })()
