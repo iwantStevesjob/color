@@ -1675,7 +1675,7 @@
             left: 13px;
             z-index: 1;
             display: inline-block;
-            max-width: 36%;
+            max-width: calc(100% - 26px);
             margin: 0;
             overflow: hidden;
             color: rgba(0, 0, 0, 0.58);
@@ -1684,6 +1684,7 @@
             text-overflow: ellipsis;
             white-space: nowrap;
             pointer-events: none;
+            transition: top 0.18s ease, color 0.18s ease;
         }
 
         .create-block-form .settings-input {
@@ -1691,16 +1692,25 @@
             border-bottom: 1px solid transparent;
             border-radius: 8px;
             background: rgba(255, 255, 255, var(--block-field-alpha, 0.62));
-            padding: 16px 12px 10px 38%;
+            padding: 30px 12px 10px;
+            caret-color: #111;
             text-align: left;
             transition: background 0.2s, border-color 0.2s, border-radius 0.2s;
         }
 
         .create-block-form .settings-input:focus,
-        .create-block-form .settings-input.has-value {
+        .create-block-form .settings-input.has-value,
+        .create-block-form .settings-input.keyboard-active {
             border-bottom-color: rgba(255, 255, 255, var(--block-field-alpha, 0.62));
             border-radius: 0;
             background: transparent;
+        }
+
+        .create-block-form .settings-label:has(+ .settings-input:focus),
+        .create-block-form .settings-label:has(+ .settings-input.has-value),
+        .create-block-form .settings-label:has(+ .settings-input.keyboard-active) {
+            top: 18px;
+            color: rgba(0, 0, 0, 0.72);
         }
 
         .create-block-form .settings-group {
@@ -10182,6 +10192,8 @@ self.onmessage = async (e) => {
 
                 if (!isMobileKeyboard) return
 
+                const hideNativeKeyboard = () => { try { navigator.virtualKeyboard?.hide?.() } catch (e) { } }
+
                 function renderKeyboard() {
                     keysWrapper.innerHTML = ''
                         ; (isSymbolMode ? symbolLayout : layout).forEach(row => {
@@ -10231,6 +10243,7 @@ self.onmessage = async (e) => {
 
                 function showKeyboard() {
                     if (window.app?.appState?.session !== 'joined') return
+                    hideNativeKeyboard()
                     if (!isKeyboardVisible) {
                         isKeyboardVisible = true
                         keyboardContainer.classList.remove('keyboard-hidden')
@@ -10244,6 +10257,7 @@ self.onmessage = async (e) => {
                     isKeyboardVisible = false
                     keyboardContainer.classList.add('keyboard-hidden')
                     closeBtn.classList.remove('visible')
+                    activeEditor?.classList?.remove('keyboard-active')
                     if (blur) activeEditor?.blur?.()
                 }
 
@@ -10270,7 +10284,7 @@ self.onmessage = async (e) => {
 
                 function settleLandscapeViewport() {
                     if (!activeEditor || !window.matchMedia('(orientation: landscape)').matches) return
-                    activeEditor.focus?.({ preventScroll: true })
+                    if (activeEditor === display) activeEditor.focus?.({ preventScroll: true })
                     window.scrollTo(0, 1)
                     requestAnimationFrame(keepCursorVisible)
                 }
@@ -10340,7 +10354,6 @@ self.onmessage = async (e) => {
                 }
 
                 function mutateInput(editor, text, isBackspace = false) {
-                    editor.focus({ preventScroll: true })
                     if (editor.selectionStart == null || editor.selectionEnd == null) {
                         const end = editor.value.length
                         editor.setSelectionRange(end, end)
@@ -10349,9 +10362,12 @@ self.onmessage = async (e) => {
                     const end = editor.selectionEnd
                     if (isBackspace) {
                         if (start === end && start === 0) return
-                        editor.setRangeText('', start === end ? start - 1 : start, end, 'end')
+                        const nextStart = start === end ? start - 1 : start
+                        editor.value = editor.value.slice(0, nextStart) + editor.value.slice(end)
+                        editor.setSelectionRange(nextStart, nextStart)
                     } else {
-                        editor.setRangeText(text, start, end, 'end')
+                        editor.value = editor.value.slice(0, start) + text + editor.value.slice(end)
+                        editor.setSelectionRange(start + text.length, start + text.length)
                     }
                     editor.dispatchEvent(new Event('input', { bubbles: true }))
                 }
@@ -10391,6 +10407,7 @@ self.onmessage = async (e) => {
 
                 function handleInput(action) {
                     try { if (typeof navigator.vibrate === 'function') navigator.vibrate(10) } catch (e) { }
+                    hideNativeKeyboard()
                     if (action === 'shift') {
                         isShifted = !isShifted
                         renderKeyboard()
@@ -10420,11 +10437,16 @@ self.onmessage = async (e) => {
 
                 function activateEditor(editor, touch) {
                     if (window.app?.appState?.session !== 'joined') return
+                    hideNativeKeyboard()
+                    if (activeEditor && activeEditor !== editor) activeEditor.classList?.remove('keyboard-active')
                     activeEditor = editor
                     if (editor === display) {
                         if (touch) setDisplaySelectionFromTouch(touch)
                         else ensureDisplaySelection()
                     } else {
+                        editor.readOnly = true
+                        editor.classList.add('keyboard-active')
+                        editor.focus({ preventScroll: true })
                         if (editor.selectionStart == null || editor.selectionEnd == null) {
                             const end = editor.value.length
                             editor.setSelectionRange?.(end, end)
@@ -10446,6 +10468,11 @@ self.onmessage = async (e) => {
                 function bindEditor(editor) {
                     if (!editor || editor.__mobileKeyboardBound) return
                     editor.__mobileKeyboardBound = true
+                    if (editor !== display) {
+                        editor.readOnly = true
+                        editor.setAttribute('readonly', 'readonly')
+                        editor.setAttribute('inputmode', 'none')
+                    }
                         let touchStartX = 0
                         let touchStartY = 0
                         let didScrollTouch = false
@@ -10473,9 +10500,13 @@ self.onmessage = async (e) => {
                         })
                         editor.addEventListener('focus', () => {
                             if (window.app?.appState?.session !== 'joined') return
+                            if (activeEditor && activeEditor !== editor) activeEditor.classList?.remove('keyboard-active')
                             activeEditor = editor
+                            editor.classList.add('keyboard-active')
                             showKeyboard()
                         })
+                        editor.addEventListener('beforeinput', e => { if (editor !== display) e.preventDefault() })
+                        editor.addEventListener('keydown', e => { if (editor !== display) e.preventDefault() })
                         editor.addEventListener('input', () => requestAnimationFrame(keepCursorVisible))
                 }
 
