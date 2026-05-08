@@ -385,7 +385,21 @@
             align-items: center;
             height: 100%;
             padding: 20px;
+            box-sizing: border-box;
             flex-wrap: wrap;
+        }
+
+        #header-connect {
+            align-items: center;
+            justify-content: center;
+            padding-left: 0;
+            padding-right: 0;
+        }
+
+        #header-connect .connect-options {
+            width: 100%;
+            height: auto;
+            padding: 0;
         }
 
         .connect-option {
@@ -481,7 +495,8 @@
         .connect-panel-title {
             font-size: 1.1rem;
             font-weight: 600;
-            margin: 0 0 15px 0;
+            width: 100%;
+            margin: 0 0 24px 0;
             text-align: center;
             color: var(--nav-color);
             text-transform: uppercase;
@@ -792,6 +807,7 @@
             pointer-events: none;
             display: none;
             text-align: center;
+            transition: top 0.55s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         #connect-content-layer.visible {
@@ -885,12 +901,56 @@
             justify-content: center;
         }
 
+        .connect-option.connect-nearby-start {
+            width: auto;
+            min-width: 188px;
+            padding: 16px 28px;
+            font-size: 0.72rem;
+        }
+
+        #connect-globe {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: none;
+            pointer-events: none;
+            z-index: 45;
+        }
+
+        #view-nearby {
+            position: relative;
+            justify-content: center;
+        }
+
+        #connect-content-layer.nearby-active {
+            top: calc(var(--nearby-content-top, 72%) - 30px);
+        }
+
+        #connect-content-layer.nearby-active.has-nearby-location {
+            top: 54%;
+        }
+
+        #connect-content-layer.nearby-active.has-nearby-peers {
+            top: 46%;
+        }
+
+        #connect-content-layer.visible.nearby-active ~ #connect-globe {
+            display: block;
+        }
+
         .connect-nearby-status {
             margin-bottom: 14px;
             color: rgba(255, 255, 255, 0.92);
             font-size: 0.84rem;
             font-weight: 700;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        #connect-content-layer:not(.has-nearby-location) .connect-nearby-status,
+        .connect-nearby-status:empty {
+            display: none;
         }
 
         .connect-nearby-list {
@@ -900,6 +960,22 @@
             margin-bottom: 14px;
             color: rgba(255, 255, 255, 0.92);
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        #view-nearby.has-nearby-peers {
+            justify-content: flex-start;
+        }
+
+        #view-nearby.has-nearby-peers .connect-nearby-list {
+            position: relative;
+            z-index: 1;
+        }
+
+        #view-nearby.has-nearby-peers .connect-nearby-peer {
+            border-bottom: 0;
+            border-radius: 999px;
+            padding: 10px 14px;
+            background: rgba(0, 0, 0, 0.32);
         }
 
         .connect-nearby-peer {
@@ -940,8 +1016,8 @@
             justify-content: center;
             border: 0;
             border-radius: 50%;
-            background: rgba(0, 0, 0, 0.7);
-            color: #fff;
+            background: transparent;
+            color: var(--nav-color);
             cursor: pointer;
             pointer-events: auto;
         }
@@ -1505,7 +1581,7 @@
             }
 
             #connect-shortcut-btn {
-                right: 78px;
+                right: 58px;
                 width: 36px;
                 height: 36px;
             }
@@ -1517,7 +1593,7 @@
             }
 
             #header-connect .connect-options {
-                transform: translateY(-28px);
+                transform: none;
             }
 
             .connect-option {
@@ -2267,6 +2343,12 @@
             height: 22px;
         }
 
+        @media (max-width: 768px) {
+            #connect-shortcut-btn {
+                right: 58px;
+            }
+        }
+
         .settings-hint {
             font-size: 0.8rem;
             color: #666;
@@ -2692,7 +2774,7 @@
             <button id="connect-search-btn" class="connect-option connect-search-submit" type="button">SEARCH</button>
         </div>
         <div id="view-nearby" class="connect-view">
-            <div id="connect-nearby-status" class="connect-nearby-status">Find people near you.</div>
+            <div id="connect-nearby-status" class="connect-nearby-status"></div>
             <div id="connect-nearby-list" class="connect-nearby-list"></div>
             <button id="connect-nearby-start" class="connect-option connect-nearby-start" type="button">START DISCOVERY</button>
         </div>
@@ -2701,6 +2783,7 @@
         <button class="connect-switcher" type="button" data-connect-switch-left></button>
         <button class="connect-switcher" type="button" data-connect-switch-right></button>
     </div>
+    <canvas id="connect-globe" width="900" height="520"></canvas>
 
     <div id="create-block-panel">
         <div class="create-block-form">
@@ -6175,6 +6258,14 @@
                 this.nearbyPeers = new Map()
                 this.nearbyLocation = null
                 this.nearbySendLocation = null
+                this.nearbyRoomLabel = ''
+                this.globeLocation = null
+                this.globeLines = null
+                this.globeAnimation = null
+                this.globeStart = 0
+                this.globeLon = 0
+                this.globeFocusStart = 0
+                this.globeFocusFromLon = 0
                 this.secureQrBootstrap = new SecureQrRoomBootstrap(session => {
                     this.enterSecureSharedRoom(session).catch(error => {
                         console.error('Secure room transition failed:', error)
@@ -7468,6 +7559,7 @@
 
             openMainSection(targetId, navItem = null) {
                 this.clearTransientPanelModes()
+                document.getElementById('connect-shortcut-btn')?.classList.remove('visible')
                 this.ui.dashboardPanel.classList.remove('revealed', 'step-down', 'half-peek')
                 this.ui.subNavLayer.classList.remove('half-slide')
                 this.ui.dashboardPanel.style.transform = ''
@@ -7544,6 +7636,10 @@
                 return source === 'simple-qr' || source === 'offer-qr' || source === 'secure-shared-qr'
             }
 
+            isRemoteJoinSource(source = this.connectionSource) {
+                return source === 'url' || source === 'nearby'
+            }
+
             resetProofState(nextRoomHex = null) {
                 const normalizedRoomHex = nextRoomHex ? String(nextRoomHex).replace('#', '').toLowerCase() : null
                 if (normalizedRoomHex && this.proofRoomHex === normalizedRoomHex) return
@@ -7557,7 +7653,7 @@
 
             requiresMiningForCurrentConnection() {
                 if (this.connectionMode === 'secure-direct') return false
-                if (this.connectionSource !== 'url') return false
+                if (!this.isRemoteJoinSource()) return false
 
                 const cleanHex = (this.roomId || '').replace('color-', '').toLowerCase()
                 const userHex = (this.user.color || '').replace('#', '').toLowerCase()
@@ -7574,7 +7670,7 @@
             requestInitialSyncFromPeer(data, pid) {
                 if (this.connectionMode === 'secure-direct') return
                 if (!this.mesh || typeof data?.cursor !== 'number') return
-                if (this.hasRenderedContent() && (this.peerCursorReady || (this.connectionSource !== 'url' && !this.isQrConnectionSource()))) return
+                if (this.hasRenderedContent() && (this.peerCursorReady || (!this.isRemoteJoinSource() && !this.isQrConnectionSource()))) return
 
                 const cursor = data.cursor
                 console.log(`[EditorApp] 🎯 Peer is at line ${cursor}. Syncing range...`)
@@ -7963,7 +8059,7 @@
                 }
                 this.connectionSource = source
                 this.isGuestScan = this.isQrConnectionSource(source)
-                this.awaitingPeerCheck = source === 'url'
+                this.awaitingPeerCheck = this.isRemoteJoinSource(source)
                 this.lastPeerCursor = null
                 this.user.color = localStorage.getItem('lastSphereColor') || '#ffffff'; if (!localStorage.getItem('lastSphereColor')) localStorage.setItem('lastSphereColor', this.user.color)
                 this.ui.userBadge.style.backgroundColor = this.user.color
@@ -8020,7 +8116,7 @@
                     const savedSignature = await this.db.getSignature(cleanHex).catch(() => null)
                     this.roomSignature = savedSignature ? this.cloneSignature(savedSignature) : null
                     this.syncDebugPassword(cleanHex)
-                    if (this.roomHasWrappedKeys && !(source === 'url' && cleanHex !== this.user.color.replace('#', '').toLowerCase())) await this.validateRoomLogin(cleanHex)
+                    if (this.roomHasWrappedKeys && !(this.isRemoteJoinSource(source) && cleanHex !== this.user.color.replace('#', '').toLowerCase())) await this.validateRoomLogin(cleanHex)
                     if (!preserveSignatureState && window.state) {
                         const basePath = savedSignature?.path?.map(p => [...p]) || []
                         const practicePaths = (savedSignature?.practicePaths || []).map(path => path.map(p => [...p]))
@@ -8047,7 +8143,7 @@
                     else if (!options.skipAutoEnter && !this.roomNeedsLogin() && window.enterRoomUI) window.enterRoomUI()
                 } else {
                     this.syncDebugPassword(cleanHex)
-                    this.ui.roomStatus.textContent = options.source === 'url' ? 'Checking Network...' : 'COLOR AVAILABLE'
+                    this.ui.roomStatus.textContent = this.isRemoteJoinSource(source) ? 'Checking Network...' : 'COLOR AVAILABLE'
                     this.ui.roomStatus.style.color = ''
                     this.joinNetwork()
                 }
@@ -8069,6 +8165,29 @@
             async renderFromLocalDB(data, centerIndex) {
                 this.renderInitialState(data, centerIndex)
                 this.isFresh = Object.keys(data || {}).length === 0
+            }
+
+            revealConnectedHome() {
+                if (!(this.halfPeekMode || this.peeking)) return
+                this.peeking = false
+                this.setPanelState('home')
+                this.updatePeekState(0)
+                if (window.resetSphereView) window.resetSphereView(false, true)
+                if (window.state) window.state.renderPath = false
+                this.halfPeekMode = null
+                this.ui.dashboardPanel.classList.remove('peek-mode', 'half-peek', 'step-down')
+                if (this.ui.subNavLayer) this.ui.subNavLayer.classList.remove('half-slide', 'peek-slide')
+                this.ui.dashboardPanel.style.transform = ''
+                this.ui.dashboardPanel.classList.add('active', 'revealed')
+                this.ui.topNav.classList.add('visible')
+                document.getElementById('connect-content-layer')?.classList.remove('visible')
+                window.setNearbyPeekMode?.(false)
+                document.getElementById('connect-shortcut-btn')?.classList.remove('visible')
+                document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
+                document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'))
+                document.getElementById('view-home')?.classList.add('active')
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))
+                document.querySelector('.nav-item[data-target="home"]')?.classList.add('active')
             }
 
             joinNetwork() {
@@ -8111,27 +8230,7 @@
                 })
 
                 this.mesh.on('qr-success', pid => {
-                    if (this.halfPeekMode || this.peeking) {
-                        this.peeking = false
-                        this.setPanelState('home')
-                        this.updatePeekState(0)
-                        if (window.resetSphereView) window.resetSphereView(false, true)
-                        if (window.state) window.state.renderPath = false
-                        this.halfPeekMode = null
-
-                        this.ui.dashboardPanel.classList.remove('peek-mode', 'half-peek', 'step-down')
-                        if (this.ui.subNavLayer) this.ui.subNavLayer.classList.remove('half-slide', 'peek-slide')
-                        this.ui.dashboardPanel.style.transform = ''
-                        this.ui.dashboardPanel.classList.add('active', 'revealed')
-                        this.ui.topNav.classList.add('visible')
-
-                        document.getElementById('connect-content-layer')?.classList.remove('visible')
-                        document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
-                        document.querySelectorAll('.content-view').forEach(cv => cv.classList.remove('active'))
-                        document.getElementById('view-home')?.classList.add('active')
-                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))
-                        document.querySelector('.nav-item[data-target="home"]')?.classList.add('active')
-                    }
+                    this.revealConnectedHome()
                 })
 
                 this.mesh.on('peer-join', pid => {
@@ -8150,9 +8249,10 @@
                         const meta = this.currentLineId ? this.parseId(this.currentLineId) : null
                         const cursor = meta ? meta.index : await this.db.getCursor(roomHex).catch(() => 0)
                         this.mesh.sendCursor({ type: 'response', cursor, approved: true }, pid)
+                        if (document.getElementById('connect-content-layer')?.classList.contains('visible')) this.revealConnectedHome()
                     }
                     this.updateStatus()
-                    if (this.connectionSource !== 'url' || this.joinApprovedPeers.has(pid)) this.requestInitialSyncFromPeer(data, pid)
+                    if (!this.isRemoteJoinSource() || this.joinApprovedPeers.has(pid)) this.requestInitialSyncFromPeer(data, pid)
                     if (this.mesh.sendCursor && this.connectionMode !== 'secure-direct' && (this.isFresh || !this.hasRenderedContent())) setTimeout(() => this.mesh?.sendCursor?.({ type: 'request' }, pid), 0)
                 })
 
@@ -8767,7 +8867,7 @@
                     if (this.requiresMiningForCurrentConnection() && !isFounder && this.joinApprovedPeers.size === 0) this.startMining()
                     this.ui.loginBtn.disabled = false
                     this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
-                    if (this.connectionSource === 'url' && !this.peerCursorReady) {
+                    if (this.isRemoteJoinSource() && !this.peerCursorReady) {
                         this.ui.loginBtn.classList.add('hidden')
                     } else if (!this.ui.dashboardPanel.classList.contains('active')) {
                         this.ui.loginBtn.classList.remove('hidden')
@@ -8859,6 +8959,25 @@
                 return `loc_${Math.floor((lat + 90) / size)}_${Math.floor((lng + 180) / size)}`
             }
 
+            nearbyZipId(loc) {
+                const postal = String(loc?.postal || '').trim()
+                const area = postal || [loc?.city, loc?.region].filter(Boolean).join('_')
+                return area ? 'zip_' + [loc?.country, area].filter(Boolean).join('_').toLowerCase().replace(/[^a-z0-9]+/g, '_') : ''
+            }
+
+            nearbyLocationLabel(loc) {
+                return [loc?.postal, loc?.city, loc?.region].filter(Boolean).join(', ') || 'your area'
+            }
+
+            async getIpNearbyLocation() {
+                const res = await fetch('https://ipapi.co/json/')
+                if (!res.ok) throw new Error('IP location failed')
+                const data = await res.json()
+                const lat = Number(data.latitude), lng = Number(data.longitude)
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error('IP location unavailable')
+                return { lat, lng, postal: data.postal || '', city: data.city || '', region: data.region || '', country: data.country_code || data.country || '', source: 'ip' }
+            }
+
             nearbyDistanceKm(lat1, lng1, lat2, lng2) {
                 const toRad = deg => deg * Math.PI / 180
                 const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1)
@@ -8871,9 +8990,119 @@
                 const list = document.getElementById('connect-nearby-list')
                 if (status && statusEl) statusEl.textContent = status
                 if (!list) return
-                if (!this.nearbyRoom) { list.innerHTML = ''; return }
+                document.getElementById('view-nearby')?.classList.toggle('has-nearby-peers', this.nearbyPeers.size > 0)
+                document.getElementById('connect-content-layer')?.classList.toggle('has-nearby-location', !!this.nearbyRoom)
+                document.getElementById('connect-content-layer')?.classList.toggle('has-nearby-peers', this.nearbyPeers.size > 0)
+                if (!this.nearbyRoom) { list.innerHTML = ''; if (statusEl && status === null) statusEl.textContent = ''; return }
                 const peers = [...this.nearbyPeers.values()].sort((a, b) => a.dist - b.dist)
                 list.innerHTML = peers.length ? peers.map(p => `<button class="connect-nearby-peer" type="button" data-nearby-color="${this.escapeAttr(p.color)}"><span>${this.escapeHtml((p.color || p.id.slice(0, 6)).toUpperCase())}</span><span>${p.dist.toFixed(2)} km</span></button>`).join('') : '<div class="connect-nearby-peer" style="cursor:default;justify-content:center;">Waiting for nearby peers...</div>'
+            }
+
+            async loadGlobeLines() {
+                if (this.globeLines) return this.globeLines
+                const res = await fetch('https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_admin_0_countries.geojson')
+                const geo = await res.json()
+                const lines = []
+                const addRing = ring => {
+                    const step = Math.max(1, Math.ceil(ring.length / 220))
+                    lines.push(ring.filter((_, i) => i % step === 0 || i === ring.length - 1))
+                }
+                geo.features?.forEach(feature => {
+                    const geom = feature.geometry
+                    if (geom?.type === 'Polygon') geom.coordinates.forEach(addRing)
+                    if (geom?.type === 'MultiPolygon') geom.coordinates.forEach(poly => poly.forEach(addRing))
+                })
+                this.globeLines = lines
+                return lines
+            }
+
+            startNearbyGlobe() {
+                const canvas = document.getElementById('connect-globe')
+                if (!canvas || this.globeAnimation) return
+                this.loadGlobeLines().catch(() => { this.globeLines = [] })
+                const draw = ts => {
+                    const active = document.getElementById('view-nearby')?.classList.contains('active') && document.getElementById('connect-content-layer')?.classList.contains('visible')
+                    if (!active) { this.globeAnimation = null; return }
+                    this.drawNearbyGlobe(ts)
+                    this.globeAnimation = requestAnimationFrame(draw)
+                }
+                this.globeAnimation = requestAnimationFrame(draw)
+            }
+
+            drawNearbyGlobe(ts) {
+                const canvas = document.getElementById('connect-globe')
+                const rect = canvas?.getBoundingClientRect()
+                if (!canvas || !rect?.width) return
+                const dpr = window.devicePixelRatio || 1
+                if (canvas.width !== Math.round(rect.width * dpr)) canvas.width = Math.round(rect.width * dpr), canvas.height = Math.round(rect.height * dpr)
+                const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height, metrics = window.getSphereScreenMetrics?.(), baseR = (metrics?.radius || Math.min(rect.width, rect.height) * 0.22) * dpr
+                ctx.clearRect(0, 0, w, h)
+                const loc = this.globeLocation
+                if (!this.globeStart) this.globeStart = ts
+                if (loc && !this.globeFocusStart) this.globeFocusStart = ts, this.globeFocusFromLon = Number.isFinite(this.globeLon) ? this.globeLon : loc.lng - 45
+                const rawFocus = loc ? Math.min(1, (ts - this.globeFocusStart) / 1800) : 0
+                const focus = rawFocus * rawFocus * (3 - 2 * rawFocus)
+                const spinLon = (ts - this.globeStart) * 0.012
+                const lonDelta = loc ? ((((loc.lng - this.globeFocusFromLon) % 360) + 540) % 360) - 180 : 0
+                const lon0 = loc ? this.globeFocusFromLon + lonDelta * focus : spinLon
+                this.globeLon = lon0
+                const idleCx = (metrics?.cx || rect.width / 2) * dpr, idleCy = (metrics?.cy || rect.height / 2) * dpr
+                document.getElementById('connect-content-layer')?.style.setProperty('--nearby-content-top', Math.min(window.innerHeight - 125, (idleCy + baseR) / dpr + 74) + 'px')
+                const r = baseR * (1 + focus * 3.2), cx = idleCx
+                const targetCy = loc ? (h * 0.26) + r * Math.sin(loc.lat * Math.PI / 180) : h / 2
+                const cy = idleCy + (targetCy - idleCy) * focus
+                ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.2 * dpr; ctx.stroke()
+                const project = ([lon, lat]) => {
+                    const lambda = (lon - lon0) * Math.PI / 180, phi = lat * Math.PI / 180, cosPhi = Math.cos(phi), z = cosPhi * Math.cos(lambda)
+                    return [cx + r * cosPhi * Math.sin(lambda), cy - r * Math.sin(phi), z]
+                }
+                ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip()
+                const drawLines = front => {
+                    ctx.strokeStyle = front ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.3)'
+                    ctx.lineWidth = (front ? 1.05 : 0.75) * dpr
+                    const lineStep = focus < 0.35 ? 3 : focus < 0.75 ? 2 : 1
+                    ;(this.globeLines || []).forEach(line => {
+                        ctx.beginPath()
+                        let open = false
+                        for (let i = 0; i < line.length; i += lineStep) {
+                            const point = line[i]
+                            const p = project(point)
+                            if ((p[2] >= 0) !== front) { open = false; continue }
+                            if (open) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]), open = true
+                        }
+                        ctx.stroke()
+                    })
+                }
+                drawLines(false); drawLines(true)
+                ctx.restore()
+                if (focus > 0) {
+                    const fade = ctx.createLinearGradient(0, h * 0.34, 0, h * 0.72)
+                    fade.addColorStop(0, 'rgba(0,0,0,0)')
+                    fade.addColorStop(0.45, `rgba(0,0,0,${0.82 * focus})`)
+                    fade.addColorStop(1, `rgba(0,0,0,${focus})`)
+                    ctx.save(); ctx.globalCompositeOperation = 'destination-out'; ctx.fillStyle = fade; ctx.fillRect(0, h * 0.34, w, h * 0.66); ctx.restore()
+                }
+                if (loc) {
+                    const p = project([loc.lng, loc.lat])
+                    if (p[2] >= 0) {
+                        const phase = ((ts - this.globeStart) % 1400) / 1400
+                        const ring = []
+                        const radius = (4 + phase * 18) * Math.PI / 180, lat1 = loc.lat * Math.PI / 180, lon1 = loc.lng * Math.PI / 180
+                        for (let i = 0; i <= 72; i++) {
+                            const brng = i / 72 * Math.PI * 2
+                            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(radius) + Math.cos(lat1) * Math.sin(radius) * Math.cos(brng))
+                            const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(radius) * Math.cos(lat1), Math.cos(radius) - Math.sin(lat1) * Math.sin(lat2))
+                            ring.push([lon2 * 180 / Math.PI, lat2 * 180 / Math.PI])
+                        }
+                        ctx.beginPath()
+                        let rippleOpen = false
+                        ring.forEach(point => { const q = project(point); if (q[2] < 0) { rippleOpen = false; return } if (rippleOpen) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]), rippleOpen = true })
+                        ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - phase)})`; ctx.lineWidth = (2.4 + phase * 2.4) * dpr; ctx.stroke()
+                        const dot = ctx.createRadialGradient(p[0] - 2 * dpr, p[1] - 2 * dpr, 0, p[0], p[1], 7 * dpr)
+                        dot.addColorStop(0, '#fff'); dot.addColorStop(1, 'rgba(255,255,255,0.55)')
+                        ctx.beginPath(); ctx.arc(p[0], p[1], 6 * dpr, 0, Math.PI * 2); ctx.fillStyle = dot; ctx.fill()
+                    }
+                }
             }
 
             stopNearbyDiscovery() {
@@ -8884,35 +9113,53 @@
                 this.nearbyPeers.clear()
             }
 
+            async initNearbyDiscovery(loc, roomId, label) {
+                const lat = loc.lat, lng = loc.lng
+                this.stopNearbyDiscovery()
+                this.nearbyLocation = { lat, lng, area: label }
+                this.globeLocation = { lat, lng }
+                this.globeFocusStart = performance.now()
+                this.globeFocusFromLon = Number.isFinite(this.globeLon) ? this.globeLon : lng - 45
+                this.nearbyRoom = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, roomId)
+                const [sendLocation, onLocation] = this.nearbyRoom.makeAction('loc')
+                const payload = () => ({ lat, lng, color: this.user.color, area: label })
+                this.nearbySendLocation = sendLocation
+                this.nearbyRoom.onPeerJoin(peerId => sendLocation(payload(), peerId))
+                this.nearbyRoom.onPeerLeave(peerId => { this.nearbyPeers.delete(peerId); this.renderNearbyDiscovery() })
+                onLocation((data, peerId) => {
+                    const peerLat = Number(data?.lat), peerLng = Number(data?.lng), color = /^#[0-9a-fA-F]{6}$/.test(data?.color || '') ? data.color : ''
+                    if (!Number.isFinite(peerLat) || !Number.isFinite(peerLng)) return
+                    this.nearbyPeers.set(peerId, { id: peerId, color, dist: this.nearbyDistanceKm(lat, lng, peerLat, peerLng) })
+                    this.renderNearbyDiscovery()
+                })
+                this.nearbyRoom.enableSync()
+                setTimeout(() => this.nearbySendLocation?.(payload()), 800)
+                this.renderNearbyDiscovery(`Searching near ${label}...`)
+            }
+
+            async startNearbyIpFallback(errorMessage = '') {
+                this.renderNearbyDiscovery(errorMessage ? 'GPS blocked. Using ZIP from IP...' : 'Using ZIP from IP...')
+                const loc = await this.getIpNearbyLocation()
+                const roomId = this.nearbyZipId(loc) || this.nearbyCellId(loc.lat, loc.lng)
+                await this.initNearbyDiscovery(loc, roomId, this.nearbyLocationLabel(loc))
+            }
+
             startNearbyDiscovery() {
                 const btn = document.getElementById('connect-nearby-start')
-                if (!navigator.geolocation) { this.renderNearbyDiscovery('GPS is not available.'); return }
-                if (btn) { btn.disabled = true; btn.style.opacity = '0.7' }
+                if (btn) { btn.textContent = 'TRY GPS AGAIN'; btn.disabled = true; btn.style.opacity = '0.7' }
+                if (!navigator.geolocation) { this.startNearbyIpFallback('GPS is not available.').catch(error => this.renderNearbyDiscovery(error.message)).finally(() => { if (btn) { btn.disabled = false; btn.style.opacity = '' } }); return }
                 this.renderNearbyDiscovery('Getting GPS...')
                 navigator.geolocation.getCurrentPosition(position => {
-                    const lat = position.coords.latitude, lng = position.coords.longitude
-                    this.stopNearbyDiscovery()
-                    this.nearbyLocation = { lat, lng }
-                    const roomId = this.nearbyCellId(lat, lng)
-                    this.nearbyRoom = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, roomId)
-                    const [sendLocation, onLocation] = this.nearbyRoom.makeAction('loc')
-                    const payload = () => ({ lat, lng, color: this.user.color })
-                    this.nearbySendLocation = sendLocation
-                    this.nearbyRoom.onPeerJoin(peerId => sendLocation(payload(), peerId))
-                    this.nearbyRoom.onPeerLeave(peerId => { this.nearbyPeers.delete(peerId); this.renderNearbyDiscovery() })
-                    onLocation((data, peerId) => {
-                        const peerLat = Number(data?.lat), peerLng = Number(data?.lng), color = /^#[0-9a-fA-F]{6}$/.test(data?.color || '') ? data.color : ''
-                        if (!Number.isFinite(peerLat) || !Number.isFinite(peerLng)) return
-                        this.nearbyPeers.set(peerId, { id: peerId, color, dist: this.nearbyDistanceKm(lat, lng, peerLat, peerLng) })
-                        this.renderNearbyDiscovery()
+                    const gpsLoc = { lat: position.coords.latitude, lng: position.coords.longitude }
+                    this.getIpNearbyLocation().catch(() => null).then(ipLoc => {
+                        const roomId = this.nearbyZipId(ipLoc) || this.nearbyCellId(gpsLoc.lat, gpsLoc.lng)
+                        return this.initNearbyDiscovery({ ...ipLoc, ...gpsLoc }, roomId, ipLoc ? this.nearbyLocationLabel(ipLoc) : 'your GPS area')
+                    }).finally(() => {
+                        if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'TRY GPS AGAIN' }
                     })
-                    this.nearbyRoom.enableSync()
-                    setTimeout(() => this.nearbySendLocation?.(payload()), 800)
-                    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'REFRESH NEARBY' }
-                    this.renderNearbyDiscovery('Searching nearby...')
                 }, error => {
-                    if (btn) { btn.disabled = false; btn.style.opacity = '' }
-                    this.renderNearbyDiscovery('Error: ' + error.message)
+                    this.startNearbyIpFallback(error.message).catch(fallbackError => this.renderNearbyDiscovery('Location blocked. Try again or enable GPS.'))
+                        .finally(() => { if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'TRY GPS AGAIN' } })
                 }, { enableHighAccuracy: true })
             }
 
@@ -8938,6 +9185,7 @@
 
                 this.ui.dashboardPanel.classList.remove('peek-mode', 'half-peek', 'active', 'step-down', 'revealed')
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
+                window.setNearbyPeekMode?.(false)
                 document.getElementById('sub-nav-layer')?.classList.remove('peek-slide', 'half-slide')
 
                 document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
@@ -8986,6 +9234,7 @@
                 this.ui.dashboardPanel.classList.toggle('peek-mode', this.peeking)
                 this.updatePeekState(this.peeking ? 1 : 0)
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
+                window.setNearbyPeekMode?.(false)
             }
             updatePeekState(val) { if (window.state?.peeking) { window.state.peeking.active = val > 0; window.state.peeking.value = val } }
 
@@ -8997,6 +9246,8 @@
                 this.ui.subNavLayer.classList.remove('half-slide')
                 document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
+                window.setNearbyPeekMode?.(false)
+                document.getElementById('connect-shortcut-btn')?.classList.remove('visible')
             }
 
             enterFullPeek(connectType = null) {
@@ -9017,6 +9268,8 @@
                 if (contentLayer) {
                     contentLayer.querySelectorAll('.connect-view').forEach(el => el.classList.remove('active'))
                     contentLayer.classList.add('visible')
+                    contentLayer.classList.toggle('nearby-active', connectType === 'nearby')
+                    window.setNearbyPeekMode?.(connectType === 'nearby')
                     this.setSelectedConnectType(connectType)
                     this.updateConnectSwitchers(connectType)
 
@@ -9046,7 +9299,8 @@
 
                     } else if (connectType === 'nearby') {
                         document.getElementById('view-nearby')?.classList.add('active')
-                        this.renderNearbyDiscovery(this.nearbyRoom ? null : 'Find people near you.')
+                        this.startNearbyGlobe()
+                        this.renderNearbyDiscovery()
                     } else {
                         document.getElementById('view-search')?.classList.add('active')
                     }
@@ -9192,6 +9446,7 @@
                 if (window.state) window.state.selectedHandle = null, window.state.signaturePaths = [], window.state.signaturePathsRotations = [], window.state.pathPoints = [], window.state.pathRotations = [], window.state.pathStartPos = null, window.state.renderPath = false, window.state.signatureHex = null, window.state.signatureBaseRotation = null, window.state.interactionSignature = { type: 'click', path: [], practicePaths: [], rotations: [], clicks: [] }, window.state.practice && (window.state.practice.awaitingRedraw = false)
                 document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none')
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
+                window.setNearbyPeekMode?.(false)
                 document.getElementById('create-block-panel')?.classList.remove('visible')
                 document.body.classList.remove('create-block-mode')
                 this.blockFormReturn = null
@@ -9236,6 +9491,7 @@
                 this.syncDebugPassword()
 
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
+                window.setNearbyPeekMode?.(false)
                 this.resetSecureQrToggle()
 
                 document.getElementById('sub-nav-layer')?.classList.remove('peek-slide', 'half-slide')
@@ -10562,6 +10818,8 @@ self.onmessage = async (e) => {
         function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const currentRots = state.interactionSignature.rotations ? state.interactionSignature.rotations.map(r => [...r]) : null; const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const originalRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) ? state.signaturePathsRotations[0].map(r => [...r]) : null; const ratio = comparePaths(originalPath, currentPath); const mergedPaths = state.signaturePaths.filter(path => path.length > 1), serializedCurrentPath = JSON.stringify(currentPath); if (currentPath.length > 1 && !mergedPaths.some(path => JSON.stringify(path) === serializedCurrentPath)) mergedPaths.push(currentPath); state.signaturePaths = mergedPaths; state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, rotations: originalPath.length > 1 ? originalRots : currentRots, practicePaths: state.signaturePaths.slice(originalPath.length > 1 ? 1 : 0).map(path => path.map(p => [...p])) }; state.practice.awaitingRedraw = false; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${Math.round(ratio * 100)}`; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.signaturePathsRotations = currentRots ? [currentRots] : []; state.interactionSignature = { type: 'drag', path: currentPath, rotations: currentRots, practicePaths: [] } } state.signatureHex = hex.replace('#', ''); if (selectedHandle) triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { if (state.selectedHandle) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(state.selectedHandle.pos, transformPos(state.selectedHandle.pos, state.sphere.rotation), state.selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false, 'local', { preserveSignatureState: true, skipAutoEnter: true }) } } } state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }
         function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none'); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (source === 'local' && (!state.interactionSignature.path || state.interactionSignature.path.length <= 1)) { if (!state.interactionSignature.clicks) state.interactionSignature.clicks = []; state.interactionSignature.clicks.push(hex.replace('#', '').toUpperCase()); state.interactionSignature.password = 'FFFFFF' + state.interactionSignature.clicks.join(''); } if (!state.historyHandles.some(h => h.hex.toLowerCase() === hex.toLowerCase())) { state.historyHandles.push({ pos: [...norm], color: [...col], hex: hex, peerCount: 0 }); } if (source === 'local' && window.app?.setPendingLoginSignature && (state.interactionSignature?.path?.length || state.interactionSignature?.clicks?.length)) window.app.setPendingLoginSignature(hex, state.interactionSignature); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4 }
+        window.getSphereScreenMetrics = (cameraZ = null) => { if (!state.canvas?.height) return null; const z = Number(cameraZ) || getResponsiveZ(), radius = (state.canvas.height / 2) / (z * Math.tan(Math.PI / 8)); return { radius, diameter: radius * 2, cx: state.canvas.width / 2, cy: state.canvas.height / 2, cameraZ: z } }
+        window.setNearbyPeekMode = () => { state.nearbyPeek = null }
         function toggleFreeze() {
             if (window.app?.handleTopBackButton?.()) return
             const isZoomed = document.getElementById('dashboard-panel').classList.contains('active') ||
@@ -10668,11 +10926,11 @@ self.onmessage = async (e) => {
             state.landing.showHandle = false
         }
 
-        function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated && !state.renderPath && !state.practice.active && !state.practice.awaitingRedraw) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])) } else if (document.body.classList.contains('light-mode') && (state.renderPath || state.practice.active || state.practice.awaitingRedraw)) { document.body.style.backgroundColor = '' } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05 } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]) } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ] } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = '' } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t) } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = state.returning.clearHex ? '' : '#FFFFFF'; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '' } } } if (state.practice.active && !state.landing.active && (!state.returning || !state.returning.active)) advancePractice(dt); let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.returning?.targetDist || state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ] } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx] } }) }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95) } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2) } }) } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); if (!state.practice.awaitingRedraw) document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) } } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)) } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95 } } renderCurrentFrame(renderBackgroundLayer, bgCameraPos); requestAnimationFrame(loop) }
+        function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated && !state.renderPath && !state.practice.active && !state.practice.awaitingRedraw) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])) } else if (document.body.classList.contains('light-mode') && (state.renderPath || state.practice.active || state.practice.awaitingRedraw)) { document.body.style.backgroundColor = '' } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05 } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]) } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ] } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = '' } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t) } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * 1.5, 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = state.returning.clearHex ? '' : '#FFFFFF'; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '' } } } if (state.practice.active && !state.landing.active && (!state.returning || !state.returning.active)) advancePractice(dt); let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.nearbyPeek?.active && (!state.returning || !state.returning.active)) { state.nearbyPeek.progress = Math.min(state.nearbyPeek.progress + dt * 1.8, 1); const t = state.nearbyPeek.progress, ease = t * t * (3 - 2 * t); state.cameraPos = [0, 0, state.nearbyPeek.startZ + (state.nearbyPeek.targetZ - state.nearbyPeek.startZ) * ease] } else if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.returning?.targetDist || state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ] } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx] } }) }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95) } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2) } }) } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); if (!state.practice.awaitingRedraw) document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) } } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)) } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95 } } renderCurrentFrame(renderBackgroundLayer, bgCameraPos); requestAnimationFrame(loop) }
         function renderCurrentFrame(renderBackgroundLayer, bgCameraPos) {
             if (document.body.classList.contains('light-mode')) {
                 renderBackgroundLayer = true
-                if (!bgCameraPos?.[2]) bgCameraPos = [0, 0, state.landing.targetDist || 1.25]
+                if (!bgCameraPos?.[2]) bgCameraPos = [0, 0, state.nearbyPeek?.active ? state.cameraPos[2] : state.landing.targetDist || 1.25]
             }
             if (state.renderer === 'webgpu') return renderWithWebGPU(renderBackgroundLayer, bgCameraPos)
             if (state.renderer === 'webgl') return renderWithWebGL(renderBackgroundLayer, bgCameraPos)
