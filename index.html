@@ -6666,6 +6666,7 @@
                 const def = typeof blockId === 'object' ? blockId : this.blockDefs.get(blockId)
                 if (!def) return
                 if (typeof blockId !== 'object' && !this.blockPrerequisiteMet(def)) return
+                if (def.id === 'test-card') { this.installTestCardBlock(); return }
                 this.activeBlockDefinition = def
                 this.blockSetupState = {}
                 if (def.autoAdd) {
@@ -6832,6 +6833,23 @@
                 for (const [pid, identity] of this.mesh.peerIdentities || []) if (String(identity?.color || '').replace('#', '').toLowerCase() === roomHex) return pid
                 const peers = Object.keys(this.mesh.getPeers?.() || {})
                 return peers.length === 1 ? peers[0] : null
+            }
+
+            async buyProduct(form) {
+                const paymentType = form.payment?.paymentType || 'stripe'
+                const profile = paymentType === 'stripe' ? await this.loadBuyerPaymentProfile() : null
+                if (profile?.cardNumber) { this.submitSavedPurchase(form, profile); return }
+                this.openPurchaseForm(form)
+            }
+
+            submitSavedPurchase(form, fields) {
+                const sellerPeerId = this.findRoomOwnerPeerId()
+                if (!sellerPeerId || !this.mesh?.sendBlockAction) return
+                const requestId = 'purchase-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+                const paymentType = form.payment?.paymentType || 'stripe'
+                const paymentDetails = fields.blockId === 'test-card' ? { ...fields, cardNumber: 'pm_card_visa' } : fields
+                this.pendingPurchases.set(requestId, { status: null, submit: null, paymentType, timer: setTimeout(() => this.pendingPurchases.delete(requestId), 45000) })
+                this.sendBlockMessage(form.def, { type: 'PURCHASE_SUBMIT', requestId, blockInstanceId: form.payload.instanceId, buyerColor: this.user.color, data: { storeName: form.payload.data?.storeName || '', productIndex: form.product.productIndex ?? '', productName: form.product.productName || '', productPrice: form.product.productPrice || '', paymentType }, paymentDetails }, sellerPeerId)
             }
 
             openPurchaseForm({ def, payload, product = {}, payment = {} }) {
@@ -7099,7 +7117,7 @@
             }
 
             async saveBuyerPaymentProfile(fields) {
-                const profile = { ...fields, savedAt: Date.now(), blockId: 'buyer-payment-profile' }
+                const profile = { ...fields, savedAt: Date.now(), blockId: fields.blockId || 'buyer-payment-profile' }
                 await this.identity._call('db_write_private', { roomHex: this.buyerPaymentRoomHex(), key: 'local:buyer-payment-profile', value: JSON.stringify(profile) })
                 this.localBlockPayloadCache = null
             }
@@ -7108,7 +7126,13 @@
                 const profile = await this.loadBuyerPaymentProfile()
                 if (!profile?.cardNumber) return null
                 const digits = String(profile.cardNumber || '').replace(/\D/g, '')
-                return { type: 'block', blockId: 'buyer-payment-profile', instanceId: 'local-buyer-payment-profile', definition: { id: 'buyer-payment-profile', name: 'PAYMENT PROFILE', category: 'ECOMMERCE', version: 1, svgIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>' }, data: { name: profile.name || '', email: profile.email || '', card: digits ? '**** ' + digits.slice(-4) : 'saved', savedAt: profile.savedAt || Date.now() }, localOnly: true }
+                const testCard = profile.blockId === 'test-card'
+                return { type: 'block', blockId: testCard ? 'test-card' : 'buyer-payment-profile', instanceId: 'local-buyer-payment-profile', definition: { id: testCard ? 'test-card' : 'buyer-payment-profile', name: testCard ? 'TEST CARD' : 'PAYMENT PROFILE', category: testCard ? 'DEMO' : 'ECOMMERCE', version: 1, svgIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>' }, data: { name: profile.name || '', email: profile.email || '', card: digits ? '**** ' + digits.slice(-4) : 'saved', savedAt: profile.savedAt || Date.now() }, localOnly: true }
+            }
+
+            async installTestCardBlock() {
+                await this.saveBuyerPaymentProfile({ blockId: 'test-card', name: 'Stripe Test Buyer', email: 'test@example.com', cardNumber: '4242424242424242', expMonth: '12', expYear: '34', cvc: '567', postalCode: '42424' })
+                this.activateBlocksTab('installed')
             }
 
             installedBlockIds(payloads) {
@@ -7698,7 +7722,7 @@
                         return `<div class='shop-product'>${item.productImage ? `<img src='${this.escapeAttr(item.productImage)}' alt=''>` : `<div class='shop-product-image-placeholder'>PRODUCT IMAGE</div>`}<div class='shop-product-body'><b>${this.escapeHtml(item.productName || 'Product')}</b><span class='shop-product-price'>${this.escapeHtml(item.productPrice || '')}</span></div>${payment.paymentType ? `<button class='shop-buy-btn' type='button' data-buy-product='${i}'>BUY</button>` : ``}${bought ? `<div class='shop-product-receipt'>RECEIPT ${this.escapeHtml(bought.stripe?.id || bought.id || '')}</div>` : ``}</div>`
                     }).join('') : ''
                     root.querySelectorAll('[data-buy-product]').forEach(btn => {
-                        btn.onclick = () => this.openPurchaseForm({ def, payload, product: { ...(products[Number(btn.dataset.buyProduct)] || {}), productIndex: Number(btn.dataset.buyProduct) }, payment })
+                        btn.onclick = () => this.buyProduct({ def, payload, product: { ...(products[Number(btn.dataset.buyProduct)] || {}), productIndex: Number(btn.dataset.buyProduct) }, payment })
                     })
                 }
                 if (isAdmin) {
