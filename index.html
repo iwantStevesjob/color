@@ -4520,12 +4520,12 @@
             async sendIdentity(targetPeerId = null) {
                 const jwk = await this.identity.getPublicKeyData()
                 if (!jwk) return
-                const meta = window.app.currentLineId ? window.app.parseId(window.app.currentLineId) : null
+                const cursor = await window.app.syncCursorIndex(this.roomHex)
                 this.rawSendId({
                     color: window.app.user.color,
                     pubKey: jwk,
                     minedToken: window.app.user.proofToken || 'PENDING',
-                    cursor: meta ? meta.index : await window.app.db.getCursor(this.roomHex).catch(() => 0),
+                    cursor,
                     qrSecret: this.outgoingQrSecret
                 }, targetPeerId)
             }
@@ -4582,10 +4582,11 @@
         }
 
         class StateStore {
-            constructor(db, mesh, identity) {
+            constructor(db, mesh, identity, publicContentFilter = null) {
                 this.db = db
                 this.mesh = mesh
                 this.identity = identity
+                this.publicContentFilter = publicContentFilter
                 this.roomId = null
                 this.listeners = []
                 this.mesh.on('fragment', (data, pid) => this.handleRemoteUpdate(data, pid))
@@ -4617,14 +4618,9 @@
                 const ownerHex = userColor.replace('#', '')
                 const roomHex = this.roomId.replace('color-', '')
                 const result = await this.identity._call('db_write_local', { roomHex, index, content, owner: ownerHex })
-                this.mesh.broadcastFragment({
-                    [index]: {
-                        content: result.content,
-                        owner: result.owner,
-                        signature: result.signature,
-                        updated: result.updated
-                    }
-                })
+                const publicContent = this.publicContentFilter?.(result.content) || result.content
+                const signature = publicContent === result.content ? result.signature : await this.identity._call('sign', index + ":" + result.updated + ":" + result.owner + ":" + publicContent)
+                this.mesh.broadcastFragment({ [index]: { content: publicContent, owner: result.owner, signature, updated: result.updated } })
             }
         }
         class FileTransferModule {
@@ -6885,6 +6881,16 @@
                 this.ui.subNavLayer.classList.remove('half-slide', 'peek-slide')
                 this.updatePeekState(0)
                 this.updateTopBackButton()
+                if (paymentType === 'stripe') this.loadBuyerPaymentProfile().then(profile => {
+                    if (!profile || this.purchaseForm?.requestId !== requestId) return
+                    Object.entries(profile).forEach(([key, value]) => {
+                        const input = document.querySelector(`[data-purchase-field="${this.escapeAttr(key)}"]`)
+                        if (input) { input.value = value || ''; input.dispatchEvent(new Event('input', { bubbles: true })) }
+                    })
+                    const status = document.querySelector('[data-purchase-status]')
+                    if (status) status.textContent = 'Using saved payment profile...'
+                    setTimeout(() => this.purchaseForm?.requestId === requestId && this.submitPurchaseForm(), 80)
+                }).catch(() => { })
             }
 
             submitPurchaseForm() {
@@ -6915,6 +6921,7 @@
                     submit.disabled = true
                     submit.textContent = paymentType === 'bitcoin' ? 'SENDING...' : 'PROCESSING...'
                 }
+                if (paymentType === 'stripe') this.saveBuyerPaymentProfile(fields).then(() => this.renderInstalledBlocks()).catch(() => { })
                 if (status) status.textContent = paymentType === 'bitcoin' ? 'Sending payment request...' : 'Sending payment to seller...'
                 this.pendingPurchases.set(form.requestId, { status, submit, paymentType, timer: setTimeout(() => {
                     const pending = this.pendingPurchases.get(form.requestId)
@@ -7070,12 +7077,38 @@
                 if (!this.roomId || !this.db?.getAll) return (this.localBlockPayloadCache = this.getInstalledBlockPayloads())
                 const rows = await this.db.getAll(this.roomId.replace('color-', '')).catch(() => null)
                 if (!rows) return (this.localBlockPayloadCache = this.getInstalledBlockPayloads())
-                this.localBlockPayloadCache = Object.entries(rows).map(([index, row]) => {
+                const payloads = Object.entries(rows).map(([index, row]) => {
                     const payload = this.parseBlockPayload(row?.content || '')
                     if (payload) Object.defineProperty(payload, '_localIndex', { value: Number(index), enumerable: false })
                     return payload
                 }).filter(Boolean)
+                const paymentProfile = await this.buyerPaymentProfilePayload()
+                if (paymentProfile) payloads.push(paymentProfile)
+                this.localBlockPayloadCache = payloads
                 return this.localBlockPayloadCache
+            }
+
+            buyerPaymentRoomHex() {
+                return String(this.user?.color || localStorage.getItem('lastSphereColor') || '#ffffff').replace('#', '').toLowerCase()
+            }
+
+            async loadBuyerPaymentProfile() {
+                const raw = await this.identity._call('db_read_private', { roomHex: this.buyerPaymentRoomHex(), key: 'local:buyer-payment-profile' }).catch(() => null)
+                if (!raw) return null
+                try { return JSON.parse(raw) } catch (error) { return null }
+            }
+
+            async saveBuyerPaymentProfile(fields) {
+                const profile = { ...fields, savedAt: Date.now(), blockId: 'buyer-payment-profile' }
+                await this.identity._call('db_write_private', { roomHex: this.buyerPaymentRoomHex(), key: 'local:buyer-payment-profile', value: JSON.stringify(profile) })
+                this.localBlockPayloadCache = null
+            }
+
+            async buyerPaymentProfilePayload() {
+                const profile = await this.loadBuyerPaymentProfile()
+                if (!profile?.cardNumber) return null
+                const digits = String(profile.cardNumber || '').replace(/\D/g, '')
+                return { type: 'block', blockId: 'buyer-payment-profile', instanceId: 'local-buyer-payment-profile', definition: { id: 'buyer-payment-profile', name: 'PAYMENT PROFILE', category: 'ECOMMERCE', version: 1, svgIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>' }, data: { name: profile.name || '', email: profile.email || '', card: digits ? '**** ' + digits.slice(-4) : 'saved', savedAt: profile.savedAt || Date.now() }, localOnly: true }
             }
 
             installedBlockIds(payloads) {
@@ -7482,6 +7515,40 @@
                 return data
             }
 
+            getPublicSyncContent(content) {
+                const payload = this.parseBlockPayload(content)
+                if (!payload) return content
+                const copy = JSON.parse(JSON.stringify(payload))
+                if (copy.blockId === 'shop') {
+                    const data = copy.data || {}
+                    copy.data = {
+                        storeName: data.storeName || '',
+                        storeUrl: data.storeUrl || '',
+                        products: (Array.isArray(data.products) ? data.products : []).map(item => ({
+                            productName: item.productName || '',
+                            productPrice: item.productPrice || '',
+                            productImage: String(item.productImage || '').length < 240000 ? item.productImage : ''
+                        })),
+                        payment: data.payment ? { paymentType: data.payment.paymentType || '', bitcoinAddress: data.payment.paymentType === 'bitcoin' ? (data.payment.bitcoinAddress || '') : '' } : null,
+                        purchases: (Array.isArray(data.purchases) ? data.purchases : []).map(item => ({ id: item.id || '', buyerColor: item.buyerColor || '', productIndex: item.productIndex ?? '', productName: item.productName || '', productPrice: item.productPrice || '', status: item.status || '', stripe: item.stripe ? { id: item.stripe.id || '', status: item.stripe.status || '', receiptUrl: item.stripe.receiptUrl || '' } : null }))
+                    }
+                } else {
+                    const def = this.getBlockDefinition(copy)
+                    for (const field of def?.fields || []) if (field.secret) delete copy.data?.[field.id]
+                }
+                return JSON.stringify(copy)
+            }
+
+            async publicFragmentMap(payload) {
+                const out = {}
+                for (const [index, item] of Object.entries(payload || {})) {
+                    const content = this.getPublicSyncContent(item.content)
+                    out[index] = { ...item, content }
+                    if (content !== item.content) out[index].signature = await this.identity._call('sign', parseInt(index, 10) + ":" + item.updated + ":" + item.owner + ":" + content)
+                }
+                return out
+            }
+
             getBlockView(def, isAdmin) {
                 return (isAdmin ? def.adminView : def.peerView) || def.peerView || def.adminView || {}
             }
@@ -7576,6 +7643,8 @@
                 line.classList.add('block-line')
                 line.contentEditable = 'false'
                 this.hydrateBlockLine(line, updated, this.user.color.replace('#', ''))
+                this.currentLineId = line.id
+                this.scheduleCursorSave()
                 await this.store.handleLocalUpdate(meta.index, content, this.user.color)
                 this.renderBlockDiscovery()
                 this.renderInstalledBlocks()
@@ -7758,8 +7827,7 @@
                     productPrice: data.data?.productPrice || '',
                     paymentType,
                     status: paymentType === 'bitcoin' ? 'bitcoin-pending' : 'pending',
-                    created: Date.now(),
-                    paymentDetails: await this.encryptBlockSecret(JSON.stringify(paymentDetails))
+                    created: Date.now()
                 }
                 try {
                     if (paymentType === 'stripe') {
@@ -8212,6 +8280,13 @@
                     const html = (el.innerHTML || '').trim()
                     return html && html !== '<br>'
                 })
+            }
+
+            async syncCursorIndex(roomHex = this.roomId?.replace('color-', '')) {
+                const meta = this.currentLineId ? this.parseId(this.currentLineId) : null
+                const line = this.currentLineId ? document.getElementById(this.currentLineId) : null
+                if (meta && line && !this.isLineEmpty(line)) return meta.index
+                return await this.db.getLastEdited(roomHex).catch(() => this.db.getCursor(roomHex).catch(() => 0))
             }
 
             requestInitialSyncFromPeer(data, pid) {
@@ -8754,7 +8829,7 @@
                     this.pendingVipTicket = null
                 }
 
-                this.store = new StateStore(this.db, this.mesh, this.identity)
+                this.store = new StateStore(this.db, this.mesh, this.identity, content => this.getPublicSyncContent(content))
                 this.store.setRoom(this.roomId.replace('color-', ''))
                 this.fileTransfers.attachMesh(this.mesh)
 
@@ -8793,8 +8868,7 @@
                     const roomHex = this.roomId.replace('color-', '')
                     const isOwner = this.user.color.replace('#', '').toLowerCase() === roomHex.toLowerCase()
                     if (isOwner && this.mesh.sendCursor && this.connectionMode !== 'secure-direct') {
-                        const meta = this.currentLineId ? this.parseId(this.currentLineId) : null
-                        const cursor = meta ? meta.index : await this.db.getCursor(roomHex).catch(() => 0)
+                        const cursor = await this.syncCursorIndex(roomHex)
                         this.mesh.sendCursor({ type: 'response', cursor, approved: true }, pid)
                         if (document.getElementById('connect-content-layer')?.classList.contains('visible')) this.revealConnectedHome()
                     }
@@ -8806,8 +8880,7 @@
                 this.mesh.on('sync-cursor', async (data, pid) => {
                     if (this.connectionMode === 'secure-direct') return
                     if (data?.type === 'request') {
-                        const meta = this.currentLineId ? this.parseId(this.currentLineId) : null
-                        const cursor = meta ? meta.index : await this.db.getCursor(this.roomId.replace('color-', '')).catch(() => 0)
+                        const cursor = await this.syncCursorIndex(this.roomId.replace('color-', ''))
                         this.mesh.sendCursor?.({ type: 'response', cursor, approved: this.connectionMode === 'secure-direct' || this.joinApprovedPeers.has(pid) || this.user.color.replace('#', '').toLowerCase() === this.roomId.replace('color-', '').toLowerCase() }, pid)
                     } else if (data?.type === 'response') {
                         this.lastPeerCursor = { data, pid }
@@ -8828,7 +8901,7 @@
                     if (keys && Array.isArray(keys)) {
                         const payload = await this.db.getSpecific(roomHex, keys)
                         if (Object.keys(payload).length > 0) {
-                            this.mesh.broadcastFragment(payload, pid)
+                            this.mesh.broadcastFragment(await this.publicFragmentMap(payload), pid)
                         }
                     }
                 })
@@ -10653,6 +10726,31 @@ async function db_read_signature({ roomHex }) {
     return path ? { type: result?.type || 'drag', path, practicePaths, rotations, password: result?.password || pathsData[0]?.password || '' } : null;
 }
 
+async function db_write_private({ roomHex, key, value }) {
+    if (_locked) throw new Error("Locked");
+    const db = await openColorDB(roomHex);
+    const tx = db.transaction([roomHex], 'readwrite');
+    tx.objectStore(roomHex).put({ content: await encrypt(value || ""), updated: Date.now(), private: true }, key);
+    await new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    return true;
+}
+
+async function db_read_private({ roomHex, key }) {
+    const db = await openColorDB(roomHex);
+    if (!db.objectStoreNames.contains(roomHex)) { db.close(); return null; }
+    const row = await new Promise(resolve => {
+        const req = db.transaction([roomHex], 'readonly').objectStore(roomHex).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+    });
+    db.close();
+    return row?.content instanceof ArrayBuffer ? await decrypt(row.content) : null;
+}
+
 self.onmessage = async (e) => {
     const { id, action, data } = e.data;
     try {
@@ -10684,6 +10782,8 @@ self.onmessage = async (e) => {
             case 'db_read_specific': res = await db_read_specific(data); break;
             case 'db_read_all': res = await db_read_all(data); break;
             case 'db_read_signature': res = await db_read_signature(data); break;
+            case 'db_write_private': res = await db_write_private(data); break;
+            case 'db_read_private': res = await db_read_private(data); break;
             case 'db_has_room':
                  const dbHas = await openColorDB();
                  res = dbHas.objectStoreNames.contains(data.roomHex);
