@@ -2036,6 +2036,13 @@
             color: rgba(0, 0, 0, 0.72);
         }
 
+        .create-block-form .settings-label:has(+ select.settings-input) {
+            top: auto;
+            left: auto;
+            display: block;
+            margin: 0 0 8px;
+        }
+
         .create-block-form .settings-label:has(+ .settings-input.required-empty)::after {
             content: ' *';
             color: #d32f2f;
@@ -2092,7 +2099,24 @@
         }
 
         .create-block-form select.settings-input {
+            appearance: none;
+            -webkit-appearance: none;
+            border-radius: 8px;
+            background-color: rgba(255, 255, 255, var(--block-field-alpha, 0.62));
+            background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+            background-position: calc(100% - 21px) 50%, calc(100% - 15px) 50%;
+            background-repeat: no-repeat;
+            background-size: 6px 6px;
+            padding: 16px 44px 10px 12px;
             text-align-last: left;
+        }
+
+        .create-block-form select.settings-input:focus,
+        .create-block-form select.settings-input.has-value,
+        .create-block-form select.settings-input.keyboard-active {
+            border-radius: 8px;
+            background-color: rgba(255, 255, 255, var(--block-field-alpha, 0.62));
+            padding: 16px 44px 10px 12px;
         }
 
         .create-block-form textarea {
@@ -2153,7 +2177,7 @@
         }
 
         .tshirt-upload.open {
-            max-height: 190px;
+            max-height: 260px;
             opacity: 1;
         }
 
@@ -2185,6 +2209,12 @@
             margin-bottom: 14px;
         }
 
+        .tshirt-upload-box[data-tshirt-upload-box] {
+            min-height: 104px;
+            padding: 10px 12px;
+            margin-bottom: 14px;
+        }
+
         .tshirt-upload-box.has-image[data-product-image-box] {
             min-height: 0;
             padding: 0;
@@ -2193,18 +2223,15 @@
         .product-upload-empty {
             display: grid;
             gap: 8px;
+            justify-items: center;
             pointer-events: none;
         }
 
-        .product-upload-empty::before {
-            content: '';
-            width: 26px;
-            height: 22px;
-            margin: 0 auto 2px;
-            border: 2px solid currentColor;
-            border-radius: 4px;
-            background: linear-gradient(135deg, transparent 52%, currentColor 53% 60%, transparent 61%), radial-gradient(circle at 70% 30%, currentColor 0 2px, transparent 3px);
-            opacity: 0.7;
+        .product-upload-empty svg {
+            width: 28px;
+            height: 28px;
+            margin-bottom: 2px;
+            opacity: 0.72;
         }
 
         .product-upload-empty span {
@@ -7591,6 +7618,7 @@
             }
 
             openConnectSection(navItem) {
+                void this.loadGlobeLines().catch(() => { this.globeLines = [] })
                 if (this.selectedConnectType) {
                     this.clearTransientPanelModes()
                     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))
@@ -9000,11 +9028,11 @@
 
             async loadGlobeLines() {
                 if (this.globeLines) return this.globeLines
-                const res = await fetch('https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_admin_0_countries.geojson')
+                const res = await fetch('https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_110m_admin_0_countries.geojson')
                 const geo = await res.json()
                 const lines = []
                 const addRing = ring => {
-                    const step = Math.max(1, Math.ceil(ring.length / 220))
+                    const step = Math.max(1, Math.ceil(ring.length / 90))
                     lines.push(ring.filter((_, i) => i % step === 0 || i === ring.length - 1))
                 }
                 geo.features?.forEach(feature => {
@@ -9146,8 +9174,8 @@
 
             startNearbyDiscovery() {
                 const btn = document.getElementById('connect-nearby-start')
-                if (btn) { btn.textContent = 'TRY GPS AGAIN'; btn.disabled = true; btn.style.opacity = '0.7' }
-                if (!navigator.geolocation) { this.startNearbyIpFallback('GPS is not available.').catch(error => this.renderNearbyDiscovery(error.message)).finally(() => { if (btn) { btn.disabled = false; btn.style.opacity = '' } }); return }
+                if (btn) { btn.textContent = 'GETTING GPS'; btn.disabled = true; btn.style.opacity = '0.7' }
+                if (!navigator.geolocation) { this.startNearbyIpFallback('GPS is not available.').catch(error => this.renderNearbyDiscovery(error.message)).finally(() => { if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'TRY GPS AGAIN' } }); return }
                 this.renderNearbyDiscovery('Getting GPS...')
                 navigator.geolocation.getCurrentPosition(position => {
                     const gpsLoc = { lat: position.coords.latitude, lng: position.coords.longitude }
@@ -9155,7 +9183,7 @@
                         const roomId = this.nearbyZipId(ipLoc) || this.nearbyCellId(gpsLoc.lat, gpsLoc.lng)
                         return this.initNearbyDiscovery({ ...ipLoc, ...gpsLoc }, roomId, ipLoc ? this.nearbyLocationLabel(ipLoc) : 'your GPS area')
                     }).finally(() => {
-                        if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'TRY GPS AGAIN' }
+                        if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.textContent = 'REFRESH NEARBY' }
                     })
                 }, error => {
                     this.startNearbyIpFallback(error.message).catch(fallbackError => this.renderNearbyDiscovery('Location blocked. Try again or enable GPS.'))
