@@ -16,7 +16,7 @@
             --bg-color: #000;
             --text-color: #fff;
             --ui-bg: rgba(255, 255, 255, 0.1);
-            --ui-border: rgba(255, 255, 255, 0.2);
+            --ui-border: rgba(70, 28, 28, 0.2);
             --nav-color: white;
             --tracker-bg: rgba(0, 0, 0, 0.75);
             --nav-height: 90px;
@@ -24,6 +24,7 @@
             --sliver-height: 10px;
             --panel-vh: 100vh;
             --half-peek-height: 60vh;
+            --highlight-selection-color: rgba(255, 230, 64, .62);
         }
 
         @supports (height: 100dvh) {
@@ -1177,6 +1178,21 @@
             font-size: 16px;
             line-height: 24px;
             position: relative;
+        }
+
+        #display::selection,
+        #display *::selection {
+            background: var(--highlight-selection-color);
+            color: inherit;
+        }
+
+        @media (pointer: fine) {
+
+            #display,
+            #display * {
+                user-select: text;
+                -webkit-user-select: text;
+            }
         }
 
         .editor-line {
@@ -6506,8 +6522,9 @@
                 this.highlightPending = null
                 this.highlightLast = null
                 this.highlightTouched = new Set()
-                this.highlightEraseSeen = new Map()
                 this.highlightBroadcastOps = new Map()
+                this.highlightMode = null
+                document.documentElement.style.setProperty('--highlight-selection-color', this.highlightBackground(this.highlighterColor()))
                 this.isFresh = true
                 this.saveTimeout = null
                 this.store = null
@@ -8774,18 +8791,15 @@
                 const end = Math.max(this.highlightLast.index, hit.index)
                 const chars = this.prepareHighlightLine(hit.line)
                 const ops = []
-                const now = Date.now()
                 for (let i = start; i <= end; i++) {
                     const key = hit.line.id + ':' + i
                     const ch = chars[i]
                     if (!ch) continue
                     const highlighted = !!ch.dataset.highlightColor
-                    if (highlighted) {
-                        if (this.highlightTouched.has(key)) continue
-                        if (!this.highlightEraseSeen.has(key)) this.highlightEraseSeen.set(key, now)
-                        if (now - this.highlightEraseSeen.get(key) < 240) continue
-                    } else if (this.highlightTouched.has(key)) continue
-                    const color = highlighted ? '' : this.highlighterColor()
+                    if (this.highlightMode === 'erase') {
+                        if (!highlighted || this.highlightTouched.has(key)) continue
+                    } else if (highlighted || this.highlightTouched.has(key)) continue
+                    const color = this.highlightMode === 'erase' ? '' : this.highlighterColor()
                     this.highlightTouched.add(key)
                     const last = ops[ops.length - 1]
                     if (last && last.color === color && last.end === i - 1) last.end = i
@@ -8805,13 +8819,13 @@
 
                 display.addEventListener('pointerdown', e => {
                     if (this.appState.session !== 'joined') return
-                    if (e.pointerType === 'mouse' && e.button !== 0) return
+                    if (e.pointerType === 'mouse') return
                     if (!this.highlightLineFromPoint(e.clientX, e.clientY)) return
                     this.highlightPending = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
                     this.highlightLast = null
                     this.highlightTouched = new Set()
-                    this.highlightEraseSeen = new Map()
                     this.highlightBroadcastOps = new Map()
+                    this.highlightMode = null
                 }, { passive: true })
 
                 display.addEventListener('pointermove', e => {
@@ -8824,6 +8838,7 @@
                             this.highlightPending = null
                             return
                         }
+                        this.highlightMode = dx < 0 ? 'erase' : 'mark'
                         this.highlightDrawing = true
                         display.setPointerCapture?.(e.pointerId)
                         this.markHighlightTo(this.highlightPoint(this.highlightPending.x, this.highlightPending.y))
@@ -8839,7 +8854,7 @@
                     this.highlightDrawing = false
                     this.highlightPending = null
                     this.highlightLast = null
-                    this.highlightEraseSeen.clear()
+                    this.highlightMode = null
                 }
                 display.addEventListener('pointerup', end, { passive: false })
                 display.addEventListener('pointercancel', end, { passive: false })
@@ -8944,6 +8959,7 @@
                     this.ui.userBadge.style.backgroundColor = this.user.color
                     localStorage.setItem('lastSphereColor', this.user.color)
                     this.user.id = 'user_' + this.user.color.replace('#', '')
+                    document.documentElement.style.setProperty('--highlight-selection-color', this.highlightBackground(this.highlighterColor()))
                 }
 
                 if (roomSignature?.path?.length) {
@@ -9067,6 +9083,7 @@
                 this.ui.userBadge.style.backgroundColor = this.user.color
                 this.ui.userBadge.setAttribute('data-hex', this.user.color.toUpperCase())
                 this.user.id = 'user_' + this.user.color.replace('#', '')
+                document.documentElement.style.setProperty('--highlight-selection-color', this.highlightBackground(this.highlighterColor()))
                 this.setSessionState('connecting')
                 this.resetProofState(cleanHex)
 
