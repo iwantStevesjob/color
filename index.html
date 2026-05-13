@@ -6507,6 +6507,7 @@
                 this.highlightLast = null
                 this.highlightTouched = new Set()
                 this.highlightEraseSeen = new Map()
+                this.highlightBroadcastOps = new Map()
                 this.isFresh = true
                 this.saveTimeout = null
                 this.store = null
@@ -8749,14 +8750,18 @@
                 const line = document.getElementById(lineId)
                 const chars = this.prepareHighlightLine(line)
                 ops.forEach(op => {
-                    const ch = chars[op.index]
-                    if (!ch) return
-                    if (op.color) {
-                        ch.dataset.highlightColor = op.color
-                        ch.style.backgroundColor = this.highlightBackground(op.color)
-                    } else {
-                        delete ch.dataset.highlightColor
-                        ch.style.backgroundColor = ''
+                    const start = Number.isFinite(op.start) ? op.start : op.index
+                    const end = Number.isFinite(op.end) ? op.end : start
+                    for (let i = start; i <= end; i++) {
+                        const ch = chars[i]
+                        if (!ch) continue
+                        if (op.color) {
+                            ch.dataset.highlightColor = op.color
+                            ch.style.backgroundColor = this.highlightBackground(op.color)
+                        } else {
+                            delete ch.dataset.highlightColor
+                            ch.style.backgroundColor = ''
+                        }
                     }
                 })
                 document.dispatchEvent(new Event('highlightchange'))
@@ -8776,16 +8781,19 @@
                     if (!ch) continue
                     const highlighted = !!ch.dataset.highlightColor
                     if (highlighted) {
+                        if (this.highlightTouched.has(key)) continue
                         if (!this.highlightEraseSeen.has(key)) this.highlightEraseSeen.set(key, now)
                         if (now - this.highlightEraseSeen.get(key) < 240) continue
                     } else if (this.highlightTouched.has(key)) continue
                     const color = highlighted ? '' : this.highlighterColor()
                     this.highlightTouched.add(key)
-                    ops.push({ index: i, color })
+                    const last = ops[ops.length - 1]
+                    if (last && last.color === color && last.end === i - 1) last.end = i
+                    else ops.push({ start: i, end: i, color })
                 }
                 if (ops.length) {
                     this.applyHighlightOps(hit.line.id, ops)
-                    this.mesh?.broadcastHighlight?.({ lineId: hit.line.id, ops })
+                    this.highlightBroadcastOps.set(hit.line.id, (this.highlightBroadcastOps.get(hit.line.id) || []).concat(ops))
                 }
                 this.highlightLast = hit
             }
@@ -8803,6 +8811,7 @@
                     this.highlightLast = null
                     this.highlightTouched = new Set()
                     this.highlightEraseSeen = new Map()
+                    this.highlightBroadcastOps = new Map()
                 }, { passive: true })
 
                 display.addEventListener('pointermove', e => {
@@ -8819,6 +8828,8 @@
 
                 const end = e => {
                     if (this.highlightDrawing) e.preventDefault()
+                    this.highlightBroadcastOps.forEach((ops, lineId) => this.mesh?.broadcastHighlight?.({ lineId, ops }))
+                    this.highlightBroadcastOps.clear()
                     this.highlightDrawing = false
                     this.highlightPending = null
                     this.highlightLast = null
@@ -8827,6 +8838,8 @@
                 display.addEventListener('pointerup', end, { passive: false })
                 display.addEventListener('pointercancel', end, { passive: false })
                 document.addEventListener('selectstart', e => { if (this.highlightDrawing) e.preventDefault() })
+                document.addEventListener('touchmove', e => { if (this.highlightDrawing) e.preventDefault() }, { passive: false })
+                document.addEventListener('contextmenu', e => { if (this.highlightDrawing) e.preventDefault() })
             }
 
             tryAutoConnectFromHash() {
