@@ -2774,10 +2774,10 @@
             flex: 4;
         }
 
-        #close-keyboard {
+        #close-keyboard,
+        #copy-highlight {
             position: fixed;
-            right: 1.5rem;
-            bottom: calc(env(safe-area-inset-bottom) + 220px);
+            bottom: calc(env(safe-area-inset-bottom) + 246px);
             z-index: 2101;
             background: #fff;
             border: 0;
@@ -2790,12 +2790,26 @@
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
 
-        #close-keyboard.visible {
+        #close-keyboard {
+            right: 1.5rem;
+        }
+
+        #copy-highlight {
+            right: 4.6rem;
+            padding: 0.6rem 0.85rem;
+            color: #444;
+            font-size: 0.75rem;
+            font-weight: 800;
+        }
+
+        #close-keyboard.visible,
+        #copy-highlight.visible {
             opacity: 1;
             pointer-events: auto;
         }
 
-        #close-keyboard:active {
+        #close-keyboard:active,
+        #copy-highlight:active {
             transform: scale(0.9);
         }
 
@@ -6492,6 +6506,7 @@
                 this.highlightPending = null
                 this.highlightLast = null
                 this.highlightTouched = new Set()
+                this.highlightEraseSeen = new Map()
                 this.isFresh = true
                 this.saveTimeout = null
                 this.store = null
@@ -8744,6 +8759,7 @@
                         ch.style.backgroundColor = ''
                     }
                 })
+                document.dispatchEvent(new Event('highlightchange'))
             }
 
             markHighlightTo(hit) {
@@ -8753,11 +8769,17 @@
                 const end = Math.max(this.highlightLast.index, hit.index)
                 const chars = this.prepareHighlightLine(hit.line)
                 const ops = []
+                const now = Date.now()
                 for (let i = start; i <= end; i++) {
                     const key = hit.line.id + ':' + i
                     const ch = chars[i]
-                    if (!ch || this.highlightTouched.has(key)) continue
-                    const color = ch.dataset.highlightColor ? '' : this.highlighterColor()
+                    if (!ch) continue
+                    const highlighted = !!ch.dataset.highlightColor
+                    if (highlighted) {
+                        if (!this.highlightEraseSeen.has(key)) this.highlightEraseSeen.set(key, now)
+                        if (now - this.highlightEraseSeen.get(key) < 240) continue
+                    } else if (this.highlightTouched.has(key)) continue
+                    const color = highlighted ? '' : this.highlighterColor()
                     this.highlightTouched.add(key)
                     ops.push({ index: i, color })
                 }
@@ -8780,6 +8802,7 @@
                     this.highlightPending = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
                     this.highlightLast = null
                     this.highlightTouched = new Set()
+                    this.highlightEraseSeen = new Map()
                 }, { passive: true })
 
                 display.addEventListener('pointermove', e => {
@@ -8799,6 +8822,7 @@
                     this.highlightDrawing = false
                     this.highlightPending = null
                     this.highlightLast = null
+                    this.highlightEraseSeen.clear()
                 }
                 display.addEventListener('pointerup', end, { passive: false })
                 display.addEventListener('pointercancel', end, { passive: false })
@@ -12188,6 +12212,7 @@ self.onmessage = async (e) => {
         turnAppNameEl.addEventListener('input', e => localStorage.setItem('turnAppName', e.target.value))
         turnApiKeyEl.addEventListener('input', e => localStorage.setItem('turnApiKey', e.target.value))
     </script>
+    <button id="copy-highlight" aria-label="Copy highlighted text">COPY</button>
     <button id="close-keyboard" aria-label="Close keyboard">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="#444" viewBox="0 0 256 256">
             <path
@@ -12216,6 +12241,7 @@ self.onmessage = async (e) => {
                 const keyboardContainer = document.getElementById('keyboard-container')
                 const keysWrapper = document.getElementById('keys-wrapper')
                 const closeBtn = document.getElementById('close-keyboard')
+                const copyHighlightBtn = document.getElementById('copy-highlight')
                 const chatContainer = document.getElementById('chat-container')
                 const dashboardPanel = document.getElementById('dashboard-panel')
                 const editors = ['master-pass', 'turn-app-name', 'turn-api-key'].map(id => document.getElementById(id)).filter(Boolean)
@@ -12233,6 +12259,8 @@ self.onmessage = async (e) => {
 
                 const hideNativeKeyboard = () => { try { navigator.virtualKeyboard?.hide?.() } catch (e) { } }
                 const ignoresDisplayKeyboard = target => !target?.closest?.('input:not([type="button"]):not([type="submit"]):not([type="radio"]):not([type="checkbox"]):not([type="file"]):not([type="hidden"]), textarea') && target?.closest?.('button, a, select, [contenteditable="false"], .color-block-widget')
+                const highlightedText = () => Array.from(display.querySelectorAll('.editor-line')).map(line => Array.from(line.querySelectorAll('.highlight-ch[data-highlight-color]')).map(ch => ch.textContent || '').join('')).filter(Boolean).join('\n')
+                const syncHighlightCopyButton = () => copyHighlightBtn?.classList.toggle('visible', isKeyboardVisible && !!display.querySelector('.highlight-ch[data-highlight-color]'))
 
                 function renderKeyboard() {
                     keysWrapper.innerHTML = ''
@@ -12288,6 +12316,7 @@ self.onmessage = async (e) => {
                         isKeyboardVisible = true
                         keyboardContainer.classList.remove('keyboard-hidden')
                         closeBtn.classList.add('visible')
+                        syncHighlightCopyButton()
                     }
                     requestAnimationFrame(keepCursorVisible)
                     requestAnimationFrame(settleLandscapeViewport)
@@ -12297,6 +12326,7 @@ self.onmessage = async (e) => {
                     isKeyboardVisible = false
                     keyboardContainer.classList.add('keyboard-hidden')
                     closeBtn.classList.remove('visible')
+                    copyHighlightBtn?.classList.remove('visible')
                     fakeCaret?.remove()
                     fakeCaret = null
                     activeEditor?.classList?.remove('keyboard-active')
@@ -12636,7 +12666,7 @@ self.onmessage = async (e) => {
                 const handleOutsideClick = (e) => {
                     if (!isKeyboardVisible) return
                     if (activeEditor?.contains?.(e.target) || [display, ...editors].some(ed => ed && ed.contains(e.target))) return
-                    if (keyboardContainer.contains(e.target) || closeBtn.contains(e.target)) return
+                    if (keyboardContainer.contains(e.target) || closeBtn.contains(e.target) || copyHighlightBtn?.contains(e.target)) return
                     if (e.target.closest && e.target.closest('.editor-tools, #editor-tools, .my-line, .nav-item, .sub-tab')) hideKeyboard(true)
                     else hideKeyboard(true)
                 }
@@ -12647,6 +12677,29 @@ self.onmessage = async (e) => {
                     e.preventDefault()
                     hideKeyboard()
                 })
+                copyHighlightBtn?.addEventListener('click', async e => {
+                    e.preventDefault()
+                    const text = highlightedText()
+                    if (!text) return
+                    try {
+                        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text)
+                        else {
+                            const area = document.createElement('textarea')
+                            area.value = text
+                            area.style.position = 'fixed'
+                            area.style.opacity = '0'
+                            document.body.appendChild(area)
+                            area.select()
+                            document.execCommand('copy')
+                            area.remove()
+                        }
+                        copyHighlightBtn.textContent = 'COPIED'
+                        setTimeout(() => { copyHighlightBtn.textContent = 'COPY' }, 900)
+                    } catch (err) {
+                        alert('Could not copy highlighted text.')
+                    }
+                })
+                document.addEventListener('highlightchange', syncHighlightCopyButton)
 
                 window.addEventListener('resize', () => {
                     if (window.innerHeight > maxHeight) maxHeight = window.innerHeight
