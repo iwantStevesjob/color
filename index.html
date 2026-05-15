@@ -9473,7 +9473,7 @@
                         this.currentLineId = line.id
                         this.renderCustomBlockDraftAction(line)
                         this.scheduleCursorSave()
-                        this.saveTimeout = setTimeout(() => this.triggerSave(line.id).catch(e => console.warn('triggerSave failed', e)), 500)
+                        this.saveTimeout = setTimeout(() => this.triggerSave(line.id), 500)
                     }
                 })
 
@@ -10786,7 +10786,6 @@ let _currentRoomHex = null;
 const WORKER_LOG = "[COLOR worker]";
 
 const DIFFICULTY_PREFIX = "0000"; 
-const subtle = self.crypto?.subtle || self.crypto?.webkitSubtle;
 
 async function computeProof(roomHex) {
     const encoder = new TextEncoder();
@@ -10795,7 +10794,7 @@ async function computeProof(roomHex) {
         nonce++;
         const hourStamp = Math.floor(Date.now() / 3600000); 
         const attempt = roomHex + hourStamp + nonce;
-        const hashBuffer = await subtle.digest('SHA-256', encoder.encode(attempt));
+        const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(attempt));
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         if (hashHex.startsWith(DIFFICULTY_PREFIX)) {
@@ -10813,7 +10812,7 @@ async function isValidPeer(peerId, roomHex) {
 
     const encoder = new TextEncoder();
     const attempt = roomHex + hourStamp + nonce;
-    const hashBuffer = await subtle.digest('SHA-256', encoder.encode(attempt));
+    const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(attempt));
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     return hashHex.startsWith(DIFFICULTY_PREFIX);
@@ -10856,16 +10855,16 @@ function openColorDB(hex = null) {
 
 async function deriveKeyFromPass(password, salt) {
     const enc = new TextEncoder();
-    const keyMaterial = await subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]);
-    return subtle.deriveKey({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
 
 async function loadKeysToMemory(sigJWK, aesJWK, pubJWK) {
-    _aesKey = await subtle.importKey("jwk", aesJWK, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    _aesKey = await crypto.subtle.importKey("jwk", aesJWK, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
     const curve = sigJWK.crv || pubJWK.crv || "P-256";
     _keyPair = {
-        privateKey: await subtle.importKey("jwk", sigJWK, { name: "ECDSA", namedCurve: curve }, false, ["sign"]),
-        publicKey: await subtle.importKey("jwk", pubJWK, { name: "ECDSA", namedCurve: curve }, true, ["verify"])
+        privateKey: await crypto.subtle.importKey("jwk", sigJWK, { name: "ECDSA", namedCurve: curve }, false, ["sign"]),
+        publicKey: await crypto.subtle.importKey("jwk", pubJWK, { name: "ECDSA", namedCurve: curve }, true, ["verify"])
     };
     _locked = false;
 }
@@ -10888,10 +10887,10 @@ async function getWrappedKeys(roomHex) {
 }
 
 async function saveWrappedKeys(roomHex, password, keysJwkObj, pubKeyJwk) {
-    const salt = self.crypto.getRandomValues(new Uint8Array(16));
+    const salt = crypto.getRandomValues(new Uint8Array(16));
     const wrapKey = await deriveKeyFromPass(password, salt);
-    const iv = self.crypto.getRandomValues(new Uint8Array(12));
-    const encryptedData = await subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, new TextEncoder().encode(JSON.stringify(keysJwkObj)));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encryptedData = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, new TextEncoder().encode(JSON.stringify(keysJwkObj)));
     _encryptedBlob = { salt, iv, data: encryptedData, pubKey: pubKeyJwk };
     _currentRoomHex = roomHex;
     const db = await openColorDB(roomHex);
@@ -10912,8 +10911,8 @@ function lockCurrentRoom() {
 
 async function encrypt(data) {
     if (_locked) throw new Error("Locked");
-    const iv = self.crypto.getRandomValues(new Uint8Array(12));
-    const c = await subtle.encrypt({ name: "AES-GCM", iv }, _aesKey, new TextEncoder().encode(data));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const c = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, _aesKey, new TextEncoder().encode(data));
     const p = new Uint8Array(iv.length + c.byteLength);
     p.set(iv, 0); p.set(new Uint8Array(c), 12);
     return p.buffer;
@@ -10925,19 +10924,19 @@ async function decrypt(buffer) {
         const p2 = new Uint8Array(buffer);
         const iv2 = p2.slice(0, 12);
         const c2 = p2.slice(12);
-        const d = await subtle.decrypt({ name: "AES-GCM", iv: iv2 }, _aesKey, c2);
+        const d = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv2 }, _aesKey, c2);
         return new TextDecoder().decode(d);
     } catch(e) { return "--- CORRUPT ---"; }
 }
 
 async function sign(data) {
      if (_locked) throw new Error("Locked");
-     const buf = await subtle.sign({ name: "ECDSA", hash: _keyPair.privateKey.algorithm.namedCurve === "P-521" ? "SHA-512" : "SHA-256" }, _keyPair.privateKey, new TextEncoder().encode(data));
+     const buf = await crypto.subtle.sign({ name: "ECDSA", hash: _keyPair.privateKey.algorithm.namedCurve === "P-521" ? "SHA-512" : "SHA-256" }, _keyPair.privateKey, new TextEncoder().encode(data));
      return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
 
 async function verify(key, content, signature) {
-    return await subtle.verify({ name: "ECDSA", hash: key.algorithm.namedCurve === "P-521" ? "SHA-512" : "SHA-256" }, key, Uint8Array.from(atob(signature), c => c.charCodeAt(0)), new TextEncoder().encode(content));
+    return await crypto.subtle.verify({ name: "ECDSA", hash: key.algorithm.namedCurve === "P-521" ? "SHA-512" : "SHA-256" }, key, Uint8Array.from(atob(signature), c => c.charCodeAt(0)), new TextEncoder().encode(content));
 }
 
 async function init() {
@@ -10946,29 +10945,28 @@ async function init() {
 }
 
 async function generateSessionIdentity() {
-    const kSig = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-    const kAes = await subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const kAes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const sigJWK = await crypto.subtle.exportKey("jwk", kSig.privateKey);
+    const pubJWK = await crypto.subtle.exportKey("jwk", kSig.publicKey);
+    const aesJWK = await crypto.subtle.exportKey("jwk", kAes);
     _encryptedBlob = null;
     _currentPassword = DEFAULT_PASS;
     _currentRoomHex = null;
-    _keyPair = kSig;
-    _aesKey = kAes;
-    _locked = false;
+    await loadKeysToMemory(sigJWK, aesJWK, pubJWK);
     return "DEFAULT";
 }
 
 async function generate(roomHex, password = DEFAULT_PASS) {
     if (!roomHex) throw new Error("Room required");
-    const kSig = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-    const kAes = await subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
-    const sigJWK = await subtle.exportKey("jwk", kSig.privateKey);
-    const pubJWK = await subtle.exportKey("jwk", kSig.publicKey);
-    const aesJWK = await subtle.exportKey("jwk", kAes);
+    const kSig = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const kAes = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const sigJWK = await crypto.subtle.exportKey("jwk", kSig.privateKey);
+    const pubJWK = await crypto.subtle.exportKey("jwk", kSig.publicKey);
+    const aesJWK = await crypto.subtle.exportKey("jwk", kAes);
     await saveWrappedKeys(roomHex, password, { aes: aesJWK, sig: sigJWK }, pubJWK);
     _currentPassword = password;
-    _keyPair = kSig;
-    _aesKey = kAes;
-    _locked = false;
+    await loadKeysToMemory(sigJWK, aesJWK, pubJWK);
     return password === DEFAULT_PASS ? "DEFAULT" : "SECURE";
 }
 
@@ -10977,7 +10975,7 @@ async function unlock(roomHex, password) {
     if (!_encryptedBlob) throw new Error("No keys");
     const wrapKey = await deriveKeyFromPass(password, _encryptedBlob.salt);
     try {
-        const decryptedBytes = await subtle.decrypt({ name: "AES-GCM", iv: _encryptedBlob.iv }, wrapKey, _encryptedBlob.data);
+        const decryptedBytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: _encryptedBlob.iv }, wrapKey, _encryptedBlob.data);
         const keysObj = JSON.parse(new TextDecoder().decode(decryptedBytes));
         await loadKeysToMemory(keysObj.sig, keysObj.aes, _encryptedBlob.pubKey);
         _currentPassword = password;
@@ -10988,7 +10986,7 @@ async function unlock(roomHex, password) {
 async function updatePass({ roomHex, newPassword }) {
      if (_locked) throw new Error("Locked");
      const oldWrapKey = await deriveKeyFromPass(_currentPassword, _encryptedBlob.salt);
-     const bytes = await subtle.decrypt({ name: "AES-GCM", iv: _encryptedBlob.iv }, oldWrapKey, _encryptedBlob.data);
+     const bytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: _encryptedBlob.iv }, oldWrapKey, _encryptedBlob.data);
      const keysObj = JSON.parse(new TextDecoder().decode(bytes));
      await saveWrappedKeys(roomHex || _currentRoomHex, newPassword, keysObj, _encryptedBlob.pubKey);
      _currentPassword = newPassword;
@@ -11237,10 +11235,6 @@ async function db_read_private({ roomHex, key }) {
 
 self.onmessage = async (e) => {
     const { id, action, data } = e.data;
-    if (!subtle) {
-        self.postMessage({ id, error: "WebCrypto unavailable in worker" });
-        return;
-    }
     try {
         let res;
         switch(action) {
@@ -11251,10 +11245,10 @@ self.onmessage = async (e) => {
             case 'generate': res = await generate(data.roomHex, data.password); break;
             case 'updatePassword': await updatePass(data); res = "SUCCESS"; break;
             case 'ensure_room_security': res = await ensureRoomSecurity(data.roomHex, data.password); break;
-            case 'getPublicKey': res = _locked ? null : await subtle.exportKey("jwk", _keyPair.publicKey); break;
+            case 'getPublicKey': res = _locked ? null : await crypto.subtle.exportKey("jwk", _keyPair.publicKey); break;
             case 'storePeerKey': 
                 try {
-                    _peerKeys[data.peerId] = await subtle.importKey("jwk", data.jwk, { name: "ECDSA", namedCurve: data.jwk.crv || "P-256" }, true, ["verify"]);
+                    _peerKeys[data.peerId] = await crypto.subtle.importKey("jwk", data.jwk, { name: "ECDSA", namedCurve: data.jwk.crv || "P-256" }, true, ["verify"]);
                     res = true;
                 } catch(e) { res = false; }
                 break;
@@ -11360,9 +11354,8 @@ self.onmessage = async (e) => {
 
         class SecureIdentity {
             constructor() {
-                const workerUrl = window.URL.createObjectURL(new Blob([WORKER_SOURCE], { type: 'text/javascript' }))
-                const useModuleWorker = /iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-                this.worker = useModuleWorker ? new Worker(workerUrl, { type: 'module' }) : new Worker(workerUrl)
+                const blob = new Blob([WORKER_SOURCE], { type: 'text/javascript' })
+                this.worker = new Worker(window.URL.createObjectURL(blob))
                 this.callbacks = {}
                 this.ready = false
                 this.locked = true
@@ -12742,7 +12735,6 @@ self.onmessage = async (e) => {
                     if (activeEditor && activeEditor !== editor) activeEditor.classList?.remove('keyboard-active')
                     activeEditor = editor
                     if (editor === display) {
-                        display.focus?.({ preventScroll: true })
                         if (touch) setDisplaySelectionFromTouch(touch)
                         else ensureDisplaySelection()
                     } else {
@@ -12760,7 +12752,6 @@ self.onmessage = async (e) => {
                 window.__mobileKeyboardActivateDisplay = () => {
                     if (window.app?.appState?.session !== 'joined') return
                     activeEditor = display
-                    display.focus?.({ preventScroll: true })
                     ensureDisplaySelection()
                     const line = document.getElementById(window.app?.currentLineId)
                     const c = window.app?.ui?.chatContainer
