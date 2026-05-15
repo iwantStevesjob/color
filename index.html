@@ -16,7 +16,7 @@
             --bg-color: #000;
             --text-color: #fff;
             --ui-bg: rgba(255, 255, 255, 0.1);
-            --ui-border: rgba(70, 28, 28, 0.2);
+            --ui-border: rgba(255, 255, 255, 0.2);
             --nav-color: white;
             --tracker-bg: rgba(0, 0, 0, 0.75);
             --nav-height: 90px;
@@ -376,6 +376,34 @@
 
         #dashboard-panel.active.half-peek {
             transform: translateY(calc(var(--panel-vh) - var(--half-peek-height)));
+        }
+
+        #connection-sphere-action {
+            position: fixed;
+            left: 50%;
+            bottom: 70px;
+            transform: translate(-50%, 8px);
+            z-index: 210;
+            border: 0;
+            border-radius: 50px;
+            background: #000;
+            color: #fff;
+            padding: 12px 34px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
+        }
+
+        #connection-sphere-action.visible {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translate(-50%, 0);
         }
 
         #sub-nav-layer.half-slide {
@@ -3340,6 +3368,8 @@
             </div>
         </div>
     </div>
+
+    <button id="connection-sphere-action" type="button">GO ONLINE</button>
 
     <div id="password-security-status"
         style="position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); text-align: center; font-family: 'Inter', sans-serif; z-index: 190; pointer-events: none; display: none; width: 90%; max-width: 500px;">
@@ -6507,7 +6537,7 @@
                 this.identity = new SecureIdentity()
                 this.db = new ColorDB()
                 this.mesh = null
-                this.ui = Object.fromEntries(['display', 'chat-container', 'minimap', 'peer-count', 'tools', 'room-status', 'login-btn', 'user-badge', 'login-card', 'dashboard-panel', 'hover-trigger', 'top-nav', 'sub-nav-layer'].map(id => [id.replace(/-./g, x => x[1].toUpperCase()), document.getElementById(id)]))
+                this.ui = Object.fromEntries(['display', 'chat-container', 'minimap', 'peer-count', 'tools', 'room-status', 'login-btn', 'user-badge', 'login-card', 'dashboard-panel', 'hover-trigger', 'top-nav', 'sub-nav-layer', 'connection-sphere-action'].map(id => [id.replace(/-./g, x => x[1].toUpperCase()), document.getElementById(id)]))
                 this.ui.dot = document.querySelector('.dot')
 
                 let savedColor = localStorage.getItem('lastSphereColor') || '#ffffff'; if (!localStorage.getItem('lastSphereColor')) localStorage.setItem('lastSphereColor', savedColor)
@@ -8342,6 +8372,30 @@
                 this.appState.panel = nextState
             }
 
+            connectedPeerEntries() {
+                return Object.entries(this.mesh?.getPeers?.() || {}).filter(([, peer]) => peer?.dc?.readyState === 'open')
+            }
+
+            updateConnectionSphereUI(connectedPeers = null) {
+                const peers = this.connectedPeerEntries()
+                const active = this.peeking && this.ui.dashboardPanel.classList.contains('active') && document.getElementById('view-home')?.classList.contains('active') && !document.getElementById('connect-content-layer')?.classList.contains('visible')
+                if (this.ui.connectionSphereAction) {
+                    const count = connectedPeers ?? peers.length
+                    this.ui.connectionSphereAction.textContent = count > 0 ? `${count} connected` : 'GO ONLINE'
+                    this.ui.connectionSphereAction.classList.toggle('visible', active)
+                }
+                window.setConnectionSphereHandles?.([{ hex: this.user.color, self: true }, ...peers.map(([pid]) => ({ hex: this.peerColors[pid] || this.mesh?.peerIdentities?.get?.(pid)?.color, pid })).filter(handle => handle.hex)])
+                window.setConnectionSphereActive?.(active)
+            }
+
+            async goOnlineFromConnectionSphere() {
+                if (!this.mesh && this.roomId) this.joinNetwork()
+                this.mesh?.enableSync?.()
+                if (this.mesh?.broadcastIdentity) await this.mesh.broadcastIdentity().catch(() => { })
+                if (window.state) window.state.connectionRadarActive = true
+                this.updateStatus()
+            }
+
             startSphereReturn() {
                 document.getElementById('sub-nav-layer')?.classList.remove('peek-slide')
                 if (!window.state) return
@@ -9066,6 +9120,7 @@
                 const preserveSignatureState = !!options.preserveSignatureState
                 this.pendingNavPath = options.navPath || null
                 this.roomId = 'color-' + cleanHex
+                if (window.state) window.state.connectionRadarActive = false
                 this.roomExists = false
                 this.roomHasWrappedKeys = false
                 this.roomSignature = null
@@ -9257,7 +9312,7 @@
                     if (this.currentLineId) this.mesh.broadcastLock({ lineId: this.currentLineId, userColor: this.user.color })
                 })
 
-                this.mesh.on('peer-leave', pid => { this.joinApprovedPeers.delete(pid); this.handleBlockPeerLeave(pid); this.updateStatus(); this.reapplyVisualLocks() })
+                this.mesh.on('peer-leave', pid => { this.joinApprovedPeers.delete(pid); delete this.peerColors[pid]; this.handleBlockPeerLeave(pid); this.updateStatus(); this.reapplyVisualLocks() })
                 this.mesh.on('block-action', (namespace, data, pid) => this.handleBlockAction(namespace, data, pid))
 
                 this.mesh.on('peer-identity', async (data, pid) => {
@@ -9453,10 +9508,15 @@
                             }
                         }
                     } else {
-                        if (window.resetSphereView) window.resetSphereView(false, true)
+                        const ownPos = window.findPositionFromColor?.(this.user.color)
+                        if (window.resetSphereView) window.resetSphereView(false, true, false, ownPos)
                         if (window.state) window.state.renderPath = false
                         this.togglePeek()
                     }
+                })
+                this.ui.connectionSphereAction?.addEventListener('click', e => {
+                    e.stopPropagation()
+                    this.goOnlineFromConnectionSphere()
                 })
 
                 document.getElementById('btn-toggle-secure').addEventListener('click', async () => {
@@ -9869,6 +9929,7 @@
                 const userHex = this.user.color.replace('#', '').toLowerCase()
                 const isFounder = cleanHex === userHex
                 const isSecureDirect = this.connectionMode === 'secure-direct'
+                this.updateConnectionSphereUI(connectedPeers)
 
                 if (this.wrongPasswordState) {
                     this.ui.roomStatus.textContent = 'WRONG PASSWORD'
@@ -10263,7 +10324,7 @@
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
                 window.setNearbyPeekMode?.(false)
             }
-            updatePeekState(val) { if (window.state?.peeking) { window.state.peeking.active = val > 0; window.state.peeking.value = val } }
+            updatePeekState(val) { if (window.state?.peeking) { window.state.peeking.active = val > 0; window.state.peeking.value = val } this.updateConnectionSphereUI() }
 
             exitHalfPeek() {
                 if (!this.halfPeekMode) return
@@ -10487,6 +10548,7 @@
             async logout() {
                 if (window.resetSphereView) window.resetSphereView(false, false, true)
                 if (window.state) window.state.selectedHandle = null, window.state.signaturePaths = [], window.state.signaturePathsRotations = [], window.state.pathPoints = [], window.state.pathRotations = [], window.state.pathStartPos = null, window.state.renderPath = false, window.state.signatureHex = null, window.state.signatureBaseRotation = null, window.state.interactionSignature = { type: 'click', path: [], practicePaths: [], rotations: [], clicks: [] }, window.state.practice && (window.state.practice.awaitingRedraw = false)
+                if (window.state) window.state.connectionRadarActive = false
                 document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none')
                 document.getElementById('connect-content-layer')?.classList.remove('visible')
                 window.setNearbyPeekMode?.(false)
@@ -11448,6 +11510,9 @@ self.onmessage = async (e) => {
         const Quat = { fromMat4: m => { let tr = m[0] + m[5] + m[10]; if (tr > 0) { let S = Math.sqrt(tr + 1.0) * 2; return [(m[6] - m[9]) / S, (m[8] - m[2]) / S, (m[1] - m[4]) / S, 0.25 * S] } else if ((m[0] > m[5]) && (m[0] > m[10])) { let S = Math.sqrt(1.0 + m[0] - m[5] - m[10]) * 2; return [0.25 * S, (m[1] + m[4]) / S, (m[8] + m[2]) / S, (m[6] - m[9]) / S] } else if (m[5] > m[10]) { let S = Math.sqrt(1.0 + m[5] - m[0] - m[10]) * 2; return [(m[1] + m[4]) / S, 0.25 * S, (m[6] + m[9]) / S, (m[8] - m[2]) / S] } else { let S = Math.sqrt(1.0 + m[10] - m[0] - m[5]) * 2; return [(m[8] + m[2]) / S, (m[6] + m[9]) / S, 0.25 * S, (m[1] - m[4]) / S] } }, toMat4: q => { let x = q[0], y = q[1], z = q[2], w = q[3], x2 = x + x, y2 = y + y, z2 = z + z, xx = x * x2, xy = x * y2, xz = x * z2, yy = y * y2, yz = y * z2, zz = z * z2, wx = w * x2, wy = w * y2, wz = w * z2; return [1 - (yy + zz), xy + wz, xz - wy, 0, xy - wz, 1 - (xx + zz), yz + wx, 0, xz + wy, yz - wx, 1 - (xx + yy), 0, 0, 0, 0, 1] }, slerp: (a, b, t) => { let cosHalfTheta = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]; if (cosHalfTheta < 0) { b = [-b[0], -b[1], -b[2], -b[3]]; cosHalfTheta = -cosHalfTheta } if (Math.abs(cosHalfTheta) >= 1.0) return [a[0], a[1], a[2], a[3]]; let halfTheta = Math.acos(cosHalfTheta), sinHalfTheta = Math.sqrt(1.0 - cosHalfTheta * cosHalfTheta); if (Math.abs(sinHalfTheta) < 0.001) return [(a[0] * 0.5 + b[0] * 0.5), (a[1] * 0.5 + b[1] * 0.5), (a[2] * 0.5 + b[2] * 0.5), (a[3] * 0.5 + b[3] * 0.5)]; let ratioA = Math.sin((1 - t) * halfTheta) / sinHalfTheta, ratioB = Math.sin(t * halfTheta) / sinHalfTheta; return [a[0] * ratioA + b[0] * ratioB, a[1] * ratioA + b[1] * ratioB, a[2] * ratioA + b[2] * ratioB, a[3] * ratioA + b[3] * ratioB] } }
         const state = { canvas: null, renderer: null, device: null, context: null, gl: null, pipelines: { sphere: null, cone: null }, glPrograms: { sphere: null, solid: null }, glLocations: { sphere: null, solid: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }], historyHandles: [], selectedHandle: null, hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathRotations: [], pathStartPos: null, renderPath: false, signatureHex: null, signaturePaths: [], signaturePathsRotations: [], practice: { active: false, path: [], rotations: null, index: 0, floatIndex: 0, speed: 2.75, awaitingRedraw: false }, interactionSignature: { type: 'click', path: [], practicePaths: [], rotations: [] }, signatureBaseRotation: null }
         window.state = state
+        state.connectionSphereActive = false
+        state.connectionHandles = []
+        state.connectionRadarActive = false
         function rgbToHex(r, g, b) { return '#' + [r, g, b].map(x => Math.round(Math.min(1, Math.max(0, x)) * 255).toString(16).padStart(2, '0')).join('') }
         function hexToRgbNormalized(hex) {
             const bigint = parseInt(hex.replace(/^#/, '').replace(/^([a-f\d])([a-f\d])([a-f\d])$/i, '$1$1$2$2$3$3'), 16)
@@ -11461,6 +11526,8 @@ self.onmessage = async (e) => {
         const solidFragmentShaderGLSL = `precision mediump float; uniform vec4 uColor; void main() { gl_FragColor = uColor; }`
         const defaultCones = [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }]
         function findPositionFromColor(targetHex) { const t = hexToRgbNormalized(targetHex); let bd = Infinity, bp = null; for (let la = 0; la <= 30; la++) for (let lo = 0; lo <= 30; lo++) { const th = la * Math.PI / 30, ph = lo * 2 * Math.PI / 30, pos = [Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)]; const c = getSurfaceColor(pos, pos, defaultCones), d = Math.sqrt((c[0] - t[0]) ** 2 + (c[1] - t[1]) ** 2 + (c[2] - t[2]) ** 2); if (d < bd) { bd = d; bp = pos } if (d < 0.05) return bp } return bp }
+        function setConnectionSphereHandles(handles) { state.connectionHandles = (handles || []).map(handle => { const hex = '#' + String(handle.hex || '').replace('#', '').slice(0, 6); if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return null; const pos = findPositionFromColor(hex); return pos ? { pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, self: !!handle.self, pid: handle.pid || '' } : null }).filter(Boolean) }
+        function setConnectionSphereActive(active) { state.connectionSphereActive = !!active }
         async function requestWorkingAdapter() {
             const attempts = [
                 { label: 'default', options: undefined },
@@ -11491,6 +11558,8 @@ self.onmessage = async (e) => {
             window.findPositionFromColor = findPositionFromColor
             window.triggerLanding = triggerLanding
             window.hexToRgbNormalized = hexToRgbNormalized
+            window.setConnectionSphereHandles = setConnectionSphereHandles
+            window.setConnectionSphereActive = setConnectionSphereActive
             state.canvas = document.getElementById('gpu-canvas')
             console.info('[Sphere] environment', {
                 href: window.location.href,
@@ -11569,7 +11638,7 @@ self.onmessage = async (e) => {
                     window.location.href = window.location.origin + window.location.pathname
                 }
             }; state.cones.forEach((c, i) => { const el = document.getElementById(`data-${i}`); if (!el) return; el.innerHTML = `<span class="cone-title" id="title-${i}">${c.name}</span> <span style="color:#666">X</span> <span class="coord-val" id="x-${i}">0.00</span> <span style="color:#666">Y</span> <span class="coord-val" id="y-${i}">0.00</span> <span style="color:#666">Z</span> <span class="coord-val" id="z-${i}">0.00</span>`; const title = document.getElementById(`title-${i}`); title.addEventListener('click', e => { if (!document.body.classList.contains('light-mode')) { e.stopPropagation(); state.cones[i].active = !state.cones[i].active } });['x', 'y', 'z'].forEach((ax, idx) => document.getElementById(`${ax}-${i}`).addEventListener('mousedown', e => { if (!document.body.classList.contains('light-mode')) { e.preventDefault(); e.stopPropagation(); state.valueScrub = { active: true, coneIndex: i, coordIndex: idx, startY: e.clientY } } })); state.uiCache[i] = { title, x: document.getElementById(`x-${i}`), y: document.getElementById(`y-${i}`), z: document.getElementById(`z-${i}`), lastPos: [null, null, null], lastActive: null } })
-            setupColorTooltip(); if (window.location.hash && window.location.hash.length > 1) { const matchPos = findPositionFromColor(window.location.hash); if (matchPos) triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(window.location.hash), true, 'url') }
+            setupColorTooltip(); setupConnectionSphereTooltip(); if (window.location.hash && window.location.hash.length > 1) { const matchPos = findPositionFromColor(window.location.hash); if (matchPos) triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(window.location.hash), true, 'url') }
             requestAnimationFrame(loop)
             console.info('[Sphere] render loop started')
         }
@@ -11758,7 +11827,9 @@ self.onmessage = async (e) => {
                 state.returning = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], rotationAxis: [1, 0, 0], rotationAngle: 0, keepRotation: true, startDist: state.cameraPos[2], targetDist: state.cameraPos[2], coneStartPositions: state.cones.map(c => [...c.pos]), explicitTargetQuat: targetQuat, isFallbackReturn: true };
             }
         }
-        function getRenderablePaths() { const paths = state.signaturePaths.filter(path => path?.length > 1), activePath = state.dragStart.active && state.pathPoints.length > 1 ? state.pathPoints : null; if (activePath && state.practice.awaitingRedraw) { const alpha = 1 / (paths.length + 1); return [...paths.map(path => ({ path, alpha })), { path: activePath, alpha: 1 }] } if (paths.length > 0) { const alpha = 1 / paths.length; return [...paths.map(path => ({ path, alpha })), ...(activePath ? [{ path: activePath, alpha: 1 }] : [])] } if (activePath) return [{ path: activePath, alpha: 1 }]; if (state.pathPoints.length > 1 && (state.landing.active || state.renderPath)) return [{ path: state.pathPoints, alpha: 1 }]; return [] }
+        function makeSurfaceRing(center, radius, segments = 96) { const c = Vec3.normalize(center), u = Vec3.normalize(Vec3.cross(Math.abs(c[1]) < .95 ? [0, 1, 0] : [1, 0, 0], c)), v = Vec3.cross(c, u), path = []; for (let i = 0; i <= segments; i++) { const a = i * Math.PI * 2 / segments, edge = Vec3.add(Vec3.scale(u, Math.cos(a)), Vec3.scale(v, Math.sin(a))); path.push(Vec3.normalize(Vec3.add(Vec3.scale(c, Math.cos(radius)), Vec3.scale(edge, Math.sin(radius))))) } return path }
+        function getConnectionRadarPaths() { const own = state.connectionHandles.find(handle => handle.self); if (!state.connectionSphereActive || !state.connectionRadarActive || !own) return []; const t = performance.now() / 2200; return [0, .34, .68].map(offset => { const p = (t + offset) % 1; return { path: makeSurfaceRing(own.pos, .04 + p * 1.15), alpha: (1 - p) * .32 } }) }
+        function getRenderablePaths() { if (state.connectionSphereActive) return getConnectionRadarPaths(); const paths = state.signaturePaths.filter(path => path?.length > 1), activePath = state.dragStart.active && state.pathPoints.length > 1 ? state.pathPoints : null; if (activePath && state.practice.awaitingRedraw) { const alpha = 1 / (paths.length + 1); return [...paths.map(path => ({ path, alpha })), { path: activePath, alpha: 1 }] } if (paths.length > 0) { const alpha = 1 / paths.length; return [...paths.map(path => ({ path, alpha })), ...(activePath ? [{ path: activePath, alpha: 1 }] : [])] } if (activePath) return [{ path: activePath, alpha: 1 }]; if (state.pathPoints.length > 1 && (state.landing.active || state.renderPath)) return [{ path: state.pathPoints, alpha: 1 }]; return [] }
         function projectToScreen(worldPos) { const m = state.vpMatrix, x = worldPos[0], y = worldPos[1], z = worldPos[2], clipX = x * m[0] + y * m[4] + z * m[8] + m[12], clipY = x * m[1] + y * m[5] + z * m[9] + m[13], clipW = x * m[3] + y * m[7] + z * m[11] + m[15]; if (clipW <= 0) return null; return { x: (clipX / clipW + 1) * state.canvas.width / 2, y: (1 - clipY / clipW) * state.canvas.height / 2 } }
         function toLocalSpherePos(p) { const m = state.sphere.rotation; return Vec3.normalize([m[0] * p[0] + m[1] * p[1] + m[2] * p[2], m[4] * p[0] + m[5] * p[1] + m[6] * p[2], m[8] * p[0] + m[9] * p[1] + m[10] * p[2]]) }
         function getVisibleHandleAt(x, y) {
@@ -11788,11 +11859,23 @@ self.onmessage = async (e) => {
 
             const dashboardActive = document.getElementById('dashboard-panel')?.classList.contains('active')
             const loginCardVisible = document.getElementById('login-card')?.classList.contains('visible')
-            if ((dashboardActive || loginCardVisible) && !state.practice.awaitingRedraw) return
+            if ((dashboardActive || loginCardVisible) && !state.practice.awaitingRedraw && !state.connectionSphereActive) return
 
             const rect = state.canvas.getBoundingClientRect()
             state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top, down: true }
             state.clickData = { startX: state.mouse.x, startY: state.mouse.y, startTime: Date.now() }
+
+            if (state.connectionSphereActive) {
+                const p = getTargetPos(state.mouse.x, state.mouse.y)
+                state.clickData.startTime = 0
+                state.interaction = { mode: 'connection', hasTouchedSphere: true }
+                state.pathPoints = []
+                state.pathRotations = []
+                state.inertia.val = 0
+                state.connectionDrag = { active: true, mouseDir: Vec3.normalize(p), sphereRotation: [...state.sphere.rotation], conePositions: state.cones.map(c => [...c.pos]), lastTrackPos: p }
+                return
+            }
+            state.connectionDrag = null
 
             const isMiss = document.body.classList.contains('light-mode') && !state.practice.awaitingRedraw && !getVisibleHandleAt(state.mouse.x, state.mouse.y);
             if (isMiss) { state.signaturePaths = []; state.selectedHandle = null }
@@ -11842,6 +11925,24 @@ self.onmessage = async (e) => {
             const r = state.canvas.getBoundingClientRect()
             state.mouse.x = e.clientX - r.left
             state.mouse.y = e.clientY - r.top
+
+            if (state.mouse.down && state.connectionDrag?.active) {
+                const tp = getTargetPos(state.mouse.x, state.mouse.y)
+                if (tp) {
+                    if (state.connectionDrag.lastTrackPos) {
+                        const axis = Vec3.cross(state.connectionDrag.lastTrackPos, tp)
+                        state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) }
+                    }
+                    state.connectionDrag.lastTrackPos = tp
+                    const a = Vec3.cross(state.connectionDrag.mouseDir, Vec3.normalize(tp))
+                    if (Vec3.len(a) > .001) {
+                        const rot = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.connectionDrag.mouseDir, Vec3.normalize(tp))))))
+                        state.sphere.rotation = Mat4.multiply(rot, state.connectionDrag.sphereRotation)
+                        state.cones.forEach((c, i) => c.pos = transformPos(state.connectionDrag.conePositions[i], rot))
+                    }
+                }
+                return
+            }
 
             if (state.mouse.down && state.interaction && state.interaction.mode === 'waiting') {
                 const ray = getMouseRay(state.mouse.x, state.mouse.y)
@@ -11972,6 +12073,7 @@ self.onmessage = async (e) => {
             return Math.max(0, Math.min(1, overlapScore * 0.3 + distanceScore * 0.25 + directionScore * 0.2 + lengthScore * 0.1 + startScore * 0.075 + endScore * 0.075))
         }
         function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || state.hasRotated || document.getElementById('login-card')?.classList.contains('visible') || document.getElementById('dashboard-panel')?.classList.contains('active') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return } } if (state.selectedHandle && !state.dragStart.active) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${state.selectedHandle.hex.toUpperCase()}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${state.selectedHandle.hex}`; return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return } const hitPos = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))); const hex = rgbToHex(...getSurfaceColor(hitPos, Vec3.normalize(hitPos))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}` }) }
+        function setupConnectionSphereTooltip() { window.addEventListener('mousemove', e => { const t = document.querySelector('.sphere-tooltip'); if (!t || !state.connectionSphereActive) return; if (e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; for (let h of state.connectionHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="meta online">${h.self ? 'YOU' : 'PEER'} ONLINE</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } t.style.display = 'none' }) }
         window.resetSphereView = function (animateIn = false, keepRotation = false, clearHex = false, centerPoint = null) {
             const m = state.sphere.rotation
             const preserveRotation = keepRotation || !!centerPoint
@@ -12073,6 +12175,19 @@ self.onmessage = async (e) => {
                         bindIdx++
                     })
                     pass.setVertexBuffer(0, state.buffers.sphereVertex)
+                }
+                if (state.connectionSphereActive) {
+                    state.connectionHandles.forEach(h => {
+                        const wp = transformPos(h.pos, state.sphere.rotation)
+                        if (wp[2] <= -0.5) return
+                        state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([h.self ? .1 : .08, h.self ? .1 : .08, h.self ? .1 : .08]))), 0)
+                        state.uniforms.cone.set([...h.color, 1.0], 16)
+                        state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone)
+                        pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx))
+                        pass.drawIndexed(state.sphere.indexCount)
+                        bindIdx++
+                    })
+                    return
                 }
                 if (state.handle.active || state.landing.showHandle) {
                     state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(state.handle.pos), Mat4.scale([.08, .08, .08]))), 0)
@@ -12181,6 +12296,15 @@ self.onmessage = async (e) => {
                         model = Mat4.multiply(Mat4.translation(c.pos), c.pos[1] < 0 ? Mat4.rotationX(Math.PI) : Mat4.identity())
                     }
                     renderWebGLSolidMesh(state.buffers.coneVertex, state.buffers.coneIndex, state.coneIndexCount, Mat4.multiply(model, Mat4.scale([.5, .5, .5])), [...c.color, 1.0])
+                })
+                return
+            }
+            if (state.connectionSphereActive) {
+                state.connectionHandles.forEach(h => {
+                    const wp = transformPos(h.pos, state.sphere.rotation)
+                    if (wp[2] <= -0.5) return
+                    const s = h.self ? .1 : .08
+                    renderWebGLSolidMesh(state.buffers.sphereVertex, state.buffers.sphereIndex, state.sphere.indexCount, Mat4.multiply(Mat4.translation(wp), Mat4.scale([s, s, s])), [...h.color, 1.0])
                 })
                 return
             }
