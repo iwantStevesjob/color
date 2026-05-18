@@ -972,7 +972,7 @@
             top: 46%;
         }
 
-        #connect-content-layer.visible.nearby-active ~ #connect-globe {
+        #connect-content-layer.visible.nearby-active~#connect-globe {
             display: block;
         }
 
@@ -1040,7 +1040,7 @@
             z-index: 55;
         }
 
-        #connect-content-layer.visible + .connect-switchers {
+        #connect-content-layer.visible+.connect-switchers {
             display: flex;
         }
 
@@ -2261,6 +2261,7 @@
         }
 
         @keyframes required-field-flash {
+
             0%,
             100% {
                 transform: scale(1);
@@ -2274,6 +2275,7 @@
         }
 
         @keyframes submit-rumble {
+
             0%,
             100% {
                 transform: translateX(0);
@@ -3094,7 +3096,8 @@
         </div>
         <div id="view-search" class="connect-view">
             <div class="connect-search-form">
-                <input id="connect-search-input" type="text" placeholder="Search color" autocomplete="off" inputmode="text">
+                <input id="connect-search-input" type="text" placeholder="Search color" autocomplete="off"
+                    inputmode="text">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="11" cy="11" r="8" />
                     <path d="m21 21-4.3-4.3" />
@@ -3105,7 +3108,8 @@
         <div id="view-nearby" class="connect-view">
             <div id="connect-nearby-status" class="connect-nearby-status"></div>
             <div id="connect-nearby-list" class="connect-nearby-list"></div>
-            <button id="connect-nearby-start" class="connect-option connect-nearby-start" type="button">START DISCOVERY</button>
+            <button id="connect-nearby-start" class="connect-option connect-nearby-start" type="button">START
+                DISCOVERY</button>
         </div>
     </div>
     <div id="connect-switchers" class="connect-switchers">
@@ -6547,6 +6551,7 @@
                 this.activeLocks = {}
                 this.peerColors = {}
                 this.initDone = false
+                this.cryptoReadyLogged = false
                 this.currentLineId = null
                 this.highlightDrawing = false
                 this.highlightPending = null
@@ -7163,16 +7168,18 @@
                 }
                 if (paymentType === 'stripe') this.saveBuyerPaymentProfile(fields).then(() => this.renderInstalledBlocks()).catch(() => { })
                 if (status) status.textContent = paymentType === 'bitcoin' ? 'Sending payment request...' : 'Sending payment to seller...'
-                this.pendingPurchases.set(form.requestId, { status, submit, paymentType, timer: setTimeout(() => {
-                    const pending = this.pendingPurchases.get(form.requestId)
-                    if (!pending) return
-                    if (pending.status) pending.status.textContent = 'No seller response yet.'
-                    if (pending.submit) {
-                        pending.submit.disabled = false
-                        pending.submit.textContent = paymentType === 'bitcoin' ? 'SEND REQUEST' : 'PAY'
-                    }
-                    this.pendingPurchases.delete(form.requestId)
-                }, 45000) })
+                this.pendingPurchases.set(form.requestId, {
+                    status, submit, paymentType, timer: setTimeout(() => {
+                        const pending = this.pendingPurchases.get(form.requestId)
+                        if (!pending) return
+                        if (pending.status) pending.status.textContent = 'No seller response yet.'
+                        if (pending.submit) {
+                            pending.submit.disabled = false
+                            pending.submit.textContent = paymentType === 'bitcoin' ? 'SEND REQUEST' : 'PAY'
+                        }
+                        this.pendingPurchases.delete(form.requestId)
+                    }, 45000)
+                })
                 this.sendBlockMessage(form.def, {
                     type: 'PURCHASE_SUBMIT',
                     requestId: form.requestId,
@@ -9007,6 +9014,10 @@
                 } catch (e) {
                     console.warn('enterRoomUI background setup failed', e)
                 }
+                if (!this.identity.locked && !this.cryptoReadyLogged) {
+                    console.log('[COLOR identity]', 'WebCrypto successful; content is encrypted', { mainThreadFallback: this.identity.usingMainThreadFallback })
+                    this.cryptoReadyLogged = true
+                }
 
                 if ((this.ui.loginBtn.textContent === 'LOGIN' || this.ownerLoginApproved) && !this.isGuestScan) {
                     this.user.color = '#' + roomHex
@@ -10149,17 +10160,17 @@
                     ctx.strokeStyle = front ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.3)'
                     ctx.lineWidth = (front ? 1.05 : 0.75) * dpr
                     const lineStep = focus < 0.35 ? 3 : focus < 0.75 ? 2 : 1
-                    ;(this.globeLines || []).forEach(line => {
-                        ctx.beginPath()
-                        let open = false
-                        for (let i = 0; i < line.length; i += lineStep) {
-                            const point = line[i]
-                            const p = project(point)
-                            if ((p[2] >= 0) !== front) { open = false; continue }
-                            if (open) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]), open = true
-                        }
-                        ctx.stroke()
-                    })
+                        ; (this.globeLines || []).forEach(line => {
+                            ctx.beginPath()
+                            let open = false
+                            for (let i = 0; i < line.length; i += lineStep) {
+                                const point = line[i]
+                                const p = project(point)
+                                if ((p[2] >= 0) !== front) { open = false; continue }
+                                if (open) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]), open = true
+                            }
+                            ctx.stroke()
+                        })
                 }
                 drawLines(false); drawLines(true)
                 ctx.restore()
@@ -10940,6 +10951,7 @@ async function verify(key, content, signature) {
 }
 
 async function init() {
+    if (typeof crypto === "undefined" || !crypto.subtle || !crypto.subtle.generateKey) throw new Error("WORKER_WEBCRYPTO_UNAVAILABLE");
     lockCurrentRoom();
     return "LOCKED";
 }
@@ -11352,6 +11364,22 @@ self.onmessage = async (e) => {
 };
 `
 
+        class LocalCryptoWorker {
+            constructor(source) {
+                this.onmessage = null
+                this.onerror = null
+                const scope = { postMessage: data => setTimeout(() => this.onmessage?.({ data }), 0) }
+                this.scope = scope
+                try { new Function('self', source)(scope) } catch (error) { setTimeout(() => this.onerror?.(error), 0) }
+            }
+
+            postMessage(data) {
+                setTimeout(() => this.scope.onmessage?.({ data }), 0)
+            }
+
+            terminate() { }
+        }
+
         class SecureIdentity {
             constructor() {
                 const blob = new Blob([WORKER_SOURCE], { type: 'text/javascript' })
@@ -11361,7 +11389,12 @@ self.onmessage = async (e) => {
                 this.locked = true
                 this.DEFAULT_PASS = 'FFFFFF'
                 this.LOG = '[COLOR identity]'
+                this.usingMainThreadFallback = false
+                this.fallbackPrompt = null
+                this.bindWorkerEvents()
+            }
 
+            bindWorkerEvents() {
                 this.worker.onmessage = e => {
                     const { id, result, error } = e.data
                     if (this.callbacks[id]) {
@@ -11390,6 +11423,36 @@ self.onmessage = async (e) => {
                 })
             }
 
+            isWorkerCryptoFailure(error) {
+                const message = String(error?.message || error || '')
+                return message.includes('WORKER_WEBCRYPTO_UNAVAILABLE') || message.includes('crypto.subtle') || message.includes('generateKey')
+            }
+
+            requestMainThreadFallback() {
+                if (this.fallbackPrompt) return this.fallbackPrompt
+                this.fallbackPrompt = new Promise(resolve => {
+                    const modal = document.createElement('div')
+                    modal.id = 'crypto-fallback-modal'
+                    modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:20px;color:#111;font-family:Arial,sans-serif;'
+                    modal.innerHTML = '<div style="max-width:420px;background:#fff;border-radius:8px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.35);"><h2 style="margin:0 0 12px;font-size:20px;">iOS update required</h2><p style="margin:0 0 12px;line-height:1.45;">Your iOS/iPadOS version is outdated and does not expose the WebCrypto functions this app needs inside a worker. Update to the latest iOS/iPadOS for the normal encrypted worker mode.</p><p style="margin:0 0 18px;line-height:1.45;">You can continue with a main-thread WebCrypto fallback. Content is still encrypted, but crypto will not run inside the worker.</p><button id="crypto-fallback-continue" type="button" style="width:100%;border:0;border-radius:6px;background:#111;color:#fff;padding:12px 14px;font-weight:bold;">CONTINUE WITHOUT WORKER</button></div>'
+                    document.body.appendChild(modal)
+                    modal.querySelector('#crypto-fallback-continue').addEventListener('click', () => { modal.remove(); resolve(true) }, { once: true })
+                })
+                return this.fallbackPrompt
+            }
+
+            async enableMainThreadFallback(error) {
+                if (this.usingMainThreadFallback || !this.isWorkerCryptoFailure(error)) return false
+                if (!window.crypto?.subtle?.generateKey) return false
+                await this.requestMainThreadFallback()
+                this.worker.terminate()
+                this.worker = new LocalCryptoWorker(WORKER_SOURCE)
+                this.bindWorkerEvents()
+                this.usingMainThreadFallback = true
+                console.warn(this.LOG, 'using main-thread WebCrypto fallback after user confirmation', { message: error?.message })
+                return true
+            }
+
             updateUI(status) {
                 const el = document.getElementById('security-status'), btn = document.getElementById('btn-security-apply'), input = document.getElementById('master-pass')
                 btn.innerText = 'REFRESH PASSWORD'
@@ -11414,7 +11477,10 @@ self.onmessage = async (e) => {
                 try {
                     const status = await this._call('init')
                     this.updateUI(status)
-                } catch (e) { console.error(e) }
+                } catch (e) {
+                    if (await this.enableMainThreadFallback(e)) return this.init()
+                    console.error(e)
+                }
             }
 
             async lockCurrentRoom() {
@@ -11428,13 +11494,23 @@ self.onmessage = async (e) => {
             }
 
             async ensureSessionIdentity() {
-                const status = await this._call('ensure_session_identity')
+                let status
+                try { status = await this._call('ensure_session_identity') }
+                catch (e) {
+                    if (await this.enableMainThreadFallback(e)) return this.ensureSessionIdentity()
+                    throw e
+                }
                 this.updateUI(status)
                 return true
             }
 
             async ensureRoomSecurity(roomHex, password) {
-                const status = await this._call('ensure_room_security', { roomHex, password })
+                let status
+                try { status = await this._call('ensure_room_security', { roomHex, password }) }
+                catch (e) {
+                    if (await this.enableMainThreadFallback(e)) return this.ensureRoomSecurity(roomHex, password)
+                    throw e
+                }
                 this.updateUI(password === this.DEFAULT_PASS ? 'DEFAULT' : status)
                 return true
             }
@@ -12778,49 +12854,49 @@ self.onmessage = async (e) => {
                             if (type === 'password') editor.style.webkitTextSecurity = 'disc'
                         }
                     }
-                        let touchStartX = 0
-                        let touchStartY = 0
-                        let didScrollTouch = false
-                        editor.addEventListener('touchstart', e => {
-                            if (editor !== display) e.preventDefault()
-                            const touch = e.changedTouches?.[0]
-                            touchStartX = touch?.clientX ?? 0
-                            touchStartY = touch?.clientY ?? 0
-                            didScrollTouch = false
-                        }, { passive: false })
-                        editor.addEventListener('touchmove', e => {
-                            const touch = e.changedTouches?.[0]
-                            if (!touch) return
-                            if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) didScrollTouch = true
-                        }, { passive: true })
-                        editor.addEventListener('touchend', e => {
-                            if (editor === display && ignoresDisplayKeyboard(e.target)) return
-                            if (didScrollTouch) return
-                            e.preventDefault()
-                            lastTouchActivation = Date.now()
-                            activateEditor(editor, e.changedTouches?.[0])
-                        }, { passive: false })
-                        editor.addEventListener('click', e => {
-                            if (editor === display && ignoresDisplayKeyboard(e.target)) return
-                            if (Date.now() - lastTouchActivation < 350) return
-                            e.preventDefault()
-                            activateEditor(editor)
-                        })
-                        editor.addEventListener('focus', () => {
-                            if (window.app?.appState?.session !== 'joined') return
-                            if (activeEditor && activeEditor !== editor) activeEditor.classList?.remove('keyboard-active')
-                            activeEditor = editor
-                            editor.classList.add('keyboard-active')
-                            showKeyboard()
-                            updateFakeCaret()
-                        })
-                        editor.addEventListener('beforeinput', e => { if (editor !== display) e.preventDefault() })
-                        editor.addEventListener('keydown', e => { if (editor !== display) e.preventDefault() })
-                        editor.addEventListener('input', () => requestAnimationFrame(keepCursorVisible))
-                        editor.addEventListener('scroll', () => requestAnimationFrame(updateFakeCaret), { passive: true })
+                    let touchStartX = 0
+                    let touchStartY = 0
+                    let didScrollTouch = false
+                    editor.addEventListener('touchstart', e => {
+                        if (editor !== display) e.preventDefault()
+                        const touch = e.changedTouches?.[0]
+                        touchStartX = touch?.clientX ?? 0
+                        touchStartY = touch?.clientY ?? 0
+                        didScrollTouch = false
+                    }, { passive: false })
+                    editor.addEventListener('touchmove', e => {
+                        const touch = e.changedTouches?.[0]
+                        if (!touch) return
+                        if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) didScrollTouch = true
+                    }, { passive: true })
+                    editor.addEventListener('touchend', e => {
+                        if (editor === display && ignoresDisplayKeyboard(e.target)) return
+                        if (didScrollTouch) return
+                        e.preventDefault()
+                        lastTouchActivation = Date.now()
+                        activateEditor(editor, e.changedTouches?.[0])
+                    }, { passive: false })
+                    editor.addEventListener('click', e => {
+                        if (editor === display && ignoresDisplayKeyboard(e.target)) return
+                        if (Date.now() - lastTouchActivation < 350) return
+                        e.preventDefault()
+                        activateEditor(editor)
+                    })
+                    editor.addEventListener('focus', () => {
+                        if (window.app?.appState?.session !== 'joined') return
+                        if (activeEditor && activeEditor !== editor) activeEditor.classList?.remove('keyboard-active')
+                        activeEditor = editor
+                        editor.classList.add('keyboard-active')
+                        showKeyboard()
+                        updateFakeCaret()
+                    })
+                    editor.addEventListener('beforeinput', e => { if (editor !== display) e.preventDefault() })
+                    editor.addEventListener('keydown', e => { if (editor !== display) e.preventDefault() })
+                    editor.addEventListener('input', () => requestAnimationFrame(keepCursorVisible))
+                    editor.addEventListener('scroll', () => requestAnimationFrame(updateFakeCaret), { passive: true })
                 }
 
-                    ;[display, ...editors].forEach(bindEditor)
+                ;[display, ...editors].forEach(bindEditor)
                 window.__mobileKeyboardBind = bindEditor
 
                 const handleOutsideClick = (e) => {
