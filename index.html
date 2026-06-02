@@ -1187,6 +1187,16 @@
             z-index: 1;
         }
 
+        #password-security-status.practice-score #password-security-title {
+            color: #000 !important;
+            font-size: 2rem !important;
+            letter-spacing: 0 !important;
+        }
+
+        #password-security-status.practice-score #password-security-desc {
+            color: #888 !important;
+        }
+
         .dot {
             width: 10px;
             height: 10px;
@@ -3037,7 +3047,7 @@
                         appendEntry(method, args)
                         if (originalConsole[method]) originalConsole[method](...args)
                     }
-                })
+	            })
 
             window.addEventListener('error', event => {
                 const resource = describeResourceTarget(event.target)
@@ -6603,6 +6613,7 @@
                 this.pendingLoginHex = null
                 this.pendingLoginSignature = null
                 this.fuzzySearch = null
+                this.debugRoomPasswords = {}
                 this.ownerLoginApproved = false
                 this.roomHasWrappedKeys = false
                 this.wrongPasswordState = false
@@ -8208,8 +8219,8 @@
 
             getAttemptedRoomSignature(roomHex = this.roomId?.replace('color-', '')) {
                 const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
-                if (cleanHex && this.pendingLoginHex === cleanHex && this.pendingLoginSignature) return this.prepareDragSignature(this.pendingLoginSignature, this.roomSignature?.unlockPointCount || this.roomSignature?.path?.length || 0)
-                const currentSignature = this.prepareDragSignature(window.state?.interactionSignature, this.roomSignature?.unlockPointCount || this.roomSignature?.path?.length || 0)
+                if (cleanHex && this.pendingLoginHex === cleanHex && this.pendingLoginSignature) return this.prepareDragSignature(this.pendingLoginSignature, 2)
+                const currentSignature = this.prepareDragSignature(window.state?.interactionSignature, 2)
                 if (currentSignature?.password || currentSignature?.path?.length || currentSignature?.clicks?.length) return currentSignature
                 return this.cloneSignature(this.roomSignature)
             }
@@ -8223,7 +8234,7 @@
             getRoomPassword(roomHex, signature) {
                 const cleanHex = String(roomHex || '').replace('#', '').toUpperCase()
                 if (!cleanHex) return ''
-                if (signature?.password) return signature.password
+                if (signature?.password && signature.type !== 'drag') return signature.password
                 if (Array.isArray(signature?.clicks) && signature.clicks.length) return 'FFFFFF' + signature.clicks.map(click => String(click || '').replace('#', '').toUpperCase()).join('')
                 if (!signature || signature.type === 'click') return 'FFFFFF' + cleanHex
                 const path = Array.isArray(signature.path) ? signature.path : []
@@ -8281,6 +8292,7 @@
                 const titleEl = document.getElementById('password-security-title')
                 const descEl = document.getElementById('password-security-desc')
                 if (!titleEl || !descEl) return
+                document.getElementById('password-security-status')?.classList.remove('practice-score')
 
                 const sig = window.state?.interactionSignature
                 const clicks = sig?.clicks || []
@@ -8353,15 +8365,33 @@
 
                 if (hasPath) {
                     const fullPath = window.state?.signatureFullPath?.length ? window.state.signatureFullPath : sig.fullPath?.length ? sig.fullPath : pathPoints
-                    titleEl.innerHTML = `<input class="password-security-slider" type="range" min="0" max="100" value="${fullPath.length > 2 ? Math.min(100, Math.round(pathPoints.length / fullPath.length * 100)) : 100}">`
+                    titleEl.innerHTML = `<input class="password-security-slider" type="range" min="0" max="100" value="${pathPoints.length <= 2 ? 0 : fullPath.length > 2 ? Math.min(100, Math.round(pathPoints.length / fullPath.length * 100)) : 100}">`
                     titleEl.style.color = ''
                     descEl.textContent = 'It would take ' + timeStr + ' to guess your password.' + (pathPoints.length > 5 ? ' More than 5 points may be hard to redraw.' : '')
                     const slider = titleEl.querySelector('.password-security-slider')
+                    const commitSliderPassword = async () => {
+                        const roomHex = this.roomId?.replace('color-', '') || window.state?.signatureHex
+                        if (!roomHex || !window.state?.interactionSignature?.path?.length) return
+                        window.state.interactionSignature.password = ''
+                        const password = this.getRoomPassword(roomHex, window.state.interactionSignature)
+                        window.state.interactionSignature.password = password
+                        this.roomSignature = this.cloneSignature(window.state.interactionSignature)
+                        this.pendingLoginHex = roomHex.toLowerCase()
+                        this.pendingLoginSignature = this.cloneSignature(window.state.interactionSignature)
+                        document.getElementById('master-pass').value = password
+                        if (this.roomHasWrappedKeys && !this.identity.locked) await this.identity.updatePassword(password)
+                        this.debugRoomPasswords[roomHex.toLowerCase()] = password
+                        console.log('data encrypted at ' + password)
+                        if (this.db && window.state.signatureHex) this.db.saveSignature(window.state.signatureHex, window.state.interactionSignature).catch(e => console.warn('saveSignature failed', e))
+                    }
+                    let sliderCommitTimer = null
+                    const scheduleSliderPassword = () => { clearTimeout(sliderCommitTimer); sliderCommitTimer = setTimeout(commitSliderPassword, 500) }
                     slider.addEventListener('input', e => {
                         const pointCount = window.applySignaturePointSlider(Number(e.target.value))
                         descEl.textContent = 'It would take ' + window.formatGuessTime(Math.pow(4096, pointCount) / GUESSES_PER_SECOND) + ' to guess your password.' + (pointCount > 5 ? ' More than 5 points may be hard to redraw.' : '')
+                        scheduleSliderPassword()
                     })
-                    slider.addEventListener('change', async () => { const roomHex = this.roomId?.replace('color-', '') || window.state?.signatureHex; if (!roomHex || !window.state?.interactionSignature?.path?.length) return; window.state.interactionSignature.password = ''; const password = this.getRoomPassword(roomHex, window.state.interactionSignature); window.state.interactionSignature.password = password; this.roomSignature = this.cloneSignature(window.state.interactionSignature); if (this.roomHasWrappedKeys && !this.identity.locked) await this.identity.updatePassword(password); if (this.db && window.state.signatureHex) this.db.saveSignature(window.state.signatureHex, window.state.interactionSignature).catch(e => console.warn('saveSignature failed', e)) })
+                    slider.addEventListener('change', scheduleSliderPassword)
                     return
                 }
 
@@ -8381,11 +8411,11 @@
             }
 
             showSignatureMatchAttempt(cleanHex, attemptedSignature) {
-                const previewState = window.startSignatureMatchPreview?.(attemptedSignature, this.roomSignature, cleanHex)
+                const previewState = window.startSignatureMatchPreview?.(attemptedSignature, cleanHex)
                 if (!previewState) return false
                 if (previewState === 'limit') return true
                 if (!this.fuzzySearch) this.fuzzySearch = new FuzzySignatureSearch(this)
-                this.fuzzySearch.start(cleanHex, attemptedSignature, this.roomSignature)
+                this.fuzzySearch.start(cleanHex, attemptedSignature)
                 this.wrongPasswordState = false
                 this.ui.roomStatus.textContent = 'SEARCHING...'
                 this.ui.roomStatus.style.color = ''
@@ -9064,7 +9094,7 @@
 
                 const roomHex = this.roomId.replace('color-', '')
                 const roomSignature = this.getRoomSignatureForSave(roomHex)
-                const roomPassword = roomSignature ? this.getRoomPassword(roomHex, roomSignature) : ''
+                const roomPassword = this.pendingLoginHex === roomHex && this.pendingLoginSignature?.password ? this.pendingLoginSignature.password : roomSignature ? this.getRoomPassword(roomHex, roomSignature) : ''
                 if (roomSignature?.path?.length) roomSignature.password = roomPassword
                 this.ui.loginBtn.classList.add('hidden')
                 this.ui.loginCard.classList.remove('visible')
@@ -9104,6 +9134,9 @@
                     this.visitedRooms.push(this.roomId)
                     this.db._open(roomHex).catch(e => console.warn('room open failed', e))
                 }
+                let centerIndex = await this.db.getCursor(roomHex).catch(() => 0)
+                if (typeof centerIndex !== 'number') centerIndex = await this.db.getLastEdited(roomHex)
+                await this.renderFromLocalDB(await this.db.getRange(roomHex, centerIndex - 50, centerIndex + 50), centerIndex)
                 this.roomExists = true
                 this.wrongPasswordState = false
                 this.syncDebugPassword(roomHex)
@@ -9283,7 +9316,7 @@
                         const prevPassword = window.state.interactionSignature?.password || ''
                         window.state.interactionSignature = savedSignature ? { ...savedSignature, path: basePath, practicePaths, clicks: prevClicks } : { type: 'click', path: [], practicePaths: [], clicks: prevClicks }
                         if (prevPassword) window.state.interactionSignature.password = prevPassword
-                        window.state.pathPoints = window.state.signaturePaths[window.state.signaturePaths.length - 1]?.map(p => [...p]) || []
+                        window.state.pathPoints = basePath.map(p => [...p])
                     }
                     let centerIndex = await this.db.getCursor(cleanHex).catch(() => 0)
                     if (typeof centerIndex !== 'number') {
@@ -10942,6 +10975,14 @@ async function deriveKeyFromPass(password, salt) {
     return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" }, keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
 
+async function createPasswordCheck(roomHex, password) {
+    const keyBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("COLOR-PASSWORD-CHECK-v1:" + password));
+    const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode("COLOR-PASSWORD-CHECK-v1:" + roomHex));
+    return { iv, data };
+}
+
 async function loadKeysToMemory(sigJWK, aesJWK, pubJWK) {
     _aesKey = await crypto.subtle.importKey("jwk", aesJWK, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
     const curve = sigJWK.crv || pubJWK.crv || "P-256";
@@ -10974,11 +11015,13 @@ async function saveWrappedKeys(roomHex, password, keysJwkObj, pubKeyJwk) {
     const wrapKey = await deriveKeyFromPass(password, salt);
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encryptedData = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, new TextEncoder().encode(JSON.stringify(keysJwkObj)));
+    const passwordCheck = await createPasswordCheck(roomHex, password);
     _encryptedBlob = { salt, iv, data: encryptedData, pubKey: pubKeyJwk };
     _currentRoomHex = roomHex;
     const db = await openColorDB(roomHex);
     const tx = db.transaction([roomHex], "readwrite");
     tx.objectStore(roomHex).put(_encryptedBlob, "wrapped_keys");
+    tx.objectStore(roomHex).put(passwordCheck, "password_check");
     await new Promise(r => tx.oncomplete = r);
     db.close(); 
 }
@@ -11260,7 +11303,7 @@ async function db_read_signature({ roomHex }) {
             const cursor = e.target.result;
             if (!cursor) { resolve(); return; }
             if (typeof cursor.key === 'string' && cursor.key.startsWith('signature:') && Array.isArray(cursor.value?.path) && cursor.value.path.length > 0) {
-                savedRows.push(cursor.value);
+                savedRows.push({ ...cursor.value, key: cursor.key });
             }
             cursor.continue();
         };
@@ -11269,9 +11312,12 @@ async function db_read_signature({ roomHex }) {
     if (savedRows.length) {
         db.close();
         savedRows.sort((a, b) => (a.created || 0) - (b.created || 0));
-        const [path, ...practicePaths] = savedRows.map(row => row.path).filter(path => Array.isArray(path) && path.length > 0);
-        const rotations = savedRows[0]?.rotations || null;
-        return path ? { type: savedRows[savedRows.length - 1]?.type || 'drag', path, practicePaths, rotations, fullPath: savedRows[0]?.fullPath || path, fullRotations: savedRows[0]?.fullRotations || null, unlockPointCount: savedRows[0]?.unlockPointCount || path.length, password: savedRows[savedRows.length - 1]?.password || '' } : null;
+        let primaryIndex = savedRows.length - 1;
+        for (let i = savedRows.length - 1; i >= 0; i--) if (savedRows[i].fullPath || /:0$/.test(String(savedRows[i].key || ''))) { primaryIndex = i; break; }
+        const latestRows = savedRows.slice(primaryIndex), primary = latestRows[0];
+        const [path, ...practicePaths] = latestRows.map(row => row.path).filter(path => Array.isArray(path) && path.length > 0);
+        const rotations = primary?.rotations || null;
+        return path ? { type: primary?.type || 'drag', path, practicePaths, rotations, fullPath: primary?.fullPath || path, fullRotations: primary?.fullRotations || null, unlockPointCount: primary?.unlockPointCount || path.length, password: primary?.password || '' } : null;
     }
     const readSignatureValue = key => new Promise(resolve => {
         const req = db.transaction([roomHex], 'readonly').objectStore(roomHex).get(key);
@@ -11413,10 +11459,10 @@ self.onmessage = async (e) => {
                 const existingSignatureSet = new Set(existingSignaturePaths);
                 signaturePaths.forEach((path, i) => {
                     const serializedPath = JSON.stringify(path);
-                    if (existingSignatureSet.has(serializedPath)) return;
+                    if (i > 0 && existingSignatureSet.has(serializedPath)) return;
                     existingSignatureSet.add(serializedPath);
                     const created = Date.now() + i;
-                    sstore.put({ type: data.signature.type, path, fullPath: i === 0 ? data.signature.fullPath || path : null, rotations: i === 0 ? data.signature.rotations || null : null, fullRotations: i === 0 ? data.signature.fullRotations || null : null, unlockPointCount: data.signature.unlockPointCount || path.length, created, password: data.signature.password || '' }, 'signature:' + created + ':' + i);
+                    sstore.put({ type: data.signature.type, path, fullPath: i === 0 ? data.signature.fullPath || path : null, rotations: i === 0 ? data.signature.rotations || null : null, fullRotations: i === 0 ? data.signature.fullRotations || null : null, unlockPointCount: data.signature.unlockPointCount || path.length, created, password: '' }, 'signature:' + created + ':' + i);
                 });
                 stx.oncomplete = () => sdb.close();
                 stx.onerror = () => sdb.close();
@@ -11461,7 +11507,8 @@ function buildSpiral(maxRadius) {
     }
     return out;
 }
-const SPIRAL = buildSpiral(50);
+const FULL_SPIRAL = buildSpiral(50);
+const PLAUSIBLE_SPIRAL = buildSpiral(11);
 function openColorDB() {
     return new Promise((resolve, reject) => {
         const req = indexedDB.open('color');
@@ -11480,14 +11527,35 @@ async function getWrappedKeys(roomHex) {
     db.close();
     return row;
 }
+async function getPasswordCheck(roomHex) {
+    const db = await openColorDB();
+    if (!db.objectStoreNames.contains(roomHex)) { db.close(); return null; }
+    const row = await new Promise(resolve => {
+        const req = db.transaction([roomHex], 'readonly').objectStore(roomHex).get('password_check');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+    });
+    db.close();
+    return row;
+}
 async function deriveKeyFromPass(password, salt) {
     const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
     return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+}
+async function testPasswordCheck(password) {
+    const keyBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('COLOR-PASSWORD-CHECK-v1:' + password));
+    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+    const bytes = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: session.passwordCheck.iv }, key, session.passwordCheck.data);
+    if (new TextDecoder().decode(bytes) !== 'COLOR-PASSWORD-CHECK-v1:' + session.roomHex) throw new Error('Wrong Password');
+    return true;
 }
 async function testWrappedKeys(password) {
     const wrapKey = await deriveKeyFromPass(password, session.wrapped.salt);
     await crypto.subtle.decrypt({ name: 'AES-GCM', iv: session.wrapped.iv }, wrapKey, session.wrapped.data);
     return true;
+}
+function testPassword(password) {
+    return session.passwordCheck ? testPasswordCheck(password) : testWrappedKeys(password);
 }
 function getRoomPassword(path) {
     return path.map(point => {
@@ -11515,59 +11583,107 @@ function offsetPoint(point, offset, pixelScale) {
     const p = normalize(point), right = normalize(cross(Math.abs(p[1]) < .95 ? [0, 1, 0] : [1, 0, 0], p)), down = normalize(cross(p, right));
     return normalize(add(p, add(scale(right, offset[0] * pixelScale), scale(down, offset[1] * pixelScale))));
 }
-function blendAttempts() {
-    if (!session.attempts.length) return [];
-    const count = session.attempts[0].length;
-    return Array.from({ length: count }, (_, i) => {
-        if (i === 0) return [...session.attempts[0][0]];
-        const center = normalize(session.attempts.reduce((sum, path) => add(sum, path[i]), [0, 0, 0]));
-        const near = session.attempts.length < 3 ? session.attempts : session.attempts.filter(path => dist(path[i], center) < 0.35);
-        return normalize((near.length ? near : session.attempts).reduce((sum, path) => add(sum, path[i]), [0, 0, 0]));
-    });
+function pointSegmentDistance(p, a, b) {
+    const ab = sub(b, a), lenSq = dot(ab, ab);
+    if (!lenSq) return dist(p, a);
+    const t = Math.min(1, Math.max(0, dot(sub(p, a), ab) / lenSq)), q = add(a, scale(ab, t));
+    return dist(p, q);
 }
-function setBaseFromAttempts() {
-    session.basePath = blendAttempts();
-    session.indices = new Array(Math.max(0, session.basePath.length - 1)).fill(0);
-    session.visited = new Set();
+function simplifyPathIndices(path, targetCount) {
+    const selected = new Set([0, path.length - 1]);
+    while (selected.size < targetCount) {
+        const ordered = [...selected].sort((a, b) => a - b);
+        let best = -1, bestDist = -1;
+        for (let s = 1; s < ordered.length; s++) {
+            const a = ordered[s - 1], b = ordered[s];
+            for (let i = a + 1; i < b; i++) {
+                const d = pointSegmentDistance(path[i], path[a], path[b]);
+                if (d > bestDist) { bestDist = d; best = i; }
+            }
+        }
+        if (best < 0) break;
+        selected.add(best);
+    }
+    return [...selected].sort((a, b) => a - b);
 }
-function makeCandidate() {
-    return session.basePath.map((point, i) => i === 0 ? [...point] : offsetPoint(point, SPIRAL[session.indices[i - 1] || 0], session.pixelScale));
+function getAttemptPaths(attempt, pointCount) {
+    const fullPath = (attempt?.fullPath?.length ? attempt.fullPath : attempt?.path || []).map(p => normalize(p));
+    if (fullPath.length < 2) return [];
+    const last = fullPath.length - 1, count = Math.max(2, Math.min(pointCount, fullPath.length));
+    if (count <= 2) return [[[...fullPath[0]], [...fullPath[last]]]];
+    const mid = simplifyPathIndices(fullPath, 3)[1];
+    return [[[...fullPath[0]], [...fullPath[mid]], [...fullPath[last]]]];
 }
-function advanceIndices() {
-    for (let i = 0; i < session.indices.length; i++) {
-        session.indices[i]++;
-        if (session.indices[i] < SPIRAL.length) return true;
-        session.indices[i] = 0;
+function activeSpiral(pointCount) {
+    return session.targetPointCount > 2 || pointCount > 2 ? PLAUSIBLE_SPIRAL : FULL_SPIRAL;
+}
+function addJob(fullPath, basePath, pointCount, lane = 0, laneCount = 1) {
+    const key = pointCount + ':' + lane + ':' + JSON.stringify(basePath);
+    if (session.jobKeys.has(key)) return;
+    session.jobKeys.add(key);
+    session.jobs.push({ id: ++session.nextJobId, fullPath, basePath, pointCount, indices: new Array(pointCount > 2 ? 1 : Math.max(0, basePath.length - 1)).fill(0), thirdIndex: lane, thirdStride: laneCount, done: false });
+}
+function jobStatus(job) {
+    const spiral = activeSpiral(job.pointCount);
+    return { id: job.id, pointCount: job.pointCount, lane: job.thirdStride > 1 ? (job.id - 1) % job.thirdStride + 1 : 1, lanes: job.thirdStride || 1, second: spiral[job.indices[0] || 0], third: job.pointCount > 2 ? spiral[job.thirdIndex || 0] : null };
+}
+function makeCandidate(job) {
+    const spiral = activeSpiral(job.pointCount);
+    if (job.pointCount > 2 && job.basePath.length > 2) return job.basePath.map((point, i) => i === 0 ? [...point] : offsetPoint(point, spiral[i === 1 ? job.indices[0] || 0 : job.thirdIndex || 0], session.pixelScale));
+    return job.basePath.map((point, i) => i === 0 ? [...point] : offsetPoint(point, spiral[job.indices[i - 1] || 0], session.pixelScale));
+}
+function advanceIndices(job) {
+    const spiral = activeSpiral(job.pointCount);
+    if (job.pointCount > 2 && job.basePath.length > 2) {
+        job.indices[0]++;
+        if (job.indices[0] < spiral.length) return true;
+        job.indices[0] = 0;
+        job.thirdIndex += job.thirdStride;
+        return job.thirdIndex < spiral.length;
+    }
+    for (let i = 0; i < job.indices.length; i++) {
+        job.indices[i]++;
+        if (job.indices[i] < spiral.length) return true;
+        job.indices[i] = 0;
     }
     return false;
 }
+function promoteJob(job) {
+    const nextPointCount = job.pointCount + 1, maxPointCount = Math.min(session.targetPointCount, job.fullPath.length);
+    if (nextPointCount > maxPointCount) return false;
+    session.pointCount = Math.max(session.pointCount, nextPointCount);
+    getAttemptPaths({ fullPath: job.fullPath }, nextPointCount).forEach(path => Array.from({ length: nextPointCount > 2 ? 4 : 1 }, (_, lane) => addJob(job.fullPath, path, nextPointCount, lane, nextPointCount > 2 ? 4 : 1)));
+    return true;
+}
+function liveJobs() {
+    return session.jobs.filter(job => !job.done);
+}
 function addAttempt(attempt) {
-    const path = (attempt?.path || []).map(p => normalize(p));
-    if (path.length < 2) return;
-    session.attempts.push(path);
-    setBaseFromAttempts();
+    const fullPath = (attempt?.fullPath?.length ? attempt.fullPath : attempt?.path || []).map(p => normalize(p));
+    if (fullPath.length < 2) return;
+    const pointCount = Math.min(session.targetPointCount, fullPath.length, Math.max(2, session.pointCount || 2));
+    getAttemptPaths({ fullPath }, pointCount).forEach(path => Array.from({ length: pointCount > 2 ? 4 : 1 }, (_, lane) => addJob(fullPath, path, pointCount, lane, pointCount > 2 ? 4 : 1)));
 }
 async function runSearch() {
     if (!session || session.running || !session.wrapped) return;
     session.running = true;
     let lastVisual = 0;
-    while (session.active && session.basePath.length > 1) {
-        const key = session.indices.join(',');
-        if (!session.visited.has(key)) {
-            const path = makeCandidate(), password = getRoomPassword(path);
-            session.visited.add(key);
-            session.checked++;
-            const now = performance.now();
-            if (now - lastVisual > 100) { self.postMessage({ type: 'visual', roomHex: session.roomHex, path, checked: session.checked }); lastVisual = now; }
-            try {
-                await testWrappedKeys(password);
-                self.postMessage({ type: 'found', roomHex: session.roomHex, path, password, checked: session.checked });
-                session.active = false;
-                break;
-            } catch (e) { }
-        }
-        if (!advanceIndices()) { self.postMessage({ type: 'progress', roomHex: session.roomHex, checked: session.checked, exhausted: true }); break; }
-        if (session.checked % 4 === 0) await delay(0);
+    while (session.active) {
+        const jobs = liveJobs();
+        if (!jobs.length) { self.postMessage({ type: 'progress', roomHex: session.roomHex, checked: session.checked, pointCount: session.pointCount, exhausted: true }); break; }
+        const job = jobs[session.jobCursor++ % jobs.length], path = makeCandidate(job), password = getRoomPassword(path);
+        session.checked++;
+        session.processed++;
+        const now = performance.now();
+        if (now - lastVisual > 100) { self.postMessage({ type: 'visual', roomHex: session.roomHex, paths: jobs.slice(0, 12).map(makeCandidate), path, password, checked: session.checked, processed: session.processed, activeJobs: jobs.length }); lastVisual = now; }
+        try {
+            await testPassword(password);
+            self.postMessage({ type: 'found', roomHex: session.roomHex, path, password, checked: session.checked });
+            session.active = false;
+            break;
+        } catch (e) { if (session.checked % 1000 === 0) self.postMessage({ type: 'tried', roomHex: session.roomHex, password, checked: session.checked, jobs: liveJobs().slice(0, 12).map(jobStatus) }); }
+        if (!advanceIndices(job)) { job.done = true; promoteJob(job); }
+        if (session.checked % 16 === 0) await delay(0);
     }
     session.running = false;
 }
@@ -11576,13 +11692,14 @@ self.onmessage = async e => {
     try {
         if (action === 'cancel') { if (session) session.active = false; return; }
         if (action === 'start') {
-            session = { active: true, running: false, roomHex: data.roomHex, wrapped: await getWrappedKeys(data.roomHex), attempts: [], basePath: [], indices: [], visited: new Set(), checked: 0, pixelScale: data.pixelScale || 0.005 };
+            session = { active: true, running: false, roomHex: data.roomHex, wrapped: await getWrappedKeys(data.roomHex), passwordCheck: await getPasswordCheck(data.roomHex), jobs: [], jobKeys: new Set(), nextJobId: 0, jobCursor: 0, checked: 0, processed: 0, pointCount: 2, targetPointCount: Math.max(2, Math.min(3, Math.round(data.unlockPointCount || 2))), pixelScale: data.pixelScale || 0.005 };
             if (!session.wrapped) { self.postMessage({ type: 'error', roomHex: data.roomHex, message: 'No wrapped keys found' }); return; }
             addAttempt(data.attempt);
-            runSearch();
+            runSearch().catch(err => self.postMessage({ type: 'error', roomHex: data.roomHex, message: err?.message || String(err) }));
         } else if (action === 'addAttempt' && session?.active && session.roomHex === data.roomHex) {
+            session.targetPointCount = Math.max(session.targetPointCount, Math.max(2, Math.min(3, Math.round(data.unlockPointCount || 2))));
             addAttempt(data.attempt);
-            runSearch();
+            runSearch().catch(err => self.postMessage({ type: 'error', roomHex: data.roomHex, message: err?.message || String(err) }));
         }
     } catch (err) {
         self.postMessage({ type: 'error', roomHex: data?.roomHex, message: err?.message || String(err) });
@@ -11797,12 +11914,13 @@ self.onmessage = async e => {
                 return 1 / Math.max(80, metrics?.radius || 200)
             }
 
-            start(roomHex, attemptedSignature, savedSignature) {
-                if (!attemptedSignature?.path?.length || !savedSignature?.path?.length) return
+            start(roomHex, attemptedSignature) {
+                if (!attemptedSignature?.path?.length) return
                 this.ensureWorker()
                 const action = this.roomHex === roomHex ? 'addAttempt' : 'start'
+                const unlockPointCount = Math.max(2, Math.min(3, Math.round(attemptedSignature?.fullPath?.length || attemptedSignature?.path?.length || 2)))
                 this.roomHex = roomHex
-                this.worker.postMessage({ action, data: { roomHex, attempt: attemptedSignature, unlockPointCount: savedSignature.unlockPointCount || savedSignature.path.length, pixelScale: this.pixelScale() } })
+                this.worker.postMessage({ action, data: { roomHex, attempt: attemptedSignature, unlockPointCount, pixelScale: this.pixelScale() } })
             }
 
             cancel() {
@@ -11813,9 +11931,15 @@ self.onmessage = async e => {
 
             async handleMessage(message) {
                 if (!message || message.roomHex !== this.app.roomId?.replace('color-', '')) return
+                const debugInput = document.getElementById('master-pass')
+                if (debugInput && message.password) debugInput.value = message.password
                 if (message.type === 'visual') {
                     this.app.ui.peerCount.innerText = `${message.checked} fuzzy attempts`
+                    window.updateSignatureMatchPreview?.(message.paths || message.path)
+                } else if (message.type === 'tried') {
+                    console.log('tried ' + message.password + ' no match to ' + (this.app.debugRoomPasswords?.[message.roomHex] || this.app.roomSignature?.password || 'UNKNOWN'))
                 } else if (message.type === 'found') {
+                    console.log('tried ' + message.password + ' match to ' + (this.app.debugRoomPasswords?.[message.roomHex] || this.app.roomSignature?.password || 'UNKNOWN'))
                     const signature = this.app.cloneSignature(this.app.roomSignature) || { type: 'drag', path: message.path, practicePaths: [] }
                     signature.password = message.password
                     signature.unlockPointCount = signature.unlockPointCount || signature.path.length
@@ -11824,9 +11948,20 @@ self.onmessage = async e => {
                     if (await this.app.identity.unlockRoom(message.roomHex, message.password, true)) {
                         this.app.ownerLoginApproved = true
                         this.app.wrongPasswordState = false
+                        if (window.state && signature?.path?.length) { const fullPath = (signature.fullPath?.length ? signature.fullPath : signature.path).map(p => [...p]); window.state.signatureHex = message.roomHex; window.state.signatureFullPath = fullPath; window.state.signatureFullRotations = signature.fullRotations?.length === fullPath.length ? signature.fullRotations.map(r => [...r]) : null; window.state.signaturePaths = [signature.path.map(p => [...p])]; window.state.signaturePathsRotations = signature.rotations ? [signature.rotations.map(r => [...r])] : []; window.state.interactionSignature = this.app.cloneSignature(signature); window.state.pathPoints = signature.path.map(p => [...p]); }
+                        const targetHex = '#' + message.roomHex, handle = [window.state?.selectedHandle, ...(window.state?.historyHandles || [])].find(h => h?.hex?.replace('#', '').toLowerCase() === message.roomHex), matchPos = handle?.pos || window.findPositionFromColor?.(targetHex), color = handle?.color || window.hexToRgbNormalized?.(targetHex)
                         window.stopSignatureMatchPreview?.()
-                        window.enterRoomUI?.()
+                        if (matchPos && color && window.triggerLanding) {
+                            const len = Math.hypot(matchPos[0], matchPos[1], matchPos[2]), norm = len ? [matchPos[0] / len, matchPos[1] / len, matchPos[2] / len] : [0, 0, 1]
+                            if (window.state?.returning) window.state.returning.active = false
+                            window.triggerLanding(norm, matchPos, color, true, 'fuzzy-match', { preserveSignatureState: true, skipAutoEnter: true, skipPreview: true })
+                            const enterWhenZoomed = () => window.state?.landing?.active && window.state.landing.progress < 0.95 ? requestAnimationFrame(enterWhenZoomed) : window.enterRoomUI?.()
+                            requestAnimationFrame(enterWhenZoomed)
+                        } else window.enterRoomUI?.()
                     }
+                } else if (message.type === 'progress' && message.exhausted) {
+                    console.log((message.pointCount || 2) + '-point search exhausted after ' + message.checked + ' attempts')
+                    window.stopSignatureMatchPreview?.()
                 } else if (message.type === 'error') {
                     console.warn('[FuzzySignature]', message.message)
                 }
@@ -11865,7 +12000,7 @@ self.onmessage = async e => {
         const Vec3 = { create: () => [0, 0, 0], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], len: v => Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]), normalize: v => { const l = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return l > 0 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0] }, dist: (a, b) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) }
         const Mat4 = { perspective: (f, a, n, fr) => { const nf = 1 / (n - fr), f_t = 1 / Math.tan(f / 2); return [f_t / a, 0, 0, 0, 0, f_t, 0, 0, 0, 0, (fr + n) * nf, -1, 0, 0, 2 * fr * n * nf, 0] }, lookAt: (e, c, u) => { const z = Vec3.normalize(Vec3.sub(e, c)), x = Vec3.normalize(Vec3.cross(u, z)), y = Vec3.cross(z, x); return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -Vec3.dot(x, e), -Vec3.dot(y, e), -Vec3.dot(z, e), 1] }, multiply: (a, b) => [a[0] * b[0] + a[4] * b[1] + a[8] * b[2] + a[12] * b[3], a[1] * b[0] + a[5] * b[1] + a[9] * b[2] + a[13] * b[3], a[2] * b[0] + a[6] * b[1] + a[10] * b[2] + a[14] * b[3], a[3] * b[0] + a[7] * b[1] + a[11] * b[2] + a[15] * b[3], a[0] * b[4] + a[4] * b[5] + a[8] * b[6] + a[12] * b[7], a[1] * b[4] + a[5] * b[5] + a[9] * b[6] + a[13] * b[7], a[2] * b[4] + a[6] * b[5] + a[10] * b[6] + a[14] * b[7], a[3] * b[4] + a[7] * b[5] + a[11] * b[6] + a[15] * b[7], a[0] * b[8] + a[4] * b[9] + a[8] * b[10] + a[12] * b[11], a[1] * b[8] + a[5] * b[9] + a[9] * b[10] + a[13] * b[11], a[2] * b[8] + a[6] * b[9] + a[10] * b[10] + a[14] * b[11], a[3] * b[8] + a[7] * b[9] + a[11] * b[10] + a[15] * b[11], a[0] * b[12] + a[4] * b[13] + a[8] * b[14] + a[12] * b[15], a[1] * b[12] + a[5] * b[13] + a[9] * b[14] + a[13] * b[15], a[2] * b[12] + a[6] * b[13] + a[10] * b[14] + a[14] * b[15], a[3] * b[12] + a[7] * b[13] + a[11] * b[14] + a[15] * b[15]], rotationX: r => [1, 0, 0, 0, 0, Math.cos(r), Math.sin(r), 0, 0, -Math.sin(r), Math.cos(r), 0, 0, 0, 0, 1], translation: v => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1], scale: v => [v[0], 0, 0, 0, 0, v[1], 0, 0, 0, 0, v[2], 0, 0, 0, 0, 1], rotationAxis: (a, r) => { const c = Math.cos(r), s = Math.sin(r), t = 1 - c, x = a[0], y = a[1], z = a[2]; return [t * x * x + c, t * x * y + z * s, t * x * z - y * s, 0, t * x * y - z * s, t * y * y + c, t * y * z + x * s, 0, t * x * z + y * s, t * y * z - x * s, t * z * z + c, 0, 0, 0, 0, 1] }, identity: () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }
         const Quat = { fromMat4: m => { let tr = m[0] + m[5] + m[10]; if (tr > 0) { let S = Math.sqrt(tr + 1.0) * 2; return [(m[6] - m[9]) / S, (m[8] - m[2]) / S, (m[1] - m[4]) / S, 0.25 * S] } else if ((m[0] > m[5]) && (m[0] > m[10])) { let S = Math.sqrt(1.0 + m[0] - m[5] - m[10]) * 2; return [0.25 * S, (m[1] + m[4]) / S, (m[8] + m[2]) / S, (m[6] - m[9]) / S] } else if (m[5] > m[10]) { let S = Math.sqrt(1.0 + m[5] - m[0] - m[10]) * 2; return [(m[1] + m[4]) / S, 0.25 * S, (m[6] + m[9]) / S, (m[8] - m[2]) / S] } else { let S = Math.sqrt(1.0 + m[10] - m[0] - m[5]) * 2; return [(m[8] + m[2]) / S, (m[6] + m[9]) / S, 0.25 * S, (m[1] - m[4]) / S] } }, toMat4: q => { let x = q[0], y = q[1], z = q[2], w = q[3], x2 = x + x, y2 = y + y, z2 = z + z, xx = x * x2, xy = x * y2, xz = x * z2, yy = y * y2, yz = y * z2, zz = z * z2, wx = w * x2, wy = w * y2, wz = w * z2; return [1 - (yy + zz), xy + wz, xz - wy, 0, xy - wz, 1 - (xx + zz), yz + wx, 0, xz + wy, yz - wx, 1 - (xx + yy), 0, 0, 0, 0, 1] }, slerp: (a, b, t) => { let cosHalfTheta = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]; if (cosHalfTheta < 0) { b = [-b[0], -b[1], -b[2], -b[3]]; cosHalfTheta = -cosHalfTheta } if (Math.abs(cosHalfTheta) >= 1.0) return [a[0], a[1], a[2], a[3]]; let halfTheta = Math.acos(cosHalfTheta), sinHalfTheta = Math.sqrt(1.0 - cosHalfTheta * cosHalfTheta); if (Math.abs(sinHalfTheta) < 0.001) return [(a[0] * 0.5 + b[0] * 0.5), (a[1] * 0.5 + b[1] * 0.5), (a[2] * 0.5 + b[2] * 0.5), (a[3] * 0.5 + b[3] * 0.5)]; let ratioA = Math.sin((1 - t) * halfTheta) / sinHalfTheta, ratioB = Math.sin(t * halfTheta) / sinHalfTheta; return [a[0] * ratioA + b[0] * ratioB, a[1] * ratioA + b[1] * ratioB, a[2] * ratioA + b[2] * ratioB, a[3] * ratioA + b[3] * ratioB] } }
-        const state = { canvas: null, renderer: null, device: null, context: null, gl: null, pipelines: { sphere: null, cone: null }, glPrograms: { sphere: null, solid: null }, glLocations: { sphere: null, solid: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }], historyHandles: [], selectedHandle: null, hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathRotations: [], pathStartPos: null, renderPath: false, signatureHex: null, signaturePaths: [], signaturePathsRotations: [], practice: { active: false, path: [], rotations: null, index: 0, floatIndex: 0, speed: 2.75, awaitingRedraw: false }, interactionSignature: { type: 'click', path: [], practicePaths: [], rotations: [] }, signatureBaseRotation: null }
+        const state = { canvas: null, renderer: null, device: null, context: null, gl: null, pipelines: { sphere: null, cone: null }, glPrograms: { sphere: null, solid: null }, glLocations: { sphere: null, solid: null }, buffers: {}, bindGroups: { sphere: null, cones: [] }, cameraPos: [0, 0, 4], sphere: { rotation: Mat4.identity(), indexCount: 0 }, cones: [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }], historyHandles: [], selectedHandle: null, hasRotated: false, mouse: { x: 0, y: 0, down: false }, draggedConeIndex: -1, valueScrub: { active: false, coneIndex: -1, coordIndex: 0, startY: 0 }, lastTime: 0, clickData: { startX: 0, startY: 0, startTime: 0 }, landing: { active: false, progress: 0, rotationAxis: [1, 0, 0], rotationAngle: 0, baseRotation: Mat4.identity(), coneStartPositions: [], handleStartPos: [0, 0, 0], showHandle: false, startDist: 4.0, targetDist: 1.25, shouldAutoEnter: false }, dragStart: { active: false, mouseDir: [0, 0, 1], sphereRotation: null, conePositions: [], lastTrackPos: null }, inertia: { active: false, axis: [1, 0, 0], val: 0 }, handle: { active: false, pos: [0, 0, 0], color: [1, 1, 1] }, msaaTexture: null, depthTexture: null, sampleCount: 4, presentationFormat: null, debugMode: false, uiCache: [], vpMatrix: Mat4.identity(), returning: null, uniforms: { sphere: new Float32Array(80), cone: new Float32Array(20) }, peeking: { active: false, value: 0 }, interaction: { mode: 'none', hasTouchedSphere: false }, pathPoints: [], pathRotations: [], pathStartPos: null, renderPath: false, signatureHex: null, signaturePaths: [], signaturePathsRotations: [], masterSignature: null, practice: { active: false, path: [], rotations: null, index: 0, floatIndex: 0, speed: 2.75, awaitingRedraw: false }, interactionSignature: { type: 'click', path: [], practicePaths: [], rotations: [] }, signatureBaseRotation: null }
         window.state = state
         state.connectionSphereActive = false
         state.connectionHandles = []
@@ -11980,9 +12115,10 @@ self.onmessage = async e => {
                         if (rotsRev) practiceRots.push(rotsRev[i]);
                     }
                 }
+                if (practiceRots.length) { practicePath.unshift(practicePath[0]); practiceRots.unshift(Quat.fromMat4(state.sphere.rotation)) }
                 state.practice = { ...state.practice, active: true, path: practicePath, rotations: practiceRots.length === practicePath.length ? practiceRots : null, index: 0, floatIndex: 0, speed: 50 * 3.25, awaitingRedraw: false };
-                state.renderPath = true; document.body.classList.add('light-mode'); document.body.style.backgroundColor = ''; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = ''
-            })
+	                state.renderPath = true; document.body.classList.add('light-mode'); document.body.style.backgroundColor = ''; const statusEl = document.getElementById('password-security-status'); statusEl.classList.remove('practice-score'); statusEl.style.display = 'none'; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = ''
+	            })
             document.getElementById('signature-clear-btn').addEventListener('click', () => { if (!state.signaturePaths || state.signaturePaths.length === 0) return; state.signaturePaths = state.signaturePaths.length > 0 ? [state.signaturePaths[0].map(p => [...p])] : []; state.interactionSignature.practicePaths = []; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); document.getElementById('signature-compare-result').textContent = ''; })
             document.getElementById('debug-btn').onclick = function () { state.debugMode = !state.debugMode; this.classList.toggle('active', state.debugMode); this.innerText = state.debugMode ? 'DEBUG ON' : 'DEBUG OFF'; document.getElementById('debug-panel').classList.toggle('visible', state.debugMode) }
             document.getElementById('reset-btn').onclick = async () => {
@@ -12150,7 +12286,6 @@ self.onmessage = async e => {
             const front = [0, 0, 1];
 
             if (state.practice.rotations && state.practice.rotations.length === state.practice.path.length) {
-                state.practice.floatIndex += dt * state.practice.speed;
                 let i = Math.floor(state.practice.floatIndex);
                 if (i >= state.practice.path.length - 1) {
                     state.sphere.rotation = Quat.toMat4(state.practice.rotations[state.practice.path.length - 1]);
@@ -12163,6 +12298,7 @@ self.onmessage = async e => {
                 state.sphere.rotation = Quat.toMat4(slerped);
                 state.cones.forEach(c => c.pos = transformPos(defaultCones.find(dc => dc.name === c.name).pos, state.sphere.rotation));
                 state.practice.index = i;
+                state.practice.floatIndex += dt * state.practice.speed;
                 return;
             }
 
@@ -12176,17 +12312,11 @@ self.onmessage = async e => {
                 state.practice.index++
             }
             state.practice.active = false; state.practice.awaitingRedraw = true; state.pathPoints = [];
-            if (state.signatureBaseRotation) {
-                let base = [...state.signatureBaseRotation];
-                let currentQuat = Quat.fromMat4(state.sphere.rotation);
-                let targetQuat = Quat.fromMat4(base);
-                state.sphere.rotation = Quat.toMat4(Quat.slerp(currentQuat, targetQuat, 0.5));
-                state.returning = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], rotationAxis: [1, 0, 0], rotationAngle: 0, keepRotation: true, startDist: state.cameraPos[2], targetDist: state.cameraPos[2], coneStartPositions: state.cones.map(c => [...c.pos]), explicitTargetQuat: targetQuat, isFallbackReturn: true };
-            }
         }
         function makeSurfaceRing(center, radius, segments = 96) { const c = Vec3.normalize(center), u = Vec3.normalize(Vec3.cross(Math.abs(c[1]) < .95 ? [0, 1, 0] : [1, 0, 0], c)), v = Vec3.cross(c, u), path = []; for (let i = 0; i <= segments; i++) { const a = i * Math.PI * 2 / segments, edge = Vec3.add(Vec3.scale(u, Math.cos(a)), Vec3.scale(v, Math.sin(a))); path.push(Vec3.normalize(Vec3.add(Vec3.scale(c, Math.cos(radius)), Vec3.scale(edge, Math.sin(radius))))) } return path }
         function getConnectionRadarPaths() { const own = state.connectionHandles.find(handle => handle.self); if (!state.connectionSphereActive || !state.connectionRadarActive || !own) return []; const t = performance.now() / 2200; return [0, .34, .68].map(offset => { const p = (t + offset) % 1; return { path: makeSurfaceRing(own.pos, .04 + p * 1.15), alpha: (1 - p) * .32 } }) }
-        function getRenderablePaths() { if (state.connectionSphereActive) return getConnectionRadarPaths(); const paths = state.signaturePaths.filter(path => path?.length > 1), activePath = state.dragStart.active && state.pathPoints.length > 1 ? state.pathPoints : null; if (activePath && state.practice.awaitingRedraw) { const alpha = 1 / (paths.length + 1); return [...paths.map(path => ({ path, alpha })), { path: activePath, alpha: 1 }] } if (paths.length > 0) { const alpha = 1 / paths.length; return [...paths.map(path => ({ path, alpha })), ...(activePath ? [{ path: activePath, alpha: 1 }] : [])] } if (activePath) return [{ path: activePath, alpha: 1 }]; if (state.pathPoints.length > 1 && (state.landing.active || state.renderPath)) return [{ path: state.pathPoints, alpha: 1 }]; return [] }
+        function updateMasterSignature(paths) { if (paths.length < 2) return state.masterSignature = null; const samples = Math.max(2, Math.round(paths.reduce((sum, path) => sum + path.length, 0) / paths.length)), sampled = paths.map(path => samplePath(path, samples)); state.masterSignature = { name: 'MASTER SIGNATURE', path: Array.from({ length: samples }, (_, i) => { const p = sampled.reduce((sum, path) => Vec3.add(sum, path[i]), [0, 0, 0]); return Vec3.len(p) > 0.001 ? Vec3.normalize(p) : [...sampled[0][i]] }) }; return state.masterSignature }
+        function getRenderablePaths() { if (state.connectionSphereActive) return getConnectionRadarPaths(); const paths = state.signaturePaths.filter(path => path?.length > 1), activePath = state.dragStart.active && state.pathPoints.length > 1 ? state.pathPoints : null, master = updateMasterSignature(paths); if (activePath && state.practice.awaitingRedraw) { const alpha = 1 / (paths.length + 1); return [...paths.map(path => ({ path, alpha })), { path: activePath, alpha: 1 }, ...(master ? [{ path: master.path, alpha: 1, color: [1, 0, 0] }] : [])] } if (paths.length > 0) { const alpha = 1 / paths.length; return [...paths.map(path => ({ path, alpha })), ...(activePath ? [{ path: activePath, alpha: 1 }] : []), ...(master ? [{ path: master.path, alpha: 1, color: [1, 0, 0] }] : [])] } if (activePath) return [{ path: activePath, alpha: 1 }]; if (state.pathPoints.length > 1 && (state.landing.active || state.renderPath)) return [{ path: state.pathPoints, alpha: 1 }]; return [] }
         function projectToScreen(worldPos) { const m = state.vpMatrix, x = worldPos[0], y = worldPos[1], z = worldPos[2], clipX = x * m[0] + y * m[4] + z * m[8] + m[12], clipY = x * m[1] + y * m[5] + z * m[9] + m[13], clipW = x * m[3] + y * m[7] + z * m[11] + m[15]; if (clipW <= 0) return null; return { x: (clipX / clipW + 1) * state.canvas.width / 2, y: (1 - clipY / clipW) * state.canvas.height / 2 } }
         function toLocalSpherePos(p) { const m = state.sphere.rotation; return Vec3.normalize([m[0] * p[0] + m[1] * p[1] + m[2] * p[2], m[4] * p[0] + m[5] * p[1] + m[6] * p[2], m[8] * p[0] + m[9] * p[1] + m[10] * p[2]]) }
         function getVisibleHandleAt(x, y) {
@@ -12221,7 +12351,6 @@ self.onmessage = async e => {
             const rect = state.canvas.getBoundingClientRect()
             state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top, down: true }
             state.clickData = { startX: state.mouse.x, startY: state.mouse.y, startTime: Date.now() }
-            if (state.signatureMatchPreview?.active && state.signatureMatchPreview.attempts?.length >= 10) { showSignatureMatchLimitMessage(); state.mouse.down = false; return }
             if (state.signatureMatchPreview?.active) state.clickData.startTime = 0
 
             if (state.connectionSphereActive) {
@@ -12345,8 +12474,8 @@ self.onmessage = async e => {
                 if (state.interactionSignature.path.length > 1000) { state.interactionSignature.path.shift(); state.interactionSignature.rotations.shift() }
             }
         }
-        function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const currentRots = state.interactionSignature.rotations ? state.interactionSignature.rotations.map(r => [...r]) : null; const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); if (state.signatureMatchPreview?.active) { if (currentPath.length > 1) { const cleanHex = hex.replace('#', ''), signature = { type: 'drag', path: currentPath, rotations: currentRots, fullPath: currentPath.map(p => [...p]), fullRotations: currentRots ? currentRots.map(r => [...r]) : null, practicePaths: [] }, unlockCount = window.app?.roomSignature?.unlockPointCount || window.app?.roomSignature?.path?.length || 0, attemptedSignature = window.app?.prepareDragSignature ? window.app.prepareDragSignature(signature, unlockCount) : signature; state.signatureHex = cleanHex; state.interactionSignature = signature; if (attemptedSignature && cleanHex && window.app?.getRoomPassword) attemptedSignature.password = window.app.getRoomPassword(cleanHex, attemptedSignature); window.app?.showSignatureMatchAttempt?.(cleanHex, attemptedSignature) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const originalRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) ? state.signaturePathsRotations[0].map(r => [...r]) : null; const ratio = comparePaths(originalPath, currentPath); const mergedPaths = state.signaturePaths.filter(path => path.length > 1), serializedCurrentPath = JSON.stringify(currentPath); if (currentPath.length > 1 && !mergedPaths.some(path => JSON.stringify(path) === serializedCurrentPath)) mergedPaths.push(currentPath); state.signaturePaths = mergedPaths; state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, rotations: originalPath.length > 1 ? originalRots : currentRots, practicePaths: state.signaturePaths.slice(originalPath.length > 1 ? 1 : 0).map(path => path.map(p => [...p])) }; state.practice.awaitingRedraw = false; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${Math.round(ratio * 100)}`; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.signaturePathsRotations = currentRots ? [currentRots] : []; state.interactionSignature = { type: 'drag', path: currentPath, rotations: currentRots, practicePaths: [] } } state.signatureHex = hex.replace('#', ''); if (selectedHandle) triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { if (state.selectedHandle) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(state.selectedHandle.pos, transformPos(state.selectedHandle.pos, state.sphere.rotation), state.selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false, 'local', { preserveSignatureState: true, skipAutoEnter: true }) } } } state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }
-        function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none'); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (source === 'local' && (!state.interactionSignature.path || state.interactionSignature.path.length <= 1)) { if (!state.interactionSignature.clicks) state.interactionSignature.clicks = []; state.interactionSignature.clicks.push(hex.replace('#', '').toUpperCase()); state.interactionSignature.password = 'FFFFFF' + state.interactionSignature.clicks.join(''); } if (!state.historyHandles.some(h => h.hex.toLowerCase() === hex.toLowerCase())) { state.historyHandles.push({ pos: [...norm], color: [...col], hex: hex, peerCount: 0 }); } if (source === 'local' && window.app?.setPendingLoginSignature && (state.interactionSignature?.path?.length || state.interactionSignature?.clicks?.length)) window.app.setPendingLoginSignature(hex, state.interactionSignature); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
+	        function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const currentRots = state.interactionSignature.rotations ? state.interactionSignature.rotations.map(r => [...r]) : null; const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); if (state.signatureMatchPreview?.active) { if (currentPath.length > 1) { const cleanHex = hex.replace('#', ''), signature = { type: 'drag', path: currentPath, rotations: currentRots, fullPath: currentPath.map(p => [...p]), fullRotations: currentRots ? currentRots.map(r => [...r]) : null, practicePaths: [] }, attemptedSignature = window.app?.prepareDragSignature ? window.app.prepareDragSignature(signature, 2) : signature; state.signatureHex = cleanHex; state.interactionSignature = signature; if (attemptedSignature && cleanHex && window.app?.getRoomPassword) attemptedSignature.password = window.app.getRoomPassword(cleanHex, attemptedSignature); window.app?.showSignatureMatchAttempt?.(cleanHex, attemptedSignature) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const originalRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) ? state.signaturePathsRotations[0].map(r => [...r]) : null; const ratio = comparePaths(originalPath, currentPath), score = Math.round(ratio * 100); const mergedPaths = state.signaturePaths.filter(path => path.length > 1), serializedCurrentPath = JSON.stringify(currentPath); if (currentPath.length > 1 && !mergedPaths.some(path => JSON.stringify(path) === serializedCurrentPath)) mergedPaths.push(currentPath); state.signaturePaths = mergedPaths; state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, rotations: originalPath.length > 1 ? originalRots : currentRots, practicePaths: state.signaturePaths.slice(originalPath.length > 1 ? 1 : 0).map(path => path.map(p => [...p])) }; state.practice.awaitingRedraw = true; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${score}`; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { const statusEl = document.getElementById('password-security-status'), titleEl = document.getElementById('password-security-title'), descEl = document.getElementById('password-security-desc'); if (statusEl && titleEl && descEl) { statusEl.classList.add('practice-score'); titleEl.textContent = `SCORE ${score}`; descEl.textContent = score > 90 ? 'GOOD JOB!' : 'TRY AGAIN'; statusEl.style.display = 'block'; statusEl.style.pointerEvents = 'none' } window.resetSphereView?.(false, false) }, 1000); setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.signaturePathsRotations = currentRots ? [currentRots] : []; state.interactionSignature = { type: 'drag', path: currentPath, rotations: currentRots, practicePaths: [] } } state.signatureHex = hex.replace('#', ''); if (selectedHandle) triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0 }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { if (state.selectedHandle) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(state.selectedHandle.pos, transformPos(state.selectedHandle.pos, state.sphere.rotation), state.selectedHandle.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true, 'local', { preserveSignatureState: true, skipAutoEnter: true }); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false, 'local', { preserveSignatureState: true, skipAutoEnter: true }) } } } state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }
+        function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none'); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (source === 'local' && (!state.interactionSignature.path || state.interactionSignature.path.length <= 1)) { if (!state.interactionSignature.clicks) state.interactionSignature.clicks = []; state.interactionSignature.clicks.push(hex.replace('#', '').toUpperCase()); state.interactionSignature.password = 'FFFFFF' + state.interactionSignature.clicks.join(''); } if (!state.historyHandles.some(h => h.hex.toLowerCase() === hex.toLowerCase())) { state.historyHandles.push({ pos: [...norm], color: [...col], hex: hex, peerCount: 0 }); } if (source === 'local' && window.app?.setPendingLoginSignature && (state.interactionSignature?.path?.length || state.interactionSignature?.clicks?.length)) window.app.setPendingLoginSignature(hex, state.interactionSignature); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview && !previewOptions.skipPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4 }
         window.getSphereScreenMetrics = (cameraZ = null) => { if (!state.canvas?.height) return null; const z = Number(cameraZ) || getResponsiveZ(), radius = (state.canvas.height / 2) / (z * Math.tan(Math.PI / 8)); return { radius, diameter: radius * 2, cx: state.canvas.width / 2, cy: state.canvas.height / 2, cameraZ: z } }
         window.setNearbyPeekMode = () => { state.nearbyPeek = null }
@@ -12394,10 +12523,10 @@ self.onmessage = async e => {
         function showSignatureMatchLimitMessage() { document.getElementById('signature-match-limit')?.classList.add('visible') }
         function resetSignatureMatchPreview() { window.app?.fuzzySearch?.cancel(); hideSignatureMatchLimitMessage(); state.signatureMatchPreview = null; state.signaturePaths = []; state.signaturePathsRotations = []; state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null; state.renderPath = false; state.selectedHandle = null; state.interactionSignature = { type: 'click', path: [], practicePaths: [], rotations: [], clicks: [] }; window.resetSphereView?.(false, false, true) }
         document.getElementById('signature-match-limit')?.addEventListener('click', resetSignatureMatchPreview)
-        function advanceSignaturePreviewSpiral(preview) { const maxPoints = Math.max(2, ...preview.attempts.map(path => path.length)); preview.visualPointCount = Math.min(maxPoints, Math.max(2, preview.visualPointCount || 2) + 1); if (!preview.indices?.length) return preview.attempts[preview.attempts.length - 1] || []; const base = preview.attempts[preview.attempts.length - 1], candidate = base.map((point, i) => i === 0 ? [...point] : offsetSignaturePoint(point, signatureSpiralOffsets[preview.indices[i - 1] || 0], preview.pixelScale)); for (let i = 0; i < preview.indices.length; i++) { preview.indices[i]++; if (preview.indices[i] < signatureSpiralOffsets.length) break; preview.indices[i] = 0 } return candidate }
-        function updateSignatureMatchPaths(candidatePath = null) { const preview = state.signatureMatchPreview; if (!preview?.active) return; const visualPointCount = Math.max(2, preview.visualPointCount || 2), paths = preview.attempts.map(path => getSignatureSliderPath(path, visualPointCount)); if (candidatePath?.length > 1) paths.push(getSignatureSliderPath(candidatePath, visualPointCount)); state.signaturePaths = paths; if (!state.dragStart.active) state.pathPoints = []; state.renderPath = true }
-        window.startSignatureMatchPreview = function (attemptedSignature, savedSignature, roomHex = '') { const path = (attemptedSignature?.fullPath?.length ? attemptedSignature.fullPath : attemptedSignature?.path || []).map(p => [...p]); if (path.length < 2 || !savedSignature?.path?.length) return false; const metrics = window.getSphereScreenMetrics?.(state.cameraPos?.[2]), pixelScale = 1 / Math.max(80, metrics?.radius || 200), preview = state.signatureMatchPreview?.active && state.signatureMatchPreview.roomHex === roomHex ? state.signatureMatchPreview : { active: true, roomHex, attempts: [], candidatePath: null, indices: [], lastVisual: 0, visualPointCount: 2, pixelScale }; const serialized = JSON.stringify(path), isNewAttempt = !preview.attempts.some(existing => JSON.stringify(existing) === serialized); if (isNewAttempt && preview.attempts.length >= 10) { showSignatureMatchLimitMessage(); return 'limit' } if (isNewAttempt) preview.attempts.push(path); hideSignatureMatchLimitMessage(); preview.indices = new Array(Math.max(0, path.length - 1)).fill(0); preview.visualPointCount = 2; preview.pixelScale = pixelScale; state.signatureMatchPreview = preview; state.landing.active = false; state.landing.showHandle = false; state.pathPoints = []; state.dragStart.active = false; const rotInfo = getAxisAngleFromRotationMatrix(transposeRotationMatrix(state.sphere.rotation)); state.returning = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], rotationAxis: rotInfo.axis, rotationAngle: rotInfo.angle, keepRotation: false, speed: 0.1, startDist: state.cameraPos[2], targetDist: getResponsiveZ(), coneStartPositions: state.cones.map(c => [...c.pos]) }; updateSignatureMatchPaths(); return true }
-        window.updateSignatureMatchPreview = function (candidatePath) { if (!state.signatureMatchPreview?.active) return; state.signatureMatchPreview.candidatePath = candidatePath?.map(p => [...p]) || null; updateSignatureMatchPaths(state.signatureMatchPreview.candidatePath) }
+        function advanceSignaturePreviewSpiral(preview) { const attempts = preview.attempts || [], maxPoints = Math.max(2, ...attempts.map(path => path.length)); preview.visualPointCount = Math.min(maxPoints, Math.max(2, preview.visualPointCount || 2) + 1); if (!preview.indices?.length) return attempts[attempts.length - 1] || []; const base = attempts[attempts.length - 1], candidate = base.map((point, i) => i === 0 ? [...point] : offsetSignaturePoint(point, signatureSpiralOffsets[preview.indices[i - 1] || 0], preview.pixelScale)); for (let i = 0; i < preview.indices.length; i++) { preview.indices[i]++; if (preview.indices[i] < signatureSpiralOffsets.length) break; preview.indices[i] = 0 } return candidate }
+        function updateSignatureMatchPaths(candidatePath = null) { const preview = state.signatureMatchPreview; if (!preview?.active) return; const candidatePaths = Array.isArray(candidatePath?.[0]?.[0]) ? candidatePath : candidatePath?.length > 1 ? [candidatePath] : []; state.signaturePaths = candidatePaths.map(path => getSignatureSliderPath(path, Math.max(preview.visualPointCount || 2, path.length))); if (!state.dragStart.active) state.pathPoints = []; state.renderPath = true }
+        window.startSignatureMatchPreview = function (attemptedSignature, roomHex = '') { const path = (attemptedSignature?.path || []).map(p => [...p]); if (path.length < 2) return false; const metrics = window.getSphereScreenMetrics?.(state.cameraPos?.[2]), pixelScale = 1 / Math.max(80, metrics?.radius || 200), preview = state.signatureMatchPreview?.active && state.signatureMatchPreview.roomHex === roomHex ? state.signatureMatchPreview : { active: true, roomHex, candidatePath: null, indices: [], lastVisual: 0, visualPointCount: 2, pixelScale }; hideSignatureMatchLimitMessage(); preview.indices = new Array(Math.max(0, path.length - 1)).fill(0); preview.visualPointCount = 2; preview.pixelScale = pixelScale; preview.workerDriven = true; state.signatureMatchPreview = preview; state.landing.active = false; state.landing.showHandle = false; state.pathPoints = []; state.dragStart.active = false; const rotInfo = getAxisAngleFromRotationMatrix(transposeRotationMatrix(state.sphere.rotation)); state.returning = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], rotationAxis: rotInfo.axis, rotationAngle: rotInfo.angle, keepRotation: false, speed: 0.1, startDist: state.cameraPos[2], targetDist: getResponsiveZ(), coneStartPositions: state.cones.map(c => [...c.pos]) }; updateSignatureMatchPaths(); return true }
+        window.updateSignatureMatchPreview = function (candidatePath) { if (!state.signatureMatchPreview?.active) return; const candidatePaths = Array.isArray(candidatePath?.[0]?.[0]) ? candidatePath.map(path => path.map(p => [...p])) : candidatePath?.length > 1 ? [candidatePath.map(p => [...p])] : []; state.signatureMatchPreview.candidatePath = candidatePaths; if (candidatePaths.length) state.signatureMatchPreview.visualPointCount = Math.max(state.signatureMatchPreview.visualPointCount || 2, ...candidatePaths.map(path => path.length)); updateSignatureMatchPaths(state.signatureMatchPreview.candidatePath) }
         window.stopSignatureMatchPreview = function () { if (state.signatureMatchPreview) state.signatureMatchPreview.active = false; state.signaturePaths = []; state.renderPath = false; hideSignatureMatchLimitMessage() }
         function applySignaturePointSlider(value) { const fullPath = (state.signatureFullPath?.length ? state.signatureFullPath : state.interactionSignature.fullPath?.length ? state.interactionSignature.fullPath : state.interactionSignature.path || []).map(p => [...p]); if (fullPath.length < 2) return fullPath.length; state.signatureFullPath = fullPath; if (!state.signatureFullRotations && state.interactionSignature.rotations?.length === fullPath.length) state.signatureFullRotations = state.interactionSignature.rotations.map(r => [...r]); const targetCount = value <= 0 ? 2 : Math.max(2, Math.min(fullPath.length, Math.round(fullPath.length * value / 100))), indices = targetCount >= fullPath.length ? fullPath.map((_, i) => i) : simplifyPathIndices(fullPath, targetCount), path = indices.map(i => [...fullPath[i]]), fullRots = state.signatureFullRotations?.length === fullPath.length ? state.signatureFullRotations : state.interactionSignature.rotations; state.interactionSignature.path = path; state.interactionSignature.fullPath = fullPath.map(p => [...p]); state.interactionSignature.unlockPointCount = path.length; state.interactionSignature.password = ''; if (fullRots?.length === fullPath.length) { state.interactionSignature.rotations = indices.map(i => [...fullRots[i]]); state.interactionSignature.fullRotations = fullRots.map(r => [...r]) } state.signaturePaths = [path, ...state.signaturePaths.slice(1)]; state.pathPoints = path.map(p => [...p]); state.renderPath = true; return path.length }
         function formatGuessTime(seconds) { if (seconds < 0.01) return 'less than 0.01 seconds'; if (seconds < 1) return seconds.toFixed(3) + ' seconds'; if (seconds < 60) return Math.round(seconds) + ' seconds'; if (seconds < 3600) return Math.round(seconds / 60) + ' minutes'; if (seconds < 86400) return (seconds / 3600).toFixed(1) + ' hours'; if (seconds < 86400 * 365) return Math.round(seconds / 86400) + ' days'; if (seconds < 86400 * 365 * 1000) return Math.round(seconds / (86400 * 365)) + ' years'; if (seconds < 86400 * 365 * 1e6) return (seconds / (86400 * 365 * 1000)).toFixed(0) + ' thousand years'; if (seconds < 86400 * 365 * 1e9) return (seconds / (86400 * 365 * 1e6)).toFixed(0) + ' million years'; if (seconds < 86400 * 365 * 1e12) return (seconds / (86400 * 365 * 1e9)).toFixed(0) + ' billion years'; return isFinite(seconds) ? (seconds / (86400 * 365 * 1e12)).toFixed(0) + ' trillion years' : 'longer than the age of the universe' }
@@ -12471,9 +12600,9 @@ self.onmessage = async e => {
             state.landing.showHandle = false
         }
 
-        function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated && !state.renderPath && !state.practice.active && !state.practice.awaitingRedraw) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])) } else if (document.body.classList.contains('light-mode') && (state.renderPath || state.practice.active || state.practice.awaitingRedraw)) { document.body.style.backgroundColor = '' } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05 } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]) } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ] } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = '' } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t) } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * (state.returning.speed || 1.5), 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = state.returning.clearHex ? '' : '#FFFFFF'; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '' } } } if (state.practice.active && !state.landing.active && (!state.returning || !state.returning.active)) advancePractice(dt); let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.nearbyPeek?.active && (!state.returning || !state.returning.active)) { state.nearbyPeek.progress = Math.min(state.nearbyPeek.progress + dt * 1.8, 1); const t = state.nearbyPeek.progress, ease = t * t * (3 - 2 * t); state.cameraPos = [0, 0, state.nearbyPeek.startZ + (state.nearbyPeek.targetZ - state.nearbyPeek.startZ) * ease] } else if (manualCameraZ === null && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.returning?.targetDist || state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ] } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx] } }) }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95) } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2) } }) } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); if (!state.practice.awaitingRedraw) document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) } } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)) } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95 } } renderCurrentFrame(renderBackgroundLayer, bgCameraPos); requestAnimationFrame(loop) }
+        function loop(ts) { const dt = Math.min((ts - state.lastTime) / 1000, 0.1); state.lastTime = ts; if (document.body.classList.contains('light-mode') && state.hasRotated && !state.renderPath && !state.practice.active && !state.practice.awaitingRedraw) { document.body.style.backgroundColor = rgbToHex(...getSurfaceColor([0, 0, 1], [0, 0, 1])) } else if (document.body.classList.contains('light-mode') && (state.renderPath || state.practice.active || state.practice.awaitingRedraw)) { document.body.style.backgroundColor = '' } if (state.valueScrub.active && Math.abs(state.valueScrub.startY - state.mouse.y) > 5) { state.cones[state.valueScrub.coneIndex].pos[state.valueScrub.coordIndex] += Math.sign(state.valueScrub.startY - state.mouse.y) * Math.pow((Math.abs(state.valueScrub.startY - state.mouse.y) - 5) / 500, 3) * .05 } let manualCameraZ = null; if (state.mouse.down && state.interaction && state.interaction.mode === 'zoom') { let pathLength = 0; for (let i = 1; i < state.pathPoints.length; i++) { pathLength += Vec3.dist(state.pathPoints[i], state.pathPoints[i - 1]) } const zoomProgress = Math.min(1, pathLength / Math.PI); const startZ = state.interaction.startZ; const targetZ = 1.25; manualCameraZ = startZ - (startZ - targetZ) * zoomProgress; state.cameraPos = [0, 0, manualCameraZ] } if (state.landing.active) { state.landing.progress = Math.min(state.landing.progress + dt * .5, 1); const t = state.landing.progress; if (t >= 1 && !state.landing.notified) { window.parent.postMessage({ type: 'zoom-complete', color: state.landing.hex }, '*'); state.landing.notified = true } if (t >= 1) { const card = document.getElementById('login-card'); if (window.self === window.top && !card.classList.contains('visible')) { card.classList.add('visible'); card.style.opacity = '' } if (state.landing.shouldAutoEnter) { if (window.enterRoomUI && window.self === window.top) window.enterRoomUI(); state.landing.shouldAutoEnter = false } } const rot = Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle * t * t); if (state.landing.showHandle) { state.handle.pos = transformPos(state.landing.handleStartPos, rot); if (t >= 1) state.landing.showHandle = false } state.sphere.rotation = Mat4.multiply(rot, state.landing.baseRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.landing.coneStartPositions[i], rot)); state.cameraPos = Vec3.scale(Vec3.normalize([0, 0, 4]), state.landing.startDist + (state.landing.targetDist - state.landing.startDist) * t * t * t) } if (state.returning && state.returning.active) { state.returning.progress = Math.min(state.returning.progress + dt * (state.returning.speed || 1.5), 1); const t = state.returning.progress, ease = 1 - Math.pow(1 - t, 3), rot = Mat4.rotationAxis(state.returning.rotationAxis, state.returning.rotationAngle * ease); state.sphere.rotation = Mat4.multiply(rot, state.returning.baseRotation); state.cameraPos = [0, 0, state.returning.startDist + (state.returning.targetDist - state.returning.startDist) * ease]; state.cones.forEach((c, i) => c.pos = transformPos(state.returning.coneStartPositions[i], rot)); if (t >= 1) { state.returning.active = false; if (!state.returning.keepRotation) { state.hasRotated = false; state.sphere.rotation = Mat4.identity(); state.cones = defaultCones.map(c => ({ ...c, pos: [...c.pos], color: [...c.color] })); state.cameraPos = [0, 0, getResponsiveZ()]; document.body.style.backgroundColor = ''; document.getElementById('color-hex').innerText = state.returning.clearHex ? '' : '#FFFFFF'; document.getElementById('login-card').style.color = ''; document.getElementById('top-nav').style.removeProperty('--nav-color'); document.getElementById('login-card').style.opacity = ''; document.getElementById('login-card').style.transition = '' } } } if (state.practice.active && !state.landing.active && (!state.returning || !state.returning.active)) advancePractice(dt); let renderBackgroundLayer = false; let bgCameraPos = [0, 0, 0]; if (manualCameraZ === null && state.nearbyPeek?.active && (!state.returning || !state.returning.active)) { state.nearbyPeek.progress = Math.min(state.nearbyPeek.progress + dt * 1.8, 1); const t = state.nearbyPeek.progress, ease = t * t * (3 - 2 * t); state.cameraPos = [0, 0, state.nearbyPeek.startZ + (state.nearbyPeek.targetZ - state.nearbyPeek.startZ) * ease] } else if (manualCameraZ === null && !state.practice.awaitingRedraw && state.peeking && (state.peeking.active || state.peeking.value > 0) && (!state.returning || !state.returning.active)) { const zoomedInZ = state.landing.targetDist || 1.25; const zoomedOutZ = state.returning?.targetDist || state.landing.startDist || 4.0; const t = state.peeking.value; const ease = t * t * (3 - 2 * t); const currentZ = zoomedInZ + (zoomedOutZ - zoomedInZ) * ease; state.cameraPos = [0, 0, currentZ]; if (t > 0.01 && t < 0.99) { renderBackgroundLayer = true; bgCameraPos = [0, 0, zoomedInZ] } } state.vpMatrix = Mat4.multiply(Mat4.perspective(Math.PI / 4, state.canvas.width / state.canvas.height, .001, 100), Mat4.lookAt(state.cameraPos, [0, 0, 0], [0, 1, 0])); if (!document.body.classList.contains('light-mode')) { state.cones.forEach((c, i) => { const cache = state.uiCache[i]; if (!cache) return; if (cache.lastActive !== c.active) { cache.title.style.color = c.active ? c.cssColor : 'grey'; cache.lastActive = c.active } ['x', 'y', 'z'].forEach((ax, idx) => { if (Math.abs(c.pos[idx] - cache.lastPos[idx]) > 0.005) { cache[ax].innerText = c.pos[idx].toFixed(2); cache.lastPos[idx] = c.pos[idx] } }) }); if (state.mouse.down) { const tp = getTargetPos(state.mouse.x, state.mouse.y); if (state.draggedConeIndex === -1 && tp) state.cones.forEach((c, i) => { if (c.active && Vec3.dist(c.pos, tp) < 0.8) state.draggedConeIndex = i }); if (state.draggedConeIndex !== -1) { const np = calculateConePosition(state.mouse.x, state.mouse.y), c = state.cones[state.draggedConeIndex]; c.vel = Vec3.scale(Vec3.sub(np, c.pos), 1 / dt); c.pos = np } } else state.draggedConeIndex = -1; state.cones.forEach(c => { if (state.draggedConeIndex === -1 || state.cones[state.draggedConeIndex] !== c) { if (Vec3.len(c.vel) > .001) { c.pos = Vec3.scale(Vec3.normalize(Vec3.add(c.pos, Vec3.scale(c.vel, dt))), 1.2); c.vel = Vec3.scale(c.vel, .95) } else c.pos = Vec3.scale(Vec3.normalize(c.pos), 1.2) } }) } else if (state.mouse.down && state.dragStart.active) { state.landing.active = false; state.landing.showHandle = false; document.getElementById('login-card').classList.remove('visible'); if (!state.practice.awaitingRedraw) document.getElementById('dashboard-panel').classList.remove('active'); const tp = getTargetPos(state.mouse.x, state.mouse.y); if (tp) { state.handle.pos = tp; if (state.dragStart.lastTrackPos) { const axis = Vec3.cross(state.dragStart.lastTrackPos, tp); state.inertia = { active: false, axis: Vec3.len(axis) > 1e-5 ? Vec3.normalize(axis) : [1, 0, 0], val: Vec3.len(axis) } } state.dragStart.lastTrackPos = tp; const a = Vec3.cross(state.dragStart.mouseDir, Vec3.normalize(tp)); if (Vec3.len(a) > .001) { const r = Mat4.rotationAxis(Vec3.normalize(a), Math.acos(Math.min(1, Math.max(-1, Vec3.dot(state.dragStart.mouseDir, Vec3.normalize(tp)))))); state.sphere.rotation = Mat4.multiply(r, state.dragStart.sphereRotation); state.cones.forEach((c, i) => c.pos = transformPos(state.dragStart.conePositions[i], r)) } } } else { state.dragStart.active = false; state.handle.active = false; if (state.inertia.val > 0.0001) { const r = Mat4.rotationAxis(state.inertia.axis, state.inertia.val); state.sphere.rotation = Mat4.multiply(r, state.sphere.rotation); state.cones.forEach(c => c.pos = transformPos(c.pos, r)); state.inertia.val *= 0.95 } } renderCurrentFrame(renderBackgroundLayer, bgCameraPos); requestAnimationFrame(loop) }
         function renderCurrentFrame(renderBackgroundLayer, bgCameraPos) {
-            if (state.signatureMatchPreview?.active) {
+            if (state.signatureMatchPreview?.active && !state.signatureMatchPreview.workerDriven) {
                 const now = performance.now()
                 if (!state.signatureMatchPreview.lastVisual || now - state.signatureMatchPreview.lastVisual >= 100) {
                     state.signatureMatchPreview.lastVisual = now
@@ -12538,7 +12667,7 @@ self.onmessage = async e => {
                 const renderablePaths = getRenderablePaths()
                 if (renderablePaths.length > 0) {
                     if (!state.buffers.pathVertices) state.buffers.pathVertices = []
-                    renderablePaths.forEach(({ path, alpha }, pathIdx) => {
+                    renderablePaths.forEach(({ path, alpha, color = [1, 1, 1] }, pathIdx) => {
                         const pathVerts = pathToVertices(path, state.sphere.rotation)
                         if (!pathVerts || pathVerts.length === 0) return
                         if (!state.buffers.pathVertices[pathIdx] || state.buffers.pathVertices[pathIdx].size < pathVerts.byteLength) {
@@ -12547,7 +12676,7 @@ self.onmessage = async e => {
                         }
                         state.device.queue.writeBuffer(state.buffers.pathVertices[pathIdx], 0, pathVerts)
                         state.uniforms.cone.set(state.vpMatrix, 0)
-                        state.uniforms.cone.set([1, 1, 1, alpha], 16)
+                        state.uniforms.cone.set([...color, alpha], 16)
                         state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone)
                         pass.setPipeline(state.pipelines.cone)
                         pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx))
@@ -12727,12 +12856,12 @@ self.onmessage = async e => {
             gl.enable(gl.BLEND)
             gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
             gl.depthMask(false)
-            paths.forEach(({ path, alpha }) => {
+            paths.forEach(({ path, alpha, color = [1, 1, 1] }) => {
                 const pathVerts = pathToVertices(path, state.sphere.rotation)
                 if (!pathVerts || pathVerts.length === 0) return
                 gl.bufferData(gl.ARRAY_BUFFER, pathVerts, gl.DYNAMIC_DRAW)
                 gl.uniformMatrix4fv(loc.uMvp, false, new Float32Array(state.vpMatrix))
-                gl.uniform4fv(loc.uColor, new Float32Array([1, 1, 1, alpha]))
+                gl.uniform4fv(loc.uColor, new Float32Array([...color, alpha]))
                 gl.drawArrays(gl.TRIANGLES, 0, pathVerts.length / 3)
             })
             gl.depthMask(true)
@@ -13256,3 +13385,4 @@ self.onmessage = async e => {
 </body>
 
 </html>
+
