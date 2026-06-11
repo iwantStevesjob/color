@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="utf-8" />
 <meta
   name="viewport"
   content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"
->
-<title>Breaking Wave — Thürey et al. browser adaptation</title>
+/>
+
+<title>Curling Barrel Wave — Three.js</title>
 
 <style>
   * {
@@ -15,12 +16,11 @@
 
   html,
   body {
+    margin: 0;
     width: 100%;
     height: 100%;
-    margin: 0;
     overflow: hidden;
-    background: #061b26;
-    color: #eefbff;
+    background: #061923;
     font-family:
       Inter,
       system-ui,
@@ -28,6 +28,7 @@
       Segoe UI,
       Roboto,
       sans-serif;
+    color: #eefbff;
   }
 
   canvas {
@@ -40,59 +41,59 @@
   #ui {
     position: fixed;
     z-index: 10;
-    top: 12px;
-    left: 12px;
-    width: min(370px, calc(100vw - 24px));
-    padding: 14px;
+    left: 10px;
+    top: 10px;
+    width: min(360px, calc(100vw - 20px));
+    padding: 13px;
     border: 1px solid rgba(255, 255, 255, 0.13);
     border-radius: 16px;
-    background: rgba(3, 24, 34, 0.82);
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
-    backdrop-filter: blur(13px);
+    background: rgba(3, 25, 35, 0.8);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.26);
   }
 
   h1 {
-    margin: 0 0 4px;
     font-size: 16px;
     letter-spacing: 0.08em;
+    margin: 0 0 4px;
   }
 
   .desc {
-    margin: 0 0 10px;
-    color: #b7d5df;
-    font-size: 11px;
-    line-height: 1.4;
+    font-size: 10px;
+    line-height: 1.35;
+    color: #b7d7df;
+    margin: 0 0 9px;
   }
 
   .row {
     display: grid;
-    grid-template-columns: 98px 1fr 48px;
+    grid-template-columns: 96px 1fr 48px;
     align-items: center;
     gap: 8px;
-    margin: 7px 0;
-    font-size: 12px;
+    margin: 6px 0;
+    font-size: 11px;
   }
 
   .row output {
     text-align: right;
-    color: #7ee7ff;
+    color: #80e9ff;
     font-variant-numeric: tabular-nums;
   }
 
   input {
     width: 100%;
-    accent-color: #4fd8ff;
+    accent-color: #53d9ff;
   }
 
   .stats {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 5px 10px;
-    margin-top: 8px;
-    padding-top: 9px;
     border-top: 1px solid rgba(255, 255, 255, 0.11);
-    color: #a9cad5;
+    padding-top: 8px;
+    margin-top: 8px;
     font-size: 10px;
+    color: #aacbd4;
   }
 
   .stats b {
@@ -107,47 +108,36 @@
   }
 
   button {
-    padding: 8px 10px;
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 11px;
     background: rgba(255, 255, 255, 0.08);
     color: white;
-    font-size: 11px;
+    padding: 8px 10px;
     font-weight: 650;
-  }
-
-  button:active {
-    transform: translateY(1px);
+    font-size: 11px;
   }
 
   #tag {
     position: fixed;
     z-index: 4;
-    right: 12px;
-    bottom: 12px;
+    right: 10px;
+    bottom: 10px;
     padding: 7px 10px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 999px;
-    background: rgba(3, 24, 34, 0.72);
-    color: #b8dce7;
+    background: rgba(3, 25, 35, 0.7);
     font-size: 10px;
+    color: #b7d8e1;
   }
 
   @media (max-width: 600px) {
     #ui {
-      top: 8px;
-      left: 8px;
-      width: calc(100vw - 16px);
-      padding: 11px;
+      padding: 10px;
     }
 
     .row {
-      grid-template-columns: 88px 1fr 44px;
-      margin: 5px 0;
-    }
-
-    .desc {
-      font-size: 10px;
+      grid-template-columns: 86px 1fr 44px;
+      margin: 4px 0;
     }
 
     .stats {
@@ -172,88 +162,89 @@
 
 <body>
 <div id="ui">
-  <h1>BREAKING-WAVE PATCH SIMULATION</h1>
+  <h1>CURLING BARREL WAVE</h1>
 
   <p class="desc">
-    Shallow-water height field + detected steep front + connected
-    ballistic fluid sheet, thickness, impact foam and spray.
+    Finite-depth wave values plus a connected Lagrangian lip sheet.
+    The rotational breaker field carries the lip over the crest,
+    downward, and back toward the wave face.
   </p>
 
   <div class="row">
-    <label for="amp">Wave height</label>
+    <label>Wave height</label>
     <input
-      id="amp"
+      id="height"
       type="range"
-      min="0.7"
-      max="2.5"
-      step="0.05"
-      value="1.75"
-    >
-    <output id="ampO"></output>
+      min="2.4"
+      max="7.5"
+      step="0.1"
+      value="5.2"
+    />
+    <output id="heightO"></output>
   </div>
 
   <div class="row">
-    <label for="period">Wave period</label>
+    <label>Period</label>
     <input
       id="period"
       type="range"
-      min="5"
-      max="11"
+      min="7"
+      max="16"
       step="0.1"
-      value="7.6"
-    >
+      value="11.5"
+    />
     <output id="periodO"></output>
   </div>
 
   <div class="row">
-    <label for="reef">Reef depth</label>
+    <label>Reef depth</label>
     <input
-      id="reef"
+      id="depth"
       type="range"
-      min="1.2"
-      max="2.8"
-      step="0.05"
-      value="1.65"
-    >
-    <output id="reefO"></output>
+      min="4"
+      max="10"
+      step="0.1"
+      value="6.8"
+    />
+    <output id="depthO"></output>
   </div>
 
   <div class="row">
-    <label for="thick">Lip thickness</label>
+    <label>Curl strength</label>
+    <input
+      id="curl"
+      type="range"
+      min="0.55"
+      max="1.45"
+      step="0.01"
+      value="1.12"
+    />
+    <output id="curlO"></output>
+  </div>
+
+  <div class="row">
+    <label>Lip thickness</label>
     <input
       id="thick"
       type="range"
-      min="0.10"
-      max="0.60"
+      min="0.12"
+      max="0.55"
       step="0.01"
-      value="0.30"
-    >
+      value="0.28"
+    />
     <output id="thickO"></output>
   </div>
 
-  <div class="row">
-    <label for="break">Break strength</label>
-    <input
-      id="break"
-      type="range"
-      min="0.55"
-      max="1.6"
-      step="0.01"
-      value="1.08"
-    >
-    <output id="breakO"></output>
-  </div>
-
   <div class="stats">
-    <span>Front slope <b id="slopeS">—</b></span>
-    <span>Patch rows <b id="rowsS">—</b></span>
-    <span>Wave speed <b id="speedS">—</b></span>
-    <span>Spray particles <b id="sprayS">—</b></span>
+    <span>Wavelength <b id="sL">—</b></span>
+    <span>Phase speed <b id="sC">—</b></span>
+    <span>Breaker ratio <b id="sR">—</b></span>
+    <span>Sheet angle <b id="sA">—</b></span>
   </div>
 
   <div class="buttons">
     <button id="pause">Pause</button>
-    <button id="reset">Reset simulation</button>
+    <button id="reset">Reset</button>
     <button id="cameraBtn">Cinematic camera</button>
   </div>
 </div>
@@ -269,6 +260,7 @@ import {
 } from "three/addons/controls/OrbitControls.js";
 
 const G = 9.81;
+const TAU = Math.PI * 2;
 
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
@@ -284,40 +276,187 @@ const smoothstep = (a, b, x) => {
 };
 
 const ui = {
-  amp: document.querySelector("#amp"),
-  period: document.querySelector("#period"),
-  reef: document.querySelector("#reef"),
-  thick: document.querySelector("#thick"),
-  break: document.querySelector("#break")
+  height:
+    document.querySelector("#height"),
+
+  period:
+    document.querySelector("#period"),
+
+  depth:
+    document.querySelector("#depth"),
+
+  curl:
+    document.querySelector("#curl"),
+
+  thick:
+    document.querySelector("#thick")
 };
 
 const out = {
-  amp: document.querySelector("#ampO"),
-  period: document.querySelector("#periodO"),
-  reef: document.querySelector("#reefO"),
-  thick: document.querySelector("#thickO"),
-  break: document.querySelector("#breakO")
+  height:
+    document.querySelector("#heightO"),
+
+  period:
+    document.querySelector("#periodO"),
+
+  depth:
+    document.querySelector("#depthO"),
+
+  curl:
+    document.querySelector("#curlO"),
+
+  thick:
+    document.querySelector("#thickO")
 };
 
-function refreshUI() {
-  out.amp.textContent =
-    (+ui.amp.value).toFixed(2) +
+function solveK(
+  omega,
+  waterDepth
+) {
+  let k = Math.max(
+    omega * omega / G,
+    omega /
+      Math.sqrt(
+        G * waterDepth
+      )
+  );
+
+  for (
+    let i = 0;
+    i < 14;
+    i++
+  ) {
+    const kh =
+      k * waterDepth;
+
+    const tanh =
+      Math.tanh(kh);
+
+    const sech2 =
+      1 /
+      (
+        Math.cosh(kh) **
+        2
+      );
+
+    const f =
+      G *
+      k *
+      tanh -
+      omega *
+      omega;
+
+    const df =
+      G *
+      (
+        tanh +
+        k *
+        waterDepth *
+        sech2
+      );
+
+    k = Math.max(
+      1e-5,
+      k - f / df
+    );
+  }
+
+  return k;
+}
+
+function physics() {
+  const H0 =
+    +ui.height.value;
+
+  const T =
+    +ui.period.value;
+
+  const waterDepth =
+    +ui.depth.value;
+
+  const omega =
+    TAU / T;
+
+  const k =
+    solveK(
+      omega,
+      waterDepth
+    );
+
+  const wavelength =
+    TAU / k;
+
+  const phaseSpeed =
+    omega / k;
+
+  const H =
+    Math.min(
+      H0,
+      0.78 *
+      waterDepth
+    );
+
+  return {
+    H0,
+    H,
+    T,
+    h: waterDepth,
+    omega,
+    k,
+    L: wavelength,
+    c: phaseSpeed,
+    ratio:
+      H / waterDepth,
+
+    curl:
+      +ui.curl.value,
+
+    thick:
+      +ui.thick.value
+  };
+}
+
+function readout(p) {
+  out.height.textContent =
+    (+ui.height.value)
+      .toFixed(1) +
     "m";
 
   out.period.textContent =
-    (+ui.period.value).toFixed(1) +
+    (+ui.period.value)
+      .toFixed(1) +
     "s";
 
-  out.reef.textContent =
-    (+ui.reef.value).toFixed(2) +
+  out.depth.textContent =
+    (+ui.depth.value)
+      .toFixed(1) +
     "m";
+
+  out.curl.textContent =
+    (+ui.curl.value)
+      .toFixed(2);
 
   out.thick.textContent =
-    (+ui.thick.value).toFixed(2) +
+    (+ui.thick.value)
+      .toFixed(2) +
     "m";
 
-  out.break.textContent =
-    (+ui.break.value).toFixed(2);
+  document
+    .querySelector("#sL")
+    .textContent =
+      p.L.toFixed(1) +
+      "m";
+
+  document
+    .querySelector("#sC")
+    .textContent =
+      p.c.toFixed(1) +
+      "m/s";
+
+  document
+    .querySelector("#sR")
+    .textContent =
+      p.ratio.toFixed(2);
 }
 
 Object
@@ -325,20 +464,21 @@ Object
   .forEach(element => {
     element.addEventListener(
       "input",
-      refreshUI
+      () => readout(
+        physics()
+      )
     );
   });
 
-refreshUI();
-
 // -----------------------------------------------------------------------------
-// Three.js scene
+// Renderer and camera
 // -----------------------------------------------------------------------------
 
 const renderer =
   new THREE.WebGLRenderer({
     antialias: true,
-    powerPreference: "high-performance"
+    powerPreference:
+      "high-performance"
   });
 
 renderer.setPixelRatio(
@@ -360,9 +500,10 @@ renderer.toneMapping =
   THREE.ACESFilmicToneMapping;
 
 renderer.toneMappingExposure =
-  1.08;
+  1.04;
 
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled =
+  true;
 
 renderer.shadowMap.type =
   THREE.PCFSoftShadowMap;
@@ -375,26 +516,29 @@ const scene =
   new THREE.Scene();
 
 scene.background =
-  new THREE.Color(0x79cce0);
+  new THREE.Color(
+    0x79cfe1
+  );
 
 scene.fog =
   new THREE.FogExp2(
-    0x78c7d8,
-    0.015
+    0x79cbd9,
+    0.014
   );
 
 const camera =
   new THREE.PerspectiveCamera(
-    46,
-    innerWidth / innerHeight,
+    47,
+    innerWidth /
+      innerHeight,
     0.1,
-    160
+    180
   );
 
 camera.position.set(
-  11,
-  5.3,
-  14
+  12,
+  6.1,
+  14.5
 );
 
 const controls =
@@ -407,31 +551,35 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 
 controls.target.set(
-  2,
-  1.3,
+  0.5,
+  2.15,
   0
 );
 
-controls.minDistance = 5.5;
-controls.maxDistance = 42;
+controls.minDistance = 6;
+controls.maxDistance = 48;
 
 controls.maxPolarAngle =
-  Math.PI * 0.53;
+  Math.PI * 0.54;
 
 controls.update();
 
+// -----------------------------------------------------------------------------
+// Lighting and sky
+// -----------------------------------------------------------------------------
+
 scene.add(
   new THREE.HemisphereLight(
-    0xd9f7ff,
-    0x173845,
-    2.5
+    0xd9f8ff,
+    0x173944,
+    2.3
   )
 );
 
 const sun =
   new THREE.DirectionalLight(
-    0xfff4d8,
-    4.3
+    0xfff2d3,
+    4.2
   );
 
 sun.position.set(
@@ -447,22 +595,22 @@ sun.shadow.mapSize.set(
   2048
 );
 
-sun.shadow.camera.left = -30;
-sun.shadow.camera.right = 30;
-sun.shadow.camera.top = 22;
-sun.shadow.camera.bottom = -15;
+sun.shadow.camera.left = -28;
+sun.shadow.camera.right = 28;
+sun.shadow.camera.top = 20;
+sun.shadow.camera.bottom = -12;
 
 scene.add(sun);
 
 const rim =
   new THREE.DirectionalLight(
-    0x6bd8ff,
-    1.25
+    0x66dcff,
+    1.2
   );
 
 rim.position.set(
-  11,
-  7,
+  12,
+  6,
   -12
 );
 
@@ -471,26 +619,27 @@ scene.add(rim);
 const sky =
   new THREE.Mesh(
     new THREE.SphereGeometry(
-      100,
+      110,
       32,
       16
     ),
 
     new THREE.ShaderMaterial({
-      side: THREE.BackSide,
+      side:
+        THREE.BackSide,
 
       uniforms: {
         top: {
           value:
             new THREE.Color(
-              0x0b5b80
+              0x0b587b
             )
         },
 
         bottom: {
           value:
             new THREE.Color(
-              0xb8edf1
+              0xbceff2
             )
         }
       },
@@ -504,7 +653,10 @@ const sky =
           gl_Position =
             projectionMatrix *
             modelViewMatrix *
-            vec4(position, 1.0);
+            vec4(
+              position,
+              1.0
+            );
         }
       `,
 
@@ -517,7 +669,10 @@ const sky =
         void main() {
           float h =
             clamp(
-              normalize(p).y * 0.5 + 0.5,
+              normalize(p).y *
+              0.5 +
+              0.5,
+
               0.0,
               1.0
             );
@@ -527,8 +682,9 @@ const sky =
               mix(
                 bottom,
                 top,
-                pow(h, 0.75)
+                pow(h, 0.74)
               ),
+
               1.0
             );
         }
@@ -539,1778 +695,842 @@ const sky =
 scene.add(sky);
 
 // -----------------------------------------------------------------------------
-// Shallow-water grid
+// Background ocean
 // -----------------------------------------------------------------------------
 
-/*
-  The paper uses a staggered, semi-Lagrangian
-  shallow-water solve.
+const OX = 96;
+const OZ = 70;
 
-  This keeps that overall architecture:
-
-  1. Advect depth and horizontal velocity.
-  2. Accelerate velocity from free-surface pressure.
-  3. Apply the continuity compression term.
-
-  h_t = -u · grad(h) - h div(u)
-*/
-
-const NX = 128;
-const NZ = 56;
-
-const LX = 44;
-const LZ = 22;
-
-const DX =
-  LX / (NX - 1);
-
-const DZ =
-  LZ / (NZ - 1);
-
-const N =
-  NX * NZ;
-
-const X0 =
-  -LX / 2;
-
-const Z0 =
-  -LZ / 2;
-
-const id = (i, j) =>
-  j * NX + i;
-
-const bed =
-  new Float32Array(N);
-
-const h =
-  new Float32Array(N);
-
-const u =
-  new Float32Array(N);
-
-const v =
-  new Float32Array(N);
-
-const ha =
-  new Float32Array(N);
-
-const ua =
-  new Float32Array(N);
-
-const va =
-  new Float32Array(N);
-
-const hn =
-  new Float32Array(N);
-
-const un =
-  new Float32Array(N);
-
-const vn =
-  new Float32Array(N);
-
-let simTime = 0;
-let frame = 0;
-let paused = false;
-let cinematic = false;
-
-function worldX(i) {
-  return X0 + i * DX;
-}
-
-function worldZ(j) {
-  return Z0 + j * DZ;
-}
-
-function reefDepthAt(x, z) {
-  const deep = 5.4;
-  const shallow =
-    +ui.reef.value;
-
-  /*
-    The center of the reef rises first.
-
-    This makes the break begin near the
-    middle and spread toward the shoulders.
-  */
-
-  const shelfShift =
-    0.055 * z * z;
-
-  const q =
-    smoothstep(
-      -3.5 + shelfShift,
-      7.0 + shelfShift,
-      x
-    );
-
-  const channel =
-    0.45 *
-    Math.exp(
-      -(
-        (z - 8.5) *
-        (z - 8.5)
-      ) /
-      5.5
-    );
-
-  return lerp(
-    deep,
-    shallow + channel,
-    q
-  );
-}
-
-function rebuildBed() {
-  for (
-    let j = 0;
-    j < NZ;
-    j++
-  ) {
-    for (
-      let i = 0;
-      i < NX;
-      i++
-    ) {
-      const k =
-        id(i, j);
-
-      bed[k] =
-        -reefDepthAt(
-          worldX(i),
-          worldZ(j)
-        );
-    }
-  }
-}
-
-function seedWave() {
-  rebuildBed();
-
-  const A =
-    +ui.amp.value;
-
-  for (
-    let j = 0;
-    j < NZ;
-    j++
-  ) {
-    const z =
-      worldZ(j);
-
-    const bend =
-      0.028 *
-      z *
-      z;
-
-    for (
-      let i = 0;
-      i < NX;
-      i++
-    ) {
-      const x =
-        worldX(i);
-
-      const depth =
-        -bed[id(i, j)];
-
-      const q =
-        (
-          x +
-          10.8 -
-          bend
-        ) /
-        2.25;
-
-      const pulse =
-        A /
-        (
-          Math.cosh(q) *
-          Math.cosh(q)
-        );
-
-      const span =
-        0.93 +
-        0.07 *
-        Math.cos(z * 0.38);
-
-      const eta =
-        pulse * span;
-
-      const k =
-        id(i, j);
-
-      h[k] =
-        Math.max(
-          0.08,
-          depth + eta
-        );
-
-      u[k] =
-        Math.sqrt(G / 5.4) *
-        eta /
-        (
-          1 +
-          eta / 5.4
-        ) *
-        1.32;
-
-      v[k] =
-        -0.025 *
-        z *
-        eta;
-    }
-  }
-}
-
-function bilinear(
-  array,
-  x,
-  z
-) {
-  const gx =
-    clamp(
-      (x - X0) / DX,
-      0,
-      NX - 1.001
-    );
-
-  const gz =
-    clamp(
-      (z - Z0) / DZ,
-      0,
-      NZ - 1.001
-    );
-
-  const i =
-    Math.floor(gx);
-
-  const j =
-    Math.floor(gz);
-
-  const fx =
-    gx - i;
-
-  const fz =
-    gz - j;
-
-  const a =
-    array[id(i, j)];
-
-  const b =
-    array[id(i + 1, j)];
-
-  const c =
-    array[id(i, j + 1)];
-
-  const d =
-    array[id(i + 1, j + 1)];
-
-  return (
-    a +
-    (b - a) * fx
-  ) *
-  (1 - fz) +
-  (
-    c +
-    (d - c) * fx
-  ) *
-  fz;
-}
-
-function surfaceAt(x, z) {
-  return (
-    bilinear(h, x, z) +
-    bilinear(bed, x, z)
-  );
-}
-
-function flowAt(
-  x,
-  z,
-  target =
-    new THREE.Vector2()
-) {
-  target.set(
-    bilinear(u, x, z),
-    bilinear(v, x, z)
+const oceanGeometry =
+  new THREE.PlaneGeometry(
+    OX,
+    OZ,
+    110,
+    70
   );
 
-  return target;
-}
-
-function swStep(dt) {
-  /*
-    Semi-Lagrangian advection.
-  */
-
-  for (
-    let j = 1;
-    j < NZ - 1;
-    j++
-  ) {
-    for (
-      let i = 1;
-      i < NX - 1;
-      i++
-    ) {
-      const k =
-        id(i, j);
-
-      const x =
-        worldX(i) -
-        u[k] * dt;
-
-      const z =
-        worldZ(j) -
-        v[k] * dt;
-
-      ha[k] =
-        bilinear(h, x, z);
-
-      ua[k] =
-        bilinear(u, x, z);
-
-      va[k] =
-        bilinear(v, x, z);
-    }
-  }
-
-  /*
-    Boundary values for the temporary fields.
-  */
-
-  for (
-    let j = 0;
-    j < NZ;
-    j++
-  ) {
-    for (
-      const i of [
-        0,
-        NX - 1
-      ]
-    ) {
-      const k =
-        id(i, j);
-
-      ha[k] = h[k];
-      ua[k] = u[k];
-      va[k] = v[k];
-    }
-  }
-
-  for (
-    let i = 0;
-    i < NX;
-    i++
-  ) {
-    for (
-      const j of [
-        0,
-        NZ - 1
-      ]
-    ) {
-      const k =
-        id(i, j);
-
-      ha[k] = h[k];
-      ua[k] = u[k];
-      va[k] = v[k];
-    }
-  }
-
-  /*
-    Pressure acceleration from the
-    free-surface gradient.
-
-    Then apply continuity compression.
-  */
-
-  for (
-    let j = 1;
-    j < NZ - 1;
-    j++
-  ) {
-    for (
-      let i = 1;
-      i < NX - 1;
-      i++
-    ) {
-      const k =
-        id(i, j);
-
-      const ex =
-        (
-          (
-            ha[id(i + 1, j)] +
-            bed[id(i + 1, j)]
-          ) -
-          (
-            ha[id(i - 1, j)] +
-            bed[id(i - 1, j)]
-          )
-        ) /
-        (2 * DX);
-
-      const ez =
-        (
-          (
-            ha[id(i, j + 1)] +
-            bed[id(i, j + 1)]
-          ) -
-          (
-            ha[id(i, j - 1)] +
-            bed[id(i, j - 1)]
-          )
-        ) /
-        (2 * DZ);
-
-      const ux =
-        ua[k] -
-        G * dt * ex;
-
-      const vz =
-        va[k] -
-        G * dt * ez;
-
-      const div =
-        (
-          ua[id(i + 1, j)] -
-          ua[id(i - 1, j)]
-        ) /
-        (2 * DX) +
-        (
-          va[id(i, j + 1)] -
-          va[id(i, j - 1)]
-        ) /
-        (2 * DZ);
-
-      hn[k] =
-        Math.max(
-          0.06,
-
-          ha[k] *
-          Math.exp(
-            clamp(
-              -dt * div,
-              -0.055,
-              0.055
-            )
-          )
-        );
-
-      un[k] = ux;
-      vn[k] = vz;
-    }
-  }
-
-  /*
-    Gentle numerical diffusion and
-    damping near the shore.
-  */
-
-  const nu = 0.018;
-
-  for (
-    let j = 1;
-    j < NZ - 1;
-    j++
-  ) {
-    for (
-      let i = 1;
-      i < NX - 1;
-      i++
-    ) {
-      const k =
-        id(i, j);
-
-      hn[k] +=
-        nu *
-        (
-          ha[id(i - 1, j)] +
-          ha[id(i + 1, j)] +
-          ha[id(i, j - 1)] +
-          ha[id(i, j + 1)] -
-          4 * ha[k]
-        );
-
-      un[k] +=
-        nu *
-        (
-          ua[id(i - 1, j)] +
-          ua[id(i + 1, j)] +
-          ua[id(i, j - 1)] +
-          ua[id(i, j + 1)] -
-          4 * ua[k]
-        );
-
-      vn[k] +=
-        nu *
-        (
-          va[id(i - 1, j)] +
-          va[id(i + 1, j)] +
-          va[id(i, j - 1)] +
-          va[id(i, j + 1)] -
-          4 * va[k]
-        );
-
-      const shore =
-        smoothstep(
-          12,
-          20,
-          worldX(i)
-        );
-
-      un[k] *=
-        1 -
-        0.16 *
-        shore *
-        dt;
-
-      vn[k] *=
-        1 -
-        0.16 *
-        shore *
-        dt;
-    }
-  }
-
-  /*
-    Periodic incoming swell at the
-    offshore boundary.
-  */
-
-  const A =
-    +ui.amp.value;
-
-  const T =
-    +ui.period.value;
-
-  const omega =
-    Math.PI *
-    2 /
-    T;
-
-  const phase =
-    omega *
-    simTime;
-
-  const etaIn =
-    A *
-    0.62 *
-    Math.sin(phase) +
-    A *
-    0.18 *
-    Math.sin(
-      2 * phase +
-      0.5
-    );
-
-  const velIn =
-    etaIn /
-    5.4 *
-    Math.sqrt(G * 5.4);
-
-  for (
-    let j = 1;
-    j < NZ - 1;
-    j++
-  ) {
-    const span =
-      0.95 +
-      0.05 *
-      Math.cos(
-        worldZ(j) *
-        0.32
-      );
-
-    for (
-      let i = 0;
-      i < 3;
-      i++
-    ) {
-      const weight =
-        (3 - i) / 3;
-
-      const k =
-        id(i, j);
-
-      const depth =
-        -bed[k];
-
-      hn[k] =
-        Math.max(
-          0.08,
-
-          depth +
-          etaIn *
-          span *
-          weight
-        );
-
-      un[k] =
-        velIn *
-        span *
-        weight;
-
-      vn[k] = 0;
-    }
-  }
-
-  /*
-    Outflow boundary.
-  */
-
-  for (
-    let j = 0;
-    j < NZ;
-    j++
-  ) {
-    const k =
-      id(
-        NX - 1,
-        j
-      );
-
-    hn[k] =
-      -bed[k];
-
-    un[k] =
-      u[k] *
-      0.8;
-
-    vn[k] =
-      v[k] *
-      0.8;
-  }
-
-  /*
-    Side boundaries.
-  */
-
-  for (
-    let i = 0;
-    i < NX;
-    i++
-  ) {
-    for (
-      const j of [
-        0,
-        NZ - 1
-      ]
-    ) {
-      const sourceJ =
-        j === 0
-          ? 1
-          : NZ - 2;
-
-      const k =
-        id(i, j);
-
-      hn[k] =
-        hn[id(i, sourceJ)];
-
-      un[k] =
-        un[id(i, sourceJ)];
-
-      vn[k] = 0;
-    }
-  }
-
-  h.set(hn);
-  u.set(un);
-  v.set(vn);
-}
-
-// -----------------------------------------------------------------------------
-// Height-field water and seabed meshes
-// -----------------------------------------------------------------------------
-
-function gridGeometry(
-  ySource
-) {
-  const positions =
-    new Float32Array(
-      N * 3
-    );
-
-  const colors =
-    new Float32Array(
-      N * 3
-    );
-
-  const indices = [];
-
-  for (
-    let j = 0;
-    j < NZ;
-    j++
-  ) {
-    for (
-      let i = 0;
-      i < NX;
-      i++
-    ) {
-      const k =
-        id(i, j);
-
-      const offset =
-        k * 3;
-
-      positions[offset] =
-        worldX(i);
-
-      positions[offset + 1] =
-        ySource(k);
-
-      positions[offset + 2] =
-        worldZ(j);
-    }
-  }
-
-  for (
-    let j = 0;
-    j < NZ - 1;
-    j++
-  ) {
-    for (
-      let i = 0;
-      i < NX - 1;
-      i++
-    ) {
-      const a =
-        id(i, j);
-
-      const b =
-        id(i + 1, j);
-
-      const c =
-        id(i, j + 1);
-
-      const d =
-        id(i + 1, j + 1);
-
-      indices.push(
-        a,
-        c,
-        b,
-
-        b,
-        c,
-        d
-      );
-    }
-  }
-
-  const geometry =
-    new THREE.BufferGeometry();
-
-  geometry.setAttribute(
-    "position",
-
-    new THREE.BufferAttribute(
-      positions,
-      3
-    )
-  );
-
-  geometry.setAttribute(
-    "color",
-
-    new THREE.BufferAttribute(
-      colors,
-      3
-    )
-  );
-
-  geometry.setIndex(
-    indices
-  );
-
-  geometry.computeVertexNormals();
-
-  return geometry;
-}
-
-const waterGeo =
-  gridGeometry(
-    k =>
-      h[k] +
-      bed[k]
-  );
-
-const waterMat =
-  new THREE.MeshPhysicalMaterial({
-    vertexColors: true,
-    roughness: 0.18,
-    metalness: 0,
-    clearcoat: 1,
-    clearcoatRoughness: 0.07,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.93
-  });
-
-const water =
+oceanGeometry.rotateX(
+  -Math.PI / 2
+);
+
+const oceanBase =
+  oceanGeometry
+    .attributes
+    .position
+    .array
+    .slice();
+
+const ocean =
   new THREE.Mesh(
-    waterGeo,
-    waterMat
+    oceanGeometry,
+
+    new THREE.MeshPhysicalMaterial({
+      color:
+        0x118ca2,
+
+      roughness:
+        0.2,
+
+      clearcoat:
+        1,
+
+      clearcoatRoughness:
+        0.08,
+
+      side:
+        THREE.DoubleSide
+    })
   );
 
-water.receiveShadow = true;
+ocean.position.y = -0.18;
+ocean.receiveShadow = true;
 
-scene.add(water);
+scene.add(ocean);
 
-const bedGeo =
-  gridGeometry(
-    k =>
-      bed[k] -
-      0.04
-  );
-
-const bedMat =
-  new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 1
-  });
-
-const bedMesh =
+const floor =
   new THREE.Mesh(
-    bedGeo,
-    bedMat
+    new THREE.PlaneGeometry(
+      95,
+      70
+    ),
+
+    new THREE.MeshStandardMaterial({
+      color:
+        0x6c7f72,
+
+      roughness:
+        1
+    })
   );
 
-bedMesh.receiveShadow = true;
+floor.rotation.x =
+  -Math.PI / 2;
 
-scene.add(bedMesh);
+floor.position.y = -5.4;
+floor.receiveShadow = true;
 
-const cDeep =
+scene.add(floor);
+
+// -----------------------------------------------------------------------------
+// Broad open wave face
+// -----------------------------------------------------------------------------
+
+const FACE_X = 92;
+const FACE_Z = 56;
+const SPAN = 24;
+const REAR = -15;
+
+const facePositions =
+  new Float32Array(
+    FACE_X *
+    FACE_Z *
+    3
+  );
+
+const faceColors =
+  new Float32Array(
+    FACE_X *
+    FACE_Z *
+    3
+  );
+
+const faceIndices = [];
+
+for (
+  let z = 0;
+  z < FACE_Z - 1;
+  z++
+) {
+  for (
+    let x = 0;
+    x < FACE_X - 1;
+    x++
+  ) {
+    const a =
+      z * FACE_X + x;
+
+    const b = a + 1;
+
+    const c =
+      (z + 1) *
+      FACE_X +
+      x;
+
+    const d = c + 1;
+
+    faceIndices.push(
+      a,
+      c,
+      b,
+
+      b,
+      c,
+      d
+    );
+  }
+}
+
+const faceGeometry =
+  new THREE.BufferGeometry();
+
+faceGeometry.setAttribute(
+  "position",
+
+  new THREE.BufferAttribute(
+    facePositions,
+    3
+  ).setUsage(
+    THREE.DynamicDrawUsage
+  )
+);
+
+faceGeometry.setAttribute(
+  "color",
+
+  new THREE.BufferAttribute(
+    faceColors,
+    3
+  ).setUsage(
+    THREE.DynamicDrawUsage
+  )
+);
+
+faceGeometry.setIndex(
+  faceIndices
+);
+
+const faceMesh =
+  new THREE.Mesh(
+    faceGeometry,
+
+    new THREE.MeshPhysicalMaterial({
+      vertexColors:
+        true,
+
+      roughness:
+        0.13,
+
+      clearcoat:
+        1,
+
+      clearcoatRoughness:
+        0.05,
+
+      side:
+        THREE.DoubleSide
+    })
+  );
+
+faceMesh.castShadow = true;
+faceMesh.receiveShadow = true;
+
+scene.add(faceMesh);
+
+const deepColor =
   new THREE.Color(
-    0x075f78
+    0x075c72
   );
 
-const cFace =
+const faceColor =
   new THREE.Color(
-    0x0b9eb0
+    0x078fa2
   );
 
-const cCrest =
+const topColor =
   new THREE.Color(
-    0x58d6dd
+    0x35c7d2
   );
 
-const cSand =
-  new THREE.Color(
-    0x8b8a70
-  );
-
-const cReef =
-  new THREE.Color(
-    0x465f55
-  );
-
-const gridColor =
+const tempColor =
   new THREE.Color();
 
-function updateGridMeshes() {
-  const positions =
-    waterGeo
-      .attributes
-      .position
-      .array;
+function crestData(
+  p,
+  z,
+  time
+) {
+  const span =
+    0.82 +
+    0.18 *
+    Math.exp(
+      -Math.pow(
+        z / 8.5,
+        4
+      )
+    );
 
-  const colors =
-    waterGeo
-      .attributes
-      .color
-      .array;
+  const H =
+    p.H * span;
 
+  const crestX =
+    0.25 +
+    0.12 *
+    Math.sin(
+      time * 0.35 +
+      z * 0.09
+    );
+
+  const crestY =
+    0.18 +
+    H * 0.83;
+
+  return {
+    H,
+    crestX,
+    crestY
+  };
+}
+
+function faceY(
+  p,
+  x,
+  z,
+  time
+) {
+  const data =
+    crestData(
+      p,
+      z,
+      time
+    );
+
+  const q =
+    clamp(
+      (
+        data.crestX -
+        x
+      ) /
+      (
+        data.crestX -
+        REAR
+      ),
+
+      0,
+      1
+    );
+
+  const shape =
+    Math.pow(
+      Math.sin(
+        q *
+        Math.PI *
+        0.5
+      ),
+
+      1.7
+    );
+
+  let y =
+    data.crestY *
+    shape;
+
+  const orbital =
+    0.055 *
+    p.H *
+    Math.sin(
+      0.42 * x +
+      0.15 * z -
+      time * 0.72
+    ) *
+    Math.pow(
+      shape,
+      0.7
+    );
+
+  y += orbital;
+
+  return y;
+}
+
+function updateFace(
+  p,
+  time
+) {
   for (
-    let j = 0;
-    j < NZ;
-    j++
+    let zIndex = 0;
+    zIndex < FACE_Z;
+    zIndex++
   ) {
+    const z =
+      lerp(
+        -SPAN / 2,
+        SPAN / 2,
+
+        zIndex /
+        (FACE_Z - 1)
+      );
+
+    const data =
+      crestData(
+        p,
+        z,
+        time
+      );
+
     for (
-      let i = 0;
-      i < NX;
-      i++
+      let xIndex = 0;
+      xIndex < FACE_X;
+      xIndex++
     ) {
-      const k =
-        id(i, j);
+      const s =
+        xIndex /
+        (FACE_X - 1);
+
+      const clustered =
+        1 -
+        Math.pow(
+          1 - s,
+          2.25
+        );
+
+      let x =
+        lerp(
+          REAR,
+          data.crestX,
+          clustered
+        );
+
+      const y =
+        faceY(
+          p,
+          x,
+          z,
+          time
+        );
+
+      const lean =
+        0.62 *
+        p.curl *
+        Math.pow(
+          clamp(
+            y /
+            data.crestY,
+
+            0,
+            1
+          ),
+
+          5
+        );
+
+      x += lean;
 
       const offset =
-        k * 3;
+        (
+          zIndex *
+          FACE_X +
+          xIndex
+        ) *
+        3;
 
-      const eta =
-        h[k] +
-        bed[k];
+      facePositions[offset] =
+        x;
 
-      positions[offset + 1] =
-        eta;
+      facePositions[offset + 1] =
+        y;
 
-      const gx =
-        i > 0 &&
-        i < NX - 1
-          ? (
-              (
-                h[id(i + 1, j)] +
-                bed[id(i + 1, j)]
-              ) -
-              (
-                h[id(i - 1, j)] +
-                bed[id(i - 1, j)]
-              )
-            ) /
-            (2 * DX)
-          : 0;
+      facePositions[offset + 2] =
+        z +
+        0.045 *
+        Math.sin(
+          z * 0.5 +
+          x * 0.3 -
+          time * 0.8
+        );
 
-      const q =
+      const heightRatio =
         clamp(
-          Math.abs(gx) *
-          0.7 +
-          Math.max(0, eta) *
-          0.18,
+          y /
+          data.crestY,
 
           0,
           1
         );
 
-      if (q > 0.55) {
-        gridColor
-          .copy(cCrest)
-          .lerp(
-            cFace,
+      tempColor
+        .copy(deepColor)
+        .lerp(
+          faceColor,
 
-            clamp(
-              (1 - q) * 2,
-              0,
-              1
-            )
-          );
-      } else {
-        gridColor
-          .copy(cDeep)
-          .lerp(
-            cFace,
-
-            clamp(
-              q * 1.8,
-              0,
-              1
-            )
-          );
-      }
-
-      colors[offset] =
-        gridColor.r;
-
-      colors[offset + 1] =
-        gridColor.g;
-
-      colors[offset + 2] =
-        gridColor.b;
-    }
-  }
-
-  waterGeo
-    .attributes
-    .position
-    .needsUpdate = true;
-
-  waterGeo
-    .attributes
-    .color
-    .needsUpdate = true;
-
-  if ((frame & 3) === 0) {
-    waterGeo.computeVertexNormals();
-  }
-
-  const bedPositions =
-    bedGeo
-      .attributes
-      .position
-      .array;
-
-  const bedColors =
-    bedGeo
-      .attributes
-      .color
-      .array;
-
-  for (
-    let k = 0;
-    k < N;
-    k++
-  ) {
-    const offset =
-      k * 3;
-
-    bedPositions[offset + 1] =
-      bed[k] -
-      0.04;
-
-    const q =
-      smoothstep(
-        -4.5,
-        -1.1,
-        bed[k]
-      );
-
-    gridColor
-      .copy(cReef)
-      .lerp(
-        cSand,
-        q
-      );
-
-    bedColors[offset] =
-      gridColor.r;
-
-    bedColors[offset + 1] =
-      gridColor.g;
-
-    bedColors[offset + 2] =
-      gridColor.b;
-  }
-
-  bedGeo
-    .attributes
-    .position
-    .needsUpdate = true;
-
-  bedGeo
-    .attributes
-    .color
-    .needsUpdate = true;
-}
-
-// -----------------------------------------------------------------------------
-// Wave-front detection
-// Paper criterion:
-//
-// |grad H| > threshold
-// grad H · u < 0
-// -----------------------------------------------------------------------------
-
-const LINE_N = 48;
-
-const line =
-  Array.from(
-    {
-      length: LINE_N
-    },
-
-    () => ({
-      valid: false,
-
-      x: 0,
-      z: 0,
-      y: 0,
-
-      cx: 0,
-      cy: 0,
-
-      gx: 0,
-      gz: 0,
-
-      slope: 0,
-
-      ux: 0,
-      uz: 0,
-
-      speed: 0
-    })
-  );
-
-let avgFrontX = 2;
-let avgSlope = 0;
-let maxSlope = 0;
-
-let breakAge = 0;
-let hadFront = false;
-
-function detectFront(dt) {
-  const pH = 0.25;
-
-  const threshold =
-    pH *
-    G *
-    dt /
-    DX /
-    (+ui.break.value);
-
-  let count = 0;
-  let sumX = 0;
-  let sumSlope = 0;
-
-  maxSlope = 0;
-
-  for (
-    let n = 0;
-    n < LINE_N;
-    n++
-  ) {
-    const z =
-      lerp(
-        Z0 + 1,
-        Z0 + LZ - 1,
-
-        n /
-        (LINE_N - 1)
-      );
-
-    const j =
-      clamp(
-        Math.round(
-          (z - Z0) /
-          DZ
-        ),
-
-        1,
-        NZ - 2
-      );
-
-    let best = -1;
-    let bestScore = 0;
-
-    let bgx = 0;
-    let bgz = 0;
-
-    for (
-      let i = 8;
-      i < NX - 9;
-      i++
-    ) {
-      const k =
-        id(i, j);
-
-      const eta =
-        h[k] +
-        bed[k];
-
-      const gx =
-        (
-          (
-            h[id(i + 1, j)] +
-            bed[id(i + 1, j)]
-          ) -
-          (
-            h[id(i - 1, j)] +
-            bed[id(i - 1, j)]
-          )
-        ) /
-        (2 * DX);
-
-      const gz =
-        (
-          (
-            h[id(i, j + 1)] +
-            bed[id(i, j + 1)]
-          ) -
-          (
-            h[id(i, j - 1)] +
-            bed[id(i, j - 1)]
-          )
-        ) /
-        (2 * DZ);
-
-      const magnitude =
-        Math.hypot(
-          gx,
-          gz
-        );
-
-      const dot =
-        gx * u[k] +
-        gz * v[k];
-
-      if (
-        magnitude >
-          threshold &&
-        dot < 0 &&
-        eta > 0.12
-      ) {
-        const shelf =
           smoothstep(
-            -5,
-            13,
-            worldX(i)
-          );
+            0.12,
+            0.72,
+            heightRatio
+          )
+        )
+        .lerp(
+          topColor,
 
-        const score =
-          magnitude *
-          (
-            -dot +
-            0.12
-          ) *
-          shelf;
-
-        if (
-          score >
-          bestScore
-        ) {
-          bestScore =
-            score;
-
-          best = i;
-
-          bgx = gx;
-          bgz = gz;
-        }
-      }
-    }
-
-    const point =
-      line[n];
-
-    point.valid =
-      best >= 0;
-
-    if (best >= 0) {
-      /*
-        Search backward from the steep
-        front to place generated particles
-        at the actual crest.
-      */
-
-      let crestI =
-        best;
-
-      let maxEta =
-        -1e9;
-
-      for (
-        let i =
-          Math.max(
-            2,
-            best - 14
-          );
-
-        i <= best + 1;
-        i++
-      ) {
-        const elevation =
-          h[id(i, j)] +
-          bed[id(i, j)];
-
-        if (
-          elevation >
-          maxEta
-        ) {
-          maxEta =
-            elevation;
-
-          crestI = i;
-        }
-      }
-
-      const k =
-        id(best, j);
-
-      const depth =
-        h[k];
-
-      const gradientLength =
-        Math.max(
-          1e-6,
-
-          Math.hypot(
-            bgx,
-            bgz
+          smoothstep(
+            0.78,
+            1,
+            heightRatio
           )
         );
 
-      const nx =
-        -bgx /
-        gradientLength;
+      faceColors[offset] =
+        tempColor.r;
 
-      const nz =
-        -bgz /
-        gradientLength;
+      faceColors[offset + 1] =
+        tempColor.g;
 
-      /*
-        Shallow-water wave speed:
-        c = sqrt(g h)
-      */
-
-      const c =
-        Math.sqrt(
-          G *
-          Math.max(
-            0.08,
-            depth
-          )
-        );
-
-      point.x =
-        worldX(best);
-
-      point.z = z;
-
-      point.y =
-        h[k] +
-        bed[k];
-
-      point.cx =
-        worldX(crestI);
-
-      point.cy =
-        maxEta;
-
-      point.gx =
-        bgx;
-
-      point.gz =
-        bgz;
-
-      point.slope =
-        gradientLength;
-
-      /*
-        Approximate wave-line velocity:
-        local flow plus propagation in
-        the downhill-gradient direction.
-      */
-
-      point.ux =
-        u[k] +
-        nx *
-        c *
-        0.58;
-
-      point.uz =
-        v[k] +
-        nz *
-        c *
-        0.58;
-
-      point.speed =
-        Math.hypot(
-          point.ux,
-          point.uz
-        );
-
-      count++;
-
-      sumX +=
-        point.x;
-
-      sumSlope +=
-        gradientLength;
-
-      maxSlope =
-        Math.max(
-          maxSlope,
-          gradientLength
-        );
+      faceColors[offset + 2] =
+        tempColor.b;
     }
   }
 
-  hadFront =
-    count >
-    LINE_N *
-    0.32;
+  faceGeometry
+    .attributes
+    .position
+    .needsUpdate = true;
 
-  if (hadFront) {
-    avgFrontX =
-      lerp(
-        avgFrontX,
-        sumX / count,
-        0.18
-      );
+  faceGeometry
+    .attributes
+    .color
+    .needsUpdate = true;
 
-    avgSlope =
-      sumSlope /
-      count;
-
-    breakAge +=
-      dt;
-  } else {
-    avgSlope *=
-      0.95;
-
-    breakAge = 0;
+  if ((frame & 1) === 0) {
+    faceGeometry.computeVertexNormals();
   }
 }
 
 // -----------------------------------------------------------------------------
-// Connected particle sheet
+// Curling lip
 // -----------------------------------------------------------------------------
 
-const MAX_ROWS = 52;
+const LIP_Z = 46;
+const MAX_ROWS = 46;
+const LIP_LIFE = 1.95;
+const SPAWN_INTERVAL = 0.045;
 
-const rows = [];
+const lipRows = [];
 
 let spawnClock = 0;
 
-function spawnRow() {
-  if (!hadFront) {
-    return;
-  }
+function spawnLipRow() {
+  lipRows.push({
+    age: 0
+  });
 
-  /*
-    Breaking starts at the center of the
-    line and spreads out toward both sides.
-  */
-
-  const spread =
-    1.1 +
-    Math.min(
-      LZ * 0.48,
-      breakAge * 2.35
-    );
-
-  const row = {
-    age: 0,
-    p: []
-  };
-
-  for (
-    let n = 0;
-    n < LINE_N;
-    n++
-  ) {
-    const source =
-      line[n];
-
-    const active =
-      source.valid &&
-      Math.abs(
-        source.z
-      ) <
-      spread;
-
-    if (!active) {
-      row.p.push({
-        alive: false,
-
-        pos:
-          new THREE.Vector3(),
-
-        vel:
-          new THREE.Vector3()
-      });
-
-      continue;
-    }
-
-    /*
-      Paper Equation 9:
-
-      u_s =
-      (1 + p_v g (H - H_i)) u_l
-
-      The coefficient is exposed through
-      the break-strength control.
-    */
-
-    const elevation =
-      Math.max(
-        0,
-        source.cy
-      );
-
-    const factor =
-      1 +
-      (
-        0.033 *
-        (+ui.break.value)
-      ) *
-      G *
-      elevation;
-
-    /*
-      The shallow-water solver has only
-      horizontal velocity.
-
-      This small vertical term estimates
-      upward motion at the crest before
-      gravity takes over.
-    */
-
-    const verticalVelocity =
-      Math.max(
-        0.12,
-
-        0.28 *
-        Math.sqrt(
-          G *
-          Math.max(
-            0.05,
-            elevation
-          )
-        )
-      );
-
-    row.p.push({
-      alive: true,
-
-      pos:
-        new THREE.Vector3(
-          source.cx,
-          source.cy - 0.03,
-          source.z
-        ),
-
-      vel:
-        new THREE.Vector3(
-          source.ux *
-          factor,
-
-          verticalVelocity,
-
-          source.uz *
-          factor
-        )
-    });
-  }
-
-  rows.push(row);
-
-  if (
-    rows.length >
+  while (
+    lipRows.length >
     MAX_ROWS
   ) {
-    rows.shift();
+    lipRows.shift();
   }
 }
 
+function lipPoint(
+  p,
+  age,
+  z,
+  time,
+  target =
+    new THREE.Vector3()
+) {
+  const data =
+    crestData(
+      p,
+      z,
+      time -
+      age * 0.18
+    );
+
+  const span =
+    Math.exp(
+      -Math.pow(
+        z / 10.5,
+        6
+      )
+    );
+
+  const progress =
+    clamp(
+      age /
+      LIP_LIFE,
+
+      0,
+      1
+    );
+
+  const curl =
+    p.curl *
+    (
+      0.72 +
+      0.28 *
+      span
+    );
+
+  const crest =
+    new THREE.Vector2(
+      data.crestX +
+      0.54 * curl,
+
+      data.crestY
+    );
+
+  const barrelCenter =
+    new THREE.Vector2(
+      data.crestX +
+      2.15 * curl,
+
+      data.crestY *
+      0.47
+    );
+
+  const dx =
+    crest.x -
+    barrelCenter.x;
+
+  const dy =
+    crest.y -
+    barrelCenter.y;
+
+  const initialRadius =
+    Math.hypot(
+      dx,
+      dy
+    );
+
+  const initialAngle =
+    Math.atan2(
+      dy,
+      dx
+    );
+
+  /*
+    The angle exceeds 180 degrees.
+
+    This makes the lip move:
+    crest -> overhead -> downward ->
+    inward toward the wave face.
+  */
+
+  const totalTurn =
+    (
+      3.1 +
+      0.62 * curl
+    ) *
+    Math.pow(
+      progress,
+      0.9
+    );
+
+  const angle =
+    initialAngle -
+    totalTurn;
+
+  /*
+    The shrinking radius creates a slight
+    inward spiral instead of a perfect
+    circular tube.
+  */
+
+  const radius =
+    initialRadius *
+    (
+      1 -
+      0.19 *
+      progress -
+      0.035 *
+      progress *
+      progress
+    );
+
+  const arcX =
+    barrelCenter.x +
+    radius *
+    Math.cos(angle) +
+    0.18 *
+    progress *
+    progress;
+
+  const arcY =
+    barrelCenter.y +
+    radius *
+    Math.sin(angle);
+
+  /*
+    Initial ballistic launch.
+
+    The rotational path gradually takes
+    over after the lip leaves the crest.
+  */
+
+  const launchX =
+    crest.x +
+    (
+      2.05 +
+      0.45 * curl
+    ) *
+    age;
+
+  const launchY =
+    crest.y +
+    (
+      1.1 +
+      0.35 * curl
+    ) *
+    age -
+    0.5 *
+    G *
+    0.62 *
+    age *
+    age;
+
+  const vortexBlend =
+    smoothstep(
+      0.04,
+      0.38,
+      progress
+    );
+
+  let x =
+    lerp(
+      launchX,
+      arcX,
+      vortexBlend
+    );
+
+  let y =
+    lerp(
+      launchY,
+      arcY,
+      vortexBlend
+    );
+
+  /*
+    The middle of the wave barrels hardest.
+    The shoulders remain less curled.
+  */
+
+  const baseX =
+    data.crestX +
+    0.18;
+
+  const baseY =
+    data.crestY *
+    0.97;
+
+  x = lerp(
+    baseX,
+    x,
+    span
+  );
+
+  y = lerp(
+    baseY,
+    y,
+    span
+  );
+
+  target.set(
+    x,
+    y,
+
+    z +
+    0.06 *
+    Math.sin(
+      z * 0.55 +
+      age * 2.1
+    )
+  );
+
+  return target;
+}
+
 // -----------------------------------------------------------------------------
-// Dynamic thick sheet
+// Thick lip mesh
 // -----------------------------------------------------------------------------
 
-const MAXV =
+const VERTICES_PER_LAYER =
   MAX_ROWS *
-  LINE_N *
-  2;
+  LIP_Z;
 
-const patchPos =
+const lipPositions =
   new Float32Array(
-    MAXV * 3
+    VERTICES_PER_LAYER *
+    2 *
+    3
   );
 
-const patchCol =
+const lipColors =
   new Float32Array(
-    MAXV * 3
+    VERTICES_PER_LAYER *
+    2 *
+    3
   );
 
-const maxIndexCount =
-  (
-    MAX_ROWS - 1
-  ) *
-  (
-    LINE_N - 1
-  ) *
-  12 +
-  (
-    MAX_ROWS +
-    LINE_N
-  ) *
-  24;
-
-const patchIdx =
+const lipIndices =
   new Uint32Array(
-    maxIndexCount
+    (
+      MAX_ROWS - 1
+    ) *
+    (
+      LIP_Z - 1
+    ) *
+    12 +
+    (
+      MAX_ROWS +
+      LIP_Z
+    ) *
+    24
   );
 
-const patchGeo =
+const lipGeometry =
   new THREE.BufferGeometry();
 
-patchGeo.setAttribute(
+lipGeometry.setAttribute(
   "position",
 
   new THREE.BufferAttribute(
-    patchPos,
+    lipPositions,
     3
   ).setUsage(
     THREE.DynamicDrawUsage
   )
 );
 
-patchGeo.setAttribute(
+lipGeometry.setAttribute(
   "color",
 
   new THREE.BufferAttribute(
-    patchCol,
+    lipColors,
     3
   ).setUsage(
     THREE.DynamicDrawUsage
   )
 );
 
-patchGeo.setIndex(
+lipGeometry.setIndex(
   new THREE.BufferAttribute(
-    patchIdx,
+    lipIndices,
     1
   ).setUsage(
     THREE.DynamicDrawUsage
   )
 );
 
-const patchMat =
-  new THREE.MeshPhysicalMaterial({
-    vertexColors: true,
-    roughness: 0.13,
-    metalness: 0,
-    clearcoat: 1,
-    clearcoatRoughness: 0.05,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.95
-  });
-
-const patchMesh =
+const lipMesh =
   new THREE.Mesh(
-    patchGeo,
-    patchMat
+    lipGeometry,
+
+    new THREE.MeshPhysicalMaterial({
+      vertexColors:
+        true,
+
+      roughness:
+        0.1,
+
+      clearcoat:
+        1,
+
+      clearcoatRoughness:
+        0.04,
+
+      side:
+        THREE.DoubleSide
+    })
   );
 
-patchMesh.castShadow = true;
-patchMesh.renderOrder = 2;
+lipMesh.castShadow = true;
+lipMesh.renderOrder = 2;
 
-scene.add(patchMesh);
+scene.add(lipMesh);
 
-const tempA =
+const upperLipColor =
+  new THREE.Color(
+    0x25b9c6
+  );
+
+const lipEdgeColor =
+  new THREE.Color(
+    0x74e9ed
+  );
+
+const lipUnderColor =
+  new THREE.Color(
+    0x033d4f
+  );
+
+const pointA =
   new THREE.Vector3();
 
-const tempB =
+const pointB =
   new THREE.Vector3();
 
-const normal =
-  new THREE.Vector3();
+const curveCenter =
+  new THREE.Vector2();
 
-const lipBlue =
-  new THREE.Color(
-    0x087f96
-  );
-
-const lipBright =
-  new THREE.Color(
-    0x42ccd5
-  );
-
-const underBlue =
-  new THREE.Color(
-    0x043f52
-  );
-
-function sheetNormal(
-  rowIndex,
-  lineIndex
-) {
-  const row =
-    rows[rowIndex];
-
-  const point =
-    row.p[lineIndex].pos;
-
-  const n0 =
-    Math.max(
-      0,
-      lineIndex - 1
-    );
-
-  const n1 =
-    Math.min(
-      LINE_N - 1,
-      lineIndex + 1
-    );
-
-  const r0 =
-    Math.max(
-      0,
-      rowIndex - 1
-    );
-
-  const r1 =
-    Math.min(
-      rows.length - 1,
-      rowIndex + 1
-    );
-
-  const spanForward =
-    row.p[n1].alive
-      ? row.p[n1].pos
-      : point;
-
-  const spanBack =
-    row.p[n0].alive
-      ? row.p[n0].pos
-      : point;
-
-  tempA.subVectors(
-    spanForward,
-    spanBack
-  );
-
-  const ageForward =
-    rows[r1]
-      .p[lineIndex]
-      .alive
-      ? rows[r1]
-          .p[lineIndex]
-          .pos
-      : point;
-
-  const ageBack =
-    rows[r0]
-      .p[lineIndex]
-      .alive
-      ? rows[r0]
-          .p[lineIndex]
-          .pos
-      : point;
-
-  tempB.subVectors(
-    ageForward,
-    ageBack
-  );
-
-  normal
-    .crossVectors(
-      tempA,
-      tempB
-    )
-    .normalize();
-
-  if (
-    normal.lengthSq() <
-    0.1
-  ) {
-    normal.set(
-      0,
-      1,
-      0
-    );
-  }
-
-  /*
-    Keep the offset on the water side of
-    the sheet instead of creating a large
-    closed balloon.
-  */
-
-  if (
-    normal.y <
-    -0.25
-  ) {
-    normal.negate();
-  }
-
-  return normal;
-}
-
-function addTri(
+function addTriangle(
   a,
   b,
   c,
   pointer
 ) {
-  patchIdx[pointer++] = a;
-  patchIdx[pointer++] = b;
-  patchIdx[pointer++] = c;
+  lipIndices[pointer++] = a;
+  lipIndices[pointer++] = b;
+  lipIndices[pointer++] = c;
 
   return pointer;
 }
@@ -2325,7 +1545,7 @@ function addQuad(
 ) {
   if (!flip) {
     pointer =
-      addTri(
+      addTriangle(
         a,
         c,
         b,
@@ -2333,7 +1553,7 @@ function addQuad(
       );
 
     pointer =
-      addTri(
+      addTriangle(
         b,
         c,
         d,
@@ -2341,7 +1561,7 @@ function addQuad(
       );
   } else {
     pointer =
-      addTri(
+      addTriangle(
         a,
         b,
         c,
@@ -2349,7 +1569,7 @@ function addQuad(
       );
 
     pointer =
-      addTri(
+      addTriangle(
         b,
         d,
         c,
@@ -2360,125 +1580,216 @@ function addQuad(
   return pointer;
 }
 
-function updatePatchGeometry() {
+function updateLipGeometry(
+  p,
+  time
+) {
   const rowCount =
-    rows.length;
-
-  const lowerPlane =
-    MAX_ROWS *
-    LINE_N;
-
-  const thickness =
-    +ui.thick.value;
-
-  /*
-    Create upper and lower copies of the
-    connected particle sheet.
-
-    The lower copy is offset along the
-    surface normal to give the lip mass.
-  */
+    lipRows.length;
 
   for (
-    let r = 0;
-    r < MAX_ROWS;
-    r++
+    let row = 0;
+    row < MAX_ROWS;
+    row++
   ) {
     for (
-      let n = 0;
-      n < LINE_N;
-      n++
+      let spanIndex = 0;
+      spanIndex < LIP_Z;
+      spanIndex++
     ) {
       const base =
-        r *
-        LINE_N +
-        n;
+        row *
+        LIP_Z +
+        spanIndex;
 
-      const upper =
+      const upperIndex =
         base;
 
-      const lower =
-        lowerPlane +
+      const lowerIndex =
+        VERTICES_PER_LAYER +
         base;
 
       const upperOffset =
-        upper * 3;
+        upperIndex * 3;
 
       const lowerOffset =
-        lower * 3;
+        lowerIndex * 3;
 
-      if (
-        r < rowCount &&
-        rows[r].p[n].alive
-      ) {
-        const point =
-          rows[r].p[n].pos;
+      if (row < rowCount) {
+        const z =
+          lerp(
+            -SPAN / 2,
+            SPAN / 2,
 
-        const surfaceNormal =
-          sheetNormal(r, n);
-
-        patchPos[upperOffset] =
-          point.x;
-
-        patchPos[upperOffset + 1] =
-          point.y;
-
-        patchPos[upperOffset + 2] =
-          point.z;
-
-        patchPos[lowerOffset] =
-          point.x -
-          surfaceNormal.x *
-          thickness;
-
-        patchPos[lowerOffset + 1] =
-          point.y -
-          surfaceNormal.y *
-          thickness;
-
-        patchPos[lowerOffset + 2] =
-          point.z -
-          surfaceNormal.z *
-          thickness;
+            spanIndex /
+            (LIP_Z - 1)
+          );
 
         const age =
+          lipRows[row].age;
+
+        lipPoint(
+          p,
+          age,
+          z,
+          time,
+          pointA
+        );
+
+        lipPoint(
+          p,
+          Math.min(
+            LIP_LIFE,
+            age + 0.025
+          ),
+          z,
+          time,
+          pointB
+        );
+
+        let tangentX =
+          pointB.x -
+          pointA.x;
+
+        let tangentY =
+          pointB.y -
+          pointA.y;
+
+        const tangentLength =
+          Math.hypot(
+            tangentX,
+            tangentY
+          ) || 1;
+
+        tangentX /=
+          tangentLength;
+
+        tangentY /=
+          tangentLength;
+
+        let normalX =
+          -tangentY;
+
+        let normalY =
+          tangentX;
+
+        const data =
+          crestData(
+            p,
+            z,
+            time -
+            age * 0.18
+          );
+
+        curveCenter.set(
+          data.crestX +
+          2.15 *
+          p.curl,
+
+          data.crestY *
+          0.47
+        );
+
+        const toCenterX =
+          curveCenter.x -
+          pointA.x;
+
+        const toCenterY =
+          curveCenter.y -
+          pointA.y;
+
+        /*
+          Force the lower lip surface to
+          point inward toward the barrel.
+        */
+
+        if (
+          normalX *
+          toCenterX +
+          normalY *
+          toCenterY <
+          0
+        ) {
+          normalX =
+            -normalX;
+
+          normalY =
+            -normalY;
+        }
+
+        const thickness =
+          p.thick *
+          (
+            0.75 +
+            0.25 *
+            Math.exp(
+              -Math.pow(
+                z / 10,
+                4
+              )
+            )
+          );
+
+        lipPositions[upperOffset] =
+          pointA.x;
+
+        lipPositions[upperOffset + 1] =
+          pointA.y;
+
+        lipPositions[upperOffset + 2] =
+          pointA.z;
+
+        lipPositions[lowerOffset] =
+          pointA.x +
+          normalX *
+          thickness;
+
+        lipPositions[lowerOffset + 1] =
+          pointA.y +
+          normalY *
+          thickness;
+
+        lipPositions[lowerOffset + 2] =
+          pointA.z;
+
+        const ageRatio =
           clamp(
-            rows[r].age /
-            2.4,
+            age /
+            LIP_LIFE,
 
             0,
             1
           );
 
-        gridColor
-          .copy(lipBright)
+        tempColor
+          .copy(lipEdgeColor)
           .lerp(
-            lipBlue,
-            age
+            upperLipColor,
+            ageRatio
           );
 
-        patchCol[upperOffset] =
-          gridColor.r;
+        lipColors[upperOffset] =
+          tempColor.r;
 
-        patchCol[upperOffset + 1] =
-          gridColor.g;
+        lipColors[upperOffset + 1] =
+          tempColor.g;
 
-        patchCol[upperOffset + 2] =
-          gridColor.b;
+        lipColors[upperOffset + 2] =
+          tempColor.b;
 
-        patchCol[lowerOffset] =
-          underBlue.r;
+        lipColors[lowerOffset] =
+          lipUnderColor.r;
 
-        patchCol[lowerOffset + 1] =
-          underBlue.g;
+        lipColors[lowerOffset + 1] =
+          lipUnderColor.g;
 
-        patchCol[lowerOffset + 2] =
-          underBlue.b;
+        lipColors[lowerOffset + 2] =
+          lipUnderColor.b;
       } else {
-        patchPos[upperOffset + 1] =
+        lipPositions[upperOffset + 1] =
           -999;
 
-        patchPos[lowerOffset + 1] =
+        lipPositions[lowerOffset + 1] =
           -999;
       }
     }
@@ -2487,151 +1798,80 @@ function updatePatchGeometry() {
   let pointer = 0;
 
   /*
-    Connect adjacent particle rows into
-    the upper and lower sheet surfaces.
+    Connect adjacent emitted crest lines.
   */
 
   for (
-    let r = 0;
-    r < rowCount - 1;
-    r++
+    let row = 0;
+    row < rowCount - 1;
+    row++
   ) {
     for (
-      let n = 0;
-      n < LINE_N - 1;
-      n++
+      let spanIndex = 0;
+      spanIndex < LIP_Z - 1;
+      spanIndex++
     ) {
-      const p00 =
-        rows[r].p[n];
+      const a =
+        row *
+        LIP_Z +
+        spanIndex;
 
-      const p01 =
-        rows[r].p[n + 1];
+      const b =
+        a + 1;
 
-      const p10 =
-        rows[r + 1].p[n];
+      const c =
+        (
+          row + 1
+        ) *
+        LIP_Z +
+        spanIndex;
 
-      const p11 =
-        rows[r + 1].p[n + 1];
+      const d =
+        c + 1;
 
-      if (
-        p00.alive &&
-        p01.alive &&
-        p10.alive &&
-        p11.alive
-      ) {
-        const a =
-          r *
-          LINE_N +
-          n;
+      pointer =
+        addQuad(
+          a,
+          b,
+          c,
+          d,
+          pointer,
+          false
+        );
 
-        const b =
-          a + 1;
-
-        const c =
-          (
-            r + 1
-          ) *
-          LINE_N +
-          n;
-
-        const d =
-          c + 1;
-
-        pointer =
-          addQuad(
-            a,
-            b,
-            c,
-            d,
-            pointer,
-            false
-          );
-
-        pointer =
-          addQuad(
-            lowerPlane + a,
-            lowerPlane + b,
-            lowerPlane + c,
-            lowerPlane + d,
-            pointer,
-            true
-          );
-      }
+      pointer =
+        addQuad(
+          VERTICES_PER_LAYER + a,
+          VERTICES_PER_LAYER + b,
+          VERTICES_PER_LAYER + c,
+          VERTICES_PER_LAYER + d,
+          pointer,
+          true
+        );
     }
   }
 
   /*
-    Close both spanwise edges.
+    Close the leading and trailing edges
+    of the thick lip.
   */
 
-  for (
-    let r = 0;
-    r < rowCount - 1;
-    r++
-  ) {
+  if (rowCount) {
     for (
-      const n of [
+      const row of [
         0,
-        LINE_N - 1
+        rowCount - 1
       ]
     ) {
-      if (
-        rows[r].p[n].alive &&
-        rows[r + 1].p[n].alive
+      for (
+        let spanIndex = 0;
+        spanIndex < LIP_Z - 1;
+        spanIndex++
       ) {
         const a =
-          r *
-          LINE_N +
-          n;
-
-        const b =
-          (
-            r + 1
-          ) *
-          LINE_N +
-          n;
-
-        pointer =
-          addQuad(
-            a,
-            lowerPlane + a,
-            b,
-            lowerPlane + b,
-            pointer,
-            n === 0
-          );
-      }
-    }
-  }
-
-  /*
-    Close the oldest and newest row ends.
-  */
-
-  const endRows =
-    rowCount
-      ? [
-          0,
-          rowCount - 1
-        ]
-      : [];
-
-  for (
-    const r of endRows
-  ) {
-    for (
-      let n = 0;
-      n < LINE_N - 1;
-      n++
-    ) {
-      if (
-        rows[r].p[n].alive &&
-        rows[r].p[n + 1].alive
-      ) {
-        const a =
-          r *
-          LINE_N +
-          n;
+          row *
+          LIP_Z +
+          spanIndex;
 
         const b =
           a + 1;
@@ -2640,40 +1880,110 @@ function updatePatchGeometry() {
           addQuad(
             a,
             b,
-            lowerPlane + a,
-            lowerPlane + b,
+            VERTICES_PER_LAYER + a,
+            VERTICES_PER_LAYER + b,
             pointer,
-            r === 0
+            row === 0
+          );
+      }
+    }
+
+    /*
+      Close both spanwise ends.
+    */
+
+    for (
+      let row = 0;
+      row < rowCount - 1;
+      row++
+    ) {
+      for (
+        const spanIndex of [
+          0,
+          LIP_Z - 1
+        ]
+      ) {
+        const a =
+          row *
+          LIP_Z +
+          spanIndex;
+
+        const b =
+          (
+            row + 1
+          ) *
+          LIP_Z +
+          spanIndex;
+
+        pointer =
+          addQuad(
+            a,
+            VERTICES_PER_LAYER + a,
+            b,
+            VERTICES_PER_LAYER + b,
+            pointer,
+            spanIndex === 0
           );
       }
     }
   }
 
-  patchIdx.fill(
+  lipIndices.fill(
     0,
     pointer
   );
 
-  patchGeo
+  lipGeometry.setDrawRange(
+    0,
+    pointer
+  );
+
+  lipGeometry
     .attributes
     .position
     .needsUpdate = true;
 
-  patchGeo
+  lipGeometry
     .attributes
     .color
     .needsUpdate = true;
 
-  patchGeo.index.needsUpdate =
+  lipGeometry.index.needsUpdate =
     true;
 
-  patchGeo.setDrawRange(
-    0,
-    pointer
-  );
-
   if ((frame & 1) === 0) {
-    patchGeo.computeVertexNormals();
+    lipGeometry.computeVertexNormals();
+  }
+
+  const oldest =
+    lipRows[0];
+
+  if (oldest) {
+    const angle =
+      (
+        3.1 +
+        0.62 *
+        p.curl
+      ) *
+      Math.pow(
+        clamp(
+          oldest.age /
+          LIP_LIFE,
+
+          0,
+          1
+        ),
+
+        0.9
+      ) *
+      180 /
+      Math.PI;
+
+    document
+      .querySelector("#sA")
+      .textContent =
+        angle.toFixed(0) +
+        "°";
   }
 }
 
@@ -2681,52 +1991,56 @@ function updatePatchGeometry() {
 // Foam and spray
 // -----------------------------------------------------------------------------
 
-const PARTICLES = 1500;
+const PARTICLE_COUNT =
+  1250;
 
-const sprayPos =
+const sprayPositions =
   new Float32Array(
-    PARTICLES * 3
+    PARTICLE_COUNT *
+    3
   );
 
-const sprayVel =
+const sprayVelocities =
   new Float32Array(
-    PARTICLES * 3
+    PARTICLE_COUNT *
+    3
   );
 
 const sprayLife =
   new Float32Array(
-    PARTICLES
+    PARTICLE_COUNT
   );
 
-const spraySize =
+const spraySizes =
   new Float32Array(
-    PARTICLES
+    PARTICLE_COUNT
   );
 
 for (
   let i = 0;
-  i < PARTICLES;
+  i < PARTICLE_COUNT;
   i++
 ) {
-  sprayPos[i * 3 + 1] =
-    -999;
+  sprayPositions[
+    i * 3 + 1
+  ] = -999;
 }
 
-const sprayGeo =
+const sprayGeometry =
   new THREE.BufferGeometry();
 
-sprayGeo.setAttribute(
+sprayGeometry.setAttribute(
   "position",
 
   new THREE.BufferAttribute(
-    sprayPos,
+    sprayPositions,
     3
   ).setUsage(
     THREE.DynamicDrawUsage
   )
 );
 
-sprayGeo.setAttribute(
+sprayGeometry.setAttribute(
   "life",
 
   new THREE.BufferAttribute(
@@ -2737,24 +2051,24 @@ sprayGeo.setAttribute(
   )
 );
 
-sprayGeo.setAttribute(
+sprayGeometry.setAttribute(
   "size",
 
   new THREE.BufferAttribute(
-    spraySize,
+    spraySizes,
     1
   ).setUsage(
     THREE.DynamicDrawUsage
   )
 );
 
-const sprayMat =
+const sprayMaterial =
   new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
+    transparent:
+      true,
 
-    blending:
-      THREE.NormalBlending,
+    depthWrite:
+      false,
 
     vertexShader: `
       attribute float life;
@@ -2767,7 +2081,10 @@ const sprayMat =
 
         vec4 mv =
           modelViewMatrix *
-          vec4(position, 1.0);
+          vec4(
+            position,
+            1.0
+          );
 
         gl_PointSize =
           size *
@@ -2808,27 +2125,25 @@ const sprayMat =
           ) *
           smoothstep(
             0.0,
-            0.15,
-            vLife
-          );
-
-        vec3 color =
-          mix(
-            vec3(
-              0.65,
-              0.94,
-              0.98
-            ),
-
-            vec3(1.0),
-
+            0.13,
             vLife
           );
 
         gl_FragColor =
           vec4(
-            color,
-            alpha * 0.94
+            mix(
+              vec3(
+                0.67,
+                0.94,
+                0.98
+              ),
+
+              vec3(1.0),
+
+              vLife
+            ),
+
+            alpha * 0.9
           );
       }
     `
@@ -2836,352 +2151,293 @@ const sprayMat =
 
 const spray =
   new THREE.Points(
-    sprayGeo,
-    sprayMat
+    sprayGeometry,
+    sprayMaterial
   );
 
-spray.frustumCulled = false;
+spray.frustumCulled =
+  false;
+
 spray.renderOrder = 4;
 
 scene.add(spray);
 
 let sprayCursor = 0;
-let activeSpray = 0;
 
-function emit(
+function emitSpray(
   position,
   impact = false,
   count = 1
 ) {
   for (
-    let n = 0;
-    n < count;
-    n++
+    let particle = 0;
+    particle < count;
+    particle++
   ) {
-    const i =
+    const index =
       sprayCursor++ %
-      PARTICLES;
+      PARTICLE_COUNT;
 
     const offset =
-      i * 3;
+      index * 3;
 
-    sprayPos[offset] =
+    sprayPositions[offset] =
       position.x +
       (
         Math.random() -
         0.5
       ) *
-      0.22;
+      0.18;
 
-    sprayPos[offset + 1] =
+    sprayPositions[offset + 1] =
       position.y +
       (
         Math.random() -
         0.5
       ) *
-      0.12;
+      0.1;
 
-    sprayPos[offset + 2] =
+    sprayPositions[offset + 2] =
       position.z +
       (
         Math.random() -
         0.5
       ) *
-      0.3;
+      0.28;
 
-    sprayVel[offset] =
+    sprayVelocities[offset] =
       (
         impact
-          ? 0.5
-          : 1.0
+          ? 0.3
+          : 1
       ) +
       Math.random() *
       (
         impact
           ? 1.7
-          : 2.7
+          : 2.1
       );
 
-    sprayVel[offset + 1] =
+    sprayVelocities[offset + 1] =
       (
         impact
           ? 0.7
-          : 1.1
+          : 1
       ) +
       Math.random() *
       (
         impact
-          ? 2.2
-          : 2.9
+          ? 2.3
+          : 2.8
       );
 
-    sprayVel[offset + 2] =
+    sprayVelocities[offset + 2] =
       (
         Math.random() -
         0.5
       ) *
       (
         impact
-          ? 3.5
-          : 2.0
+          ? 3.8
+          : 2
       );
 
-    sprayLife[i] =
+    sprayLife[index] =
       0.65 +
       Math.random() *
       0.35;
 
-    spraySize[i] =
-      impact
-        ? 10 +
-          Math.random() *
-          15
-        : 5 +
-          Math.random() *
-          10;
+    spraySizes[index] =
+      (
+        impact
+          ? 7
+          : 4
+      ) +
+      Math.random() *
+      (
+        impact
+          ? 10
+          : 7
+      );
   }
 }
 
-function updateSpray(dt) {
-  activeSpray = 0;
+function updateSpray(
+  dt,
+  p,
+  time
+) {
+  if (lipRows.length) {
+    /*
+      Spray along the outer lip.
+    */
+
+    for (
+      let emission = 0;
+      emission < 5;
+      emission++
+    ) {
+      const row =
+        lipRows[
+          Math.floor(
+            Math.random() *
+            Math.min(
+              lipRows.length,
+              12
+            )
+          )
+        ];
+
+      const z =
+        lerp(
+          -8,
+          8,
+          Math.random()
+        );
+
+      lipPoint(
+        p,
+        row.age,
+        z,
+        time,
+        pointA
+      );
+
+      if (
+        Math.random() <
+        0.7
+      ) {
+        emitSpray(
+          pointA,
+          false,
+          1
+        );
+      }
+    }
+
+    /*
+      Whitewater where the curled lip
+      reaches the lower face.
+    */
+
+    const oldest =
+      lipRows[0];
+
+    if (
+      oldest &&
+      oldest.age >
+      1.15
+    ) {
+      for (
+        let emission = 0;
+        emission < 8;
+        emission++
+      ) {
+        const z =
+          lerp(
+            -9,
+            9,
+            Math.random()
+          );
+
+        lipPoint(
+          p,
+          oldest.age,
+          z,
+          time,
+          pointA
+        );
+
+        if (pointA.y < 1) {
+          emitSpray(
+            pointA,
+            true,
+            1
+          );
+        }
+      }
+    }
+  }
 
   for (
-    let i = 0;
-    i < PARTICLES;
-    i++
+    let index = 0;
+    index < PARTICLE_COUNT;
+    index++
   ) {
     if (
-      sprayLife[i] <= 0
+      sprayLife[index] <=
+      0
     ) {
       continue;
     }
 
-    activeSpray++;
-
     const offset =
-      i * 3;
+      index * 3;
 
-    sprayLife[i] -=
+    sprayLife[index] -=
       dt *
       (
-        0.34 +
-        0.38 *
+        0.36 +
+        0.35 *
         (
           1 -
-          sprayLife[i]
+          sprayLife[index]
         )
       );
 
-    sprayVel[offset + 1] -=
+    sprayVelocities[offset + 1] -=
       G *
-      0.34 *
+      0.33 *
       dt;
 
-    sprayVel[offset] *=
+    sprayVelocities[offset] *=
       Math.pow(
-        0.988,
+        0.989,
         dt * 60
       );
 
-    sprayVel[offset + 2] *=
+    sprayVelocities[offset + 2] *=
       Math.pow(
-        0.988,
+        0.989,
         dt * 60
       );
 
-    sprayPos[offset] +=
-      sprayVel[offset] *
+    sprayPositions[offset] +=
+      sprayVelocities[offset] *
       dt;
 
-    sprayPos[offset + 1] +=
-      sprayVel[offset + 1] *
+    sprayPositions[offset + 1] +=
+      sprayVelocities[offset + 1] *
       dt;
 
-    sprayPos[offset + 2] +=
-      sprayVel[offset + 2] *
+    sprayPositions[offset + 2] +=
+      sprayVelocities[offset + 2] *
       dt;
 
     if (
-      sprayLife[i] <= 0
+      sprayLife[index] <=
+      0
     ) {
-      sprayPos[offset + 1] =
-        -999;
+      sprayPositions[
+        offset + 1
+      ] = -999;
     }
   }
 
-  sprayGeo
+  sprayGeometry
     .attributes
     .position
     .needsUpdate = true;
 
-  sprayGeo
+  sprayGeometry
     .attributes
     .life
     .needsUpdate = true;
 
-  sprayGeo
+  sprayGeometry
     .attributes
     .size
     .needsUpdate = true;
-}
-
-function updateRows(dt) {
-  spawnClock +=
-    dt;
-
-  if (
-    spawnClock >
-    0.055
-  ) {
-    spawnClock = 0;
-    spawnRow();
-  }
-
-  for (
-    const row of rows
-  ) {
-    row.age +=
-      dt;
-
-    for (
-      const particle of row.p
-    ) {
-      if (!particle.alive) {
-        continue;
-      }
-
-      /*
-        Once detached, sheet particles
-        are advanced from initial velocity
-        and gravity.
-      */
-
-      particle.vel.y -=
-        G * dt;
-
-      particle.vel.multiplyScalar(
-        Math.pow(
-          0.997,
-          dt * 60
-        )
-      );
-
-      particle.pos.addScaledVector(
-        particle.vel,
-        dt
-      );
-
-      /*
-        Air drag tears small droplets
-        away from the leading sheet.
-      */
-
-      if (
-        Math.random() <
-          0.018 &&
-        row.age >
-          0.28
-      ) {
-        emit(
-          particle.pos,
-          false,
-          1
-        );
-      }
-
-      const surface =
-        surfaceAt(
-          particle.pos.x,
-          particle.pos.z
-        );
-
-      /*
-        Reabsorb the particle when it
-        strikes the height-field water.
-      */
-
-      if (
-        row.age >
-          0.17 &&
-        particle.pos.y <=
-          surface + 0.025
-      ) {
-        particle.pos.y =
-          surface + 0.02;
-
-        particle.alive =
-          false;
-
-        emit(
-          particle.pos,
-          true,
-          3
-        );
-      }
-
-      if (
-        particle.pos.x >
-          X0 + LX + 4 ||
-        particle.pos.y <
-          -8
-      ) {
-        particle.alive =
-          false;
-      }
-    }
-  }
-
-  while (
-    rows.length &&
-    (
-      !rows[0].p.some(
-        particle =>
-          particle.alive
-      ) ||
-      rows[0].age >
-        4.2
-    )
-  ) {
-    rows.shift();
-  }
-
-  /*
-    Additional spray from the oldest,
-    leading edge of the sheet.
-  */
-
-  if (rows.length) {
-    const oldest =
-      rows[0];
-
-    for (
-      let k = 0;
-      k < 3;
-      k++
-    ) {
-      const n =
-        Math.floor(
-          Math.random() *
-          LINE_N
-        );
-
-      const particle =
-        oldest.p[n];
-
-      if (
-        particle &&
-        particle.alive &&
-        Math.random() <
-          0.48
-      ) {
-        emit(
-          particle.pos,
-          false,
-          1
-        );
-      }
-    }
-  }
 }
 
 // -----------------------------------------------------------------------------
@@ -3192,11 +2448,10 @@ function makeBoard() {
   const group =
     new THREE.Group();
 
-  const segments = 18;
-
-  const length = 2.7;
-  const width = 0.62;
-  const thickness = 0.1;
+  const segments = 16;
+  const length = 2.8;
+  const width = 0.66;
+  const thickness = 0.11;
 
   const vertices = [];
   const indices = [];
@@ -3212,14 +2467,13 @@ function makeBoard() {
         : -thickness / 2;
 
     for (
-      let i = 0;
-      i < segments;
-      i++
+      let segment = 0;
+      segment < segments;
+      segment++
     ) {
       const angle =
-        Math.PI *
-        2 *
-        i /
+        TAU *
+        segment /
         segments;
 
       const z =
@@ -3256,7 +2510,7 @@ function makeBoard() {
           Math.abs(z) /
           (length / 2),
 
-          2.6
+          2.5
         );
 
       vertices.push(
@@ -3273,7 +2527,7 @@ function makeBoard() {
   vertices.push(
     0,
     thickness / 2 +
-      0.015,
+    0.015,
     0
   );
 
@@ -3287,30 +2541,32 @@ function makeBoard() {
   );
 
   for (
-    let i = 0;
-    i < segments;
-    i++
+    let segment = 0;
+    segment < segments;
+    segment++
   ) {
     const next =
-      (i + 1) %
+      (
+        segment + 1
+      ) %
       segments;
 
     indices.push(
       topCenter,
-      segments + i,
+      segments + segment,
       segments + next,
 
       bottomCenter,
       next,
-      i,
+      segment,
 
-      i,
+      segment,
       next,
-      segments + i,
+      segments + segment,
 
       next,
       segments + next,
-      segments + i
+      segments + segment
     );
   }
 
@@ -3337,9 +2593,14 @@ function makeBoard() {
       geometry,
 
       new THREE.MeshStandardMaterial({
-        color: 0xf1cd50,
-        roughness: 0.55,
-        flatShading: true
+        color:
+          0xf0cf54,
+
+        roughness:
+          0.56,
+
+        flatShading:
+          true
       })
     );
 
@@ -3350,46 +2611,24 @@ function makeBoard() {
   const stripe =
     new THREE.Mesh(
       new THREE.BoxGeometry(
-        0.075,
+        0.07,
         0.02,
         1.15
       ),
 
       new THREE.MeshStandardMaterial({
-        color: 0x14495b,
-        roughness: 0.7
+        color:
+          0x164d5f,
+
+        roughness:
+          0.7
       })
     );
 
   stripe.position.y =
-    0.075;
+    0.08;
 
   group.add(stripe);
-
-  const fin =
-    new THREE.Mesh(
-      new THREE.ConeGeometry(
-        0.12,
-        0.4,
-        3
-      ),
-
-      new THREE.MeshStandardMaterial({
-        color: 0x14495b,
-        flatShading: true
-      })
-    );
-
-  fin.rotation.z =
-    Math.PI;
-
-  fin.position.set(
-    0,
-    -0.24,
-    0.65
-  );
-
-  group.add(fin);
 
   return group;
 }
@@ -3399,200 +2638,111 @@ const board =
 
 scene.add(board);
 
-const boardState = {
-  x: -1,
-  z: 6.3,
-  y: 1,
+let boardZ = -7.5;
 
-  vx: 0,
-  vz: -0.45,
-  vy: 0
-};
-
-const flowTmp =
-  new THREE.Vector2();
-
-function resetBoard() {
-  boardState.x =
-    avgFrontX -
-    2.1;
-
-  boardState.z =
-    6.1;
-
-  boardState.vx = 0;
-  boardState.vz = -0.55;
-  boardState.vy = 0;
-
-  boardState.y =
-    surfaceAt(
-      boardState.x,
-      boardState.z
-    ) +
-    0.25;
-}
-
-function updateBoard(dt) {
-  const flow =
-    flowAt(
-      boardState.x,
-      boardState.z,
-      flowTmp
-    );
-
-  const power =
-    clamp(
-      Math.hypot(
-        flow.x,
-        flow.y
-      ) /
-      3,
-
-      0,
-      1
-    );
-
-  /*
-    The board is driven toward the local
-    shallow-water velocity.
-
-    It also receives a down-the-line push
-    along the wave shoulder.
-  */
-
-  boardState.vx +=
+function updateBoard(
+  dt,
+  p,
+  time
+) {
+  boardZ +=
+    dt *
     (
-      flow.x -
-      boardState.vx
-    ) *
-    (
-      1 -
-      Math.exp(
-        -dt * 2.4
+      1.1 +
+      1.5 *
+      clamp(
+        p.H / 6,
+        0,
+        1
       )
     );
 
-  boardState.vz +=
-    (
-      flow.y -
-      1.05 *
-      power -
-      boardState.vz
-    ) *
-    (
-      1 -
-      Math.exp(
-        -dt * 1.6
-      )
-    );
-
-  boardState.x +=
-    boardState.vx *
-    dt;
-
-  boardState.z +=
-    boardState.vz *
-    dt;
-
-  const surface =
-    surfaceAt(
-      boardState.x,
-      boardState.z
-    );
-
-  const spring =
-    (
-      surface +
-      0.2 -
-      boardState.y
-    ) *
-    20 -
-    boardState.vy *
-    6;
-
-  boardState.vy +=
-    spring *
-    dt;
-
-  boardState.y +=
-    boardState.vy *
-    dt;
-
-  if (
-    boardState.z <
-      Z0 + 1 ||
-    boardState.x >
-      X0 + LX - 2 ||
-    boardState.x <
-      X0 + 2
-  ) {
-    resetBoard();
+  if (boardZ > 8.5) {
+    boardZ = -8.5;
   }
 
-  board.position.set(
-    boardState.x,
-    boardState.y,
-    boardState.z
-  );
+  const data =
+    crestData(
+      p,
+      boardZ,
+      time
+    );
+
+  const x =
+    data.crestX -
+    4;
+
+  const y =
+    faceY(
+      p,
+      x,
+      boardZ,
+      time
+    ) +
+    0.23;
 
   const epsilon =
-    0.24;
+    0.2;
 
   const slopeX =
     (
-      surfaceAt(
-        boardState.x +
-          epsilon,
-
-        boardState.z
+      faceY(
+        p,
+        x + epsilon,
+        boardZ,
+        time
       ) -
-      surfaceAt(
-        boardState.x -
-          epsilon,
-
-        boardState.z
+      faceY(
+        p,
+        x - epsilon,
+        boardZ,
+        time
       )
     ) /
-    (2 * epsilon);
+    (
+      2 *
+      epsilon
+    );
 
   const slopeZ =
     (
-      surfaceAt(
-        boardState.x,
-
-        boardState.z +
-          epsilon
+      faceY(
+        p,
+        x,
+        boardZ + epsilon,
+        time
       ) -
-      surfaceAt(
-        boardState.x,
-
-        boardState.z -
-          epsilon
+      faceY(
+        p,
+        x,
+        boardZ - epsilon,
+        time
       )
     ) /
-    (2 * epsilon);
+    (
+      2 *
+      epsilon
+    );
+
+  board.position.set(
+    x,
+    y,
+    boardZ
+  );
 
   board.rotation.order =
     "YXZ";
 
   board.rotation.y =
-    Math.atan2(
-      boardState.vx,
-
-      Math.max(
-        0.001,
-        -boardState.vz
-      )
-    );
+    0.05;
 
   board.rotation.x =
     -Math.atan(
       slopeZ
     ) +
-    0.03 *
+    0.025 *
     Math.sin(
-      simTime *
-      4
+      time * 4
     );
 
   board.rotation.z =
@@ -3603,60 +2753,48 @@ function updateBoard(dt) {
 }
 
 // -----------------------------------------------------------------------------
-// Reset, warm start and animation
+// Animation
 // -----------------------------------------------------------------------------
 
-function resetSimulation() {
-  simTime = 0;
+let paused = false;
+let cinematic = false;
 
-  rows.length = 0;
+let simulationTime = 0;
+let frame = 0;
+
+let lastTime =
+  performance.now();
+
+function resetSimulation() {
+  lipRows.length = 0;
 
   spawnClock = 0;
-  breakAge = 0;
-  hadFront = false;
-
-  sprayLife.fill(0);
+  simulationTime = 0;
 
   for (
     let i = 0;
-    i < PARTICLES;
+    i < 18;
     i++
   ) {
-    sprayPos[i * 3 + 1] =
-      -999;
+    spawnLipRow();
   }
-
-  seedWave();
-
-  /*
-    Warm the shallow-water field so the
-    initial swell is already reaching the
-    reef when the page appears.
-  */
 
   for (
     let i = 0;
-    i < 145;
+    i < lipRows.length;
     i++
   ) {
-    simTime +=
-      0.012;
-
-    swStep(
-      0.012
-    );
-
-    detectFront(
-      0.012
-    );
+    lipRows[i].age =
+      (
+        lipRows.length -
+        1 -
+        i
+      ) *
+      SPAWN_INTERVAL;
   }
 
-  resetBoard();
-  updateGridMeshes();
-  updatePatchGeometry();
+  boardZ = -7.5;
 }
-
-resetSimulation();
 
 document
   .querySelector("#pause")
@@ -3694,9 +2832,6 @@ document
           : "Cinematic camera";
   };
 
-let last =
-  performance.now();
-
 function animate(now) {
   requestAnimationFrame(
     animate
@@ -3708,127 +2843,162 @@ function animate(now) {
 
       (
         now -
-        last
+        lastTime
       ) /
       1000
     );
 
-  last = now;
+  lastTime = now;
 
   if (paused) {
     dt = 0;
   }
 
+  const p =
+    physics();
+
+  readout(p);
+
   if (dt > 0) {
-    /*
-      Fixed substeps keep the shallow-water
-      solve and the ballistic particle sheet
-      stable.
-    */
+    simulationTime +=
+      dt;
 
-    const substeps = 2;
+    spawnClock +=
+      dt;
 
-    const subDt =
-      dt /
-      substeps;
+    if (
+      spawnClock >=
+      SPAWN_INTERVAL
+    ) {
+      spawnClock -=
+        SPAWN_INTERVAL;
+
+      spawnLipRow();
+    }
 
     for (
-      let step = 0;
-      step < substeps;
-      step++
+      const row of lipRows
     ) {
-      simTime +=
-        subDt;
-
-      swStep(
-        subDt
-      );
-
-      detectFront(
-        subDt
-      );
-
-      updateRows(
-        subDt
-      );
-
-      updateSpray(
-        subDt
-      );
-
-      updateBoard(
-        subDt
-      );
+      row.age +=
+        dt;
     }
+
+    while (
+      lipRows.length &&
+      lipRows[0].age >
+      LIP_LIFE
+    ) {
+      lipRows.shift();
+    }
+
+    updateSpray(
+      dt,
+      p,
+      simulationTime
+    );
+
+    updateBoard(
+      dt,
+      p,
+      simulationTime
+    );
   }
 
   frame++;
 
-  updateGridMeshes();
-  updatePatchGeometry();
+  const oceanPositions =
+    oceanGeometry
+      .attributes
+      .position
+      .array;
 
-  document
-    .querySelector("#slopeS")
-    .textContent =
-      avgSlope.toFixed(2);
+  for (
+    let i = 0;
+    i <
+    oceanGeometry
+      .attributes
+      .position
+      .count;
+    i++
+  ) {
+    const x =
+      oceanBase[i * 3];
 
-  document
-    .querySelector("#rowsS")
-    .textContent =
-      String(
-        rows.length
+    const z =
+      oceanBase[
+        i * 3 + 2
+      ];
+
+    oceanPositions[i * 3] =
+      x;
+
+    oceanPositions[
+      i * 3 + 1
+    ] =
+      0.11 *
+      Math.sin(
+        0.2 * x +
+        0.08 * z -
+        simulationTime *
+        0.8
+      ) +
+      0.05 *
+      Math.sin(
+        -0.11 * x +
+        0.27 * z -
+        simulationTime *
+        1.3
       );
 
-  const validLinePoint =
-    line.find(
-      point =>
-        point.valid
-    );
+    oceanPositions[
+      i * 3 + 2
+    ] =
+      z;
+  }
 
-  document
-    .querySelector("#speedS")
-    .textContent =
-      (
-        validLinePoint
-          ? validLinePoint.speed
-          : 0
-      ).toFixed(1) +
-      "m/s";
+  oceanGeometry
+    .attributes
+    .position
+    .needsUpdate = true;
 
-  document
-    .querySelector("#sprayS")
-    .textContent =
-      String(
-        activeSpray
-      );
+  if ((frame & 3) === 0) {
+    oceanGeometry.computeVertexNormals();
+  }
+
+  updateFace(
+    p,
+    simulationTime
+  );
+
+  updateLipGeometry(
+    p,
+    simulationTime
+  );
 
   if (cinematic) {
     const angle =
-      simTime *
+      simulationTime *
       0.12;
 
     camera.position.set(
-      avgFrontX +
-        8.5,
-
-      4.2 +
-        Math.sin(
-          angle *
-          0.6
-        ) *
-        0.45,
-
       11.5 +
-        Math.sin(angle) *
-        2.2
+      Math.sin(angle) *
+      1.5,
+
+      5.5 +
+      0.25 *
+      Math.sin(
+        angle * 0.7
+      ),
+
+      13.5 +
+      Math.cos(angle) *
+      1.5
     );
 
     camera.lookAt(
-      avgFrontX -
-        0.2,
-
-      1.55,
-
+      0.8,
+      2.2,
       0
     );
   } else {
@@ -3840,6 +3010,9 @@ function animate(now) {
     camera
   );
 }
+
+resetSimulation();
+readout(physics());
 
 requestAnimationFrame(
   animate
