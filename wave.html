@@ -1,409 +1,583 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
-  />
-  <title>Three.js Barrel Wave Simulator</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Volumetric Barrel Wave — Three.js</title>
 
-  <style>
-    :root {
-      color-scheme: dark;
-      --glass: rgba(5, 22, 35, 0.70);
-      --line: rgba(170, 230, 255, 0.22);
-      --text: #e8fbff;
-      --muted: #9bc4d1;
-      --accent: #55e5ff;
-    }
+<style>
+  :root {
+    color-scheme: dark;
+  }
 
-    * {
-      box-sizing: border-box;
-    }
+  * {
+    box-sizing: border-box;
+  }
 
-    html,
-    body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      overflow: hidden;
-      background: #07141e;
-      font-family:
-        Inter,
-        ui-sans-serif,
-        system-ui,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
-    }
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #061a24;
+    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
 
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-      touch-action: none;
-    }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+  }
 
-    #ui {
-      position: fixed;
-      top: 14px;
-      left: 14px;
-      z-index: 10;
-      width: min(315px, calc(100vw - 28px));
-      padding: 14px 14px 12px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background:
-        linear-gradient(
-          145deg,
-          rgba(9, 35, 52, 0.82),
-          var(--glass)
-        );
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
-      color: var(--text);
-    }
+  #hud {
+    position: fixed;
+    left: 16px;
+    top: 16px;
+    z-index: 10;
+    width: min(390px, calc(100vw - 32px));
+    padding: 16px 16px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 18px;
+    background: linear-gradient(
+      180deg,
+      rgba(4, 28, 40, 0.88),
+      rgba(5, 36, 49, 0.72)
+    );
+    backdrop-filter: blur(14px);
+    box-shadow: 0 16px 44px rgba(0, 0, 0, 0.3);
+  }
 
-    #ui h1 {
-      font-size: 16px;
-      line-height: 1.15;
-      margin: 0 0 4px;
-      letter-spacing: 0.02em;
-    }
+  h1 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    letter-spacing: 0.08em;
+  }
 
-    #ui .subtitle {
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
-      margin-bottom: 12px;
+  .sub {
+    margin: 0 0 12px;
+    color: #b9d5df;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 104px 1fr 56px;
+    align-items: center;
+    gap: 10px;
+    margin: 8px 0;
+    font-size: 13px;
+  }
+
+  .row label {
+    color: #d9edf4;
+  }
+
+  .row output {
+    text-align: right;
+    color: #8ee8ff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    accent-color: #55d7ff;
+  }
+
+  #stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px 12px;
+    margin-top: 11px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.11);
+    font-size: 11px;
+    color: #b7d5df;
+  }
+
+  #stats b {
+    color: #f0fbff;
+    font-weight: 650;
+  }
+
+  .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  button {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: white;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 9px 12px;
+    border-radius: 12px;
+    font: 600 12px/1 system-ui;
+    cursor: pointer;
+  }
+
+  button:active {
+    transform: translateY(1px);
+  }
+
+  #badge {
+    position: fixed;
+    right: 14px;
+    bottom: 14px;
+    z-index: 5;
+    padding: 8px 11px;
+    border-radius: 999px;
+    background: rgba(2, 22, 31, 0.66);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #a9d6e3;
+    font-size: 11px;
+    backdrop-filter: blur(10px);
+  }
+
+  @media (max-width: 600px) {
+    #hud {
+      left: 10px;
+      top: 10px;
+      width: calc(100vw - 20px);
+      padding: 13px;
     }
 
     .row {
-      display: grid;
-      grid-template-columns: 82px 1fr 42px;
-      align-items: center;
-      gap: 8px;
-      margin: 8px 0;
-    }
-
-    .row label {
-      font-size: 12px;
-      color: #c8edf6;
-    }
-
-    .value {
-      font-variant-numeric: tabular-nums;
-      text-align: right;
-      font-size: 11px;
-      color: var(--accent);
-    }
-
-    input[type="range"] {
-      width: 100%;
-      accent-color: var(--accent);
-    }
-
-    .buttons {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-top: 11px;
-    }
-
-    button {
-      border: 1px solid var(--line);
-      color: var(--text);
-      background: rgba(16, 58, 76, 0.62);
-      border-radius: 10px;
-      padding: 8px 10px;
-      font-weight: 650;
-      font-size: 11px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background: rgba(24, 82, 105, 0.72);
-    }
-
-    .toggles {
-      display: flex;
-      gap: 12px;
-      margin-top: 10px;
-      color: #c8edf6;
-      font-size: 11px;
-    }
-
-    .toggles label {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-
-    #hint {
-      position: fixed;
-      left: 50%;
-      bottom: 14px;
-      transform: translateX(-50%);
-      z-index: 10;
-      padding: 7px 11px;
-      border-radius: 999px;
-      color: rgba(235, 252, 255, 0.85);
-      background: rgba(2, 14, 22, 0.55);
-      border: 1px solid rgba(170, 230, 255, 0.16);
-      backdrop-filter: blur(8px);
-      font-size: 10px;
-      white-space: nowrap;
-      pointer-events: none;
+      grid-template-columns: 92px 1fr 50px;
+      gap: 7px;
+      margin: 6px 0;
     }
 
     #badge {
-      position: fixed;
-      right: 14px;
-      top: 14px;
-      z-index: 10;
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      color: #bff8ff;
-      border: 1px solid rgba(125, 236, 255, 0.2);
-      background: rgba(5, 26, 39, 0.62);
+      display: none;
     }
+  }
+</style>
 
-    @media (max-width: 620px) {
-      #ui {
-        padding: 12px;
-      }
-
-      #ui .subtitle {
-        display: none;
-      }
-
-      .row {
-        margin: 6px 0;
-      }
-
-      #hint {
-        bottom: 8px;
-        max-width: calc(100vw - 16px);
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      #badge {
-        display: none;
-      }
-    }
-  </style>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
-      }
-    }
-  </script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+  }
+}
+</script>
 </head>
 
 <body>
-  <section id="ui">
-    <h1>Barrel Wave Simulator</h1>
+<div id="hud">
+  <h1>VOLUMETRIC BARREL WAVE</h1>
 
-    <div class="subtitle">
-      A procedural breaker with an overhanging lip, crest spray,
-      whitewater and a wave-driven low-poly surfboard.
-    </div>
+  <p class="sub">
+    Closed water volume + finite-depth dispersion, shoaling,
+    depth-limited breaking, Stokes/Gerstner orbital motion,
+    and a kinematic plunging lip.
+  </p>
 
-    <div class="row">
-      <label for="power">Wave power</label>
-      <input
-        id="power"
-        type="range"
-        min="0.55"
-        max="1.45"
-        step="0.01"
-        value="1.00"
-      />
-      <span id="powerValue" class="value">1.00×</span>
-    </div>
-
-    <div class="row">
-      <label for="speed">Flow speed</label>
-      <input
-        id="speed"
-        type="range"
-        min="0.25"
-        max="1.80"
-        step="0.01"
-        value="1.00"
-      />
-      <span id="speedValue" class="value">1.00×</span>
-    </div>
-
-    <div class="row">
-      <label for="barrel">Barrel curl</label>
-      <input
-        id="barrel"
-        type="range"
-        min="0.45"
-        max="1.25"
-        step="0.01"
-        value="1.00"
-      />
-      <span id="barrelValue" class="value">1.00×</span>
-    </div>
-
-    <div class="toggles">
-      <label>
-        <input id="foamToggle" type="checkbox" checked />
-        Whitewater
-      </label>
-
-      <label>
-        <input id="wireToggle" type="checkbox" />
-        Wireframe
-      </label>
-    </div>
-
-    <div class="buttons">
-      <button id="pause">Pause</button>
-      <button id="camera">Reset camera</button>
-    </div>
-  </section>
-
-  <div id="badge">PROCEDURAL · THREE.JS</div>
-
-  <div id="hint">
-    Drag to orbit · Pinch/wheel to zoom · Right-drag to pan
+  <div class="row">
+    <label for="height">Offshore height</label>
+    <input
+      id="height"
+      type="range"
+      min="2.0"
+      max="8.0"
+      step="0.1"
+      value="4.8"
+    />
+    <output id="heightOut"></output>
   </div>
 
-  <script type="module">
-    import * as THREE from "three";
-    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+  <div class="row">
+    <label for="period">Period</label>
+    <input
+      id="period"
+      type="range"
+      min="7"
+      max="16"
+      step="0.1"
+      value="11.2"
+    />
+    <output id="periodOut"></output>
+  </div>
 
-    const settings = {
-      power: 1,
-      speed: 1,
-      barrel: 1,
-      foam: true,
-      paused: false
-    };
+  <div class="row">
+    <label for="depth">Reef depth</label>
+    <input
+      id="depth"
+      type="range"
+      min="3.5"
+      max="12"
+      step="0.1"
+      value="6.5"
+    />
+    <output id="depthOut"></output>
+  </div>
 
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x8ac7dc);
-    scene.fog = new THREE.FogExp2(0x7fb5ca, 0.018);
+  <div class="row">
+    <label for="barrel">Barrel bias</label>
+    <input
+      id="barrel"
+      type="range"
+      min="0"
+      max="1"
+      step="0.01"
+      value="0.92"
+    />
+    <output id="barrelOut"></output>
+  </div>
 
-    const camera = new THREE.PerspectiveCamera(
-      52,
-      innerWidth / innerHeight,
-      0.1,
-      180
+  <div class="row">
+    <label for="wind">Offshore wind</label>
+    <input
+      id="wind"
+      type="range"
+      min="-1"
+      max="1"
+      step="0.01"
+      value="0.28"
+    />
+    <output id="windOut"></output>
+  </div>
+
+  <div id="stats">
+    <span>Breaking height <b id="sH">—</b></span>
+    <span>Wavelength <b id="sL">—</b></span>
+    <span>H / depth <b id="sR">—</b></span>
+    <span>Energy flux <b id="sP">—</b></span>
+  </div>
+
+  <div class="buttons">
+    <button id="pause">Pause</button>
+    <button id="reset">Reset board</button>
+    <button id="camera">Cinematic camera</button>
+  </div>
+</div>
+
+<div id="badge">Drag to orbit · pinch/scroll to zoom</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const ui = {
+  height: document.getElementById("height"),
+  period: document.getElementById("period"),
+  depth: document.getElementById("depth"),
+  barrel: document.getElementById("barrel"),
+  wind: document.getElementById("wind")
+};
+
+// -----------------------------------------------------------------------------
+// Physics helpers
+// -----------------------------------------------------------------------------
+
+const G = 9.81;
+const RHO = 1025;
+const TAU = Math.PI * 2;
+
+const clamp = THREE.MathUtils.clamp;
+const lerp = THREE.MathUtils.lerp;
+
+const smoothstep = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+function solveDispersion(omega, depth) {
+  /*
+    Finite-depth gravity-wave dispersion relation:
+
+        omega² = g k tanh(kh)
+
+    Solved with Newton iteration.
+  */
+
+  let k = Math.max(
+    omega * omega / G,
+    omega / Math.sqrt(G * depth)
+  );
+
+  for (let i = 0; i < 16; i++) {
+    const kh = k * depth;
+    const th = Math.tanh(kh);
+    const sech2 =
+      1 / (Math.cosh(kh) * Math.cosh(kh));
+
+    const f =
+      G * k * th -
+      omega * omega;
+
+    const df =
+      G * (th + k * depth * sech2);
+
+    k = Math.max(
+      1e-4,
+      k - f / df
+    );
+  }
+
+  return k;
+}
+
+function getPhysics() {
+  const H0 = +ui.height.value;
+  const T = +ui.period.value;
+  const h = +ui.depth.value;
+
+  const omega = TAU / T;
+  const k = solveDispersion(omega, h);
+
+  const L = TAU / k;
+  const c = omega / k;
+
+  const kh = k * h;
+
+  const n =
+    0.5 *
+    (
+      1 +
+      (2 * kh) / Math.sinh(2 * kh)
     );
 
-    const homeCamera = new THREE.Vector3(15.5, 8.2, 19.5);
-    camera.position.copy(homeCamera);
+  const cg = n * c;
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: "high-performance"
-    });
+  /*
+    Deep-water group velocity is used as the
+    shoaling reference.
+  */
 
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
-    renderer.setSize(innerWidth, innerHeight);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.06;
+  const k0 = omega * omega / G;
+  const c0 = omega / k0;
+  const cg0 = c0 * 0.5;
 
-    document.body.prepend(renderer.domElement);
+  const Ks = Math.sqrt(cg0 / cg);
+  const Hlinear = H0 * Ks;
 
-    const controls = new OrbitControls(
-      camera,
-      renderer.domElement
-    );
+  /*
+    Depth-limited breaker index:
 
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.065;
-    controls.target.set(0, 1.8, 0.5);
-    controls.minDistance = 6;
-    controls.maxDistance = 55;
-    controls.maxPolarAngle = Math.PI * 0.49;
+        Hb ≈ gamma h
+        gamma ≈ 0.78
+  */
 
-    scene.add(
-      new THREE.HemisphereLight(
-        0xdaf7ff,
-        0x34505e,
-        2.6
-      )
-    );
+  const Hb = 0.78 * h;
+  const H = Math.min(Hlinear, Hb);
 
-    const sun = new THREE.DirectionalLight(
-      0xfff4d2,
-      4.2
-    );
+  const ratio = H / h;
 
-    sun.position.set(-12, 18, 10);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -22;
-    sun.shadow.camera.right = 22;
-    sun.shadow.camera.top = 18;
-    sun.shadow.camera.bottom = -10;
+  const depthBreak =
+    smoothstep(0.5, 0.78, ratio);
 
-    scene.add(sun);
+  const steepBreak =
+    smoothstep(0.075, 0.13, H / L);
 
-    const rim = new THREE.DirectionalLight(
-      0x58c9ff,
-      1.1
-    );
+  const B = clamp(
+    (
+      0.22 +
+      0.78 *
+      Math.max(depthBreak, steepBreak)
+    ) *
+    (+ui.barrel.value),
+    0,
+    1
+  );
 
-    rim.position.set(12, 7, -12);
-    scene.add(rim);
+  /*
+    Linear wave energy density:
 
-    /*
-      Sky dome.
-    */
+        E = rho g H² / 8
 
-    const skyGeo = new THREE.SphereGeometry(
-      90,
+    Wave energy flux:
+
+        P = E Cg
+  */
+
+  const E =
+    RHO *
+    G *
+    H *
+    H /
+    8;
+
+  const P = E * cg;
+
+  return {
+    H0,
+    T,
+    h,
+    omega,
+    k,
+    L,
+    c,
+    cg,
+    Ks,
+    Hlinear,
+    H,
+    Hb,
+    ratio,
+    B,
+    E,
+    P
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Renderer, scene and camera
+// -----------------------------------------------------------------------------
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: "high-performance"
+});
+
+renderer.setPixelRatio(
+  Math.min(devicePixelRatio, 2)
+);
+
+renderer.setSize(
+  innerWidth,
+  innerHeight
+);
+
+renderer.outputColorSpace =
+  THREE.SRGBColorSpace;
+
+renderer.toneMapping =
+  THREE.ACESFilmicToneMapping;
+
+renderer.toneMappingExposure = 1.05;
+
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type =
+  THREE.PCFSoftShadowMap;
+
+document.body.appendChild(
+  renderer.domElement
+);
+
+const scene = new THREE.Scene();
+
+scene.background =
+  new THREE.Color(0x78cce0);
+
+scene.fog =
+  new THREE.FogExp2(
+    0x74c7da,
+    0.018
+  );
+
+const camera =
+  new THREE.PerspectiveCamera(
+    48,
+    innerWidth / innerHeight,
+    0.1,
+    180
+  );
+
+camera.position.set(
+  13,
+  7.6,
+  18
+);
+
+const controls =
+  new OrbitControls(
+    camera,
+    renderer.domElement
+  );
+
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.target.set(-0.5, 2.0, 0);
+controls.minDistance = 7;
+controls.maxDistance = 45;
+controls.maxPolarAngle =
+  Math.PI * 0.52;
+
+controls.update();
+
+scene.add(
+  new THREE.HemisphereLight(
+    0xcaf4ff,
+    0x17414c,
+    2.2
+  )
+);
+
+const sun =
+  new THREE.DirectionalLight(
+    0xfff4d8,
+    4.2
+  );
+
+sun.position.set(
+  -8,
+  16,
+  10
+);
+
+sun.castShadow = true;
+
+sun.shadow.mapSize.set(
+  2048,
+  2048
+);
+
+sun.shadow.camera.left = -25;
+sun.shadow.camera.right = 25;
+sun.shadow.camera.top = 20;
+sun.shadow.camera.bottom = -12;
+
+scene.add(sun);
+
+const fill =
+  new THREE.DirectionalLight(
+    0x7adfff,
+    1.1
+  );
+
+fill.position.set(
+  12,
+  5,
+  -10
+);
+
+scene.add(fill);
+
+// -----------------------------------------------------------------------------
+// Sky dome
+// -----------------------------------------------------------------------------
+
+const sky =
+  new THREE.Mesh(
+    new THREE.SphereGeometry(
+      100,
       32,
-      18
-    );
-
-    const skyMat = new THREE.ShaderMaterial({
+      16
+    ),
+    new THREE.ShaderMaterial({
       side: THREE.BackSide,
 
       uniforms: {
-        topColor: {
-          value: new THREE.Color(0x3f92b8)
+        top: {
+          value:
+            new THREE.Color(0x0d5f86)
         },
 
-        bottomColor: {
-          value: new THREE.Color(0xd6edf2)
-        },
-
-        offset: {
-          value: 6
-        },
-
-        exponent: {
-          value: 0.85
+        bottom: {
+          value:
+            new THREE.Color(0xa8e8ef)
         }
       },
 
       vertexShader: `
-        varying vec3 vWorldPosition;
+        varying vec3 vP;
 
         void main() {
-          vec4 worldPosition =
-            modelMatrix * vec4(position, 1.0);
-
-          vWorldPosition = worldPosition.xyz;
+          vP = position;
 
           gl_Position =
             projectionMatrix *
@@ -413,798 +587,2182 @@
       `,
 
       fragmentShader: `
-        uniform vec3 topColor;
-        uniform vec3 bottomColor;
-        uniform float offset;
-        uniform float exponent;
+        uniform vec3 top;
+        uniform vec3 bottom;
 
-        varying vec3 vWorldPosition;
+        varying vec3 vP;
 
         void main() {
-          float h = normalize(
-            vWorldPosition +
-            vec3(0.0, offset, 0.0)
-          ).y;
+          float h =
+            clamp(
+              normalize(vP).y * 0.5 + 0.5,
+              0.0,
+              1.0
+            );
 
-          vec3 color = mix(
-            bottomColor,
-            topColor,
-            pow(max(h, 0.0), exponent)
-          );
-
-          gl_FragColor = vec4(color, 1.0);
+          gl_FragColor =
+            vec4(
+              mix(
+                bottom,
+                top,
+                pow(h, 0.72)
+              ),
+              1.0
+            );
         }
       `
+    })
+  );
+
+scene.add(sky);
+
+// -----------------------------------------------------------------------------
+// Seabed
+// -----------------------------------------------------------------------------
+
+const seabed =
+  new THREE.Mesh(
+    new THREE.PlaneGeometry(
+      90,
+      70
+    ),
+    new THREE.MeshStandardMaterial({
+      color: 0x7d8b79,
+      roughness: 1,
+      metalness: 0
+    })
+  );
+
+seabed.rotation.x =
+  -Math.PI / 2;
+
+seabed.position.y = -5.2;
+seabed.receiveShadow = true;
+
+scene.add(seabed);
+
+// -----------------------------------------------------------------------------
+// Background ocean surface
+// -----------------------------------------------------------------------------
+
+const oceanGeo =
+  new THREE.PlaneGeometry(
+    90,
+    62,
+    120,
+    80
+  );
+
+oceanGeo.rotateX(
+  -Math.PI / 2
+);
+
+const oceanPos =
+  oceanGeo.attributes.position;
+
+const oceanBase =
+  new Float32Array(
+    oceanPos.array.length
+  );
+
+oceanBase.set(
+  oceanPos.array
+);
+
+const oceanMat =
+  new THREE.MeshPhysicalMaterial({
+    color: 0x118aa0,
+    roughness: 0.18,
+    metalness: 0,
+    clearcoat: 1,
+    clearcoatRoughness: 0.08,
+    transparent: true,
+    opacity: 0.92,
+    side: THREE.DoubleSide
+  });
+
+const ocean =
+  new THREE.Mesh(
+    oceanGeo,
+    oceanMat
+  );
+
+ocean.position.y = -0.14;
+ocean.receiveShadow = true;
+
+scene.add(ocean);
+
+const oceanWaves = [
+  {
+    A: 0.15,
+    kx: 0.26,
+    kz: 0.08,
+    w: 1.15,
+    p: 0
+  },
+  {
+    A: 0.09,
+    kx: -0.12,
+    kz: 0.31,
+    w: 1.55,
+    p: 1.7
+  },
+  {
+    A: 0.05,
+    kx: 0.43,
+    kz: -0.22,
+    w: 2.05,
+    p: 3.4
+  }
+];
+
+function updateOcean(t) {
+  const a = oceanPos.array;
+
+  for (
+    let i = 0;
+    i < oceanPos.count;
+    i++
+  ) {
+    const x =
+      oceanBase[i * 3];
+
+    const z =
+      oceanBase[i * 3 + 2];
+
+    let y = 0;
+
+    for (const q of oceanWaves) {
+      y +=
+        q.A *
+        Math.sin(
+          q.kx * x +
+          q.kz * z -
+          q.w * t +
+          q.p
+        );
+    }
+
+    a[i * 3] = x;
+    a[i * 3 + 1] = y;
+    a[i * 3 + 2] = z;
+  }
+
+  oceanPos.needsUpdate = true;
+
+  if ((frame & 3) === 0) {
+    oceanGeo.computeVertexNormals();
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Closed volumetric breaker mesh
+// -----------------------------------------------------------------------------
+
+const WAVE_SPAN = 22;
+const Z_SLICES = 52;
+
+let outlineCount = 0;
+let crestIndex = 0;
+let lipIndex = 0;
+let impactIndex = 0;
+let shoulderIndex = 0;
+
+let latestSections = [];
+
+function bezierPoint(
+  p0,
+  p1,
+  p2,
+  p3,
+  t
+) {
+  const it = 1 - t;
+
+  return {
+    x:
+      it * it * it * p0.x +
+      3 * it * it * t * p1.x +
+      3 * it * t * t * p2.x +
+      t * t * t * p3.x,
+
+    y:
+      it * it * it * p0.y +
+      3 * it * it * t * p1.y +
+      3 * it * t * t * p2.y +
+      t * t * t * p3.y
+  };
+}
+
+function addBezier(
+  out,
+  p0,
+  p1,
+  p2,
+  p3,
+  steps,
+  tag,
+  skipFirst = true
+) {
+  for (
+    let i = skipFirst ? 1 : 0;
+    i <= steps;
+    i++
+  ) {
+    const s = i / steps;
+
+    const p =
+      bezierPoint(
+        p0,
+        p1,
+        p2,
+        p3,
+        s
+      );
+
+    out.push({
+      x: p.x,
+      y: p.y,
+      tag,
+      s
     });
+  }
+}
 
-    scene.add(
-      new THREE.Mesh(
-        skyGeo,
-        skyMat
-      )
-    );
+function makeOutline(
+  phys,
+  z,
+  t
+) {
+  const phase =
+    z * 0.27 -
+    t * 0.55;
 
-    /*
-      Distant hazy horizon.
-    */
-
-    const horizon = new THREE.Mesh(
-      new THREE.CylinderGeometry(
-        55,
-        58,
-        2,
-        80,
-        1,
-        true
+  const edge =
+    0.78 +
+    0.22 *
+    Math.pow(
+      Math.cos(
+        (z / WAVE_SPAN) *
+        Math.PI
       ),
-
-      new THREE.MeshBasicMaterial({
-        color: 0xaed6df,
-        transparent: true,
-        opacity: 0.34,
-        side: THREE.BackSide
-      })
+      2
     );
 
-    horizon.position.y = -0.5;
-    scene.add(horizon);
-
-    /*
-      Water material.
-    */
-
-    const waterMat =
-      new THREE.MeshPhysicalMaterial({
-        color: 0x087f9c,
-        roughness: 0.22,
-        metalness: 0.02,
-        transmission: 0.08,
-        transparent: true,
-        opacity: 0.94,
-        clearcoat: 0.55,
-        clearcoatRoughness: 0.25,
-        side: THREE.DoubleSide,
-        vertexColors: true
-      });
-
-    /*
-      Base ocean surface.
-    */
-
-    const seaCols = 120;
-    const seaRows = 72;
-
-    const seaGeo = new THREE.PlaneGeometry(
-      42,
-      31,
-      seaCols,
-      seaRows
+  const H =
+    phys.H *
+    edge *
+    (
+      1 +
+      0.045 *
+      Math.sin(phase)
     );
 
-    seaGeo.rotateX(-Math.PI / 2);
-
-    const sea = new THREE.Mesh(
-      seaGeo,
-      waterMat
-    );
-
-    sea.receiveShadow = true;
-    sea.position.z = -1.5;
-
-    scene.add(sea);
-
-    const seaBase =
-      seaGeo.attributes.position.array.slice();
-
-    const seaColors = new Float32Array(
-      seaGeo.attributes.position.count * 3
-    );
-
-    seaGeo.setAttribute(
-      "color",
-      new THREE.BufferAttribute(
-        seaColors,
-        3
-      )
-    );
-
-    function smoothstep(a, b, x) {
-      const t = THREE.MathUtils.clamp(
-        (x - a) / (b - a),
-        0,
-        1
-      );
-
-      return t * t * (3 - 2 * t);
-    }
-
-    function breakStrength(x) {
-      const shoulderFade =
-        1 - smoothstep(1.5, 10.5, x);
-
-      const leftFade =
-        smoothstep(-14.5, -9.0, x);
-
-      return THREE.MathUtils.clamp(
-        shoulderFade * leftFade,
-        0.08,
-        1
-      );
-    }
-
-    function seaHeight(x, z, t) {
-      const power = settings.power;
-      const flow = t * settings.speed;
-
-      const broad =
-        0.24 *
+  const B =
+    clamp(
+      phys.B *
+      (
+        0.9 +
+        0.1 *
         Math.sin(
-          z * 0.55 -
-          flow * 0.85 +
-          x * 0.035
-        );
-
-      const cross =
-        0.10 *
-        Math.sin(
-          x * 0.9 +
-          z * 0.24 +
-          flow * 1.25
-        );
-
-      const ripple =
-        0.045 *
-        Math.sin(
-          x * 2.4 -
-          z * 1.35 +
-          flow * 2.7
-        );
-
-      const face = Math.exp(
-        -Math.pow(
-          (z + 0.2) / 2.55,
-          2
+          phase + 0.7
         )
-      );
+      ),
+      0,
+      1
+    );
 
-      const steep =
-        face *
-        (
-          0.64 +
-          0.72 *
-          smoothstep(-2.5, 1.2, z)
-        ) *
-        power;
+  const crestY =
+    0.68 *
+    H *
+    (
+      1 +
+      0.24 * B
+    ) +
+    0.38;
 
-      return (
-        -1.18 +
-        broad +
-        cross +
-        ripple +
-        steep *
+  const rearX = -13.2;
+  const shoulderX = -5.1;
+
+  const crestX =
+    -1.15 +
+    0.12 *
+    Math.sin(phase);
+
+  const lipReach =
+    lerp(
+      1,
+      4.15,
+      B
+    );
+
+  const lipX =
+    crestX +
+    lipReach;
+
+  const impactX =
+    lerp(
+      3.1,
+      6,
+      B
+    );
+
+  const bottom =
+    -Math.min(
+      4.3,
+      0.58 * phys.h
+    );
+
+  const out = [];
+
+  /*
+    Back shoulder.
+
+    This starts near mean sea level and
+    adds substantial water volume behind
+    the crest instead of creating a thin
+    folded sheet.
+  */
+
+  addBezier(
+    out,
+
+    {
+      x: rearX,
+      y: 0.02
+    },
+
+    {
+      x: -10.6,
+      y: 0.02 + 0.03 * H
+    },
+
+    {
+      x: -7.6,
+      y: 0.05 + 0.12 * H
+    },
+
+    {
+      x: shoulderX,
+      y: 0.18 * crestY
+    },
+
+    28,
+    "rear",
+    false
+  );
+
+  shoulderIndex =
+    out.length + 12;
+
+  /*
+    Steepening wave face.
+  */
+
+  addBezier(
+    out,
+
+    {
+      x: shoulderX,
+      y: 0.18 * crestY
+    },
+
+    {
+      x: -3.7,
+      y: 0.27 * crestY
+    },
+
+    {
+      x: -2.7,
+      y: 0.78 * crestY
+    },
+
+    {
+      x: crestX,
+      y: crestY
+    },
+
+    24,
+    "rise",
+    true
+  );
+
+  crestIndex =
+    out.length - 1;
+
+  /*
+    Outer surface of the crest and lip.
+  */
+
+  addBezier(
+    out,
+
+    {
+      x: crestX,
+      y: crestY
+    },
+
+    {
+      x:
+        crestX +
+        0.95 +
+        0.25 * B,
+
+      y:
+        crestY *
         (
-          0.42 +
-          0.28 *
-          breakStrength(x)
+          1.08 +
+          0.04 * B
         )
+    },
+
+    {
+      x:
+        lipX -
+        0.18,
+
+      y:
+        crestY *
+        (
+          0.94 -
+          0.06 * B
+        )
+    },
+
+    {
+      x: lipX,
+
+      y:
+        crestY *
+        lerp(
+          0.8,
+          0.57,
+          B
+        )
+    },
+
+    20,
+    "outerLip",
+    true
+  );
+
+  lipIndex =
+    out.length - 1;
+
+  /*
+    Underside of the plunging lip.
+
+    This branch travels backwards beneath
+    the outer lip and creates the hollow
+    air barrel.
+  */
+
+  addBezier(
+    out,
+
+    {
+      x: lipX,
+
+      y:
+        crestY *
+        lerp(
+          0.8,
+          0.57,
+          B
+        )
+    },
+
+    {
+      x:
+        lipX +
+        0.12 * B,
+
+      y:
+        crestY *
+        0.42
+    },
+
+    {
+      x:
+        crestX +
+        2.1,
+
+      y:
+        crestY *
+        0.28
+    },
+
+    {
+      x:
+        crestX +
+        1.05,
+
+      y:
+        crestY *
+        0.19
+    },
+
+    20,
+    "innerLip",
+    true
+  );
+
+  /*
+    Lower face and trough leading to the
+    impact zone.
+  */
+
+  addBezier(
+    out,
+
+    {
+      x:
+        crestX +
+        1.05,
+
+      y:
+        crestY *
+        0.19
+    },
+
+    {
+      x:
+        crestX +
+        2,
+
+      y:
+        crestY *
+        0.11
+    },
+
+    {
+      x:
+        impactX -
+        1.2,
+
+      y:
+        0.03 *
+        crestY
+    },
+
+    {
+      x: impactX,
+      y: 0.01
+    },
+
+    26,
+    "lowerFace",
+    true
+  );
+
+  impactIndex =
+    out.length - 1;
+
+  /*
+    Close the cross-section below the
+    surface. These points make it a solid,
+    enclosed body of water.
+  */
+
+  out.push({
+    x: impactX + 0.55,
+    y: bottom,
+    tag: "bottom",
+    s: 0
+  });
+
+  out.push({
+    x: rearX,
+    y: bottom,
+    tag: "bottom",
+    s: 1
+  });
+
+  /*
+    Add small finite-depth orbital motion
+    over the breaker envelope.
+
+    The actual overturning envelope is
+    kinematic because exact overturning
+    requires a free-surface Navier–Stokes
+    or SPH solver.
+  */
+
+  const ka =
+    0.16 *
+    phys.H *
+    phys.k;
+
+  for (const p of out) {
+    const top =
+      p.tag === "bottom"
+        ? 0
+        : 1;
+
+    const q =
+      phys.k * p.x -
+      phys.omega *
+      t *
+      0.2 +
+      z * 0.08;
+
+    const second =
+      0.5 * ka;
+
+    p.x +=
+      top *
+      (
+        0.08 *
+        phys.H *
+        Math.cos(q) +
+
+        0.018 *
+        phys.H *
+        second *
+        Math.cos(2 * q)
       );
-    }
 
-    /*
-      Overhanging curl geometry.
+    p.y +=
+      top *
+      (
+        0.055 *
+        phys.H *
+        Math.sin(q) +
 
-      X moves along the wave.
-      V wraps around the barrel cross section.
-    */
-
-    const curlCols = 118;
-    const curlRows = 42;
-
-    const curlGeo =
-      new THREE.BufferGeometry();
-
-    const curlPositions =
-      new Float32Array(
-        (curlCols + 1) *
-        (curlRows + 1) *
-        3
+        0.014 *
+        phys.H *
+        second *
+        Math.sin(2 * q)
       );
+  }
 
-    const curlColors =
-      new Float32Array(
-        curlPositions.length
-      );
+  return out;
+}
 
-    const curlIndices = [];
+const phys0 =
+  getPhysics();
 
-    for (
-      let ix = 0;
-      ix <= curlCols;
-      ix++
-    ) {
-      for (
-        let iv = 0;
-        iv <= curlRows;
-        iv++
-      ) {
-        if (
-          ix < curlCols &&
-          iv < curlRows
-        ) {
-          const a =
-            ix *
-            (curlRows + 1) +
-            iv;
+const template =
+  makeOutline(
+    phys0,
+    0,
+    0
+  );
 
-          const b =
-            (ix + 1) *
-            (curlRows + 1) +
-            iv;
+outlineCount =
+  template.length;
 
-          curlIndices.push(
-            a,
-            b,
-            a + 1,
+const wavePositions =
+  new Float32Array(
+    Z_SLICES *
+    outlineCount *
+    3
+  );
 
-            b,
-            b + 1,
-            a + 1
-          );
-        }
-      }
-    }
+const waveColors =
+  new Float32Array(
+    Z_SLICES *
+    outlineCount *
+    3
+  );
 
-    curlGeo.setIndex(curlIndices);
+const waveIndices = [];
 
-    curlGeo.setAttribute(
-      "position",
-      new THREE.BufferAttribute(
-        curlPositions,
-        3
+/*
+  Connect every closed cross-section to
+  the neighboring cross-section.
+*/
+
+for (
+  let j = 0;
+  j < Z_SLICES - 1;
+  j++
+) {
+  for (
+    let i = 0;
+    i < outlineCount;
+    i++
+  ) {
+    const ni =
+      (i + 1) %
+      outlineCount;
+
+    const a =
+      j *
+      outlineCount +
+      i;
+
+    const b =
+      j *
+      outlineCount +
+      ni;
+
+    const c =
+      (j + 1) *
+      outlineCount +
+      i;
+
+    const d =
+      (j + 1) *
+      outlineCount +
+      ni;
+
+    waveIndices.push(
+      a,
+      c,
+      b,
+
+      b,
+      c,
+      d
+    );
+  }
+}
+
+/*
+  Triangulate both end caps so the wave
+  is a completely closed water volume.
+*/
+
+const contour =
+  template.map(
+    p =>
+      new THREE.Vector2(
+        p.x,
+        p.y
       )
-    );
+  );
 
-    curlGeo.setAttribute(
-      "color",
-      new THREE.BufferAttribute(
-        curlColors,
-        3
-      )
-    );
+const capFaces =
+  THREE.ShapeUtils.triangulateShape(
+    contour,
+    []
+  );
 
-    curlGeo.computeVertexNormals();
+for (const f of capFaces) {
+  waveIndices.push(
+    f[2],
+    f[1],
+    f[0]
+  );
 
-    const curl = new THREE.Mesh(
-      curlGeo,
-      waterMat.clone()
-    );
+  const o =
+    (Z_SLICES - 1) *
+    outlineCount;
 
-    curl.material.color.set(0x0786a1);
-    curl.castShadow = true;
-    curl.receiveShadow = true;
+  waveIndices.push(
+    o + f[0],
+    o + f[1],
+    o + f[2]
+  );
+}
 
-    scene.add(curl);
+const tagColor = {
+  rear:
+    new THREE.Color(
+      0x1299ad
+    ),
 
-    function updateCurl(t) {
-      const positions =
-        curlGeo.attributes.position.array;
+  rise:
+    new THREE.Color(
+      0x08788f
+    ),
 
-      const colors =
-        curlGeo.attributes.color.array;
+  outerLip:
+    new THREE.Color(
+      0x0b6e84
+    ),
 
-      const flow =
-        t * settings.speed;
+  innerLip:
+    new THREE.Color(
+      0x034252
+    ),
 
-      const power =
-        settings.power;
+  lowerFace:
+    new THREE.Color(
+      0x075f72
+    ),
 
-      const barrel =
-        settings.barrel;
+  bottom:
+    new THREE.Color(
+      0x064554
+    )
+};
 
-      let index = 0;
+for (
+  let j = 0;
+  j < Z_SLICES;
+  j++
+) {
+  for (
+    let i = 0;
+    i < outlineCount;
+    i++
+  ) {
+    const c =
+      tagColor[
+        template[i].tag
+      ] ||
+      tagColor.rise;
 
-      for (
-        let ix = 0;
-        ix <= curlCols;
-        ix++
-      ) {
-        const x0 =
-          -13 +
-          26 *
-          (ix / curlCols);
+    const o =
+      (
+        j *
+        outlineCount +
+        i
+      ) *
+      3;
 
-        const strength =
-          breakStrength(x0);
+    waveColors[o] = c.r;
+    waveColors[o + 1] = c.g;
+    waveColors[o + 2] = c.b;
+  }
+}
 
-        const x =
-          x0 +
-          0.13 *
-          Math.sin(
-            flow * 0.85 +
-            ix * 0.13
-          );
+const waveGeo =
+  new THREE.BufferGeometry();
 
-        const radius =
-          (
-            2.20 +
-            0.65 * power
-          ) *
-          (
-            0.54 +
-            0.46 * strength
-          );
+waveGeo.setAttribute(
+  "position",
+  new THREE.BufferAttribute(
+    wavePositions,
+    3
+  ).setUsage(
+    THREE.DynamicDrawUsage
+  )
+);
 
-        const thetaStart = -1.42;
+waveGeo.setAttribute(
+  "color",
+  new THREE.BufferAttribute(
+    waveColors,
+    3
+  )
+);
 
-        const thetaEnd =
-          THREE.MathUtils.lerp(
-            1.62,
-            2.72 * barrel,
-            strength
-          );
+waveGeo.setIndex(
+  waveIndices
+);
 
-        for (
-          let iv = 0;
-          iv <= curlRows;
-          iv++
-        ) {
-          const v =
-            iv / curlRows;
+const waveMat =
+  new THREE.MeshPhysicalMaterial({
+    vertexColors: true,
+    roughness: 0.16,
+    metalness: 0,
+    clearcoat: 1,
+    clearcoatRoughness: 0.06,
+    side: THREE.DoubleSide,
+    transparent: false
+  });
 
-          const theta =
-            THREE.MathUtils.lerp(
-              thetaStart,
-              thetaEnd,
-              v
-            );
+const waveMesh =
+  new THREE.Mesh(
+    waveGeo,
+    waveMat
+  );
 
-          const wobble =
-            0.09 *
-            Math.sin(
-              ix * 0.24 +
-              flow * 2.1 +
-              v * 5.0
-            ) *
-            (
-              0.25 +
-              strength
-            );
+waveMesh.castShadow = true;
+waveMesh.receiveShadow = true;
 
-          const z =
-            -0.55 -
-            radius *
-            Math.cos(theta) +
-            wobble +
-            0.18 *
-            Math.sin(
-              x0 * 0.28 +
-              flow
-            );
+scene.add(waveMesh);
 
-          const y =
-            1.56 +
-            radius *
-            Math.sin(theta) +
-            0.10 *
-            Math.sin(
-              x0 * 0.55 -
-              flow * 1.2
-            ) *
-            (
-              0.25 +
-              v
-            );
+function updateWave(
+  t,
+  phys
+) {
+  const arr =
+    waveGeo
+      .attributes
+      .position
+      .array;
 
-          positions[index] = x;
-          positions[index + 1] = y;
-          positions[index + 2] = z;
+  latestSections.length =
+    Z_SLICES;
 
-          const crest =
-            smoothstep(
-              0.68,
-              1.0,
-              v
-            );
-
-          const hollow =
-            Math.max(
-              0,
-              Math.sin(theta)
-            );
-
-          colors[index] =
-            THREE.MathUtils.lerp(
-              0.015,
-              0.34,
-              crest
-            );
-
-          colors[index + 1] =
-            THREE.MathUtils.lerp(
-              0.42 +
-              hollow * 0.08,
-              0.92,
-              crest
-            );
-
-          colors[index + 2] =
-            THREE.MathUtils.lerp(
-              0.58 +
-              hollow * 0.13,
-              0.96,
-              crest
-            );
-
-          index += 3;
-        }
-      }
-
-      curlGeo.attributes.position.needsUpdate =
-        true;
-
-      curlGeo.attributes.color.needsUpdate =
-        true;
-
-      curlGeo.computeVertexNormals();
-
-      curlGeo.attributes.normal.needsUpdate =
-        true;
-    }
-
-    /*
-      Whitewater foam particles.
-    */
-
-    const foamCount = 265;
-
-    const foamGeo =
-      new THREE.IcosahedronGeometry(
-        0.22,
-        1
+  for (
+    let j = 0;
+    j < Z_SLICES;
+    j++
+  ) {
+    const z =
+      lerp(
+        -WAVE_SPAN / 2,
+        WAVE_SPAN / 2,
+        j /
+        (Z_SLICES - 1)
       );
 
-    const foamMat =
-      new THREE.MeshStandardMaterial({
-        color: 0xf4ffff,
-        roughness: 0.82,
-        transparent: true,
-        opacity: 0.88
-      });
-
-    const foam =
-      new THREE.InstancedMesh(
-        foamGeo,
-        foamMat,
-        foamCount
+    const sec =
+      makeOutline(
+        phys,
+        z,
+        t
       );
 
-    foam.castShadow = true;
-
-    foam.instanceMatrix.setUsage(
-      THREE.DynamicDrawUsage
-    );
-
-    scene.add(foam);
-
-    const foamState = [];
-    const dummy = new THREE.Object3D();
-
-    function resetFoam(
-      particle,
-      initial = false
-    ) {
-      particle.age = initial
-        ? Math.random() * 4.2
-        : 0;
-
-      particle.life =
-        2.0 +
-        Math.random() * 2.7;
-
-      particle.x =
-        -12 +
-        Math.random() * 18;
-
-      const strength =
-        breakStrength(particle.x);
-
-      const fromLip =
-        Math.random() < 0.62;
-
-      particle.y = fromLip
-        ? (
-          3.4 +
-          strength * 1.0 +
-          Math.random() * 0.55
-        )
-        : (
-          -0.25 +
-          Math.random() * 0.35
-        );
-
-      particle.z = fromLip
-        ? (
-          1.0 +
-          Math.random() * 1.2
-        )
-        : (
-          1.8 +
-          Math.random() * 4.4
-        );
-
-      particle.vx =
-        (
-          Math.random() -
-          0.5
-        ) *
-        0.55;
-
-      particle.vy = fromLip
-        ? (
-          -0.8 -
-          Math.random() * 1.7
-        )
-        : (
-          0.05 +
-          Math.random() * 0.18
-        );
-
-      particle.vz =
-        1.05 +
-        Math.random() * 2.0 +
-        settings.power * 0.45;
-
-      particle.spin =
-        Math.random() *
-        Math.PI;
-
-      particle.size =
-        0.45 +
-        Math.random() * 1.15;
-    }
+    latestSections[j] =
+      sec;
 
     for (
       let i = 0;
-      i < foamCount;
+      i < outlineCount;
       i++
     ) {
-      const particle = {};
+      const p = sec[i];
 
-      resetFoam(
-        particle,
-        true
+      const o =
+        (
+          j *
+          outlineCount +
+          i
+        ) *
+        3;
+
+      arr[o] = p.x;
+      arr[o + 1] = p.y;
+
+      arr[o + 2] =
+        z +
+        (
+          p.tag === "bottom"
+            ? 0
+            : 0.06 *
+              Math.sin(
+                0.45 * p.x +
+                z * 0.22 -
+                t
+              )
+        );
+    }
+  }
+
+  waveGeo
+    .attributes
+    .position
+    .needsUpdate = true;
+
+  if ((frame & 1) === 0) {
+    waveGeo.computeVertexNormals();
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Crest foam ribbon
+// -----------------------------------------------------------------------------
+
+const foamPos =
+  new Float32Array(
+    Z_SLICES *
+    2 *
+    3
+  );
+
+const foamIdx = [];
+
+for (
+  let j = 0;
+  j < Z_SLICES - 1;
+  j++
+) {
+  const a = j * 2;
+  const b = a + 1;
+  const c = a + 2;
+  const d = a + 3;
+
+  foamIdx.push(
+    a,
+    c,
+    b,
+
+    b,
+    c,
+    d
+  );
+}
+
+const foamGeo =
+  new THREE.BufferGeometry();
+
+foamGeo.setAttribute(
+  "position",
+  new THREE.BufferAttribute(
+    foamPos,
+    3
+  ).setUsage(
+    THREE.DynamicDrawUsage
+  )
+);
+
+foamGeo.setIndex(
+  foamIdx
+);
+
+const foamMat =
+  new THREE.MeshStandardMaterial({
+    color: 0xf4ffff,
+    roughness: 0.82,
+    transparent: true,
+    opacity: 0.88,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+
+const foamRibbon =
+  new THREE.Mesh(
+    foamGeo,
+    foamMat
+  );
+
+foamRibbon.renderOrder = 3;
+
+scene.add(foamRibbon);
+
+function updateFoamRibbon() {
+  const src =
+    waveGeo
+      .attributes
+      .position
+      .array;
+
+  const dst =
+    foamGeo
+      .attributes
+      .position
+      .array;
+
+  const idxA =
+    Math.max(
+      0,
+      crestIndex - 2
+    );
+
+  const idxB =
+    Math.min(
+      outlineCount - 1,
+      crestIndex + 6
+    );
+
+  for (
+    let j = 0;
+    j < Z_SLICES;
+    j++
+  ) {
+    for (
+      let r = 0;
+      r < 2;
+      r++
+    ) {
+      const si =
+        (
+          j *
+          outlineCount +
+          (
+            r
+              ? idxB
+              : idxA
+          )
+        ) *
+        3;
+
+      const di =
+        (
+          j * 2 +
+          r
+        ) *
+        3;
+
+      dst[di] =
+        src[si];
+
+      dst[di + 1] =
+        src[si + 1] +
+        0.07;
+
+      dst[di + 2] =
+        src[si + 2];
+    }
+  }
+
+  foamGeo
+    .attributes
+    .position
+    .needsUpdate = true;
+
+  if ((frame & 3) === 0) {
+    foamGeo.computeVertexNormals();
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Spray and whitewater particles
+// -----------------------------------------------------------------------------
+
+const PARTICLES = 1000;
+
+const pPos =
+  new Float32Array(
+    PARTICLES * 3
+  );
+
+const pVel =
+  new Float32Array(
+    PARTICLES * 3
+  );
+
+const pLife =
+  new Float32Array(
+    PARTICLES
+  );
+
+for (
+  let i = 0;
+  i < PARTICLES;
+  i++
+) {
+  pPos[i * 3 + 1] = -999;
+}
+
+const pGeo =
+  new THREE.BufferGeometry();
+
+pGeo.setAttribute(
+  "position",
+  new THREE.BufferAttribute(
+    pPos,
+    3
+  ).setUsage(
+    THREE.DynamicDrawUsage
+  )
+);
+
+pGeo.setAttribute(
+  "aLife",
+  new THREE.BufferAttribute(
+    pLife,
+    1
+  ).setUsage(
+    THREE.DynamicDrawUsage
+  )
+);
+
+const pMat =
+  new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending:
+      THREE.AdditiveBlending,
+
+    vertexShader: `
+      attribute float aLife;
+
+      varying float vLife;
+
+      void main() {
+        vLife = aLife;
+
+        vec4 mv =
+          modelViewMatrix *
+          vec4(position, 1.0);
+
+        gl_PointSize =
+          (
+            3.0 +
+            13.0 *
+            aLife
+          ) *
+          (
+            260.0 /
+            max(
+              1.0,
+              -mv.z
+            )
+          );
+
+        gl_Position =
+          projectionMatrix *
+          mv;
+      }
+    `,
+
+    fragmentShader: `
+      varying float vLife;
+
+      void main() {
+        vec2 q =
+          gl_PointCoord -
+          0.5;
+
+        float d =
+          dot(q, q);
+
+        if (d > 0.25) {
+          discard;
+        }
+
+        float a =
+          smoothstep(
+            0.25,
+            0.02,
+            d
+          ) *
+          smoothstep(
+            0.0,
+            0.18,
+            vLife
+          );
+
+        gl_FragColor =
+          vec4(
+            mix(
+              vec3(
+                0.55,
+                0.95,
+                1.0
+              ),
+              vec3(1.0),
+              vLife
+            ),
+            a * 0.95
+          );
+      }
+    `
+  });
+
+const spray =
+  new THREE.Points(
+    pGeo,
+    pMat
+  );
+
+spray.frustumCulled = false;
+
+scene.add(spray);
+
+let particleCursor = 0;
+
+function waveVertex(
+  slice,
+  index
+) {
+  const a =
+    waveGeo
+      .attributes
+      .position
+      .array;
+
+  const o =
+    (
+      slice *
+      outlineCount +
+      index
+    ) *
+    3;
+
+  return new THREE.Vector3(
+    a[o],
+    a[o + 1],
+    a[o + 2]
+  );
+}
+
+function spawnParticle(
+  origin,
+  kind,
+  phys
+) {
+  const i =
+    particleCursor++ %
+    PARTICLES;
+
+  const o = i * 3;
+
+  pPos[o] =
+    origin.x +
+    (
+      Math.random() -
+      0.5
+    ) *
+    0.18;
+
+  pPos[o + 1] =
+    origin.y +
+    (
+      Math.random() -
+      0.5
+    ) *
+    0.12;
+
+  pPos[o + 2] =
+    origin.z +
+    (
+      Math.random() -
+      0.5
+    ) *
+    0.45;
+
+  const wind =
+    +ui.wind.value;
+
+  if (kind === "lip") {
+    pVel[o] =
+      1.2 +
+      Math.random() *
+      2.4;
+
+    pVel[o + 1] =
+      1.3 +
+      Math.random() *
+      2.8;
+
+    pVel[o + 2] =
+      (
+        Math.random() -
+        0.5
+      ) *
+      1.7 +
+      wind *
+      1.7;
+  } else {
+    pVel[o] =
+      0.4 +
+      Math.random() *
+      1.7;
+
+    pVel[o + 1] =
+      0.7 +
+      Math.random() *
+      1.9;
+
+    pVel[o + 2] =
+      (
+        Math.random() -
+        0.5
+      ) *
+      2.5;
+  }
+
+  pLife[i] =
+    0.65 +
+    Math.random() *
+    0.35;
+}
+
+function updateParticles(
+  dt,
+  phys
+) {
+  const emit =
+    Math.floor(
+      5 +
+      18 * phys.B
+    );
+
+  for (
+    let n = 0;
+    n < emit;
+    n++
+  ) {
+    const s =
+      Math.floor(
+        Math.random() *
+        Z_SLICES
       );
 
-      foamState.push(particle);
+    spawnParticle(
+      waveVertex(
+        s,
+        lipIndex
+      ),
+      "lip",
+      phys
+    );
+
+    if ((n & 1) === 0) {
+      spawnParticle(
+        waveVertex(
+          s,
+          impactIndex
+        ),
+        "impact",
+        phys
+      );
+    }
+  }
+
+  for (
+    let i = 0;
+    i < PARTICLES;
+    i++
+  ) {
+    if (pLife[i] <= 0) {
+      continue;
     }
 
-    function updateFoam(dt, t) {
-      foam.visible = settings.foam;
-      if (!settings.foam) return;
-      for (let i = 0; i < foamCount; i++) {
-        const p = foamState[i];
-        p.age += dt * settings.speed;
-        if (p.age > p.life || p.z > 10.5) resetFoam(p);
-        const strength = breakStrength(p.x);
-        p.x += p.vx * dt;
-        p.vy -= 0.72 * dt;
-        p.z += p.vz * dt * (0.72 + 0.38 * settings.power);
-        p.y += p.vy * dt;
-        const surface = seaHeight(p.x, p.z - sea.position.z, t) + 0.13;
-        if (p.y < surface) { p.y = surface; p.vy = Math.abs(p.vy) * 0.14; p.vz *= 0.994; }
-        const fade = Math.min(1, (p.life - p.age) * 1.6);
-        const pulse = 0.72 + 0.28 * Math.sin(p.age * 7 + i);
-        const s = p.size * fade * pulse * (0.65 + strength * 0.35);
-        dummy.position.set(p.x, p.y, p.z);
-        dummy.rotation.set(p.spin + p.age, p.spin * 0.4, p.age * 1.6);
-        dummy.scale.set(s * 1.25, s * 0.60, s);
-        dummy.updateMatrix();
-        foam.setMatrixAt(i, dummy.matrix);
-      }
-      foam.instanceMatrix.needsUpdate = true;
+    const o = i * 3;
+
+    pLife[i] -=
+      dt *
+      (
+        0.34 +
+        0.45 *
+        (
+          1 -
+          pLife[i]
+        )
+      );
+
+    pVel[o + 1] -=
+      G *
+      0.26 *
+      dt;
+
+    pVel[o] *=
+      Math.pow(
+        0.992,
+        dt * 60
+      );
+
+    pVel[o + 2] *=
+      Math.pow(
+        0.992,
+        dt * 60
+      );
+
+    pPos[o] +=
+      pVel[o] *
+      dt;
+
+    pPos[o + 1] +=
+      pVel[o + 1] *
+      dt;
+
+    pPos[o + 2] +=
+      pVel[o + 2] *
+      dt;
+
+    if (pLife[i] <= 0) {
+      pPos[o + 1] = -999;
     }
+  }
 
-    // Crest mist / spray as a separate point system.
-    const sprayCount = 720;
-    const sprayPositions = new Float32Array(sprayCount * 3);
-    const sprayData = [];
-    const sprayGeo = new THREE.BufferGeometry();
-    sprayGeo.setAttribute('position', new THREE.BufferAttribute(sprayPositions, 3));
-    const sprayMat = new THREE.PointsMaterial({ color: 0xeaffff, size: 0.095, transparent: true, opacity: 0.68, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
-    const spray = new THREE.Points(sprayGeo, sprayMat);
-    scene.add(spray);
-    function resetSpray(p, initial = false) {
-      p.age = initial ? Math.random() * 1.4 : 0;
-      p.life = 0.65 + Math.random() * 1.3;
-      p.x = -12 + Math.random() * 18;
-      const strength = breakStrength(p.x);
-      p.y = 4.25 + strength * 0.65 + Math.random() * 0.35;
-      p.z = 0.35 + Math.random() * 1.3;
-      p.vx = (Math.random() - 0.55) * 1.2;
-      p.vy = 0.55 + Math.random() * 1.7;
-      p.vz = 0.5 + Math.random() * 1.6;
+  pGeo
+    .attributes
+    .position
+    .needsUpdate = true;
+
+  pGeo
+    .attributes
+    .aLife
+    .needsUpdate = true;
+}
+
+// -----------------------------------------------------------------------------
+// Low-poly surfboard
+// -----------------------------------------------------------------------------
+
+function createBoard() {
+  const group =
+    new THREE.Group();
+
+  const seg = 16;
+  const L = 3;
+  const W = 0.72;
+  const T = 0.13;
+
+  const verts = [];
+  const idx = [];
+
+  for (
+    let ring = 0;
+    ring < 2;
+    ring++
+  ) {
+    const y =
+      ring
+        ? T / 2
+        : -T / 2;
+
+    for (
+      let i = 0;
+      i < seg;
+      i++
+    ) {
+      const a =
+        TAU *
+        i /
+        seg;
+
+      const z =
+        Math.cos(a) *
+        L /
+        2;
+
+      const taper =
+        Math.pow(
+          Math.max(
+            0,
+            1 -
+            Math.pow(
+              Math.abs(z) /
+              (L / 2),
+              1.65
+            )
+          ),
+          0.34
+        );
+
+      const x =
+        Math.sin(a) *
+        W /
+        2 *
+        taper;
+
+      const rocker =
+        0.14 *
+        Math.pow(
+          Math.abs(z) /
+          (L / 2),
+          2.5
+        );
+
+      verts.push(
+        x,
+        y + rocker,
+        z
+      );
     }
-    for (let i = 0; i < sprayCount; i++) { const p = {}; resetSpray(p, true); sprayData.push(p); }
-    function updateSpray(dt) {
-      spray.visible = settings.foam;
-      if (!settings.foam) return;
-      const a = sprayGeo.attributes.position.array;
-      for (let i = 0; i < sprayCount; i++) {
-        const p = sprayData[i];
-        p.age += dt * settings.speed;
-        if (p.age > p.life) resetSpray(p);
-        p.vy -= 1.4 * dt;
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.z += p.vz * dt * settings.power;
-        a[i * 3] = p.x; a[i * 3 + 1] = p.y; a[i * 3 + 2] = p.z;
-      }
-      sprayGeo.attributes.position.needsUpdate = true;
+  }
+
+  const topCenter =
+    verts.length / 3;
+
+  verts.push(
+    0,
+    T / 2 + 0.02,
+    0
+  );
+
+  const botCenter =
+    verts.length / 3;
+
+  verts.push(
+    0,
+    -T / 2,
+    0
+  );
+
+  for (
+    let i = 0;
+    i < seg;
+    i++
+  ) {
+    const n =
+      (i + 1) % seg;
+
+    idx.push(
+      topCenter,
+      seg + i,
+      seg + n
+    );
+
+    idx.push(
+      botCenter,
+      n,
+      i
+    );
+
+    idx.push(
+      i,
+      n,
+      seg + i,
+
+      n,
+      seg + n,
+      seg + i
+    );
+  }
+
+  const g =
+    new THREE.BufferGeometry();
+
+  g.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(
+      verts,
+      3
+    )
+  );
+
+  g.setIndex(idx);
+  g.computeVertexNormals();
+
+  const deck =
+    new THREE.Mesh(
+      g,
+      new THREE.MeshStandardMaterial({
+        color: 0xf0cf55,
+        roughness: 0.58,
+        metalness: 0,
+        flatShading: true
+      })
+    );
+
+  deck.castShadow = true;
+
+  group.add(deck);
+
+  const stripe =
+    new THREE.Mesh(
+      new THREE.BoxGeometry(
+        0.08,
+        0.025,
+        1.25
+      ),
+      new THREE.MeshStandardMaterial({
+        color: 0x174e62,
+        roughness: 0.7
+      })
+    );
+
+  stripe.position.y = 0.1;
+  stripe.position.z = -0.15;
+
+  group.add(stripe);
+
+  const fin =
+    new THREE.Mesh(
+      new THREE.ConeGeometry(
+        0.14,
+        0.48,
+        3
+      ),
+      new THREE.MeshStandardMaterial({
+        color: 0x174e62,
+        roughness: 0.65,
+        flatShading: true
+      })
+    );
+
+  fin.rotation.z = Math.PI;
+
+  fin.position.set(
+    0,
+    -0.28,
+    0.7
+  );
+
+  group.add(fin);
+
+  return group;
+}
+
+const board =
+  createBoard();
+
+scene.add(board);
+
+let boardZ = -6.5;
+
+// -----------------------------------------------------------------------------
+// Surfboard wake
+// -----------------------------------------------------------------------------
+
+const TRAIL = 42;
+
+const trailArray =
+  new Float32Array(
+    TRAIL * 3
+  );
+
+const trailGeo =
+  new THREE.BufferGeometry();
+
+trailGeo.setAttribute(
+  "position",
+  new THREE.BufferAttribute(
+    trailArray,
+    3
+  ).setUsage(
+    THREE.DynamicDrawUsage
+  )
+);
+
+const trail =
+  new THREE.Line(
+    trailGeo,
+    new THREE.LineBasicMaterial({
+      color: 0xe9ffff,
+      transparent: true,
+      opacity: 0.78,
+      depthWrite: false
+    })
+  );
+
+scene.add(trail);
+
+let trailPoints =
+  Array.from(
+    {
+      length: TRAIL
+    },
+    () =>
+      new THREE.Vector3(
+        0,
+        -999,
+        0
+      )
+  );
+
+function updateBoard(
+  dt,
+  phys
+) {
+  /*
+    Board speed is tied to wave-energy flux.
+
+    Larger H and greater group velocity
+    push it faster along the shoulder.
+  */
+
+  const normalizedPower =
+    clamp(
+      phys.P /
+      420000,
+      0,
+      1
+    );
+
+  const speed =
+    0.7 +
+    3.1 *
+    Math.sqrt(
+      normalizedPower
+    );
+
+  boardZ +=
+    speed *
+    dt;
+
+  if (
+    boardZ >
+    WAVE_SPAN / 2 -
+    1.2
+  ) {
+    boardZ =
+      -WAVE_SPAN / 2 +
+      1.2;
+
+    for (
+      const p of trailPoints
+    ) {
+      p.set(
+        0,
+        -999,
+        0
+      );
     }
+  }
 
-    // Low-poly surfboard made from a faceted extruded outline.
-    function makeSurfboard() {
-      const shape = new THREE.Shape();
-      const pts = [
-        [-2.05, 0], [-1.72, -0.42], [-0.72, -0.58], [0.70, -0.55], [1.62, -0.35], [2.10, 0],
-        [1.62, 0.35], [0.70, 0.55], [-0.72, 0.58], [-1.72, 0.42]
-      ];
-      shape.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i][0], pts[i][1]);
-      shape.closePath();
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: true, bevelSegments: 1, steps: 1, bevelSize: 0.08, bevelThickness: 0.045 });
-      geo.center();
-      geo.rotateX(Math.PI / 2);
-      const boardMat = new THREE.MeshStandardMaterial({ color: 0xffc43b, roughness: 0.48, metalness: 0.02, flatShading: true });
-      const board = new THREE.Mesh(geo, boardMat);
-      board.castShadow = true;
-      board.receiveShadow = true;
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.035, 0.11), new THREE.MeshStandardMaterial({ color: 0xf65d40, roughness: 0.5 }));
-      stripe.position.y = 0.105;
-      board.add(stripe);
-      const finMat = new THREE.MeshStandardMaterial({ color: 0x173d50, roughness: 0.6, flatShading: true });
-      const finGeo = new THREE.ConeGeometry(0.14, 0.46, 3);
-      for (const z of [-0.22, 0.22]) {
-        const fin = new THREE.Mesh(finGeo, finMat);
-        fin.position.set(-1.35, -0.27, z);
-        fin.rotation.z = Math.PI;
-        board.add(fin);
-      }
-      return board;
+  const f =
+    (
+      boardZ +
+      WAVE_SPAN / 2
+    ) /
+    WAVE_SPAN;
+
+  const j =
+    clamp(
+      Math.round(
+        f *
+        (
+          Z_SLICES -
+          1
+        )
+      ),
+      1,
+      Z_SLICES - 2
+    );
+
+  const p =
+    waveVertex(
+      j,
+      shoulderIndex
+    );
+
+  const pL =
+    waveVertex(
+      j,
+      Math.max(
+        0,
+        shoulderIndex - 1
+      )
+    );
+
+  const pR =
+    waveVertex(
+      j,
+      Math.min(
+        outlineCount - 1,
+        shoulderIndex + 1
+      )
+    );
+
+  const pZ0 =
+    waveVertex(
+      j - 1,
+      shoulderIndex
+    );
+
+  const pZ1 =
+    waveVertex(
+      j + 1,
+      shoulderIndex
+    );
+
+  board.position.set(
+    p.x,
+    p.y + 0.24,
+    p.z
+  );
+
+  const slopeX =
+    Math.atan2(
+      pR.y - pL.y,
+      pR.x - pL.x
+    );
+
+  const slopeZ =
+    Math.atan2(
+      pZ1.y - pZ0.y,
+      pZ1.z - pZ0.z
+    );
+
+  board.rotation.order = "YXZ";
+
+  board.rotation.y =
+    0.08 *
+    Math.sin(
+      simTime * 0.7
+    ) +
+    0.04;
+
+  board.rotation.x =
+    -slopeZ *
+    0.85 +
+    0.03 *
+    Math.sin(
+      simTime * 2.1
+    );
+
+  board.rotation.z =
+    -slopeX *
+    0.62;
+
+  trailPoints.unshift(
+    new THREE.Vector3(
+      p.x + 0.08,
+      p.y + 0.1,
+      p.z - 1.2
+    )
+  );
+
+  trailPoints.pop();
+
+  for (
+    let i = 0;
+    i < TRAIL;
+    i++
+  ) {
+    const q =
+      trailPoints[i];
+
+    trailArray[i * 3] =
+      q.x;
+
+    trailArray[i * 3 + 1] =
+      q.y +
+      0.02 *
+      Math.sin(
+        simTime * 5 -
+        i * 0.25
+      );
+
+    trailArray[i * 3 + 2] =
+      q.z;
+  }
+
+  trailGeo
+    .attributes
+    .position
+    .needsUpdate = true;
+}
+
+// -----------------------------------------------------------------------------
+// UI
+// -----------------------------------------------------------------------------
+
+function updateReadout(
+  phys
+) {
+  document
+    .getElementById(
+      "heightOut"
+    )
+    .textContent =
+      (+ui.height.value)
+        .toFixed(1) +
+      " m";
+
+  document
+    .getElementById(
+      "periodOut"
+    )
+    .textContent =
+      (+ui.period.value)
+        .toFixed(1) +
+      " s";
+
+  document
+    .getElementById(
+      "depthOut"
+    )
+    .textContent =
+      (+ui.depth.value)
+        .toFixed(1) +
+      " m";
+
+  document
+    .getElementById(
+      "barrelOut"
+    )
+    .textContent =
+      Math.round(
+        +ui.barrel.value *
+        100
+      ) +
+      "%";
+
+  document
+    .getElementById(
+      "windOut"
+    )
+    .textContent =
+      (+ui.wind.value)
+        .toFixed(2);
+
+  document
+    .getElementById(
+      "sH"
+    )
+    .textContent =
+      phys.H.toFixed(2) +
+      " m";
+
+  document
+    .getElementById(
+      "sL"
+    )
+    .textContent =
+      phys.L.toFixed(1) +
+      " m";
+
+  document
+    .getElementById(
+      "sR"
+    )
+    .textContent =
+      phys.ratio.toFixed(2);
+
+  document
+    .getElementById(
+      "sP"
+    )
+    .textContent =
+      (
+        phys.P /
+        1000
+      ).toFixed(0) +
+      " kW/m";
+}
+
+for (
+  const el of
+  Object.values(ui)
+) {
+  el.addEventListener(
+    "input",
+    () =>
+      updateReadout(
+        getPhysics()
+      )
+  );
+}
+
+let paused = false;
+let cinematic = false;
+
+document
+  .getElementById("pause")
+  .onclick = () => {
+    paused = !paused;
+
+    document
+      .getElementById(
+        "pause"
+      )
+      .textContent =
+        paused
+          ? "Resume"
+          : "Pause";
+  };
+
+document
+  .getElementById("reset")
+  .onclick = () => {
+    boardZ = -6.5;
+
+    for (
+      const p of trailPoints
+    ) {
+      p.set(
+        0,
+        -999,
+        0
+      );
     }
-    const board = makeSurfboard();
-    scene.add(board);
-    let boardTravel = 0;
-    const boardX = 7.15;
+  };
 
-    // Little wake streaks behind the board.
-    const wake = new THREE.Group();
-    const wakeMat = new THREE.MeshBasicMaterial({ color: 0xe9ffff, transparent: true, opacity: 0.46, side: THREE.DoubleSide, depthWrite: false });
-    for (let i = 0; i < 7; i++) {
-      const g = new THREE.PlaneGeometry(0.07, 1.0 + i * 0.18);
-      const m = new THREE.Mesh(g, wakeMat.clone());
-      m.rotation.x = -Math.PI / 2;
-      m.rotation.z = (Math.random() - 0.5) * 0.16;
-      m.position.set((i - 3) * 0.10, 0, -0.7 - i * 0.2);
-      wake.add(m);
-    }
-    scene.add(wake);
+document
+  .getElementById("camera")
+  .onclick = () => {
+    cinematic = !cinematic;
+    controls.enabled = !cinematic;
 
-    const normal = new THREE.Vector3();
-    function getSurfaceNormal(x, z, t) {
-      const e = 0.12;
-      const hx = seaHeight(x + e, z - sea.position.z, t) - seaHeight(x - e, z - sea.position.z, t);
-      const hz = seaHeight(x, z + e - sea.position.z, t) - seaHeight(x, z - e - sea.position.z, t);
-      normal.set(-hx / (2 * e), 1, -hz / (2 * e)).normalize();
-      return normal;
-    }
-    function updateBoard(dt, t) {
-      boardTravel += dt * (0.44 + settings.power * 0.92) * settings.speed;
-      if (boardTravel > 7.5) boardTravel -= 7.5;
-      const z = -0.3 + boardTravel;
-      const x = boardX + 0.28 * Math.sin(t * 0.9);
-      const y = seaHeight(x, z - sea.position.z, t) + 0.26 + 0.05 * Math.sin(t * 4.2);
-      board.position.set(x, y, z);
-      const n = getSurfaceNormal(x, z, t);
-      const targetQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
-      const yaw = new THREE.Quaternion().setFromAxisAngle(n, -0.10 + 0.06 * Math.sin(t * 0.7));
-      targetQuat.multiply(yaw);
-      board.quaternion.slerp(targetQuat, 0.12);
-      board.rotateX(0.012 * Math.sin(t * 3.6));
-      wake.position.copy(board.position);
-      wake.position.y -= 0.20;
-      wake.quaternion.copy(board.quaternion);
-      wake.rotateY(Math.PI / 2);
-      wake.children.forEach((m, i) => { m.material.opacity = 0.18 + 0.24 * (1 - i / wake.children.length) * (0.65 + settings.power * 0.35); });
-    }
+    document
+      .getElementById(
+        "camera"
+      )
+      .textContent =
+        cinematic
+          ? "Free camera"
+          : "Cinematic camera";
+  };
 
-    // A soft shadow-receiving seabed gives the translucent water depth.
-    const seabed = new THREE.Mesh(new THREE.PlaneGeometry(70, 55), new THREE.MeshStandardMaterial({ color: 0x6ca79f, roughness: 1 }));
-    seabed.rotation.x = -Math.PI / 2;
-    seabed.position.y = -3.6;
-    seabed.position.z = 1;
-    seabed.receiveShadow = true;
-    scene.add(seabed);
+// -----------------------------------------------------------------------------
+// Animation
+// -----------------------------------------------------------------------------
 
-    let frame = 0;
-    function updateSea(t) {
-      const p = seaGeo.attributes.position.array;
-      const c = seaGeo.attributes.color.array;
-      for (let i = 0; i < seaGeo.attributes.position.count; i++) {
-        const x = seaBase[i * 3];
-        const z = seaBase[i * 3 + 2];
-        const y = seaHeight(x, z, t);
-        p[i * 3 + 1] = y;
-        const crest = smoothstep(-0.35, 0.80, y);
-        c[i * 3] = THREE.MathUtils.lerp(0.015, 0.22, crest);
-        c[i * 3 + 1] = THREE.MathUtils.lerp(0.37, 0.78, crest);
-        c[i * 3 + 2] = THREE.MathUtils.lerp(0.52, 0.86, crest);
-      }
-      seaGeo.attributes.position.needsUpdate = true;
-      seaGeo.attributes.color.needsUpdate = true;
-      if ((frame & 1) === 0) { seaGeo.computeVertexNormals(); seaGeo.attributes.normal.needsUpdate = true; }
-    }
+let last =
+  performance.now();
 
-    const clock = new THREE.Clock();
-    let simTime = 0;
-    function animate() {
-      requestAnimationFrame(animate);
-      const rawDt = Math.min(clock.getDelta(), 0.033);
-      const dt = settings.paused ? 0 : rawDt;
-      simTime += dt;
-      if (!settings.paused) {
-        updateSea(simTime);
-        updateCurl(simTime);
-        updateFoam(dt, simTime);
-        updateSpray(dt);
-        updateBoard(dt, simTime);
-        frame++;
-      }
-      controls.update();
-      renderer.render(scene, camera);
-    }
+let simTime = 0;
+let frame = 0;
 
-    const bindRange = (id, key, suffix = '×') => {
-      const el = document.getElementById(id), value = document.getElementById(id + 'Value');
-      el.addEventListener('input', () => { settings[key] = Number(el.value); value.textContent = Number(el.value).toFixed(2) + suffix; });
-    };
-    bindRange('power', 'power');
-    bindRange('speed', 'speed');
-    bindRange('barrel', 'barrel');
-    document.getElementById('foamToggle').addEventListener('change', e => settings.foam = e.target.checked);
-    document.getElementById('wireToggle').addEventListener('change', e => { sea.material.wireframe = e.target.checked; curl.material.wireframe = e.target.checked; });
-    document.getElementById('pause').addEventListener('click', e => { settings.paused = !settings.paused; e.target.textContent = settings.paused ? 'Resume' : 'Pause'; });
-    document.getElementById('camera').addEventListener('click', () => { camera.position.copy(homeCamera); controls.target.set(0, 1.8, 0.5); controls.update(); });
+function animate(now) {
+  requestAnimationFrame(
+    animate
+  );
 
-    addEventListener('resize', () => {
-      camera.aspect = innerWidth / innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
-      renderer.setSize(innerWidth, innerHeight);
-    });
+  const rawDt =
+    Math.min(
+      0.033,
+      (now - last) /
+      1000
+    );
 
-    updateSea(0); updateCurl(0); updateFoam(0, 0); updateSpray(0); updateBoard(0, 0);
-    animate();
-  </script>
+  last = now;
+
+  const dt =
+    paused
+      ? 0
+      : rawDt;
+
+  simTime += dt;
+  frame++;
+
+  const phys =
+    getPhysics();
+
+  updateReadout(phys);
+  updateOcean(simTime);
+  updateWave(simTime, phys);
+  updateFoamRibbon();
+  updateParticles(dt, phys);
+  updateBoard(dt, phys);
+
+  if (cinematic) {
+    const a =
+      simTime *
+      0.09;
+
+    camera.position.set(
+      12.5 +
+      2.2 *
+      Math.sin(a),
+
+      7 +
+      Math.sin(
+        a * 0.7
+      ),
+
+      17 *
+      Math.cos(
+        a * 0.22
+      )
+    );
+
+    camera.lookAt(
+      -0.4,
+      2,
+      boardZ * 0.18
+    );
+  } else {
+    controls.update();
+  }
+
+  renderer.render(
+    scene,
+    camera
+  );
+}
+
+updateReadout(
+  getPhysics()
+);
+
+updateWave(
+  0,
+  getPhysics()
+);
+
+updateFoamRibbon();
+
+requestAnimationFrame(
+  animate
+);
+
+addEventListener(
+  "resize",
+  () => {
+    camera.aspect =
+      innerWidth /
+      innerHeight;
+
+    camera
+      .updateProjectionMatrix();
+
+    renderer.setSize(
+      innerWidth,
+      innerHeight
+    );
+
+    renderer.setPixelRatio(
+      Math.min(
+        devicePixelRatio,
+        2
+      )
+    );
+  }
+);
+</script>
 </body>
 </html>
