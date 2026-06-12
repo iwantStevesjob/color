@@ -1,19 +1,1193 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>FLIP Reef Breaker</title><style>*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#071923;color:#eefbff;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}canvas{display:block;width:100%;height:100%;touch-action:none}#panel{position:fixed;z-index:10;left:10px;top:10px;width:min(390px,calc(100vw - 20px));padding:13px 14px;border:1px solid rgba(255,255,255,.14);border-radius:16px;background:rgba(2,24,34,.84);box-shadow:0 16px 45px rgba(0,0,0,.3);backdrop-filter:blur(13px)}h1{font-size:16px;letter-spacing:.08em;margin:0 0 3px}.desc{font-size:10.5px;line-height:1.38;color:#b8d6df;margin:0 0 9px}.row{display:grid;grid-template-columns:104px 1fr 52px;gap:8px;align-items:center;margin:6px 0;font-size:11px}.row output{text-align:right;color:#81e9ff;font-variant-numeric:tabular-nums}input[type=range]{width:100%;accent-color:#53d9ff}.stats{display:grid;grid-template-columns:1fr 1fr;gap:5px 12px;margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.11);font-size:10px;color:#aacbd4}.stats b{color:#fff}.buttons{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}button{border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(255,255,255,.08);color:#fff;padding:8px 10px;font:650 11px system-ui;cursor:pointer}button:active{transform:translateY(1px)}#badge{position:fixed;z-index:4;right:10px;bottom:10px;padding:7px 10px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(2,24,34,.72);font-size:10px;color:#b7d9e2}#status{color:#9af0b4}@media(max-width:600px){#panel{padding:10px}.row{grid-template-columns:92px 1fr 48px;margin:4px 0}.stats{display:none}#badge{display:none}.desc{font-size:9.5px}}</style><script type="importmap">
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Reconstructed FLIP Barrel — Reef Breaker</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#071923;color:#eefbff;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  #panel{position:fixed;z-index:10;left:10px;top:10px;width:min(372px,calc(100vw - 20px));padding:13px 14px;border:1px solid rgba(255,255,255,.14);border-radius:16px;background:rgba(2,24,34,.84);box-shadow:0 16px 45px rgba(0,0,0,.3);backdrop-filter:blur(13px)}
+  h1{font-size:16px;letter-spacing:.08em;margin:0 0 3px}
+  .desc{font-size:10.5px;line-height:1.38;color:#b8d6df;margin:0 0 9px}
+  .row{display:grid;grid-template-columns:104px 1fr 52px;gap:8px;align-items:center;margin:6px 0;font-size:11px}
+  .row output{text-align:right;color:#81e9ff;font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:#53d9ff}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:5px 12px;margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.11);font-size:10px;color:#aacbd4}
+  .stats b{color:#fff}
+  .buttons{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+  button{border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(255,255,255,.08);color:#fff;padding:8px 10px;font:650 11px system-ui;cursor:pointer}
+  button:active{transform:translateY(1px)}
+  #badge{position:fixed;z-index:4;right:10px;bottom:10px;padding:7px 10px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(2,24,34,.72);font-size:10px;color:#b7d9e2}
+  #status{color:#9af0b4}
+  @media(max-width:600px){#panel{padding:10px}.row{grid-template-columns:92px 1fr 48px;margin:4px 0}.stats{display:none}#badge{display:none}.desc{font-size:9.5px}}
+</style>
+<script type="importmap">
 {
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
   }
 }
-</script></head><body><div id="panel"><h1>FLIP REEF-BREAKER SIMULATION</h1><p class="desc">
-    Real 2D free-surface FLIP/PIC pressure simulation, extruded in depth for Three.js display.
-    The reef is a solid boundary in the solver. No prescribed crest or lip trajectory.
-  </p><div class="row"><label for="waveHeight">Initial wave</label><input id="waveHeight" type="range" min="1.55" max="2.55" step="0.05" value="2.25"><output id="waveHeightOut"></output></div><div class="row"><label for="reefHeight">Reef rise</label><input id="reefHeight" type="range" min="2.65" max="3.65" step="0.05" value="3.25"><output id="reefHeightOut"></output></div><div class="row"><label for="reefLength">Reef slope</label><input id="reefLength" type="range" min="4.0" max="7.5" step="0.1" value="5.0"><output id="reefLengthOut"></output></div><div class="row"><label for="flipRatio">PIC ↔ FLIP</label><input id="flipRatio" type="range" min="0.82" max="0.98" step="0.01" value="0.93"><output id="flipRatioOut"></output></div><div class="row"><label for="pressureIters">Pressure</label><input id="pressureIters" type="range" min="18" max="50" step="1" value="34"><output id="pressureItersOut"></output></div><div class="stats"><span>Particles <b id="particleStat">—</b></span><span>Grid <b id="gridStat">—</b></span><span>Sim time <b id="timeStat">—</b></span><span>Overhang <b id="overhangStat">forming</b></span><span>Max speed <b id="speedStat">—</b></span><span>State <b id="status">running</b></span></div><div class="buttons"><button id="pauseBtn">Pause</button><button id="resetBtn">Reset with settings</button><button id="viewBtn">Lock side view</button><button id="gridBtn">Show solver grid</button></div></div><div id="badge">Drag to orbit · pinch/scroll to zoom</div><script type="module">/*!
-Copyright 2022 Matthias Müller - Ten Minute Physics
-Adapted from 18-flip.html: https://github.com/matthias-research/pages/blob/master/tenMinutePhysics/18-flip.html
+</script>
+</head>
+<body>
+<div id="panel">
+  <h1>RECONSTRUCTED FLIP BARREL</h1>
+  <p class="desc">
+    The visible water is one smooth reconstructed liquid volume, not rendered particles.
+    Motion comes from a free-surface FLIP/PIC pressure solve; the reef is a solid boundary inside that solve.
+  </p>
+  <div class="row"><label for="waveHeight">Initial wave</label><input id="waveHeight" type="range" min="1.55" max="2.55" step="0.05" value="2.25"><output id="waveHeightOut"></output></div>
+  <div class="row"><label for="reefHeight">Reef rise</label><input id="reefHeight" type="range" min="2.65" max="3.65" step="0.05" value="3.25"><output id="reefHeightOut"></output></div>
+  <div class="row"><label for="reefLength">Reef slope</label><input id="reefLength" type="range" min="4.0" max="7.5" step="0.1" value="5.0"><output id="reefLengthOut"></output></div>
+  <div class="row"><label for="flipRatio">PIC ↔ FLIP</label><input id="flipRatio" type="range" min="0.82" max="0.98" step="0.01" value="0.93"><output id="flipRatioOut"></output></div>
+  <div class="row"><label for="pressureIters">Pressure</label><input id="pressureIters" type="range" min="18" max="50" step="1" value="34"><output id="pressureItersOut"></output></div>
+  <div class="stats">
+    <span>Particles <b id="particleStat">—</b></span>
+    <span>Grid <b id="gridStat">—</b></span>
+    <span>Sim time <b id="timeStat">—</b></span>
+    <span>Overhang <b id="overhangStat">forming</b></span>
+    <span>Max speed <b id="speedStat">—</b></span>
+    <span>State <b id="status">running</b></span>
+  </div>
+  <div class="buttons">
+    <button id="pauseBtn">Pause</button>
+    <button id="resetBtn">Reset with settings</button>
+    <button id="viewBtn">Side physics view</button>
+    <button id="gridBtn">Show solver grid</button>
+    <button id="loopBtn">Loop: on</button>
+  </div>
+</div>
+<div id="badge">Drag to orbit · pinch/scroll to zoom</div>
+
+<script type="module">
+/*
+Core FLIP/PIC transfer and pressure-projection structure adapted from:
+Copyright 2022 Matthias Müller — Ten Minute Physics
+https://github.com/matthias-research/pages/blob/master/tenMinutePhysics/18-flip.html
+
 MIT License
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 */
-import*as THREE from"three";import{OrbitControls}from"three/addons/controls/OrbitControls.js";const G=9.81,FLUID=0,AIR=1,SOLID=2,clamp=THREE.MathUtils.clamp,lerp=THREE.MathUtils.lerp,smoothstep=(e,t,i)=>{const r=clamp((i-e)/(t-e),0,1);return r*r*(3-2*r)},sech2=e=>{const t=Math.cosh(e);return 1/(t*t)},ui={waveHeight:document.querySelector("#waveHeight"),reefHeight:document.querySelector("#reefHeight"),reefLength:document.querySelector("#reefLength"),flipRatio:document.querySelector("#flipRatio"),pressureIters:document.querySelector("#pressureIters")},outputs={waveHeight:document.querySelector("#waveHeightOut"),reefHeight:document.querySelector("#reefHeightOut"),reefLength:document.querySelector("#reefLengthOut"),flipRatio:document.querySelector("#flipRatioOut"),pressureIters:document.querySelector("#pressureItersOut")};function updateReadouts(){outputs.waveHeight.textContent=(+ui.waveHeight.value).toFixed(2)+" m",outputs.reefHeight.textContent=(+ui.reefHeight.value).toFixed(2)+" m",outputs.reefLength.textContent=(+ui.reefLength.value).toFixed(1)+" m",outputs.flipRatio.textContent=(+ui.flipRatio.value).toFixed(2),outputs.pressureIters.textContent=ui.pressureIters.value}Object.values(ui).forEach(e=>e.addEventListener("input",updateReadouts)),updateReadouts();class FlipFluid{constructor(e,t,i,r,s,o,l){this.width=e,this.height=t,this.fNumX=Math.floor(e/i)+1,this.fNumY=Math.floor(t/i)+1,this.h=Math.max(e/this.fNumX,t/this.fNumY),this.inv=1/this.h,this.n=this.fNumY,this.numCells=this.fNumX*this.fNumY,this.u=new Float32Array(this.numCells),this.v=new Float32Array(this.numCells),this.du=new Float32Array(this.numCells),this.dv=new Float32Array(this.numCells),this.prevU=new Float32Array(this.numCells),this.prevV=new Float32Array(this.numCells),this.pressure=new Float32Array(this.numCells),this.solidMask=new Float32Array(this.numCells),this.cellType=new Int8Array(this.numCells),this.particleDensity=new Float32Array(this.numCells),this.particleRestDensity=0,this.maxParticles=s,this.particlePos=new Float32Array(2*s),this.particleVel=new Float32Array(2*s),this.numParticles=0,this.particleRadius=r,this.pInvSpacing=1/(2.2*r),this.pNumX=Math.floor(e*this.pInvSpacing)+1,this.pNumY=Math.floor(t*this.pInvSpacing)+1,this.pNumCells=this.pNumX*this.pNumY,this.numCellParticles=new Int32Array(this.pNumCells),this.firstCellParticle=new Int32Array(this.pNumCells+1),this.cellParticleIds=new Int32Array(s),this.bedFn=o,this.bedSlopeFn=l}setupSolidMask(){const e=this.n;for(let t=0;t<this.fNumX;t++){const i=t*this.h,r=this.bedFn(i);for(let i=0;i<this.fNumY;i++){const s=i*this.h,o=0===t||t===this.fNumX-1||0===i||s<r+.5*this.h;this.solidMask[t*e+i]=o?0:1}}}integrateParticles(e){for(let t=0;t<this.numParticles;t++)this.particleVel[2*t+1]-=G*e,this.particlePos[2*t]+=this.particleVel[2*t]*e,this.particlePos[2*t+1]+=this.particleVel[2*t+1]*e}buildParticleHash(){this.numCellParticles.fill(0);for(let e=0;e<this.numParticles;e++){const t=clamp(Math.floor(this.particlePos[2*e]*this.pInvSpacing),0,this.pNumX-1),i=clamp(Math.floor(this.particlePos[2*e+1]*this.pInvSpacing),0,this.pNumY-1);this.numCellParticles[t*this.pNumY+i]++}let e=0;for(let t=0;t<this.pNumCells;t++)e+=this.numCellParticles[t],this.firstCellParticle[t]=e;this.firstCellParticle[this.pNumCells]=e;for(let e=0;e<this.numParticles;e++){const t=clamp(Math.floor(this.particlePos[2*e]*this.pInvSpacing),0,this.pNumX-1),i=clamp(Math.floor(this.particlePos[2*e+1]*this.pInvSpacing),0,this.pNumY-1),r=t*this.pNumY+i;this.firstCellParticle[r]--,this.cellParticleIds[this.firstCellParticle[r]]=e}}pushParticlesApart(e){this.buildParticleHash();const t=2*this.particleRadius,i=t*t;for(let r=0;r<e;r++)for(let e=0;e<this.numParticles;e++){let r=this.particlePos[2*e],s=this.particlePos[2*e+1];const o=Math.floor(r*this.pInvSpacing),l=Math.floor(s*this.pInvSpacing),a=Math.max(o-1,0),n=Math.max(l-1,0),c=Math.min(o+1,this.pNumX-1),h=Math.min(l+1,this.pNumY-1);for(let o=a;o<=c;o++)for(let l=n;l<=h;l++){const a=o*this.pNumY+l,n=this.firstCellParticle[a],c=this.firstCellParticle[a+1];for(let o=n;o<c;o++){const l=this.cellParticleIds[o];if(l<=e)continue;let a=this.particlePos[2*l]-r,n=this.particlePos[2*l+1]-s;const c=a*a+n*n;if(0===c||c>=i)continue;const h=Math.sqrt(c),u=.5*(t-h)/h;a*=u,n*=u,this.particlePos[2*e]-=a,this.particlePos[2*e+1]-=n,this.particlePos[2*l]+=a,this.particlePos[2*l+1]+=n,r=this.particlePos[2*e],s=this.particlePos[2*e+1]}}}}handleParticleCollisions(){const e=this.particleRadius,t=this.h+e;for(let i=0;i<this.numParticles;i++){let r=this.particlePos[2*i],s=this.particlePos[2*i+1],o=this.particleVel[2*i],l=this.particleVel[2*i+1];r<t&&(r=t,o<0&&(o=0)),r>this.width-t&&(r=this.width-t,o>0&&(o=0)),s>this.height-t&&(s=this.height-t,l>0&&(l=0));const a=this.bedFn(r)+e;if(s<a){let e=-this.bedSlopeFn(r),t=1;const i=Math.hypot(e,t)||1;e/=i,t/=i,s=a;const n=o*e+l*t;n<0&&(o-=n*e,l-=n*t);const c=-e,h=o*t+l*c;o-=.035*h*t,l-=.035*h*c}this.particlePos[2*i]=r,this.particlePos[2*i+1]=s,this.particleVel[2*i]=o,this.particleVel[2*i+1]=l}}updateParticleDensity(){const e=this.n,t=this.h,i=this.inv,r=.5*t,s=this.particleDensity;s.fill(0);for(let o=0;o<this.numParticles;o++){const l=clamp(this.particlePos[2*o],t,(this.fNumX-1)*t),a=clamp(this.particlePos[2*o+1],t,(this.fNumY-1)*t),n=clamp(Math.floor((l-r)*i),0,this.fNumX-2),c=clamp(Math.floor((a-r)*i),0,this.fNumY-2),h=n+1,u=c+1,d=(l-r-n*t)*i,p=(a-r-c*t)*i,m=1-d,f=1-p;s[n*e+c]+=m*f,s[h*e+c]+=d*f,s[h*e+u]+=d*p,s[n*e+u]+=m*p}if(0===this.particleRestDensity){let e=0,t=0;for(let i=0;i<this.numCells;i++)0===this.cellType[i]&&(e+=s[i],t++);t&&(this.particleRestDensity=e/t)}}transferVelocities(e,t=.93){const i=this.n,r=this.h,s=this.inv,o=.5*r;if(e){this.prevU.set(this.u),this.prevV.set(this.v),this.du.fill(0),this.dv.fill(0),this.u.fill(0),this.v.fill(0);for(let e=0;e<this.numCells;e++)this.cellType[e]=0===this.solidMask[e]?2:1;for(let e=0;e<this.numParticles;e++){const t=clamp(Math.floor(this.particlePos[2*e]*s),0,this.fNumX-1)*i+clamp(Math.floor(this.particlePos[2*e+1]*s),0,this.fNumY-1);1===this.cellType[t]&&(this.cellType[t]=0)}}for(let l=0;l<2;l++){const a=0===l?0:o,n=0===l?o:0,c=0===l?this.u:this.v,h=0===l?this.prevU:this.prevV,u=0===l?this.du:this.dv;for(let o=0;o<this.numParticles;o++){const d=clamp(this.particlePos[2*o],r,(this.fNumX-1)*r),p=clamp(this.particlePos[2*o+1],r,(this.fNumY-1)*r),m=clamp(Math.floor((d-a)*s),0,this.fNumX-2),f=clamp(Math.floor((p-n)*s),0,this.fNumY-2),E=m+1,w=f+1,P=(d-a-m*r)*s,y=(p-n-f*r)*s,g=1-P,T=1-y,R=g*T,v=P*T,S=P*y,M=g*y,H=m*i+f,A=E*i+f,C=E*i+w,b=m*i+w;if(e){const e=this.particleVel[2*o+l];c[H]+=e*R,u[H]+=R,c[A]+=e*v,u[A]+=v,c[C]+=e*S,u[C]+=S,c[b]+=e*M,u[b]+=M}else{const e=0===l?i:1,r=[H,A,C,b],s=[R,v,S,M];let a=0,n=0,u=0;for(let t=0;t<4;t++){const i=r[t];(1!==this.cellType[i]||i-e>=0&&1!==this.cellType[i-e])&&(a+=s[t],n+=s[t]*c[i],u+=s[t]*(c[i]-h[i]))}if(a>0){n/=a,u/=a;const e=this.particleVel[2*o+l]+u;this.particleVel[2*o+l]=(1-t)*n+t*e}}}if(e){for(let e=0;e<c.length;e++)u[e]>0&&(c[e]/=u[e]);for(let e=0;e<this.fNumX;e++)for(let t=0;t<this.fNumY;t++){const r=e*i+t,s=2===this.cellType[r];(s||e>0&&2===this.cellType[(e-1)*i+t])&&(this.u[r]=0),(s||t>0&&2===this.cellType[e*i+t-1])&&(this.v[r]=0)}}}}solveIncompressibility(e,t,i=1.85){this.pressure.fill(0),this.prevU.set(this.u),this.prevV.set(this.v);const r=this.n,s=1e3*this.h/t;for(let t=0;t<e;t++)for(let e=1;e<this.fNumX-1;e++)for(let t=1;t<this.fNumY-1;t++){const o=e*r+t;if(0!==this.cellType[o])continue;const l=(e-1)*r+t,a=(e+1)*r+t,n=e*r+t-1,c=e*r+t+1,h=this.solidMask[l],u=this.solidMask[a],d=this.solidMask[n],p=this.solidMask[c],m=h+u+d+p;if(0===m)continue;let f=this.u[a]-this.u[o]+this.v[c]-this.v[o];if(this.particleRestDensity>0){const e=this.particleDensity[o]-this.particleRestDensity;e>0&&(f-=.7*e)}const E=-f/m*i;this.pressure[o]+=s*E,this.u[o]-=h*E,this.u[a]+=u*E,this.v[o]-=d*E,this.v[c]+=p*E}}step(e,t,i,r=!0){this.integrateParticles(e),r&&this.pushParticlesApart(1),this.handleParticleCollisions(),this.transferVelocities(!0),this.updateParticleDensity(),this.solveIncompressibility(i,e,1.85),this.transferVelocities(!1,t),this.handleParticleCollisions()}}const DOMAIN_W=26,DOMAIN_H=9,MEAN_LEVEL=5.15,DEEP_FLOOR=.45,REEF_START=10;let fluid=null,simTime=0,accumulator=0,paused=!1,sideView=!1,showGrid=!1;function currentBed(e){const t=+ui.reefHeight.value,i=+ui.reefLength.value;if(e<10)return.45;if(e<10+i){let r=(e-10)/i;return r=r*r*(3-2*r),.45+t*r}return.45+t+.06*Math.sin(.7*(e-10-i))}function currentBedSlope(e){const t=.02;return(currentBed(e+t)-currentBed(e-t))/(2*t)}function createSimulation(){const e=.24,t=.075;fluid=new FlipFluid(26,9,e,t,2e4,currentBed,currentBedSlope),fluid.setupSolidMask();const i=+ui.waveHeight.value,r=1.18,s=Math.sqrt(G*(4.7+i)),o=.5*Math.sqrt(3)*.15;let l=0;for(let e=.7649999999999999;e<25.685000000000002;e+=.15){const a=5.15+i*sech2((e-7.8)/r),n=currentBed(e);let c=0;for(let h=n+t;h<a-t&&!(l>=fluid.maxParticles);h+=o,c++){const o=e+(c%2?t:0);if(o>25.685000000000002)continue;fluid.particlePos[2*l]=o,fluid.particlePos[2*l+1]=h;const a=(e-7.8)/r,u=i*sech2(a),d=-2*i*sech2(a)*Math.tanh(a)/r,p=Math.max(.2,5.15-n+u),m=clamp((h-n)/p,0,1),f=s*u/p;fluid.particleVel[2*l]=f*(.78+2.35*m*m),fluid.particleVel[2*l+1]=-s*(h-n)/p*d*.78,l++}}fluid.numParticles=l,simTime=0,accumulator=0,boardZ=-3.4,boardYVelocity=0,board.position.set(simToWorldX(5.6),simToWorldY(5.15+.2),boardZ),updateSeafloorGeometry(),rebuildGridLines(),updateParticleGeometry(!0),document.querySelector("#particleStat").textContent=l.toLocaleString(),document.querySelector("#gridStat").textContent=fluid.fNumX+" × "+fluid.fNumY}const renderer=new THREE.WebGLRenderer({antialias:!0,powerPreference:"high-performance"});renderer.setPixelRatio(Math.min(devicePixelRatio,1.75)),renderer.setSize(innerWidth,innerHeight),renderer.outputColorSpace=THREE.SRGBColorSpace,renderer.toneMapping=THREE.ACESFilmicToneMapping,renderer.toneMappingExposure=1.08,renderer.shadowMap.enabled=!0,renderer.shadowMap.type=THREE.PCFSoftShadowMap,document.body.appendChild(renderer.domElement);const scene=new THREE.Scene;scene.background=new THREE.Color(7719388),scene.fog=new THREE.FogExp2(7719388,.022);const camera=new THREE.PerspectiveCamera(47,innerWidth/innerHeight,.1,150);camera.position.set(0,6,17.5);const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=!0,controls.dampingFactor=.06,controls.target.set(-.3,4.25,0),controls.minDistance=7,controls.maxDistance=42,controls.maxPolarAngle=.54*Math.PI,controls.update(),scene.add(new THREE.HemisphereLight(14219519,1522502,2.4));const sun=new THREE.DirectionalLight(16773845,4.1);sun.position.set(-8,15,10),sun.castShadow=!0,sun.shadow.mapSize.set(2048,2048),sun.shadow.camera.left=-24,sun.shadow.camera.right=24,sun.shadow.camera.top=18,sun.shadow.camera.bottom=-10,scene.add(sun);const rim=new THREE.DirectionalLight(7069183,1.25);rim.position.set(12,6,-12),scene.add(rim);const sky=new THREE.Mesh(new THREE.SphereGeometry(90,32,16),new THREE.ShaderMaterial({side:THREE.BackSide,uniforms:{top:{value:new THREE.Color(744576)},bottom:{value:new THREE.Color(12185329)}},vertexShader:"varying vec3 p;void main(){p=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}",fragmentShader:"uniform vec3 top;uniform vec3 bottom;varying vec3 p;void main(){float h=clamp(normalize(p).y*.5+.5,0.,1.);gl_FragColor=vec4(mix(bottom,top,pow(h,.74)),1.);}"}));scene.add(sky);const WORLD_X_OFFSET=-13,WORLD_Y_OFFSET=-.15,WATER_HALF_SPAN=4.4,simToWorldX=e=>e+-13,simToWorldY=e=>e+-.15;let seafloorMesh=null;function makeSeafloorGeometry(){const e=180,t=[],i=[];for(let i=0;i<=e;i++){const r=26*i/e,s=simToWorldX(r),o=simToWorldY(currentBed(r));t.push(s,o,-6.4,s,o,6.4)}for(let t=0;t<e;t++){const e=2*t,r=e+1,s=e+2,o=e+3;i.push(e,s,r,r,s,o)}const r=t.length/3;for(let i=0;i<=e;i++){const r=simToWorldX(26*i/e);t.push(r,-4.5,-6.4,r,-4.5,6.4)}for(let t=0;t<e;t++){const e=2*t,s=e+1,o=e+2,l=e+3,a=r+2*t,n=a+1,c=a+2,h=a+3;i.push(e,a,o,o,a,c,s,l,n,l,h,n)}const s=new THREE.BufferGeometry;return s.setAttribute("position",new THREE.Float32BufferAttribute(t,3)),s.setIndex(i),s.computeVertexNormals(),s}function updateSeafloorGeometry(){seafloorMesh&&(scene.remove(seafloorMesh),seafloorMesh.geometry.dispose()),seafloorMesh=new THREE.Mesh(makeSeafloorGeometry(),new THREE.MeshStandardMaterial({color:7173735,roughness:1,metalness:0,flatShading:!1})),seafloorMesh.receiveShadow=!0,scene.add(seafloorMesh)}const DEPTH_LAYERS=7,MAX_RENDER_PARTICLES=2e4*DEPTH_LAYERS,waterPositions=new Float32Array(3*MAX_RENDER_PARTICLES),waterColors=new Float32Array(3*MAX_RENDER_PARTICLES),waterSizes=new Float32Array(MAX_RENDER_PARTICLES),waterGeometry=new THREE.BufferGeometry;waterGeometry.setAttribute("position",new THREE.BufferAttribute(waterPositions,3).setUsage(THREE.DynamicDrawUsage)),waterGeometry.setAttribute("color",new THREE.BufferAttribute(waterColors,3).setUsage(THREE.DynamicDrawUsage)),waterGeometry.setAttribute("size",new THREE.BufferAttribute(waterSizes,1).setUsage(THREE.DynamicDrawUsage));const waterMaterial=new THREE.ShaderMaterial({transparent:!0,depthWrite:!0,vertexColors:!0,uniforms:{pixelRatio:{value:renderer.getPixelRatio()}},vertexShader:"\n    attribute float size;\n    varying vec3 vColor;\n    void main(){\n      vColor=color;\n      vec4 mv=modelViewMatrix*vec4(position,1.0);\n      gl_PointSize=size*(240.0/max(1.0,-mv.z));\n      gl_Position=projectionMatrix*mv;\n    }\n  ",fragmentShader:"\n    varying vec3 vColor;\n    void main(){\n      vec2 q=gl_PointCoord-.5;\n      float r2=dot(q,q);\n      if(r2>.25) discard;\n      float edge=smoothstep(.25,.16,r2);\n      float light=.84+.22*sqrt(max(0.,.25-r2));\n      gl_FragColor=vec4(vColor*light,edge);\n    }\n  "}),waterPoints=new THREE.Points(waterGeometry,waterMaterial);waterPoints.frustumCulled=!1,waterPoints.renderOrder=2,scene.add(waterPoints);const deepBlue=new THREE.Color(482680),midBlue=new THREE.Color(495269),brightBlue=new THREE.Color(2604490),foamWhite=new THREE.Color(15400959),colorTmp=new THREE.Color;function particleRelativeDensity(e){const t=clamp(Math.floor(fluid.particlePos[2*e]*fluid.inv),0,fluid.fNumX-1),i=clamp(Math.floor(fluid.particlePos[2*e+1]*fluid.inv),0,fluid.fNumY-1),r=fluid.particleDensity[t*fluid.n+i];return fluid.particleRestDensity>0?r/fluid.particleRestDensity:1}let renderParticleCount=0;function updateParticleGeometry(e=!1){if(!fluid)return;const t=fluid.numParticles;let i=0,r=0;for(let e=0;e<DEPTH_LAYERS;e++){const s=1===DEPTH_LAYERS?0:e/(DEPTH_LAYERS-1),o=lerp(-WATER_HALF_SPAN,WATER_HALF_SPAN,s),l=1-.18*Math.abs(2*s-1);for(let s=0;s<t;s++){const t=fluid.particlePos[2*s],a=fluid.particlePos[2*s+1],n=fluid.particleVel[2*s],c=fluid.particleVel[2*s+1],h=Math.hypot(n,c);r=Math.max(r,h);const u=particleRelativeDensity(s),d=clamp((.92-u)/.32,0,1),p=clamp((h-3.5)/4.5,0,1)*clamp((2.3-c)/4.2,0,1),m=clamp(.7*d+.65*p,0,1),f=clamp((a-currentBed(t))/(5.15-currentBed(t)+2.2),0,1);colorTmp.copy(deepBlue).lerp(midBlue,f).lerp(brightBlue,.7*d).lerp(foamWhite,m);const E=3*i;waterPositions[E]=simToWorldX(t)+.025*Math.sin(1.73*s+2.2*e),waterPositions[E+1]=simToWorldY(a),waterPositions[E+2]=o+.035*Math.sin(2.31*s+e),waterColors[E]=colorTmp.r*l,waterColors[E+1]=colorTmp.g*l,waterColors[E+2]=colorTmp.b*l,waterSizes[i]=m>.45?1.05:.82,i++}}renderParticleCount=i,waterGeometry.setDrawRange(0,i),waterGeometry.attributes.position.needsUpdate=!0,waterGeometry.attributes.color.needsUpdate=!0,waterGeometry.attributes.size.needsUpdate=!0,document.querySelector("#speedStat").textContent=r.toFixed(1)+" m/s"}let gridLines=null;function rebuildGridLines(){if(gridLines&&(scene.remove(gridLines),gridLines.geometry.dispose()),!fluid)return;const e=[];for(let t=0;t<fluid.fNumX;t+=3){const i=simToWorldX(t*fluid.h);e.push(i,simToWorldY(0),WATER_HALF_SPAN+.12,i,simToWorldY(9),WATER_HALF_SPAN+.12)}for(let t=0;t<fluid.fNumY;t+=3){const i=simToWorldY(t*fluid.h);e.push(simToWorldX(0),i,WATER_HALF_SPAN+.12,simToWorldX(26),i,WATER_HALF_SPAN+.12)}const t=new THREE.BufferGeometry;t.setAttribute("position",new THREE.Float32BufferAttribute(e,3)),gridLines=new THREE.LineSegments(t,new THREE.LineBasicMaterial({color:12382207,transparent:!0,opacity:.17,depthWrite:!1})),gridLines.visible=showGrid,scene.add(gridLines)}function createBoard(){const e=new THREE.Group,t=16,i=[],r=[];for(let e=0;e<2;e++){const r=e?.055:-.055;for(let e=0;e<t;e++){const s=2*Math.PI*e/t,o=2.6*Math.cos(s)/2,l=Math.pow(Math.max(0,1-Math.pow(Math.abs(o)/1.3,1.7)),.34),a=.6*Math.sin(s)/2*l,n=.11*Math.pow(Math.abs(o)/1.3,2.5);i.push(a,r+n,o)}}const s=i.length/3;i.push(0,.07,0);const o=i.length/3;i.push(0,-.055,0);for(let e=0;e<t;e++){const i=(e+1)%t;r.push(s,t+e,t+i,o,i,e,e,i,t+e,i,t+i,t+e)}const l=new THREE.BufferGeometry;l.setAttribute("position",new THREE.Float32BufferAttribute(i,3)),l.setIndex(r),l.computeVertexNormals();const a=new THREE.Mesh(l,new THREE.MeshStandardMaterial({color:15781716,roughness:.55,flatShading:!0}));a.castShadow=!0,e.add(a);const n=new THREE.Mesh(new THREE.BoxGeometry(.07,.022,1.08),new THREE.MeshStandardMaterial({color:1461599,roughness:.7}));return n.position.y=.08,e.add(n),e}const board=createBoard();scene.add(board);let boardZ=-3.4,boardYVelocity=0;function surfaceSampleAt(e){let t=currentBed(e),i=0,r=0,s=0;for(let o=0;o<fluid.numParticles;o++){const l=fluid.particlePos[2*o];if(Math.abs(l-e)>.32)continue;const a=fluid.particlePos[2*o+1];a>t&&(t=a),a>t-.7&&(i+=fluid.particleVel[2*o],r+=fluid.particleVel[2*o+1],s++)}return{y:t,vx:s?i/s:0,vy:s?r/s:0}}function findCrest(){let e=7,t=-1/0;for(let i=0;i<fluid.numParticles;i++){const r=fluid.particlePos[2*i+1];r>t&&(t=r,e=fluid.particlePos[2*i])}return{x:e,y:t}}function updateBoard(e){const t=findCrest(),i=clamp(t.x-2.2,2,24),r=surfaceSampleAt(i),s=r.y+.17;boardYVelocity+=18*(s-(board.position.y- -.15))*e,boardYVelocity*=Math.exp(-5*e);const o=board.position.y- -.15+boardYVelocity*e;boardZ+=(-.6-.12*clamp(r.vx,0,8))*e,boardZ<.5-WATER_HALF_SPAN&&(boardZ=WATER_HALF_SPAN-.5),board.position.set(simToWorldX(i),simToWorldY(o),boardZ);const l=.18,a=surfaceSampleAt(clamp(i-l,0,26)).y,n=(surfaceSampleAt(clamp(i+l,0,26)).y-a)/(2*l);board.rotation.order="YXZ",board.rotation.x=.04*Math.sin(4*simTime),board.rotation.y=.05,board.rotation.z=.65*Math.atan(n)}function detectOverhang(){const e=Array.from({length:120},()=>[]);for(let t=0;t<fluid.numParticles;t++){const i=fluid.particlePos[2*t];e[clamp(Math.floor(i/26*120),0,119)].push(fluid.particlePos[2*t+1])}let t=0;for(const i of e)if(!(i.length<6)){i.sort((e,t)=>e-t);for(let e=1;e<i.length;e++)t=Math.max(t,i[e]-i[e-1])}return t>.32}document.querySelector("#pauseBtn").onclick=()=>{paused=!paused,document.querySelector("#pauseBtn").textContent=paused?"Resume":"Pause",document.querySelector("#status").textContent=paused?"paused":"running"},document.querySelector("#resetBtn").onclick=()=>createSimulation(),document.querySelector("#viewBtn").onclick=()=>{sideView=!sideView,controls.enabled=!sideView,document.querySelector("#viewBtn").textContent=sideView?"Free 3D view":"Lock side view"},document.querySelector("#gridBtn").onclick=()=>{showGrid=!showGrid,gridLines&&(gridLines.visible=showGrid),document.querySelector("#gridBtn").textContent=showGrid?"Hide solver grid":"Show solver grid"},createSimulation();let last=performance.now(),frame=0;const FIXED_DT=1/90;function animate(e){requestAnimationFrame(animate);const t=Math.min(.05,(e-last)/1e3);if(last=e,!paused){accumulator+=t;let e=0;for(;accumulator>=FIXED_DT&&e<3;)fluid.step(FIXED_DT,+ui.flipRatio.value,+ui.pressureIters.value,!0),simTime+=FIXED_DT,accumulator-=FIXED_DT,e++;updateBoard(t)}if(frame++,1&frame||updateParticleGeometry(),frame%12==0){document.querySelector("#timeStat").textContent=simTime.toFixed(2)+" s";const e=detectOverhang(),t=document.querySelector("#overhangStat");t.textContent=e?"detected":"forming",t.style.color=e?"#8effaa":"#ffe38a"}sideView?(camera.position.lerp(new THREE.Vector3(0,5.8,17.5),.08),controls.target.lerp(new THREE.Vector3(-.3,4.4,0),.08),camera.lookAt(controls.target)):controls.update(),renderer.render(scene,camera)}requestAnimationFrame(animate),addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight,camera.updateProjectionMatrix(),renderer.setSize(innerWidth,innerHeight),renderer.setPixelRatio(Math.min(devicePixelRatio,1.75))});</script></body></html>
+
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+const G = 9.81;
+const FLUID = 0;
+const AIR = 1;
+const SOLID = 2;
+const clamp = THREE.MathUtils.clamp;
+const lerp = THREE.MathUtils.lerp;
+const smoothstep = (a,b,x) => { const t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); };
+const sech2 = x => { const c=Math.cosh(x); return 1/(c*c); };
+
+const ui = {
+  waveHeight: document.querySelector("#waveHeight"),
+  reefHeight: document.querySelector("#reefHeight"),
+  reefLength: document.querySelector("#reefLength"),
+  flipRatio: document.querySelector("#flipRatio"),
+  pressureIters: document.querySelector("#pressureIters")
+};
+// Browsers sometimes restore old range values on reload. Start from the tested barrel preset.
+ui.waveHeight.value="2.25";
+ui.reefHeight.value="3.25";
+ui.reefLength.value="5.0";
+ui.flipRatio.value="0.93";
+ui.pressureIters.value="34";
+
+const outputs = {
+  waveHeight: document.querySelector("#waveHeightOut"),
+  reefHeight: document.querySelector("#reefHeightOut"),
+  reefLength: document.querySelector("#reefLengthOut"),
+  flipRatio: document.querySelector("#flipRatioOut"),
+  pressureIters: document.querySelector("#pressureItersOut")
+};
+function updateReadouts(){
+  outputs.waveHeight.textContent=(+ui.waveHeight.value).toFixed(2)+" m";
+  outputs.reefHeight.textContent=(+ui.reefHeight.value).toFixed(2)+" m";
+  outputs.reefLength.textContent=(+ui.reefLength.value).toFixed(1)+" m";
+  outputs.flipRatio.textContent=(+ui.flipRatio.value).toFixed(2);
+  outputs.pressureIters.textContent=ui.pressureIters.value;
+}
+Object.values(ui).forEach(el=>el.addEventListener("input",updateReadouts));
+updateReadouts();
+
+// -----------------------------------------------------------------------------
+// FLIP/PIC free-surface solver
+// -----------------------------------------------------------------------------
+class FlipFluid {
+  constructor(width,height,spacing,particleRadius,maxParticles,bedFn,bedSlopeFn){
+    this.width=width;
+    this.height=height;
+    this.fNumX=Math.floor(width/spacing)+1;
+    this.fNumY=Math.floor(height/spacing)+1;
+    this.h=Math.max(width/this.fNumX,height/this.fNumY);
+    this.inv=1/this.h;
+    this.n=this.fNumY;
+    this.numCells=this.fNumX*this.fNumY;
+
+    this.u=new Float32Array(this.numCells);
+    this.v=new Float32Array(this.numCells);
+    this.du=new Float32Array(this.numCells);
+    this.dv=new Float32Array(this.numCells);
+    this.prevU=new Float32Array(this.numCells);
+    this.prevV=new Float32Array(this.numCells);
+    this.pressure=new Float32Array(this.numCells);
+    this.solidMask=new Float32Array(this.numCells);
+    this.cellType=new Int8Array(this.numCells);
+    this.particleDensity=new Float32Array(this.numCells);
+    this.particleRestDensity=0;
+
+    this.maxParticles=maxParticles;
+    this.particlePos=new Float32Array(maxParticles*2);
+    this.particleVel=new Float32Array(maxParticles*2);
+    this.numParticles=0;
+    this.particleRadius=particleRadius;
+
+    this.pInvSpacing=1/(2.2*particleRadius);
+    this.pNumX=Math.floor(width*this.pInvSpacing)+1;
+    this.pNumY=Math.floor(height*this.pInvSpacing)+1;
+    this.pNumCells=this.pNumX*this.pNumY;
+    this.numCellParticles=new Int32Array(this.pNumCells);
+    this.firstCellParticle=new Int32Array(this.pNumCells+1);
+    this.cellParticleIds=new Int32Array(maxParticles);
+
+    this.bedFn=bedFn;
+    this.bedSlopeFn=bedSlopeFn;
+  }
+
+  setupSolidMask(){
+    const n=this.n;
+    for(let i=0;i<this.fNumX;i++){
+      const x=i*this.h;
+      const bed=this.bedFn(x);
+      for(let j=0;j<this.fNumY;j++){
+        const y=j*this.h;
+        const isSolid=i===0 || i===this.fNumX-1 || j===0 || y<bed+0.5*this.h;
+        this.solidMask[i*n+j]=isSolid?0:1;
+      }
+    }
+  }
+
+  integrateParticles(dt){
+    for(let i=0;i<this.numParticles;i++){
+      this.particleVel[2*i+1]-=G*dt;
+      this.particlePos[2*i]+=this.particleVel[2*i]*dt;
+      this.particlePos[2*i+1]+=this.particleVel[2*i+1]*dt;
+    }
+  }
+
+  buildParticleHash(){
+    this.numCellParticles.fill(0);
+    for(let i=0;i<this.numParticles;i++){
+      const x=clamp(Math.floor(this.particlePos[2*i]*this.pInvSpacing),0,this.pNumX-1);
+      const y=clamp(Math.floor(this.particlePos[2*i+1]*this.pInvSpacing),0,this.pNumY-1);
+      this.numCellParticles[x*this.pNumY+y]++;
+    }
+    let first=0;
+    for(let c=0;c<this.pNumCells;c++){
+      first+=this.numCellParticles[c];
+      this.firstCellParticle[c]=first;
+    }
+    this.firstCellParticle[this.pNumCells]=first;
+    for(let i=0;i<this.numParticles;i++){
+      const x=clamp(Math.floor(this.particlePos[2*i]*this.pInvSpacing),0,this.pNumX-1);
+      const y=clamp(Math.floor(this.particlePos[2*i+1]*this.pInvSpacing),0,this.pNumY-1);
+      const cell=x*this.pNumY+y;
+      this.firstCellParticle[cell]--;
+      this.cellParticleIds[this.firstCellParticle[cell]]=i;
+    }
+  }
+
+  pushParticlesApart(iterations){
+    this.buildParticleHash();
+    const minDist=2*this.particleRadius;
+    const minDist2=minDist*minDist;
+    for(let iteration=0;iteration<iterations;iteration++){
+      for(let i=0;i<this.numParticles;i++){
+        let px=this.particlePos[2*i];
+        let py=this.particlePos[2*i+1];
+        const pxi=Math.floor(px*this.pInvSpacing);
+        const pyi=Math.floor(py*this.pInvSpacing);
+        const x0=Math.max(pxi-1,0);
+        const y0=Math.max(pyi-1,0);
+        const x1=Math.min(pxi+1,this.pNumX-1);
+        const y1=Math.min(pyi+1,this.pNumY-1);
+        for(let xi=x0;xi<=x1;xi++){
+          for(let yi=y0;yi<=y1;yi++){
+            const cell=xi*this.pNumY+yi;
+            const first=this.firstCellParticle[cell];
+            const last=this.firstCellParticle[cell+1];
+            for(let q=first;q<last;q++){
+              const j=this.cellParticleIds[q];
+              if(j<=i) continue;
+              let dx=this.particlePos[2*j]-px;
+              let dy=this.particlePos[2*j+1]-py;
+              const d2=dx*dx+dy*dy;
+              if(d2===0 || d2>=minDist2) continue;
+              const d=Math.sqrt(d2);
+              const s=0.5*(minDist-d)/d;
+              dx*=s;
+              dy*=s;
+              this.particlePos[2*i]-=dx;
+              this.particlePos[2*i+1]-=dy;
+              this.particlePos[2*j]+=dx;
+              this.particlePos[2*j+1]+=dy;
+              px=this.particlePos[2*i];
+              py=this.particlePos[2*i+1];
+            }
+          }
+        }
+      }
+    }
+  }
+
+  handleParticleCollisions(){
+    const r=this.particleRadius;
+    const margin=this.h+r;
+    for(let i=0;i<this.numParticles;i++){
+      let x=this.particlePos[2*i];
+      let y=this.particlePos[2*i+1];
+      let vx=this.particleVel[2*i];
+      let vy=this.particleVel[2*i+1];
+
+      if(x<margin){x=margin;if(vx<0)vx=0;}
+      if(x>this.width-margin){x=this.width-margin;if(vx>0)vx=0;}
+      if(y>this.height-margin){y=this.height-margin;if(vy>0)vy=0;}
+
+      const floorY=this.bedFn(x)+r;
+      if(y<floorY){
+        const slope=this.bedSlopeFn(x);
+        let nx=-slope, ny=1;
+        const len=Math.hypot(nx,ny)||1;
+        nx/=len; ny/=len;
+        y=floorY;
+        const normalVelocity=vx*nx+vy*ny;
+        if(normalVelocity<0){vx-=normalVelocity*nx;vy-=normalVelocity*ny;}
+        // Tangential seabed drag. This is part of the breaker formation:
+        // lower water is slowed while the upper crest keeps moving.
+        const tx=ny, ty=-nx;
+        const tangentVelocity=vx*tx+vy*ty;
+        vx-=0.035*tangentVelocity*tx;
+        vy-=0.035*tangentVelocity*ty;
+      }
+
+      this.particlePos[2*i]=x;
+      this.particlePos[2*i+1]=y;
+      this.particleVel[2*i]=vx;
+      this.particleVel[2*i+1]=vy;
+    }
+  }
+
+  updateParticleDensity(){
+    const n=this.n,h=this.h,inv=this.inv,h2=0.5*h;
+    const density=this.particleDensity;
+    density.fill(0);
+    for(let i=0;i<this.numParticles;i++){
+      const x=clamp(this.particlePos[2*i],h,(this.fNumX-1)*h);
+      const y=clamp(this.particlePos[2*i+1],h,(this.fNumY-1)*h);
+      const x0=clamp(Math.floor((x-h2)*inv),0,this.fNumX-2);
+      const y0=clamp(Math.floor((y-h2)*inv),0,this.fNumY-2);
+      const x1=x0+1,y1=y0+1;
+      const tx=((x-h2)-x0*h)*inv;
+      const ty=((y-h2)-y0*h)*inv;
+      const sx=1-tx,sy=1-ty;
+      density[x0*n+y0]+=sx*sy;
+      density[x1*n+y0]+=tx*sy;
+      density[x1*n+y1]+=tx*ty;
+      density[x0*n+y1]+=sx*ty;
+    }
+    if(this.particleRestDensity===0){
+      let sum=0,count=0;
+      for(let c=0;c<this.numCells;c++){
+        if(this.cellType[c]===FLUID){sum+=density[c];count++;}
+      }
+      if(count) this.particleRestDensity=sum/count;
+    }
+  }
+
+  transferVelocities(toGrid,flipRatio=0.93){
+    const n=this.n,h=this.h,inv=this.inv,h2=0.5*h;
+    if(toGrid){
+      this.prevU.set(this.u);
+      this.prevV.set(this.v);
+      this.du.fill(0);this.dv.fill(0);this.u.fill(0);this.v.fill(0);
+      for(let c=0;c<this.numCells;c++) this.cellType[c]=this.solidMask[c]===0?SOLID:AIR;
+      for(let i=0;i<this.numParticles;i++){
+        const xi=clamp(Math.floor(this.particlePos[2*i]*inv),0,this.fNumX-1);
+        const yi=clamp(Math.floor(this.particlePos[2*i+1]*inv),0,this.fNumY-1);
+        const cell=xi*n+yi;
+        if(this.cellType[cell]===AIR) this.cellType[cell]=FLUID;
+      }
+    }
+
+    for(let component=0;component<2;component++){
+      const dx=component===0?0:h2;
+      const dy=component===0?h2:0;
+      const field=component===0?this.u:this.v;
+      const previous=component===0?this.prevU:this.prevV;
+      const weights=component===0?this.du:this.dv;
+
+      for(let i=0;i<this.numParticles;i++){
+        const x=clamp(this.particlePos[2*i],h,(this.fNumX-1)*h);
+        const y=clamp(this.particlePos[2*i+1],h,(this.fNumY-1)*h);
+        const x0=clamp(Math.floor((x-dx)*inv),0,this.fNumX-2);
+        const y0=clamp(Math.floor((y-dy)*inv),0,this.fNumY-2);
+        const x1=x0+1,y1=y0+1;
+        const tx=((x-dx)-x0*h)*inv;
+        const ty=((y-dy)-y0*h)*inv;
+        const sx=1-tx,sy=1-ty;
+        const w0=sx*sy,w1=tx*sy,w2=tx*ty,w3=sx*ty;
+        const c0=x0*n+y0,c1=x1*n+y0,c2=x1*n+y1,c3=x0*n+y1;
+
+        if(toGrid){
+          const value=this.particleVel[2*i+component];
+          field[c0]+=value*w0;weights[c0]+=w0;
+          field[c1]+=value*w1;weights[c1]+=w1;
+          field[c2]+=value*w2;weights[c2]+=w2;
+          field[c3]+=value*w3;weights[c3]+=w3;
+        }else{
+          const offset=component===0?n:1;
+          const cells=[c0,c1,c2,c3];
+          const ws=[w0,w1,w2,w3];
+          let sum=0,pic=0,correction=0;
+          for(let k=0;k<4;k++){
+            const cell=cells[k];
+            const valid=this.cellType[cell]!==AIR || (cell-offset>=0 && this.cellType[cell-offset]!==AIR);
+            if(!valid) continue;
+            sum+=ws[k];
+            pic+=ws[k]*field[cell];
+            correction+=ws[k]*(field[cell]-previous[cell]);
+          }
+          if(sum>0){
+            pic/=sum; correction/=sum;
+            const oldVelocity=this.particleVel[2*i+component];
+            const flipVelocity=oldVelocity+correction;
+            this.particleVel[2*i+component]=(1-flipRatio)*pic+flipRatio*flipVelocity;
+          }
+        }
+      }
+
+      if(toGrid){
+        for(let c=0;c<field.length;c++) if(weights[c]>0) field[c]/=weights[c];
+        for(let i=0;i<this.fNumX;i++){
+          for(let j=0;j<this.fNumY;j++){
+            const cell=i*n+j;
+            const solid=this.cellType[cell]===SOLID;
+            if(solid || (i>0 && this.cellType[(i-1)*n+j]===SOLID)) this.u[cell]=0;
+            if(solid || (j>0 && this.cellType[i*n+j-1]===SOLID)) this.v[cell]=0;
+          }
+        }
+      }
+    }
+  }
+
+  solveIncompressibility(iterations,dt,overRelaxation=1.85){
+    this.pressure.fill(0);
+    this.prevU.set(this.u);
+    this.prevV.set(this.v);
+    const n=this.n;
+    const pressureScale=1000*this.h/dt;
+
+    for(let iteration=0;iteration<iterations;iteration++){
+      for(let i=1;i<this.fNumX-1;i++){
+        for(let j=1;j<this.fNumY-1;j++){
+          const center=i*n+j;
+          if(this.cellType[center]!==FLUID) continue;
+          const left=(i-1)*n+j,right=(i+1)*n+j,bottom=i*n+j-1,top=i*n+j+1;
+          const sx0=this.solidMask[left],sx1=this.solidMask[right];
+          const sy0=this.solidMask[bottom],sy1=this.solidMask[top];
+          const openFaces=sx0+sx1+sy0+sy1;
+          if(openFaces===0) continue;
+
+          let divergence=this.u[right]-this.u[center]+this.v[top]-this.v[center];
+          if(this.particleRestDensity>0){
+            const compression=this.particleDensity[center]-this.particleRestDensity;
+            if(compression>0) divergence-=0.7*compression;
+          }
+          const correction=-divergence/openFaces*overRelaxation;
+          this.pressure[center]+=pressureScale*correction;
+          this.u[center]-=sx0*correction;
+          this.u[right]+=sx1*correction;
+          this.v[center]-=sy0*correction;
+          this.v[top]+=sy1*correction;
+        }
+      }
+    }
+  }
+
+  step(dt,flipRatio,pressureIterations,separateParticles=true){
+    this.integrateParticles(dt);
+    if(separateParticles) this.pushParticlesApart(1);
+    this.handleParticleCollisions();
+    this.transferVelocities(true);
+    this.updateParticleDensity();
+    this.solveIncompressibility(pressureIterations,dt,1.85);
+    this.transferVelocities(false,flipRatio);
+    this.handleParticleCollisions();
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Domain, bathymetry and physically initialized wave packet
+// -----------------------------------------------------------------------------
+const DOMAIN_W=26;
+const DOMAIN_H=9;
+const MEAN_LEVEL=5.15;
+const DEEP_FLOOR=0.45;
+const REEF_START=10;
+let fluid=null;
+let simTime=0;
+let accumulator=0;
+let paused=false;
+let sideView=false;
+let showGrid=false;
+
+function currentBed(x){
+  const rise=+ui.reefHeight.value;
+  const length=+ui.reefLength.value;
+  if(x<REEF_START) return DEEP_FLOOR;
+  if(x<REEF_START+length){
+    let t=(x-REEF_START)/length;
+    t=t*t*(3-2*t);
+    return DEEP_FLOOR+rise*t;
+  }
+  return DEEP_FLOOR+rise+0.06*Math.sin((x-REEF_START-length)*0.7);
+}
+function currentBedSlope(x){
+  const e=0.02;
+  return (currentBed(x+e)-currentBed(x-e))/(2*e);
+}
+
+function createSimulation(){
+  const gridSpacing=0.24;
+  const particleRadius=0.075;
+  fluid=new FlipFluid(DOMAIN_W,DOMAIN_H,gridSpacing,particleRadius,20000,currentBed,currentBedSlope);
+  fluid.setupSolidMask();
+
+  const amplitude=+ui.waveHeight.value;
+  const center=7.8;
+  const width=1.18;
+  const deepDepth=MEAN_LEVEL-DEEP_FLOOR;
+  const phaseSpeed=Math.sqrt(G*(deepDepth+amplitude));
+  const particleDX=2*particleRadius;
+  const particleDY=Math.sqrt(3)*0.5*particleDX;
+  let count=0;
+
+  for(let x=DEEP_FLOOR+gridSpacing+particleRadius;x<DOMAIN_W-gridSpacing-particleRadius;x+=particleDX){
+    const eta=amplitude*sech2((x-center)/width);
+    const surface=MEAN_LEVEL+eta;
+    const bed=currentBed(x);
+    let row=0;
+    for(let y=bed+particleRadius;y<surface-particleRadius;y+=particleDY,row++){
+      if(count>=fluid.maxParticles) break;
+      const px=x+(row%2?particleRadius:0);
+      if(px>DOMAIN_W-gridSpacing-particleRadius) continue;
+      fluid.particlePos[2*count]=px;
+      fluid.particlePos[2*count+1]=y;
+
+      // Solitary-wave-like shallow-water velocity initialization. The
+      // vertical variation approximates finite-depth orbital shear; it is
+      // an initial condition, not a prescribed trajectory. After t=0 all
+      // motion comes from gravity, pressure projection and the reef boundary.
+      const q=(x-center)/width;
+      const etaLocal=amplitude*sech2(q);
+      const dEtaDx=-2*amplitude*sech2(q)*Math.tanh(q)/width;
+      const localDepth=Math.max(0.2,MEAN_LEVEL-bed+etaLocal);
+      const fraction=clamp((y-bed)/localDepth,0,1);
+      const depthAverageU=phaseSpeed*etaLocal/localDepth;
+      fluid.particleVel[2*count]=depthAverageU*(0.78+2.35*fraction*fraction);
+      fluid.particleVel[2*count+1]=-phaseSpeed*(y-bed)/localDepth*dEtaDx*0.78;
+      count++;
+    }
+  }
+  fluid.numParticles=count;
+  simTime=0;
+  accumulator=0;
+  lastContour=[];
+  boardZ=-3.4;
+  updateSeafloorGeometry();
+  rebuildGridLines();
+
+  // Initialize grid density, then advance briefly so the first rendered frame
+  // already shows the wave shoaling into the reef instead of a flat start.
+  for(let warm=0;warm<26;warm++){
+    fluid.step(1/90,+ui.flipRatio.value,+ui.pressureIters.value,true);
+    simTime+=1/90;
+  }
+  updateSurfaceGeometry(true);
+  document.querySelector("#particleStat").textContent=count.toLocaleString();
+  document.querySelector("#gridStat").textContent=fluid.fNumX+" × "+fluid.fNumY;
+}
+
+// -----------------------------------------------------------------------------
+// Three.js scene
+// -----------------------------------------------------------------------------
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.08;
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const pmrem=new THREE.PMREMGenerator(renderer);
+const roomEnv=new RoomEnvironment(renderer);
+const environmentTexture=pmrem.fromScene(roomEnv,0.04).texture;
+roomEnv.dispose();
+pmrem.dispose();
+
+const scene=new THREE.Scene();
+scene.environment=environmentTexture;
+scene.background=new THREE.Color(0x75c9dc);
+scene.fog=new THREE.FogExp2(0x75c9dc,0.022);
+
+const camera=new THREE.PerspectiveCamera(47,innerWidth/innerHeight,0.1,150);
+camera.position.set(7.8,5.1,16.5);
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;
+controls.dampingFactor=0.06;
+controls.target.set(-0.2,3.85,0);
+controls.minDistance=7;
+controls.maxDistance=42;
+controls.maxPolarAngle=Math.PI*0.54;
+controls.update();
+
+scene.add(new THREE.HemisphereLight(0xd8f8ff,0x173b46,2.4));
+const sun=new THREE.DirectionalLight(0xfff2d5,4.1);
+sun.position.set(-8,15,10);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-24;sun.shadow.camera.right=24;sun.shadow.camera.top=18;sun.shadow.camera.bottom=-10;
+scene.add(sun);
+const rim=new THREE.DirectionalLight(0x6bddff,1.25);rim.position.set(12,6,-12);scene.add(rim);
+
+const sky=new THREE.Mesh(
+  new THREE.SphereGeometry(90,32,16),
+  new THREE.ShaderMaterial({
+    side:THREE.BackSide,
+    uniforms:{top:{value:new THREE.Color(0x0b5c80)},bottom:{value:new THREE.Color(0xb9eef1)}},
+    vertexShader:`varying vec3 p;void main(){p=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+    fragmentShader:`uniform vec3 top;uniform vec3 bottom;varying vec3 p;void main(){float h=clamp(normalize(p).y*.5+.5,0.,1.);gl_FragColor=vec4(mix(bottom,top,pow(h,.74)),1.);}`
+  })
+);
+scene.add(sky);
+
+// World mapping: simulation x is translated so the breaker is centered.
+const WORLD_X_OFFSET=-13;
+const WORLD_Y_OFFSET=-0.15;
+const WATER_HALF_SPAN=4.4;
+const simToWorldX=x=>x+WORLD_X_OFFSET;
+const simToWorldY=y=>y+WORLD_Y_OFFSET;
+
+// -----------------------------------------------------------------------------
+// Seafloor mesh — generated from the exact function used by the solver
+// -----------------------------------------------------------------------------
+let seafloorMesh=null;
+function makeSeafloorGeometry(){
+  const segments=180;
+  const positions=[];
+  const indices=[];
+  for(let i=0;i<=segments;i++){
+    const x=DOMAIN_W*i/segments;
+    const wx=simToWorldX(x);
+    const wy=simToWorldY(currentBed(x));
+    positions.push(wx,wy,-6.4, wx,wy,6.4);
+  }
+  for(let i=0;i<segments;i++){
+    const a=i*2,b=a+1,c=a+2,d=a+3;
+    indices.push(a,c,b,b,c,d);
+  }
+  // Vertical skirt below the near and far edges.
+  const baseY=-4.5;
+  const topCount=positions.length/3;
+  for(let i=0;i<=segments;i++){
+    const x=DOMAIN_W*i/segments;
+    const wx=simToWorldX(x);
+    positions.push(wx,baseY,-6.4,wx,baseY,6.4);
+  }
+  for(let i=0;i<segments;i++){
+    const ta=i*2,tb=ta+1,tc=ta+2,td=ta+3;
+    const ba=topCount+i*2,bb=ba+1,bc=ba+2,bd=ba+3;
+    indices.push(ta,ba,tc,tc,ba,bc, tb,td,bb,td,bd,bb);
+  }
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+let reefShader=null;
+function makeReefMaterial(){
+  const material=new THREE.MeshStandardMaterial({color:0x776f5b,roughness:0.92,metalness:0});
+  material.onBeforeCompile=shader=>{
+    reefShader=shader;
+    shader.uniforms.uCausticTime={value:0};
+    shader.vertexShader=shader.vertexShader.replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvarying vec3 vCausticWorld;\nvCausticWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
+    shader.fragmentShader='uniform float uCausticTime;\nvarying vec3 vCausticWorld;\n'+shader.fragmentShader;
+    shader.fragmentShader=shader.fragmentShader.replace('#include <dithering_fragment>',`float c1=sin(vCausticWorld.x*2.4+uCausticTime*1.25+sin(vCausticWorld.z*1.8));
+float c2=sin(vCausticWorld.z*2.9-uCausticTime*1.05+sin(vCausticWorld.x*1.55));
+float caustic=pow(max(0.0,0.52+0.26*c1+0.26*c2),7.0);
+gl_FragColor.rgb+=vec3(0.16,0.28,0.25)*caustic;
+#include <dithering_fragment>`);
+  };
+  material.customProgramCacheKey=()=>"reef-caustics-v2";
+  return material;
+}
+
+function updateSeafloorGeometry(){
+  if(seafloorMesh){scene.remove(seafloorMesh);seafloorMesh.geometry.dispose();}
+  seafloorMesh=new THREE.Mesh(
+    makeSeafloorGeometry(),
+    makeReefMaterial()
+  );
+  seafloorMesh.receiveShadow=true;
+  scene.add(seafloorMesh);
+}
+
+// -----------------------------------------------------------------------------
+// Continuous reconstructed water surface
+// -----------------------------------------------------------------------------
+// The FLIP particles remain the simulation state. Rendering uses a smoothed
+// density isocontour (marching squares) and builds a connected water volume.
+// This removes the repeated particle curtains and preserves real overhangs.
+const SURFACE_ISO=0.28;
+const SURFACE_SLICES=15;
+let waterMesh=null;
+let waterGeometry=null;
+let lastContour=[];
+let maxSpeed=0;
+
+const waterMaterial=new THREE.MeshPhysicalMaterial({
+  color:0x0b96a7,
+  roughness:0.035,
+  metalness:0,
+  transmission:0.66,
+  thickness:4.0,
+  ior:1.333,
+  attenuationColor:new THREE.Color(0x047486),
+  attenuationDistance:6.8,
+  clearcoat:1,
+  clearcoatRoughness:0.018,
+  envMapIntensity:1.9,
+  specularIntensity:1.0,
+  specularColor:new THREE.Color(0xe9ffff),
+  emissive:new THREE.Color(0x002d35),
+  emissiveIntensity:0.16,
+  side:THREE.DoubleSide,
+  transparent:false
+});
+let waterShader=null;
+waterMaterial.onBeforeCompile=shader=>{
+  waterShader=shader;
+  shader.uniforms.uWaterTime={value:0};
+  shader.vertexShader='varying vec3 vWaterWorld;\n'+shader.vertexShader;
+  shader.vertexShader=shader.vertexShader.replace(
+    '#include <worldpos_vertex>',
+    '#include <worldpos_vertex>\nvWaterWorld=worldPosition.xyz;'
+  );
+  shader.fragmentShader='uniform float uWaterTime;\nvarying vec3 vWaterWorld;\n'+shader.fragmentShader;
+  shader.fragmentShader=shader.fragmentShader.replace(
+    '#include <normal_fragment_begin>',
+    `#include <normal_fragment_begin>
+     float rippleA=sin(vWaterWorld.x*2.3+vWaterWorld.z*1.6-uWaterTime*1.8);
+     float rippleB=sin(vWaterWorld.x*-1.4+vWaterWorld.z*2.8-uWaterTime*1.25);
+     float crestMask=smoothstep(2.8,6.8,vWaterWorld.y);
+     normal=normalize(normal+vec3((rippleA+rippleB)*0.018*(0.35+crestMask),0.0,(rippleA-rippleB)*0.012));`
+  );
+};
+waterMaterial.customProgramCacheKey=()=>"flip-water-ripples-v3";
+
+function interpolateIso(ax,ay,av,bx,by,bv,iso){
+  const d=bv-av;
+  const t=Math.abs(d)<1e-6?0.5:clamp((iso-av)/d,0,1);
+  return {x:lerp(ax,bx,t),y:lerp(ay,by,t)};
+}
+
+function marchingSegments(field,w,h,iso){
+  const segs=[];
+  const edgePoint=(edge,x,y,v0,v1,v2,v3)=>{
+    if(edge===0) return interpolateIso(x,y,v0,x+1,y,v1,iso);
+    if(edge===1) return interpolateIso(x+1,y,v1,x+1,y+1,v2,iso);
+    if(edge===2) return interpolateIso(x+1,y+1,v2,x,y+1,v3,iso);
+    return interpolateIso(x,y+1,v3,x,y,v0,iso);
+  };
+  const add=(x,y,e0,e1,v0,v1,v2,v3)=>segs.push([
+    edgePoint(e0,x,y,v0,v1,v2,v3),
+    edgePoint(e1,x,y,v0,v1,v2,v3)
+  ]);
+  for(let y=0;y<h-1;y++){
+    for(let x=0;x<w-1;x++){
+      const v0=field[x*h+y];
+      const v1=field[(x+1)*h+y];
+      const v2=field[(x+1)*h+y+1];
+      const v3=field[x*h+y+1];
+      const code=(v0>=iso?1:0)|(v1>=iso?2:0)|(v2>=iso?4:0)|(v3>=iso?8:0);
+      switch(code){
+        case 1:add(x,y,3,0,v0,v1,v2,v3);break;
+        case 2:add(x,y,0,1,v0,v1,v2,v3);break;
+        case 3:add(x,y,3,1,v0,v1,v2,v3);break;
+        case 4:add(x,y,1,2,v0,v1,v2,v3);break;
+        case 5:{
+          const center=(v0+v1+v2+v3)*0.25;
+          if(center>=iso){add(x,y,3,2,v0,v1,v2,v3);add(x,y,0,1,v0,v1,v2,v3);}
+          else{add(x,y,3,0,v0,v1,v2,v3);add(x,y,1,2,v0,v1,v2,v3);}
+          break;
+        }
+        case 6:add(x,y,0,2,v0,v1,v2,v3);break;
+        case 7:add(x,y,3,2,v0,v1,v2,v3);break;
+        case 8:add(x,y,2,3,v0,v1,v2,v3);break;
+        case 9:add(x,y,2,0,v0,v1,v2,v3);break;
+        case 10:{
+          const center=(v0+v1+v2+v3)*0.25;
+          if(center>=iso){add(x,y,0,3,v0,v1,v2,v3);add(x,y,1,2,v0,v1,v2,v3);}
+          else{add(x,y,0,1,v0,v1,v2,v3);add(x,y,2,3,v0,v1,v2,v3);}
+          break;
+        }
+        case 11:add(x,y,1,2,v0,v1,v2,v3);break;
+        case 12:add(x,y,1,3,v0,v1,v2,v3);break;
+        case 13:add(x,y,0,1,v0,v1,v2,v3);break;
+        case 14:add(x,y,3,0,v0,v1,v2,v3);break;
+      }
+    }
+  }
+  return segs;
+}
+
+function connectSegments(segments){
+  const key=p=>Math.round(p.x*1000)+","+Math.round(p.y*1000);
+  const buckets=new Map();
+  segments.forEach((s,i)=>{
+    for(const p of s){
+      const k=key(p);
+      if(!buckets.has(k)) buckets.set(k,[]);
+      buckets.get(k).push(i);
+    }
+  });
+  const used=new Uint8Array(segments.length);
+  const loops=[];
+  for(let seed=0;seed<segments.length;seed++){
+    if(used[seed]) continue;
+    used[seed]=1;
+    const loop=[segments[seed][0],segments[seed][1]];
+    let current=segments[seed][1];
+    for(let guard=0;guard<segments.length+8;guard++){
+      const list=buckets.get(key(current))||[];
+      let next=-1;
+      for(const idx of list) if(!used[idx]){next=idx;break;}
+      if(next<0) break;
+      used[next]=1;
+      const s=segments[next];
+      const aKey=key(s[0]);
+      current=aKey===key(current)?s[1]:s[0];
+      loop.push(current);
+      if(key(current)===key(loop[0])) break;
+    }
+    if(loop.length>16) loops.push(loop);
+  }
+  return loops;
+}
+
+function polygonArea(points){
+  let a=0;
+  for(let i=0;i<points.length;i++){
+    const p=points[i],q=points[(i+1)%points.length];
+    a+=p.x*q.y-q.x*p.y;
+  }
+  return a*0.5;
+}
+
+function smoothLoop(points,passes=2){
+  let p=points.slice();
+  if(p.length>2 && Math.hypot(p[0].x-p[p.length-1].x,p[0].y-p[p.length-1].y)<0.01) p.pop();
+  for(let pass=0;pass<passes;pass++){
+    const q=[];
+    for(let i=0;i<p.length;i++){
+      const a=p[(i-1+p.length)%p.length],b=p[i],c=p[(i+1)%p.length];
+      q.push({x:a.x*0.2+b.x*0.6+c.x*0.2,y:a.y*0.2+b.y*0.6+c.y*0.2});
+    }
+    p=q;
+  }
+  if(p.length>360){
+    const stride=Math.ceil(p.length/360);
+    p=p.filter((_,i)=>i%stride===0);
+  }
+  return p;
+}
+
+function reconstructContour(){
+  if(!fluid||fluid.particleRestDensity<=0) return lastContour;
+  const w=fluid.fNumX+2,h=fluid.fNumY+2;
+  let field=new Float32Array(w*h);
+  for(let x=0;x<fluid.fNumX;x++){
+    for(let y=0;y<fluid.fNumY;y++){
+      const k=x*fluid.n+y;
+      const density=fluid.particleDensity[k]/fluid.particleRestDensity;
+      const occupied=fluid.cellType[k]===FLUID?0.28:0;
+      field[(x+1)*h+y+1]=Math.max(density,occupied);
+    }
+  }
+  // Two compact blur passes convert the particles into a smooth liquid SDF-like field.
+  for(let pass=0;pass<2;pass++){
+    const next=new Float32Array(field.length);
+    for(let x=1;x<w-1;x++) for(let y=1;y<h-1;y++){
+      next[x*h+y]=(
+        field[x*h+y]*4+
+        field[(x-1)*h+y]+field[(x+1)*h+y]+
+        field[x*h+y-1]+field[x*h+y+1]+
+        .5*(field[(x-1)*h+y-1]+field[(x+1)*h+y-1]+field[(x-1)*h+y+1]+field[(x+1)*h+y+1])
+      )/10;
+    }
+    field=next;
+  }
+  const loops=connectSegments(marchingSegments(field,w,h,SURFACE_ISO));
+  if(!loops.length) return lastContour;
+  loops.sort((a,b)=>Math.abs(polygonArea(b))-Math.abs(polygonArea(a)));
+  let loop=smoothLoop(loops[0],2);
+  // Grid density nodes are centered at half a FLIP cell, with one padded border.
+  loop=loop.map(p=>new THREE.Vector2(
+    (p.x-1+0.5)*fluid.h,
+    (p.y-1+0.5)*fluid.h
+  ));
+  if(THREE.ShapeUtils.isClockWise(loop)===false) loop.reverse();
+  lastContour=loop;
+  return loop;
+}
+
+function buildWaterGeometry(contour){
+  if(contour.length<8) return null;
+  const count=contour.length;
+  const positions=[];
+  const indices=[];
+  // The central slice is exact. Neighboring slices only add subtle spanwise
+  // visual variation; they do not prescribe or alter the FLIP cross-section.
+  for(let s=0;s<SURFACE_SLICES;s++){
+    const st=s/(SURFACE_SLICES-1);
+    const z=lerp(-WATER_HALF_SPAN,WATER_HALF_SPAN,st);
+    const span=Math.sin(st*Math.PI);
+    const phase=Math.sin(z*0.72+simTime*0.45);
+    for(const p of contour){
+      const bed=currentBed(clamp(p.x,0,DOMAIN_W));
+      const freeWeight=smoothstep(bed+0.35,MEAN_LEVEL-0.15,p.y);
+      const crestWeight=smoothstep(MEAN_LEVEL-0.25,MEAN_LEVEL+1.5,p.y);
+      const x=p.x+freeWeight*(0.05*phase+0.035*Math.sin(p.y*1.8+z));
+      const y=p.y+crestWeight*span*0.035*Math.sin(z*0.9+simTime*0.6);
+      positions.push(simToWorldX(x),simToWorldY(y),z);
+    }
+  }
+  for(let s=0;s<SURFACE_SLICES-1;s++){
+    for(let i=0;i<count;i++){
+      const n=(i+1)%count;
+      const a=s*count+i,b=s*count+n,c=(s+1)*count+i,d=(s+1)*count+n;
+      indices.push(a,c,b,b,c,d);
+    }
+  }
+  const tris=THREE.ShapeUtils.triangulateShape(contour,[]);
+  const front=0,back=(SURFACE_SLICES-1)*count;
+  for(const tri of tris){
+    indices.push(front+tri[2],front+tri[1],front+tri[0]);
+    indices.push(back+tri[0],back+tri[1],back+tri[2]);
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+// Foam remains particle-based, but only low-density/high-speed surface particles
+// are shown and each gets a deterministic spanwise position instead of curtains.
+const MAX_FOAM=4200;
+const foamPositions=new Float32Array(MAX_FOAM*3);
+const foamSizes=new Float32Array(MAX_FOAM);
+const foamGeometry=new THREE.BufferGeometry();
+foamGeometry.setAttribute("position",new THREE.BufferAttribute(foamPositions,3).setUsage(THREE.DynamicDrawUsage));
+foamGeometry.setAttribute("size",new THREE.BufferAttribute(foamSizes,1).setUsage(THREE.DynamicDrawUsage));
+const foamMaterial=new THREE.ShaderMaterial({
+  transparent:true,depthWrite:false,blending:THREE.NormalBlending,
+  vertexShader:`attribute float size;varying float vA;void main(){vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=size*(220.0/max(1.0,-mv.z));vA=clamp(size/12.0,0.0,1.0);gl_Position=projectionMatrix*mv;}`,
+  fragmentShader:`varying float vA;void main(){vec2 q=gl_PointCoord-.5;float d=dot(q,q);if(d>.25)discard;float a=smoothstep(.25,.03,d)*(.35+.65*vA);gl_FragColor=vec4(vec3(.88,1.,1.),a);}`
+});
+const foamPoints=new THREE.Points(foamGeometry,foamMaterial);
+foamPoints.frustumCulled=false;
+foamPoints.renderOrder=4;
+scene.add(foamPoints);
+
+function particleRelativeDensity(i){
+  const x=clamp(Math.floor(fluid.particlePos[2*i]*fluid.inv),0,fluid.fNumX-1);
+  const y=clamp(Math.floor(fluid.particlePos[2*i+1]*fluid.inv),0,fluid.fNumY-1);
+  const d=fluid.particleDensity[x*fluid.n+y];
+  return fluid.particleRestDensity>0?d/fluid.particleRestDensity:1;
+}
+
+function updateFoam(){
+  let cursor=0;maxSpeed=0;
+  for(let i=0;i<fluid.numParticles&&cursor<MAX_FOAM;i++){
+    const x=fluid.particlePos[2*i],y=fluid.particlePos[2*i+1];
+    const vx=fluid.particleVel[2*i],vy=fluid.particleVel[2*i+1];
+    const speed=Math.hypot(vx,vy);maxSpeed=Math.max(maxSpeed,speed);
+    const density=particleRelativeDensity(i);
+    const exposed=clamp((0.88-density)/0.28,0,1);
+    const breaking=clamp((speed-3.2)/4.5,0,1)*clamp((1.6-vy)/3.6,0,1);
+    const foam=Math.max(exposed*0.82,breaking);
+    if(foam<0.42) continue;
+    const hash=Math.sin(i*12.9898+simTime*0.37)*43758.5453;
+    const z=lerp(-WATER_HALF_SPAN,WATER_HALF_SPAN,hash-Math.floor(hash));
+    const o=cursor*3;
+    foamPositions[o]=simToWorldX(x);
+    foamPositions[o+1]=simToWorldY(y)+0.015;
+    foamPositions[o+2]=z;
+    foamSizes[cursor]=5.5+foam*7.5;
+    cursor++;
+  }
+  foamGeometry.setDrawRange(0,cursor);
+  foamGeometry.attributes.position.needsUpdate=true;
+  foamGeometry.attributes.size.needsUpdate=true;
+  document.querySelector("#speedStat").textContent=maxSpeed.toFixed(1)+" m/s";
+}
+
+function updateSurfaceGeometry(force=false){
+  if(!fluid) return;
+  const contour=reconstructContour();
+  const geo=buildWaterGeometry(contour);
+  if(geo){
+    if(!waterMesh){
+      waterGeometry=geo;
+      waterMesh=new THREE.Mesh(waterGeometry,waterMaterial);
+      waterMesh.castShadow=true;
+      waterMesh.receiveShadow=true;
+      waterMesh.renderOrder=2;
+      scene.add(waterMesh);
+    }else{
+      const old=waterMesh.geometry;
+      waterMesh.geometry=geo;
+      waterGeometry=geo;
+      old.dispose();
+    }
+  }
+  updateFoam();
+}
+
+// -----------------------------------------------------------------------------
+// Optional solver-grid overlay
+// -----------------------------------------------------------------------------
+let gridLines=null;
+function rebuildGridLines(){
+  if(gridLines){scene.remove(gridLines);gridLines.geometry.dispose();}
+  if(!fluid) return;
+  const pts=[];
+  for(let i=0;i<fluid.fNumX;i+=3){
+    const x=simToWorldX(i*fluid.h);
+    pts.push(x,simToWorldY(0),WATER_HALF_SPAN+0.12,x,simToWorldY(DOMAIN_H),WATER_HALF_SPAN+0.12);
+  }
+  for(let j=0;j<fluid.fNumY;j+=3){
+    const y=simToWorldY(j*fluid.h);
+    pts.push(simToWorldX(0),y,WATER_HALF_SPAN+0.12,simToWorldX(DOMAIN_W),y,WATER_HALF_SPAN+0.12);
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));
+  gridLines=new THREE.LineSegments(geo,new THREE.LineBasicMaterial({color:0xbcefff,transparent:true,opacity:0.17,depthWrite:false}));
+  gridLines.visible=showGrid;
+  scene.add(gridLines);
+}
+
+// -----------------------------------------------------------------------------
+// Low-poly surfboard sampled from the simulated shoulder
+// -----------------------------------------------------------------------------
+function createBoard(){
+  const group=new THREE.Group();
+  const segments=16,length=2.6,width=0.6,thickness=0.11;
+  const vertices=[],indices=[];
+  for(let ring=0;ring<2;ring++){
+    const y=ring?thickness/2:-thickness/2;
+    for(let i=0;i<segments;i++){
+      const a=Math.PI*2*i/segments;
+      const z=Math.cos(a)*length/2;
+      const taper=Math.pow(Math.max(0,1-Math.pow(Math.abs(z)/(length/2),1.7)),0.34);
+      const x=Math.sin(a)*width/2*taper;
+      const rocker=0.11*Math.pow(Math.abs(z)/(length/2),2.5);
+      vertices.push(x,y+rocker,z);
+    }
+  }
+  const top=vertices.length/3;vertices.push(0,thickness/2+.015,0);
+  const bottom=vertices.length/3;vertices.push(0,-thickness/2,0);
+  for(let i=0;i<segments;i++){
+    const n=(i+1)%segments;
+    indices.push(top,segments+i,segments+n,bottom,n,i,i,n,segments+i,n,segments+n,segments+i);
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute("position",new THREE.Float32BufferAttribute(vertices,3));
+  geo.setIndex(indices);geo.computeVertexNormals();
+  const deck=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0xf0cf54,roughness:.55,flatShading:true}));
+  deck.castShadow=true;group.add(deck);
+  const stripe=new THREE.Mesh(new THREE.BoxGeometry(.07,.022,1.08),new THREE.MeshStandardMaterial({color:0x164d5f,roughness:.7}));
+  stripe.position.y=.08;group.add(stripe);
+  return group;
+}
+const board=createBoard();
+scene.add(board);
+let boardZ=-3.4;
+let boardYVelocity=0;
+function surfaceSampleAt(x){
+  let top=currentBed(x),sumVX=0,sumVY=0,count=0;
+  const radius=0.32;
+  for(let i=0;i<fluid.numParticles;i++){
+    const px=fluid.particlePos[2*i];
+    if(Math.abs(px-x)>radius) continue;
+    const py=fluid.particlePos[2*i+1];
+    if(py>top) top=py;
+    if(py>top-0.7){sumVX+=fluid.particleVel[2*i];sumVY+=fluid.particleVel[2*i+1];count++;}
+  }
+  return {y:top,vx:count?sumVX/count:0,vy:count?sumVY/count:0};
+}
+function findCrest(){
+  let crestX=7,crestY=-Infinity;
+  for(let i=0;i<fluid.numParticles;i++){
+    const y=fluid.particlePos[2*i+1];
+    if(y>crestY){crestY=y;crestX=fluid.particlePos[2*i];}
+  }
+  return {x:crestX,y:crestY};
+}
+function updateBoard(dt){
+  const crest=findCrest();
+  const x=clamp(crest.x-2.2,2,DOMAIN_W-2);
+  const sample=surfaceSampleAt(x);
+  const targetY=sample.y+0.17;
+  boardYVelocity+=(targetY-(board.position.y-WORLD_Y_OFFSET))*18*dt;
+  boardYVelocity*=Math.exp(-5*dt);
+  const boardSimY=(board.position.y-WORLD_Y_OFFSET)+boardYVelocity*dt;
+  boardZ+=(-0.6-0.12*clamp(sample.vx,0,8))*dt;
+  if(boardZ<-WATER_HALF_SPAN+0.5) boardZ=WATER_HALF_SPAN-0.5;
+  board.position.set(simToWorldX(x),simToWorldY(boardSimY),boardZ);
+  const e=.18;
+  const left=surfaceSampleAt(clamp(x-e,0,DOMAIN_W)).y;
+  const right=surfaceSampleAt(clamp(x+e,0,DOMAIN_W)).y;
+  const slope=(right-left)/(2*e);
+  board.rotation.order="YXZ";
+  board.rotation.x=0.04*Math.sin(simTime*4);
+  board.rotation.y=Math.PI/2;
+  board.rotation.z=Math.atan(slope)*0.65;
+}
+
+// -----------------------------------------------------------------------------
+// Overhang detection: multiple separated vertical fluid bands in an x-bin.
+// This is measured from particles; it is not used to drive the wave.
+// -----------------------------------------------------------------------------
+function detectOverhang(){
+  const bins=120;
+  const lists=Array.from({length:bins},()=>[]);
+  for(let i=0;i<fluid.numParticles;i++){
+    const x=fluid.particlePos[2*i];
+    const b=clamp(Math.floor(x/DOMAIN_W*bins),0,bins-1);
+    lists[b].push(fluid.particlePos[2*i+1]);
+  }
+  let bestGap=0;
+  for(const ys of lists){
+    if(ys.length<6) continue;
+    ys.sort((a,b)=>a-b);
+    for(let i=1;i<ys.length;i++) bestGap=Math.max(bestGap,ys[i]-ys[i-1]);
+  }
+  return bestGap>0.32;
+}
+
+// -----------------------------------------------------------------------------
+// Controls and main loop
+// -----------------------------------------------------------------------------
+document.querySelector("#pauseBtn").onclick=()=>{
+  paused=!paused;
+  document.querySelector("#pauseBtn").textContent=paused?"Resume":"Pause";
+  document.querySelector("#status").textContent=paused?"paused":"running";
+};
+document.querySelector("#resetBtn").onclick=()=>createSimulation();
+document.querySelector("#viewBtn").onclick=()=>{
+  sideView=!sideView;
+  controls.enabled=!sideView;
+  document.querySelector("#viewBtn").textContent=sideView?"Free 3D view":"Side physics view";
+};
+document.querySelector("#gridBtn").onclick=()=>{
+  showGrid=!showGrid;
+  if(gridLines) gridLines.visible=showGrid;
+  document.querySelector("#gridBtn").textContent=showGrid?"Hide solver grid":"Show solver grid";
+};
+document.querySelector("#loopBtn").onclick=()=>{
+  autoLoop=!autoLoop;
+  document.querySelector("#loopBtn").textContent=autoLoop?"Loop: on":"Loop: off";
+};
+
+createSimulation();
+let last=performance.now();
+let frame=0;
+const FIXED_DT=1/90;
+
+function animate(now){
+  requestAnimationFrame(animate);
+  const realDt=Math.min(0.05,(now-last)/1000);
+  last=now;
+
+  if(!paused){
+    accumulator+=realDt;
+    let steps=0;
+    while(accumulator>=FIXED_DT && steps<3){
+      fluid.step(FIXED_DT,+ui.flipRatio.value,+ui.pressureIters.value,true);
+      simTime+=FIXED_DT;
+      accumulator-=FIXED_DT;
+      steps++;
+    }
+    updateBoard(realDt);
+  }
+
+  frame++;
+  if((frame&1)===0) updateSurfaceGeometry();
+  if(frame%12===0){
+    document.querySelector("#timeStat").textContent=simTime.toFixed(2)+" s";
+    const curling=detectOverhang();
+    const el=document.querySelector("#overhangStat");
+    el.textContent=curling?"detected":"forming";
+    el.style.color=curling?"#8effaa":"#ffe38a";
+  }
+
+  if(sideView){
+    camera.position.lerp(new THREE.Vector3(0,5.8,17.5),0.08);
+    controls.target.lerp(new THREE.Vector3(-0.3,4.4,0),0.08);
+    camera.lookAt(controls.target);
+  }else{
+    controls.update();
+  }
+
+  if(autoLoop && simTime>4.15) createSimulation();
+  if(reefShader) reefShader.uniforms.uCausticTime.value=simTime;
+  if(waterShader) waterShader.uniforms.uWaterTime.value=simTime;
+  renderer.render(scene,camera);
+}
+requestAnimationFrame(animate);
+
+addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+});
+</script>
+</body>
+</html>
