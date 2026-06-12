@@ -1,1193 +1,2465 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Reconstructed FLIP Barrel — Reef Breaker</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Reef Barrel Wave Simulator</title>
 <style>
-  *{box-sizing:border-box}
-  html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#071923;color:#eefbff;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-  canvas{display:block;width:100%;height:100%;touch-action:none}
-  #panel{position:fixed;z-index:10;left:10px;top:10px;width:min(372px,calc(100vw - 20px));padding:13px 14px;border:1px solid rgba(255,255,255,.14);border-radius:16px;background:rgba(2,24,34,.84);box-shadow:0 16px 45px rgba(0,0,0,.3);backdrop-filter:blur(13px)}
-  h1{font-size:16px;letter-spacing:.08em;margin:0 0 3px}
-  .desc{font-size:10.5px;line-height:1.38;color:#b8d6df;margin:0 0 9px}
-  .row{display:grid;grid-template-columns:104px 1fr 52px;gap:8px;align-items:center;margin:6px 0;font-size:11px}
-  .row output{text-align:right;color:#81e9ff;font-variant-numeric:tabular-nums}
-  input[type=range]{width:100%;accent-color:#53d9ff}
-  .stats{display:grid;grid-template-columns:1fr 1fr;gap:5px 12px;margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.11);font-size:10px;color:#aacbd4}
-  .stats b{color:#fff}
-  .buttons{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
-  button{border:1px solid rgba(255,255,255,.16);border-radius:11px;background:rgba(255,255,255,.08);color:#fff;padding:8px 10px;font:650 11px system-ui;cursor:pointer}
-  button:active{transform:translateY(1px)}
-  #badge{position:fixed;z-index:4;right:10px;bottom:10px;padding:7px 10px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(2,24,34,.72);font-size:10px;color:#b7d9e2}
-  #status{color:#9af0b4}
-  @media(max-width:600px){#panel{padding:10px}.row{grid-template-columns:92px 1fr 48px;margin:4px 0}.stats{display:none}#badge{display:none}.desc{font-size:9.5px}}
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #07131c;
+    font-family: Inter, system-ui, sans-serif;
+  }
+
+  canvas {
+    display: block;
+    touch-action: none;
+  }
+
+  #ui {
+    position: fixed;
+    left: 14px;
+    top: 14px;
+    z-index: 10;
+    width: min(330px, calc(100vw - 28px));
+    padding: 13px 14px 12px;
+    color: #eefaff;
+    background: rgba(4, 18, 27, .77);
+    border: 1px solid rgba(180, 235, 255, .22);
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 12px 35px rgba(0,0,0,.28);
+    user-select: none;
+  }
+
+  #ui h1 {
+    margin: 0 0 5px;
+    font-size: 16px;
+    letter-spacing: .02em;
+  }
+
+  #ui p {
+    margin: 0 0 10px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #b9d5df;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 105px 1fr 42px;
+    gap: 8px;
+    align-items: center;
+    margin: 7px 0;
+    font-size: 11px;
+  }
+
+  input[type="range"] {
+    width: 100%;
+  }
+
+  output {
+    text-align: right;
+    color: #d9fbff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  button {
+    border: 1px solid rgba(180,235,255,.25);
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: #eefaff;
+    background: rgba(67, 151, 180, .2);
+    cursor: pointer;
+    font-size: 11px;
+  }
+
+  button:hover {
+    background: rgba(67, 151, 180, .35);
+  }
+
+  #status {
+    position: fixed;
+    right: 12px;
+    bottom: 10px;
+    color: rgba(235,250,255,.72);
+    font: 11px/1.3 monospace;
+    text-align: right;
+    pointer-events: none;
+  }
+
+  @media (max-width: 680px) {
+    #ui {
+      width: 270px;
+      padding: 10px 11px;
+    }
+
+    #ui p {
+      display: none;
+    }
+
+    .row {
+      grid-template-columns: 88px 1fr 38px;
+      margin: 5px 0;
+    }
+  }
 </style>
+</head>
+
+<body>
+<div id="ui">
+  <h1>Reef Barrel Wave Simulator</h1>
+  <p>
+    Bathymetry-driven shoaling, a folding parametric lip,
+    whitewater particles, refractive water shading,
+    and a buoyant low-poly surfboard.
+  </p>
+
+  <div class="row">
+    <label for="height">Wave height</label>
+    <input id="height" type="range" min="1.2" max="4.6" step="0.1" value="3.2">
+    <output id="heightOut">3.2</output>
+  </div>
+
+  <div class="row">
+    <label for="period">Period</label>
+    <input id="period" type="range" min="4.2" max="9.0" step="0.1" value="6.2">
+    <output id="periodOut">6.2</output>
+  </div>
+
+  <div class="row">
+    <label for="reef">Reef height</label>
+    <input id="reef" type="range" min="0.55" max="1.25" step="0.01" value="1.00">
+    <output id="reefOut">1.00</output>
+  </div>
+
+  <div class="row">
+    <label for="curl">Lip curl</label>
+    <input id="curl" type="range" min="0.2" max="1.5" step="0.01" value="1.00">
+    <output id="curlOut">1.00</output>
+  </div>
+
+  <div class="row">
+    <label for="spray">Whitewater</label>
+    <input id="spray" type="range" min="0" max="1.8" step="0.05" value="1.00">
+    <output id="sprayOut">1.00</output>
+  </div>
+
+  <div class="buttons">
+    <button id="pause">Pause</button>
+    <button id="resetBoard">Reset board</button>
+    <button id="camera">Barrel camera</button>
+  </div>
+</div>
+
+<div id="status"></div>
+
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
   }
 }
 </script>
-</head>
-<body>
-<div id="panel">
-  <h1>RECONSTRUCTED FLIP BARREL</h1>
-  <p class="desc">
-    The visible water is one smooth reconstructed liquid volume, not rendered particles.
-    Motion comes from a free-surface FLIP/PIC pressure solve; the reef is a solid boundary inside that solve.
-  </p>
-  <div class="row"><label for="waveHeight">Initial wave</label><input id="waveHeight" type="range" min="1.55" max="2.55" step="0.05" value="2.25"><output id="waveHeightOut"></output></div>
-  <div class="row"><label for="reefHeight">Reef rise</label><input id="reefHeight" type="range" min="2.65" max="3.65" step="0.05" value="3.25"><output id="reefHeightOut"></output></div>
-  <div class="row"><label for="reefLength">Reef slope</label><input id="reefLength" type="range" min="4.0" max="7.5" step="0.1" value="5.0"><output id="reefLengthOut"></output></div>
-  <div class="row"><label for="flipRatio">PIC ↔ FLIP</label><input id="flipRatio" type="range" min="0.82" max="0.98" step="0.01" value="0.93"><output id="flipRatioOut"></output></div>
-  <div class="row"><label for="pressureIters">Pressure</label><input id="pressureIters" type="range" min="18" max="50" step="1" value="34"><output id="pressureItersOut"></output></div>
-  <div class="stats">
-    <span>Particles <b id="particleStat">—</b></span>
-    <span>Grid <b id="gridStat">—</b></span>
-    <span>Sim time <b id="timeStat">—</b></span>
-    <span>Overhang <b id="overhangStat">forming</b></span>
-    <span>Max speed <b id="speedStat">—</b></span>
-    <span>State <b id="status">running</b></span>
-  </div>
-  <div class="buttons">
-    <button id="pauseBtn">Pause</button>
-    <button id="resetBtn">Reset with settings</button>
-    <button id="viewBtn">Side physics view</button>
-    <button id="gridBtn">Show solver grid</button>
-    <button id="loopBtn">Loop: on</button>
-  </div>
-</div>
-<div id="badge">Drag to orbit · pinch/scroll to zoom</div>
 
 <script type="module">
-/*
-Core FLIP/PIC transfer and pressure-projection structure adapted from:
-Copyright 2022 Matthias Müller — Ten Minute Physics
-https://github.com/matthias-research/pages/blob/master/tenMinutePhysics/18-flip.html
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-MIT License
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
-
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-
-const G = 9.81;
-const FLUID = 0;
-const AIR = 1;
-const SOLID = 2;
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
-const smoothstep = (a,b,x) => { const t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); };
-const sech2 = x => { const c=Math.cosh(x); return 1/(c*c); };
 
-const ui = {
-  waveHeight: document.querySelector("#waveHeight"),
-  reefHeight: document.querySelector("#reefHeight"),
-  reefLength: document.querySelector("#reefLength"),
-  flipRatio: document.querySelector("#flipRatio"),
-  pressureIters: document.querySelector("#pressureIters")
+const smoothstep = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
 };
-// Browsers sometimes restore old range values on reload. Start from the tested barrel preset.
-ui.waveHeight.value="2.25";
-ui.reefHeight.value="3.25";
-ui.reefLength.value="5.0";
-ui.flipRatio.value="0.93";
-ui.pressureIters.value="34";
 
-const outputs = {
-  waveHeight: document.querySelector("#waveHeightOut"),
-  reefHeight: document.querySelector("#reefHeightOut"),
-  reefLength: document.querySelector("#reefLengthOut"),
-  flipRatio: document.querySelector("#flipRatioOut"),
-  pressureIters: document.querySelector("#pressureItersOut")
+const wrapPi = a => Math.atan2(Math.sin(a), Math.cos(a));
+
+const params = {
+  waveHeight: 3.2,
+  period: 6.2,
+  reefHeight: 1.0,
+  curl: 1.0,
+  spray: 1.0
 };
-function updateReadouts(){
-  outputs.waveHeight.textContent=(+ui.waveHeight.value).toFixed(2)+" m";
-  outputs.reefHeight.textContent=(+ui.reefHeight.value).toFixed(2)+" m";
-  outputs.reefLength.textContent=(+ui.reefLength.value).toFixed(1)+" m";
-  outputs.flipRatio.textContent=(+ui.flipRatio.value).toFixed(2);
-  outputs.pressureIters.textContent=ui.pressureIters.value;
-}
-Object.values(ui).forEach(el=>el.addEventListener("input",updateReadouts));
-updateReadouts();
 
-// -----------------------------------------------------------------------------
-// FLIP/PIC free-surface solver
-// -----------------------------------------------------------------------------
-class FlipFluid {
-  constructor(width,height,spacing,particleRadius,maxParticles,bedFn,bedSlopeFn){
-    this.width=width;
-    this.height=height;
-    this.fNumX=Math.floor(width/spacing)+1;
-    this.fNumY=Math.floor(height/spacing)+1;
-    this.h=Math.max(width/this.fNumX,height/this.fNumY);
-    this.inv=1/this.h;
-    this.n=this.fNumY;
-    this.numCells=this.fNumX*this.fNumY;
+let paused = false;
+let simTime = 0;
+let frameCount = 0;
+let fpsTime = performance.now();
+let fps = 0;
 
-    this.u=new Float32Array(this.numCells);
-    this.v=new Float32Array(this.numCells);
-    this.du=new Float32Array(this.numCells);
-    this.dv=new Float32Array(this.numCells);
-    this.prevU=new Float32Array(this.numCells);
-    this.prevV=new Float32Array(this.numCells);
-    this.pressure=new Float32Array(this.numCells);
-    this.solidMask=new Float32Array(this.numCells);
-    this.cellType=new Int8Array(this.numCells);
-    this.particleDensity=new Float32Array(this.numCells);
-    this.particleRestDensity=0;
+/* -------------------------------------------------------
+   Scene, renderer and camera
+------------------------------------------------------- */
 
-    this.maxParticles=maxParticles;
-    this.particlePos=new Float32Array(maxParticles*2);
-    this.particleVel=new Float32Array(maxParticles*2);
-    this.numParticles=0;
-    this.particleRadius=particleRadius;
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x8bb4c1, 0.009);
 
-    this.pInvSpacing=1/(2.2*particleRadius);
-    this.pNumX=Math.floor(width*this.pInvSpacing)+1;
-    this.pNumY=Math.floor(height*this.pInvSpacing)+1;
-    this.pNumCells=this.pNumX*this.pNumY;
-    this.numCellParticles=new Int32Array(this.pNumCells);
-    this.firstCellParticle=new Int32Array(this.pNumCells+1);
-    this.cellParticleIds=new Int32Array(maxParticles);
+const camera = new THREE.PerspectiveCamera(
+  50,
+  innerWidth / innerHeight,
+  0.1,
+  220
+);
 
-    this.bedFn=bedFn;
-    this.bedSlopeFn=bedSlopeFn;
-  }
+camera.position.set(30, 15, 34);
 
-  setupSolidMask(){
-    const n=this.n;
-    for(let i=0;i<this.fNumX;i++){
-      const x=i*this.h;
-      const bed=this.bedFn(x);
-      for(let j=0;j<this.fNumY;j++){
-        const y=j*this.h;
-        const isSolid=i===0 || i===this.fNumX-1 || j===0 || y<bed+0.5*this.h;
-        this.solidMask[i*n+j]=isSolid?0:1;
-      }
-    }
-  }
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: 'high-performance'
+});
 
-  integrateParticles(dt){
-    for(let i=0;i<this.numParticles;i++){
-      this.particleVel[2*i+1]-=G*dt;
-      this.particlePos[2*i]+=this.particleVel[2*i]*dt;
-      this.particlePos[2*i+1]+=this.particleVel[2*i+1]*dt;
-    }
-  }
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  buildParticleHash(){
-    this.numCellParticles.fill(0);
-    for(let i=0;i<this.numParticles;i++){
-      const x=clamp(Math.floor(this.particlePos[2*i]*this.pInvSpacing),0,this.pNumX-1);
-      const y=clamp(Math.floor(this.particlePos[2*i+1]*this.pInvSpacing),0,this.pNumY-1);
-      this.numCellParticles[x*this.pNumY+y]++;
-    }
-    let first=0;
-    for(let c=0;c<this.pNumCells;c++){
-      first+=this.numCellParticles[c];
-      this.firstCellParticle[c]=first;
-    }
-    this.firstCellParticle[this.pNumCells]=first;
-    for(let i=0;i<this.numParticles;i++){
-      const x=clamp(Math.floor(this.particlePos[2*i]*this.pInvSpacing),0,this.pNumX-1);
-      const y=clamp(Math.floor(this.particlePos[2*i+1]*this.pInvSpacing),0,this.pNumY-1);
-      const cell=x*this.pNumY+y;
-      this.firstCellParticle[cell]--;
-      this.cellParticleIds[this.firstCellParticle[cell]]=i;
-    }
-  }
-
-  pushParticlesApart(iterations){
-    this.buildParticleHash();
-    const minDist=2*this.particleRadius;
-    const minDist2=minDist*minDist;
-    for(let iteration=0;iteration<iterations;iteration++){
-      for(let i=0;i<this.numParticles;i++){
-        let px=this.particlePos[2*i];
-        let py=this.particlePos[2*i+1];
-        const pxi=Math.floor(px*this.pInvSpacing);
-        const pyi=Math.floor(py*this.pInvSpacing);
-        const x0=Math.max(pxi-1,0);
-        const y0=Math.max(pyi-1,0);
-        const x1=Math.min(pxi+1,this.pNumX-1);
-        const y1=Math.min(pyi+1,this.pNumY-1);
-        for(let xi=x0;xi<=x1;xi++){
-          for(let yi=y0;yi<=y1;yi++){
-            const cell=xi*this.pNumY+yi;
-            const first=this.firstCellParticle[cell];
-            const last=this.firstCellParticle[cell+1];
-            for(let q=first;q<last;q++){
-              const j=this.cellParticleIds[q];
-              if(j<=i) continue;
-              let dx=this.particlePos[2*j]-px;
-              let dy=this.particlePos[2*j+1]-py;
-              const d2=dx*dx+dy*dy;
-              if(d2===0 || d2>=minDist2) continue;
-              const d=Math.sqrt(d2);
-              const s=0.5*(minDist-d)/d;
-              dx*=s;
-              dy*=s;
-              this.particlePos[2*i]-=dx;
-              this.particlePos[2*i+1]-=dy;
-              this.particlePos[2*j]+=dx;
-              this.particlePos[2*j+1]+=dy;
-              px=this.particlePos[2*i];
-              py=this.particlePos[2*i+1];
-            }
-          }
-        }
-      }
-    }
-  }
-
-  handleParticleCollisions(){
-    const r=this.particleRadius;
-    const margin=this.h+r;
-    for(let i=0;i<this.numParticles;i++){
-      let x=this.particlePos[2*i];
-      let y=this.particlePos[2*i+1];
-      let vx=this.particleVel[2*i];
-      let vy=this.particleVel[2*i+1];
-
-      if(x<margin){x=margin;if(vx<0)vx=0;}
-      if(x>this.width-margin){x=this.width-margin;if(vx>0)vx=0;}
-      if(y>this.height-margin){y=this.height-margin;if(vy>0)vy=0;}
-
-      const floorY=this.bedFn(x)+r;
-      if(y<floorY){
-        const slope=this.bedSlopeFn(x);
-        let nx=-slope, ny=1;
-        const len=Math.hypot(nx,ny)||1;
-        nx/=len; ny/=len;
-        y=floorY;
-        const normalVelocity=vx*nx+vy*ny;
-        if(normalVelocity<0){vx-=normalVelocity*nx;vy-=normalVelocity*ny;}
-        // Tangential seabed drag. This is part of the breaker formation:
-        // lower water is slowed while the upper crest keeps moving.
-        const tx=ny, ty=-nx;
-        const tangentVelocity=vx*tx+vy*ty;
-        vx-=0.035*tangentVelocity*tx;
-        vy-=0.035*tangentVelocity*ty;
-      }
-
-      this.particlePos[2*i]=x;
-      this.particlePos[2*i+1]=y;
-      this.particleVel[2*i]=vx;
-      this.particleVel[2*i+1]=vy;
-    }
-  }
-
-  updateParticleDensity(){
-    const n=this.n,h=this.h,inv=this.inv,h2=0.5*h;
-    const density=this.particleDensity;
-    density.fill(0);
-    for(let i=0;i<this.numParticles;i++){
-      const x=clamp(this.particlePos[2*i],h,(this.fNumX-1)*h);
-      const y=clamp(this.particlePos[2*i+1],h,(this.fNumY-1)*h);
-      const x0=clamp(Math.floor((x-h2)*inv),0,this.fNumX-2);
-      const y0=clamp(Math.floor((y-h2)*inv),0,this.fNumY-2);
-      const x1=x0+1,y1=y0+1;
-      const tx=((x-h2)-x0*h)*inv;
-      const ty=((y-h2)-y0*h)*inv;
-      const sx=1-tx,sy=1-ty;
-      density[x0*n+y0]+=sx*sy;
-      density[x1*n+y0]+=tx*sy;
-      density[x1*n+y1]+=tx*ty;
-      density[x0*n+y1]+=sx*ty;
-    }
-    if(this.particleRestDensity===0){
-      let sum=0,count=0;
-      for(let c=0;c<this.numCells;c++){
-        if(this.cellType[c]===FLUID){sum+=density[c];count++;}
-      }
-      if(count) this.particleRestDensity=sum/count;
-    }
-  }
-
-  transferVelocities(toGrid,flipRatio=0.93){
-    const n=this.n,h=this.h,inv=this.inv,h2=0.5*h;
-    if(toGrid){
-      this.prevU.set(this.u);
-      this.prevV.set(this.v);
-      this.du.fill(0);this.dv.fill(0);this.u.fill(0);this.v.fill(0);
-      for(let c=0;c<this.numCells;c++) this.cellType[c]=this.solidMask[c]===0?SOLID:AIR;
-      for(let i=0;i<this.numParticles;i++){
-        const xi=clamp(Math.floor(this.particlePos[2*i]*inv),0,this.fNumX-1);
-        const yi=clamp(Math.floor(this.particlePos[2*i+1]*inv),0,this.fNumY-1);
-        const cell=xi*n+yi;
-        if(this.cellType[cell]===AIR) this.cellType[cell]=FLUID;
-      }
-    }
-
-    for(let component=0;component<2;component++){
-      const dx=component===0?0:h2;
-      const dy=component===0?h2:0;
-      const field=component===0?this.u:this.v;
-      const previous=component===0?this.prevU:this.prevV;
-      const weights=component===0?this.du:this.dv;
-
-      for(let i=0;i<this.numParticles;i++){
-        const x=clamp(this.particlePos[2*i],h,(this.fNumX-1)*h);
-        const y=clamp(this.particlePos[2*i+1],h,(this.fNumY-1)*h);
-        const x0=clamp(Math.floor((x-dx)*inv),0,this.fNumX-2);
-        const y0=clamp(Math.floor((y-dy)*inv),0,this.fNumY-2);
-        const x1=x0+1,y1=y0+1;
-        const tx=((x-dx)-x0*h)*inv;
-        const ty=((y-dy)-y0*h)*inv;
-        const sx=1-tx,sy=1-ty;
-        const w0=sx*sy,w1=tx*sy,w2=tx*ty,w3=sx*ty;
-        const c0=x0*n+y0,c1=x1*n+y0,c2=x1*n+y1,c3=x0*n+y1;
-
-        if(toGrid){
-          const value=this.particleVel[2*i+component];
-          field[c0]+=value*w0;weights[c0]+=w0;
-          field[c1]+=value*w1;weights[c1]+=w1;
-          field[c2]+=value*w2;weights[c2]+=w2;
-          field[c3]+=value*w3;weights[c3]+=w3;
-        }else{
-          const offset=component===0?n:1;
-          const cells=[c0,c1,c2,c3];
-          const ws=[w0,w1,w2,w3];
-          let sum=0,pic=0,correction=0;
-          for(let k=0;k<4;k++){
-            const cell=cells[k];
-            const valid=this.cellType[cell]!==AIR || (cell-offset>=0 && this.cellType[cell-offset]!==AIR);
-            if(!valid) continue;
-            sum+=ws[k];
-            pic+=ws[k]*field[cell];
-            correction+=ws[k]*(field[cell]-previous[cell]);
-          }
-          if(sum>0){
-            pic/=sum; correction/=sum;
-            const oldVelocity=this.particleVel[2*i+component];
-            const flipVelocity=oldVelocity+correction;
-            this.particleVel[2*i+component]=(1-flipRatio)*pic+flipRatio*flipVelocity;
-          }
-        }
-      }
-
-      if(toGrid){
-        for(let c=0;c<field.length;c++) if(weights[c]>0) field[c]/=weights[c];
-        for(let i=0;i<this.fNumX;i++){
-          for(let j=0;j<this.fNumY;j++){
-            const cell=i*n+j;
-            const solid=this.cellType[cell]===SOLID;
-            if(solid || (i>0 && this.cellType[(i-1)*n+j]===SOLID)) this.u[cell]=0;
-            if(solid || (j>0 && this.cellType[i*n+j-1]===SOLID)) this.v[cell]=0;
-          }
-        }
-      }
-    }
-  }
-
-  solveIncompressibility(iterations,dt,overRelaxation=1.85){
-    this.pressure.fill(0);
-    this.prevU.set(this.u);
-    this.prevV.set(this.v);
-    const n=this.n;
-    const pressureScale=1000*this.h/dt;
-
-    for(let iteration=0;iteration<iterations;iteration++){
-      for(let i=1;i<this.fNumX-1;i++){
-        for(let j=1;j<this.fNumY-1;j++){
-          const center=i*n+j;
-          if(this.cellType[center]!==FLUID) continue;
-          const left=(i-1)*n+j,right=(i+1)*n+j,bottom=i*n+j-1,top=i*n+j+1;
-          const sx0=this.solidMask[left],sx1=this.solidMask[right];
-          const sy0=this.solidMask[bottom],sy1=this.solidMask[top];
-          const openFaces=sx0+sx1+sy0+sy1;
-          if(openFaces===0) continue;
-
-          let divergence=this.u[right]-this.u[center]+this.v[top]-this.v[center];
-          if(this.particleRestDensity>0){
-            const compression=this.particleDensity[center]-this.particleRestDensity;
-            if(compression>0) divergence-=0.7*compression;
-          }
-          const correction=-divergence/openFaces*overRelaxation;
-          this.pressure[center]+=pressureScale*correction;
-          this.u[center]-=sx0*correction;
-          this.u[right]+=sx1*correction;
-          this.v[center]-=sy0*correction;
-          this.v[top]+=sy1*correction;
-        }
-      }
-    }
-  }
-
-  step(dt,flipRatio,pressureIterations,separateParticles=true){
-    this.integrateParticles(dt);
-    if(separateParticles) this.pushParticlesApart(1);
-    this.handleParticleCollisions();
-    this.transferVelocities(true);
-    this.updateParticleDensity();
-    this.solveIncompressibility(pressureIterations,dt,1.85);
-    this.transferVelocities(false,flipRatio);
-    this.handleParticleCollisions();
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Domain, bathymetry and physically initialized wave packet
-// -----------------------------------------------------------------------------
-const DOMAIN_W=26;
-const DOMAIN_H=9;
-const MEAN_LEVEL=5.15;
-const DEEP_FLOOR=0.45;
-const REEF_START=10;
-let fluid=null;
-let simTime=0;
-let accumulator=0;
-let paused=false;
-let sideView=false;
-let showGrid=false;
-
-function currentBed(x){
-  const rise=+ui.reefHeight.value;
-  const length=+ui.reefLength.value;
-  if(x<REEF_START) return DEEP_FLOOR;
-  if(x<REEF_START+length){
-    let t=(x-REEF_START)/length;
-    t=t*t*(3-2*t);
-    return DEEP_FLOOR+rise*t;
-  }
-  return DEEP_FLOOR+rise+0.06*Math.sin((x-REEF_START-length)*0.7);
-}
-function currentBedSlope(x){
-  const e=0.02;
-  return (currentBed(x+e)-currentBed(x-e))/(2*e);
-}
-
-function createSimulation(){
-  const gridSpacing=0.24;
-  const particleRadius=0.075;
-  fluid=new FlipFluid(DOMAIN_W,DOMAIN_H,gridSpacing,particleRadius,20000,currentBed,currentBedSlope);
-  fluid.setupSolidMask();
-
-  const amplitude=+ui.waveHeight.value;
-  const center=7.8;
-  const width=1.18;
-  const deepDepth=MEAN_LEVEL-DEEP_FLOOR;
-  const phaseSpeed=Math.sqrt(G*(deepDepth+amplitude));
-  const particleDX=2*particleRadius;
-  const particleDY=Math.sqrt(3)*0.5*particleDX;
-  let count=0;
-
-  for(let x=DEEP_FLOOR+gridSpacing+particleRadius;x<DOMAIN_W-gridSpacing-particleRadius;x+=particleDX){
-    const eta=amplitude*sech2((x-center)/width);
-    const surface=MEAN_LEVEL+eta;
-    const bed=currentBed(x);
-    let row=0;
-    for(let y=bed+particleRadius;y<surface-particleRadius;y+=particleDY,row++){
-      if(count>=fluid.maxParticles) break;
-      const px=x+(row%2?particleRadius:0);
-      if(px>DOMAIN_W-gridSpacing-particleRadius) continue;
-      fluid.particlePos[2*count]=px;
-      fluid.particlePos[2*count+1]=y;
-
-      // Solitary-wave-like shallow-water velocity initialization. The
-      // vertical variation approximates finite-depth orbital shear; it is
-      // an initial condition, not a prescribed trajectory. After t=0 all
-      // motion comes from gravity, pressure projection and the reef boundary.
-      const q=(x-center)/width;
-      const etaLocal=amplitude*sech2(q);
-      const dEtaDx=-2*amplitude*sech2(q)*Math.tanh(q)/width;
-      const localDepth=Math.max(0.2,MEAN_LEVEL-bed+etaLocal);
-      const fraction=clamp((y-bed)/localDepth,0,1);
-      const depthAverageU=phaseSpeed*etaLocal/localDepth;
-      fluid.particleVel[2*count]=depthAverageU*(0.78+2.35*fraction*fraction);
-      fluid.particleVel[2*count+1]=-phaseSpeed*(y-bed)/localDepth*dEtaDx*0.78;
-      count++;
-    }
-  }
-  fluid.numParticles=count;
-  simTime=0;
-  accumulator=0;
-  lastContour=[];
-  boardZ=-3.4;
-  updateSeafloorGeometry();
-  rebuildGridLines();
-
-  // Initialize grid density, then advance briefly so the first rendered frame
-  // already shows the wave shoaling into the reef instead of a flat start.
-  for(let warm=0;warm<26;warm++){
-    fluid.step(1/90,+ui.flipRatio.value,+ui.pressureIters.value,true);
-    simTime+=1/90;
-  }
-  updateSurfaceGeometry(true);
-  document.querySelector("#particleStat").textContent=count.toLocaleString();
-  document.querySelector("#gridStat").textContent=fluid.fNumX+" × "+fluid.fNumY;
-}
-
-// -----------------------------------------------------------------------------
-// Three.js scene
-// -----------------------------------------------------------------------------
-const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
-renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
-renderer.setSize(innerWidth,innerHeight);
-renderer.outputColorSpace=THREE.SRGBColorSpace;
-renderer.toneMapping=THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure=1.08;
-renderer.shadowMap.enabled=true;
-renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
-const pmrem=new THREE.PMREMGenerator(renderer);
-const roomEnv=new RoomEnvironment(renderer);
-const environmentTexture=pmrem.fromScene(roomEnv,0.04).texture;
-roomEnv.dispose();
-pmrem.dispose();
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.2, -3);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.minDistance = 7;
+controls.maxDistance = 95;
 
-const scene=new THREE.Scene();
-scene.environment=environmentTexture;
-scene.background=new THREE.Color(0x75c9dc);
-scene.fog=new THREE.FogExp2(0x75c9dc,0.022);
+/* -------------------------------------------------------
+   Lighting and sky
+------------------------------------------------------- */
 
-const camera=new THREE.PerspectiveCamera(47,innerWidth/innerHeight,0.1,150);
-camera.position.set(7.8,5.1,16.5);
-const controls=new OrbitControls(camera,renderer.domElement);
-controls.enableDamping=true;
-controls.dampingFactor=0.06;
-controls.target.set(-0.2,3.85,0);
-controls.minDistance=7;
-controls.maxDistance=42;
-controls.maxPolarAngle=Math.PI*0.54;
-controls.update();
+scene.add(
+  new THREE.HemisphereLight(
+    0xbfe8ff,
+    0x34452d,
+    1.7
+  )
+);
 
-scene.add(new THREE.HemisphereLight(0xd8f8ff,0x173b46,2.4));
-const sun=new THREE.DirectionalLight(0xfff2d5,4.1);
-sun.position.set(-8,15,10);
-sun.castShadow=true;
-sun.shadow.mapSize.set(2048,2048);
-sun.shadow.camera.left=-24;sun.shadow.camera.right=24;sun.shadow.camera.top=18;sun.shadow.camera.bottom=-10;
+const sun = new THREE.DirectionalLight(0xfff3d2, 3.6);
+sun.position.set(-28, 42, 18);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -48;
+sun.shadow.camera.right = 48;
+sun.shadow.camera.top = 48;
+sun.shadow.camera.bottom = -48;
+sun.shadow.camera.near = 2;
+sun.shadow.camera.far = 100;
 scene.add(sun);
-const rim=new THREE.DirectionalLight(0x6bddff,1.25);rim.position.set(12,6,-12);scene.add(rim);
 
-const sky=new THREE.Mesh(
-  new THREE.SphereGeometry(90,32,16),
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(120, 32, 16),
   new THREE.ShaderMaterial({
-    side:THREE.BackSide,
-    uniforms:{top:{value:new THREE.Color(0x0b5c80)},bottom:{value:new THREE.Color(0xb9eef1)}},
-    vertexShader:`varying vec3 p;void main(){p=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-    fragmentShader:`uniform vec3 top;uniform vec3 bottom;varying vec3 p;void main(){float h=clamp(normalize(p).y*.5+.5,0.,1.);gl_FragColor=vec4(mix(bottom,top,pow(h,.74)),1.);}`
+    side: THREE.BackSide,
+    depthWrite: false,
+
+    uniforms: {
+      sunDir: {
+        value: sun.position.clone().normalize()
+      }
+    },
+
+    vertexShader: `
+      varying vec3 vDir;
+
+      void main() {
+        vDir = normalize(position);
+
+        gl_Position =
+          projectionMatrix *
+          modelViewMatrix *
+          vec4(position, 1.0);
+      }
+    `,
+
+    fragmentShader: `
+      varying vec3 vDir;
+      uniform vec3 sunDir;
+
+      void main() {
+        float h = clamp(vDir.y * 0.5 + 0.5, 0.0, 1.0);
+
+        vec3 horizon = vec3(0.66, 0.84, 0.90);
+        vec3 zenith = vec3(0.08, 0.27, 0.43);
+
+        vec3 col = mix(
+          horizon,
+          zenith,
+          pow(h, 0.65)
+        );
+
+        float sunGlow =
+          pow(max(dot(vDir, sunDir), 0.0), 550.0) *
+          7.0;
+
+        col += vec3(1.0, 0.72, 0.42) * sunGlow;
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `
   })
 );
+
 scene.add(sky);
 
-// World mapping: simulation x is translated so the breaker is centered.
-const WORLD_X_OFFSET=-13;
-const WORLD_Y_OFFSET=-0.15;
-const WATER_HALF_SPAN=4.4;
-const simToWorldX=x=>x+WORLD_X_OFFSET;
-const simToWorldY=y=>y+WORLD_Y_OFFSET;
+/* -------------------------------------------------------
+   Reef and beach bathymetry
+------------------------------------------------------- */
 
-// -----------------------------------------------------------------------------
-// Seafloor mesh — generated from the exact function used by the solver
-// -----------------------------------------------------------------------------
-let seafloorMesh=null;
-function makeSeafloorGeometry(){
-  const segments=180;
-  const positions=[];
-  const indices=[];
-  for(let i=0;i<=segments;i++){
-    const x=DOMAIN_W*i/segments;
-    const wx=simToWorldX(x);
-    const wy=simToWorldY(currentBed(x));
-    positions.push(wx,wy,-6.4, wx,wy,6.4);
+function channelFactor(x) {
+  return Math.exp(
+    -Math.pow((x + 15.0) / 6.5, 2)
+  );
+}
+
+function reefProfile(z) {
+  return Math.exp(
+    -Math.pow((z + 2.5) / 10.0, 4)
+  );
+}
+
+function bedHeight(x, z) {
+  const channel = channelFactor(x);
+
+  const alongshore =
+    0.92 +
+    0.10 * Math.sin(x * 0.16) +
+    0.06 * Math.sin(x * 0.37 + 1.1);
+
+  const reef =
+    8.05 *
+    params.reefHeight *
+    reefProfile(z) *
+    alongshore *
+    (1.0 - 0.58 * channel);
+
+  const shoreT = smoothstep(17.0, 35.0, -z);
+
+  const beach =
+    12.2 *
+    Math.pow(shoreT, 1.42);
+
+  const outerRidge =
+    0.75 *
+    Math.exp(-Math.pow((z - 14.0) / 8.0, 2)) *
+    (0.5 + 0.5 * Math.sin(x * 0.12 + 2.0));
+
+  return -10.2 + reef + beach + outerRidge;
+}
+
+/* -------------------------------------------------------
+   Wave model
+
+   The base mesh is indexed by fixed parameters x and z,
+   but the returned world position moves in all 3 axes.
+
+   The large negative worldZ displacement at the lip makes
+   the z mapping reverse locally, allowing an overhang.
+------------------------------------------------------- */
+
+function localWaveData(x, z, time, out) {
+  const bottom = bedHeight(x, z);
+  const depth = Math.max(0.04, -bottom);
+
+  const channel = channelFactor(x);
+  const reef = reefProfile(z);
+  const shoreward = smoothstep(7.0, 28.0, -z);
+
+  const wavelength = params.period * 3.15;
+  const k = Math.PI * 2 / wavelength;
+  const omega = Math.PI * 2 / params.period;
+
+  /*
+    Approximate shallow-water travel-time delay.
+
+    Shallower parts of the reef delay the wave more than
+    the deeper channel, creating a bent crest line.
+  */
+  const delay =
+    reef * (1.9 - 0.75 * channel) +
+    shoreward * (0.7 - 0.22 * channel) +
+    0.13 * Math.sin(x * 0.11);
+
+  const theta = k * z + omega * time + delay;
+  const phi = wrapPi(theta);
+
+  /*
+    Approximate shoaling: wave amplitude grows as depth
+    decreases, until post-breaking dissipation takes over.
+  */
+  const shoal = clamp(
+    Math.pow(8.5 / Math.max(depth, 0.6), 0.22),
+    0.88,
+    1.78
+  );
+
+  const postBreakDecay = lerp(
+    1.0,
+    0.32,
+    shoreward
+  );
+
+  const amplitude =
+    params.waveHeight *
+    0.5 *
+    shoal *
+    postBreakDecay;
+
+  const slope = Math.abs(
+    (
+      bedHeight(x, z + 0.45) -
+      bedHeight(x, z - 0.45)
+    ) / 0.9
+  );
+
+  /*
+    Simplified breaker detector using local wave-height
+    to depth ratio plus seabed slope.
+  */
+  const heightDepthRatio =
+    (2.0 * amplitude) /
+    Math.max(depth, 0.25);
+
+  const breaking =
+    smoothstep(
+      0.48,
+      0.82,
+      heightDepthRatio + slope * 0.24
+    ) *
+    smoothstep(0.08, 0.48, reef);
+
+  const crest =
+    Math.exp(
+      -(phi * phi) /
+      (2.0 * 0.52 * 0.52)
+    );
+
+  const front =
+    Math.exp(
+      -Math.pow((phi + 0.34) / 0.42, 2)
+    );
+
+  const lip =
+    breaking *
+    Math.exp(
+      -Math.pow((phi + 0.20) / 0.25, 2)
+    );
+
+  const curlBand =
+    breaking *
+    Math.exp(
+      -Math.pow((phi + 0.55) / 0.52, 2)
+    );
+
+  /*
+    Vertically skewed wave profile.
+  */
+  let y =
+    amplitude *
+    (
+      Math.cos(phi) +
+      0.18 * Math.cos(2.0 * phi) -
+      0.06 * Math.cos(3.0 * phi)
+    );
+
+  y += amplitude * breaking * 0.32 * crest;
+
+  /*
+    Pull the lip down as it moves forward.
+  */
+  y -=
+    amplitude *
+    params.curl *
+    (
+      0.90 * lip +
+      0.22 * curlBand
+    );
+
+  /*
+    Horizontal orbital motion.
+
+    This is the important part that Evan's heightfield
+    cannot do. The lip displacement can become strong
+    enough for the parameter-to-world mapping to reverse.
+  */
+  const orbitalQ = 0.48 + 0.95 * breaking;
+
+  let worldZ =
+    z +
+    orbitalQ *
+    amplitude *
+    Math.sin(phi);
+
+  worldZ -=
+    amplitude *
+    params.curl *
+    (
+      1.82 * lip +
+      0.48 * curlBand
+    );
+
+  const chop =
+    (
+      0.055 +
+      0.035 * reef
+    ) *
+    Math.sin(
+      x * 0.72 +
+      z * 0.34 +
+      time * 2.1
+    ) +
+    0.035 *
+    Math.sin(
+      -x * 0.41 +
+      z * 0.86 +
+      time * 2.8
+    );
+
+  y += chop * (1.0 - 0.55 * breaking);
+
+  /*
+    Blend the water onto the beach in extremely
+    shallow areas.
+  */
+  const wet = smoothstep(0.02, 0.55, depth);
+  y = lerp(bottom + 0.018, y, wet);
+
+  out.x =
+    x +
+    0.10 *
+    amplitude *
+    Math.sin(phi + x * 0.05) *
+    (1.0 - channel * 0.4);
+
+  out.y = y;
+  out.z = worldZ;
+  out.depth = depth;
+  out.breaking = breaking;
+  out.crest = crest;
+  out.front = front;
+
+  out.foam = clamp(
+    breaking *
+    (
+      0.40 * crest +
+      0.92 * front +
+      0.55 * lip
+    ) +
+    shoreward * 0.13,
+    0,
+    1
+  );
+
+  out.flowZ =
+    -0.25 -
+    breaking * crest * 4.2 -
+    shoreward * 0.35;
+
+  out.bottom = bottom;
+
+  return out;
+}
+
+/* -------------------------------------------------------
+   Seabed mesh
+------------------------------------------------------- */
+
+const bedGeo = new THREE.PlaneGeometry(
+  82,
+  82,
+  150,
+  150
+);
+
+bedGeo.rotateX(-Math.PI / 2);
+
+const bedPositions = bedGeo.attributes.position;
+
+function updateBedGeometry() {
+  for (let i = 0; i < bedPositions.count; i++) {
+    const x = bedPositions.getX(i);
+    const z = bedPositions.getZ(i);
+
+    bedPositions.setY(
+      i,
+      bedHeight(x, z)
+    );
   }
-  for(let i=0;i<segments;i++){
-    const a=i*2,b=a+1,c=a+2,d=a+3;
-    indices.push(a,c,b,b,c,d);
+
+  bedPositions.needsUpdate = true;
+
+  bedGeo.computeVertexNormals();
+  bedGeo.attributes.normal.needsUpdate = true;
+}
+
+updateBedGeometry();
+
+const bedMat = new THREE.ShaderMaterial({
+  uniforms: {
+    time: {
+      value: 0
+    }
+  },
+
+  vertexShader: `
+    varying vec3 vWorld;
+    varying vec3 vNormal;
+
+    void main() {
+      vec4 worldPosition =
+        modelMatrix *
+        vec4(position, 1.0);
+
+      vWorld = worldPosition.xyz;
+      vNormal =
+        normalize(
+          mat3(modelMatrix) *
+          normal
+        );
+
+      gl_Position =
+        projectionMatrix *
+        viewMatrix *
+        worldPosition;
+    }
+  `,
+
+  fragmentShader: `
+    varying vec3 vWorld;
+    varying vec3 vNormal;
+
+    uniform float time;
+
+    float hash(vec2 p) {
+      return fract(
+        sin(
+          dot(
+            p,
+            vec2(127.1, 311.7)
+          )
+        ) *
+        43758.5453
+      );
+    }
+
+    float noise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+
+      f = f * f * (3.0 - 2.0 * f);
+
+      return mix(
+        mix(
+          hash(i),
+          hash(i + vec2(1.0, 0.0)),
+          f.x
+        ),
+        mix(
+          hash(i + vec2(0.0, 1.0)),
+          hash(i + vec2(1.0, 1.0)),
+          f.x
+        ),
+        f.y
+      );
+    }
+
+    void main() {
+      float wet =
+        1.0 -
+        smoothstep(
+          -0.05,
+          0.35,
+          vWorld.y
+        );
+
+      float n =
+        noise(vWorld.xz * 0.22) * 0.55 +
+        noise(vWorld.xz * 0.72) * 0.25;
+
+      vec3 sand = mix(
+        vec3(0.42, 0.36, 0.22),
+        vec3(0.72, 0.64, 0.40),
+        n
+      );
+
+      vec3 reef = mix(
+        vec3(0.12, 0.18, 0.12),
+        vec3(0.31, 0.29, 0.17),
+        n
+      );
+
+      float reefMix =
+        smoothstep(
+          -7.5,
+          -1.0,
+          vWorld.y
+        ) *
+        wet;
+
+      vec3 col = mix(
+        sand,
+        reef,
+        reefMix * 0.72
+      );
+
+      vec3 dry = mix(
+        vec3(0.46, 0.40, 0.24),
+        vec3(0.68, 0.58, 0.34),
+        n
+      );
+
+      col = mix(
+        dry,
+        col,
+        wet
+      );
+
+      /*
+        Approximate animated caustic pattern.
+      */
+      float c1 =
+        sin(
+          vWorld.x * 1.75 +
+          sin(
+            vWorld.z * 1.15 +
+            time * 0.45
+          )
+        );
+
+      float c2 =
+        sin(
+          vWorld.z * 1.62 -
+          sin(
+            vWorld.x * 1.05 -
+            time * 0.38
+          )
+        );
+
+      float caustic =
+        pow(
+          max(0.0, c1 * c2),
+          2.0
+        );
+
+      col +=
+        vec3(0.20, 0.29, 0.19) *
+        caustic *
+        wet *
+        smoothstep(
+          -9.0,
+          -0.4,
+          vWorld.y
+        );
+
+      float light =
+        0.50 +
+        0.50 *
+        max(
+          dot(
+            normalize(vNormal),
+            normalize(
+              vec3(-0.4, 1.0, 0.25)
+            )
+          ),
+          0.0
+        );
+
+      gl_FragColor =
+        vec4(
+          col * light,
+          1.0
+        );
+    }
+  `
+});
+
+const bedMesh = new THREE.Mesh(
+  bedGeo,
+  bedMat
+);
+
+bedMesh.receiveShadow = true;
+scene.add(bedMesh);
+
+/* -------------------------------------------------------
+   Dynamic water mesh
+------------------------------------------------------- */
+
+const NX = 104;
+const NZ = 150;
+
+const WATER_WIDTH = 80;
+const WATER_DEPTH = 80;
+
+const vertexCount = NX * NZ;
+
+const positions =
+  new Float32Array(vertexCount * 3);
+
+const normals =
+  new Float32Array(vertexCount * 3);
+
+const foamAttribute =
+  new Float32Array(vertexCount);
+
+const depthAttribute =
+  new Float32Array(vertexCount);
+
+const baseX =
+  new Float32Array(vertexCount);
+
+const baseZ =
+  new Float32Array(vertexCount);
+
+const indices = [];
+
+for (let j = 0; j < NZ; j++) {
+  const z =
+    -WATER_DEPTH / 2 +
+    WATER_DEPTH *
+    j /
+    (NZ - 1);
+
+  for (let i = 0; i < NX; i++) {
+    const x =
+      -WATER_WIDTH / 2 +
+      WATER_WIDTH *
+      i /
+      (NX - 1);
+
+    const vertex = j * NX + i;
+
+    baseX[vertex] = x;
+    baseZ[vertex] = z;
   }
-  // Vertical skirt below the near and far edges.
-  const baseY=-4.5;
-  const topCount=positions.length/3;
-  for(let i=0;i<=segments;i++){
-    const x=DOMAIN_W*i/segments;
-    const wx=simToWorldX(x);
-    positions.push(wx,baseY,-6.4,wx,baseY,6.4);
+}
+
+for (let j = 0; j < NZ - 1; j++) {
+  for (let i = 0; i < NX - 1; i++) {
+    const a = j * NX + i;
+    const b = a + 1;
+    const c = a + NX;
+    const d = c + 1;
+
+    indices.push(
+      a, c, b,
+      b, c, d
+    );
   }
-  for(let i=0;i<segments;i++){
-    const ta=i*2,tb=ta+1,tc=ta+2,td=ta+3;
-    const ba=topCount+i*2,bb=ba+1,bc=ba+2,bd=ba+3;
-    indices.push(ta,ba,tc,tc,ba,bc, tb,td,bb,td,bd,bb);
+}
+
+const waterGeo =
+  new THREE.BufferGeometry();
+
+waterGeo.setAttribute(
+  'position',
+  new THREE.BufferAttribute(
+    positions,
+    3
+  )
+);
+
+waterGeo.setAttribute(
+  'normal',
+  new THREE.BufferAttribute(
+    normals,
+    3
+  )
+);
+
+waterGeo.setAttribute(
+  'aFoam',
+  new THREE.BufferAttribute(
+    foamAttribute,
+    1
+  )
+);
+
+waterGeo.setAttribute(
+  'aDepth',
+  new THREE.BufferAttribute(
+    depthAttribute,
+    1
+  )
+);
+
+waterGeo.setIndex(indices);
+
+/* -------------------------------------------------------
+   Refraction render target
+------------------------------------------------------- */
+
+const refractionTarget =
+  new THREE.WebGLRenderTarget(
+    Math.max(
+      1,
+      Math.floor(
+        innerWidth *
+        renderer.getPixelRatio()
+      )
+    ),
+    Math.max(
+      1,
+      Math.floor(
+        innerHeight *
+        renderer.getPixelRatio()
+      )
+    ),
+    {
+      depthBuffer: true,
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter
+    }
+  );
+
+refractionTarget.texture.colorSpace =
+  THREE.SRGBColorSpace;
+
+/* -------------------------------------------------------
+   Water shader
+------------------------------------------------------- */
+
+const waterMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  transparent: true,
+  depthWrite: true,
+
+  uniforms: {
+    time: {
+      value: 0
+    },
+
+    sunDir: {
+      value: sun.position.clone().normalize()
+    },
+
+    tScene: {
+      value: refractionTarget.texture
+    },
+
+    resolution: {
+      value: new THREE.Vector2(
+        innerWidth *
+        renderer.getPixelRatio(),
+
+        innerHeight *
+        renderer.getPixelRatio()
+      )
+    }
+  },
+
+  vertexShader: `
+    attribute float aFoam;
+    attribute float aDepth;
+
+    varying vec3 vWorld;
+    varying vec3 vNormal;
+    varying float vFoam;
+    varying float vDepth;
+
+    void main() {
+      vec4 worldPosition =
+        modelMatrix *
+        vec4(position, 1.0);
+
+      vWorld = worldPosition.xyz;
+
+      vNormal =
+        normalize(
+          mat3(modelMatrix) *
+          normal
+        );
+
+      vFoam = aFoam;
+      vDepth = aDepth;
+
+      gl_Position =
+        projectionMatrix *
+        viewMatrix *
+        worldPosition;
+    }
+  `,
+
+  fragmentShader: `
+    varying vec3 vWorld;
+    varying vec3 vNormal;
+    varying float vFoam;
+    varying float vDepth;
+
+    uniform float time;
+    uniform vec3 sunDir;
+    uniform sampler2D tScene;
+    uniform vec2 resolution;
+
+    vec3 skyColor(vec3 direction) {
+      float h =
+        clamp(
+          direction.y * 0.5 + 0.5,
+          0.0,
+          1.0
+        );
+
+      return mix(
+        vec3(0.64, 0.82, 0.88),
+        vec3(0.06, 0.25, 0.42),
+        pow(h, 0.72)
+      );
+    }
+
+    void main() {
+      if (vDepth < 0.025) {
+        discard;
+      }
+
+      vec3 N = normalize(vNormal);
+
+      if (!gl_FrontFacing) {
+        N = -N;
+      }
+
+      vec3 V =
+        normalize(
+          cameraPosition -
+          vWorld
+        );
+
+      vec3 R =
+        reflect(-V, N);
+
+      float fresnel =
+        0.025 +
+        0.975 *
+        pow(
+          1.0 -
+          max(dot(N, V), 0.0),
+          5.0
+        );
+
+      float shallow =
+        1.0 -
+        smoothstep(
+          1.0,
+          8.5,
+          vDepth
+        );
+
+      vec3 bottomTint =
+        mix(
+          vec3(0.015, 0.22, 0.26),
+          vec3(0.22, 0.53, 0.49),
+          shallow
+        );
+
+      float c =
+        sin(
+          vWorld.x * 1.45 +
+          sin(
+            vWorld.z * 0.9 +
+            time * 0.5
+          )
+        ) *
+        sin(
+          vWorld.z * 1.7 -
+          sin(
+            vWorld.x * 0.8 -
+            time * 0.42
+          )
+        );
+
+      float caustic =
+        pow(
+          max(c, 0.0),
+          2.0
+        );
+
+      float absorb =
+        exp(-vDepth * 0.11);
+
+      /*
+        Screen-space refraction.
+
+        The scene without water is rendered into tScene.
+        The water normal distorts the screen coordinate.
+      */
+      vec2 screenUV =
+        gl_FragCoord.xy /
+        resolution;
+
+      vec2 bend =
+        vec2(N.x, N.z) *
+        mix(
+          0.010,
+          0.026,
+          shallow
+        ) *
+        (1.0 - 0.55 * fresnel);
+
+      vec3 sceneThroughWater =
+        texture2D(
+          tScene,
+          clamp(
+            screenUV + bend,
+            vec2(0.002),
+            vec2(0.998)
+          )
+        ).rgb;
+
+      vec3 refracted =
+        mix(
+          sceneThroughWater,
+          bottomTint,
+          0.30 +
+          0.34 *
+          (1.0 - absorb)
+        );
+
+      refracted +=
+        vec3(0.08, 0.20, 0.13) *
+        caustic *
+        shallow;
+
+      refracted =
+        mix(
+          vec3(0.01, 0.11, 0.17),
+          refracted,
+          absorb
+        );
+
+      vec3 reflected =
+        skyColor(R);
+
+      float spec =
+        pow(
+          max(
+            dot(
+              reflect(-sunDir, N),
+              -V
+            ),
+            0.0
+          ),
+          260.0
+        );
+
+      vec3 col =
+        mix(
+          refracted,
+          reflected,
+          fresnel
+        );
+
+      col +=
+        vec3(1.0, 0.86, 0.62) *
+        spec *
+        2.5;
+
+      float foamNoise =
+        0.72 +
+        0.28 *
+        sin(
+          vWorld.x * 3.2 +
+          vWorld.z * 2.1 +
+          time * 4.0
+        );
+
+      float foam =
+        smoothstep(
+          0.22,
+          0.82,
+          vFoam * foamNoise
+        );
+
+      col =
+        mix(
+          col,
+          vec3(0.88, 0.97, 1.0),
+          foam
+        );
+
+      float alpha =
+        mix(
+          0.90,
+          0.985,
+          clamp(
+            fresnel + foam,
+            0.0,
+            1.0
+          )
+        );
+
+      gl_FragColor =
+        vec4(col, alpha);
+    }
+  `
+});
+
+const waterMesh =
+  new THREE.Mesh(
+    waterGeo,
+    waterMat
+  );
+
+waterMesh.renderOrder = 2;
+waterMesh.castShadow = false;
+
+scene.add(waterMesh);
+
+/* -------------------------------------------------------
+   Update water positions and normals
+------------------------------------------------------- */
+
+const sample = {
+  x: 0,
+  y: 0,
+  z: 0,
+  depth: 0,
+  breaking: 0,
+  crest: 0,
+  front: 0,
+  foam: 0,
+  flowZ: 0,
+  bottom: 0
+};
+
+function updateWater(time) {
+  for (let vertex = 0; vertex < vertexCount; vertex++) {
+    localWaveData(
+      baseX[vertex],
+      baseZ[vertex],
+      time,
+      sample
+    );
+
+    const p = vertex * 3;
+
+    positions[p] = sample.x;
+    positions[p + 1] = sample.y;
+    positions[p + 2] = sample.z;
+
+    foamAttribute[vertex] = sample.foam;
+    depthAttribute[vertex] = sample.depth;
   }
-  const geometry=new THREE.BufferGeometry();
-  geometry.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
-  geometry.setIndex(indices);
+
+  /*
+    Recompute normals using the actual deformed positions.
+
+    This remains valid after the mesh folds because it is
+    no longer deriving normals from only a height value.
+  */
+  for (let j = 0; j < NZ; j++) {
+    const jm = Math.max(j - 1, 0);
+    const jp = Math.min(j + 1, NZ - 1);
+
+    for (let i = 0; i < NX; i++) {
+      const im = Math.max(i - 1, 0);
+      const ip = Math.min(i + 1, NX - 1);
+
+      const vertex = j * NX + i;
+
+      const left =
+        (j * NX + im) * 3;
+
+      const right =
+        (j * NX + ip) * 3;
+
+      const down =
+        (jm * NX + i) * 3;
+
+      const upIndex =
+        (jp * NX + i) * 3;
+
+      const tx0 =
+        positions[right] -
+        positions[left];
+
+      const tx1 =
+        positions[right + 1] -
+        positions[left + 1];
+
+      const tx2 =
+        positions[right + 2] -
+        positions[left + 2];
+
+      const tz0 =
+        positions[upIndex] -
+        positions[down];
+
+      const tz1 =
+        positions[upIndex + 1] -
+        positions[down + 1];
+
+      const tz2 =
+        positions[upIndex + 2] -
+        positions[down + 2];
+
+      let nx =
+        tz1 * tx2 -
+        tz2 * tx1;
+
+      let ny =
+        tz2 * tx0 -
+        tz0 * tx2;
+
+      let nz =
+        tz0 * tx1 -
+        tz1 * tx0;
+
+      const inverseLength =
+        1 /
+        Math.max(
+          0.000001,
+          Math.hypot(nx, ny, nz)
+        );
+
+      nx *= inverseLength;
+      ny *= inverseLength;
+      nz *= inverseLength;
+
+      if (ny < 0) {
+        nx = -nx;
+        ny = -ny;
+        nz = -nz;
+      }
+
+      const normalIndex =
+        vertex * 3;
+
+      normals[normalIndex] = nx;
+      normals[normalIndex + 1] = ny;
+      normals[normalIndex + 2] = nz;
+    }
+  }
+
+  waterGeo.attributes.position.needsUpdate = true;
+  waterGeo.attributes.normal.needsUpdate = true;
+  waterGeo.attributes.aFoam.needsUpdate = true;
+  waterGeo.attributes.aDepth.needsUpdate = true;
+}
+
+/* -------------------------------------------------------
+   Whitewater particle pool
+------------------------------------------------------- */
+
+const MAX_PARTICLES = 5200;
+
+const particlePositions =
+  new Float32Array(
+    MAX_PARTICLES * 3
+  );
+
+const particleColors =
+  new Float32Array(
+    MAX_PARTICLES * 3
+  );
+
+const particleVelocities =
+  Array.from(
+    { length: MAX_PARTICLES },
+    () => new THREE.Vector3()
+  );
+
+const particleLife =
+  new Float32Array(MAX_PARTICLES);
+
+const particleMaxLife =
+  new Float32Array(MAX_PARTICLES);
+
+const particleType =
+  new Uint8Array(MAX_PARTICLES);
+
+let particleCursor = 0;
+
+for (let i = 0; i < MAX_PARTICLES; i++) {
+  particlePositions[i * 3 + 1] = -100;
+}
+
+const particleGeo =
+  new THREE.BufferGeometry();
+
+particleGeo.setAttribute(
+  'position',
+  new THREE.BufferAttribute(
+    particlePositions,
+    3
+  )
+);
+
+particleGeo.setAttribute(
+  'color',
+  new THREE.BufferAttribute(
+    particleColors,
+    3
+  )
+);
+
+const particleMat =
+  new THREE.PointsMaterial({
+    size: 0.19,
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.88,
+    depthWrite: false,
+    blending: THREE.NormalBlending
+  });
+
+const particlePoints =
+  new THREE.Points(
+    particleGeo,
+    particleMat
+  );
+
+particlePoints.frustumCulled = false;
+particlePoints.renderOrder = 4;
+
+scene.add(particlePoints);
+
+function spawnParticle(
+  x,
+  y,
+  z,
+  velocityX,
+  velocityY,
+  velocityZ,
+  life,
+  type = 0
+) {
+  const index =
+    particleCursor++ %
+    MAX_PARTICLES;
+
+  const p = index * 3;
+
+  particlePositions[p] = x;
+  particlePositions[p + 1] = y;
+  particlePositions[p + 2] = z;
+
+  particleVelocities[index].set(
+    velocityX,
+    velocityY,
+    velocityZ
+  );
+
+  particleLife[index] = life;
+  particleMaxLife[index] = life;
+  particleType[index] = type;
+
+  if (type === 0) {
+    particleColors[p] = 0.88;
+    particleColors[p + 1] = 0.97;
+    particleColors[p + 2] = 1.0;
+  } else {
+    particleColors[p] = 0.72;
+    particleColors[p + 1] = 0.90;
+    particleColors[p + 2] = 0.94;
+  }
+}
+
+const spawnSample = {
+  x: 0,
+  y: 0,
+  z: 0,
+  depth: 0,
+  breaking: 0,
+  crest: 0,
+  front: 0,
+  foam: 0,
+  flowZ: 0,
+  bottom: 0
+};
+
+function spawnWhitewater(deltaTime, time) {
+  const attempts =
+    Math.floor(
+      42 *
+      params.spray *
+      deltaTime *
+      60
+    );
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const x =
+      THREE.MathUtils.randFloat(
+        -31,
+        31
+      );
+
+    const z =
+      THREE.MathUtils.randFloat(
+        -15,
+        9
+      );
+
+    localWaveData(
+      x,
+      z,
+      time,
+      spawnSample
+    );
+
+    const probability =
+      spawnSample.breaking *
+      spawnSample.crest *
+      0.34 *
+      params.spray;
+
+    if (Math.random() < probability) {
+      const airborneSpray =
+        Math.random() < 0.66;
+
+      const breakerStrength =
+        spawnSample.breaking;
+
+      spawnParticle(
+        spawnSample.x +
+        THREE.MathUtils.randFloatSpread(0.45),
+
+        spawnSample.y +
+        THREE.MathUtils.randFloat(0, 0.22),
+
+        spawnSample.z +
+        THREE.MathUtils.randFloatSpread(0.35),
+
+        THREE.MathUtils.randFloatSpread(1.25),
+
+        airborneSpray
+          ? THREE.MathUtils.randFloat(1.1, 3.5) *
+            breakerStrength
+          : THREE.MathUtils.randFloat(0.15, 0.65),
+
+        airborneSpray
+          ? THREE.MathUtils.randFloat(-4.6, -1.4) *
+            breakerStrength
+          : THREE.MathUtils.randFloat(-1.7, -0.35),
+
+        airborneSpray
+          ? THREE.MathUtils.randFloat(0.7, 1.8)
+          : THREE.MathUtils.randFloat(1.8, 4.0),
+
+        airborneSpray ? 0 : 1
+      );
+    }
+  }
+}
+
+function updateParticles(deltaTime) {
+  for (let i = 0; i < MAX_PARTICLES; i++) {
+    if (particleLife[i] <= 0) {
+      continue;
+    }
+
+    particleLife[i] -= deltaTime;
+
+    const p = i * 3;
+
+    if (particleLife[i] <= 0) {
+      particlePositions[p + 1] = -100;
+      continue;
+    }
+
+    const velocity =
+      particleVelocities[i];
+
+    if (particleType[i] === 0) {
+      velocity.y -=
+        5.6 *
+        deltaTime;
+
+      velocity.multiplyScalar(
+        Math.exp(
+          -0.42 *
+          deltaTime
+        )
+      );
+    } else {
+      velocity.y -=
+        0.25 *
+        deltaTime;
+
+      velocity.multiplyScalar(
+        Math.exp(
+          -1.15 *
+          deltaTime
+        )
+      );
+    }
+
+    particlePositions[p] +=
+      velocity.x *
+      deltaTime;
+
+    particlePositions[p + 1] +=
+      velocity.y *
+      deltaTime;
+
+    particlePositions[p + 2] +=
+      velocity.z *
+      deltaTime;
+
+    const fade = clamp(
+      particleLife[i] /
+      particleMaxLife[i],
+      0,
+      1
+    );
+
+    particleColors[p] =
+      lerp(
+        0.42,
+        0.93,
+        fade
+      );
+
+    particleColors[p + 1] =
+      lerp(
+        0.66,
+        0.98,
+        fade
+      );
+
+    particleColors[p + 2] =
+      lerp(
+        0.72,
+        1.0,
+        fade
+      );
+  }
+
+  particleGeo.attributes.position.needsUpdate = true;
+  particleGeo.attributes.color.needsUpdate = true;
+}
+
+/* -------------------------------------------------------
+   Low-poly surfboard
+------------------------------------------------------- */
+
+function createBoardGeometry() {
+  const segments = 18;
+  const vertices = [];
+  const boardIndices = [];
+
+  for (let layer = 0; layer < 2; layer++) {
+    const y =
+      layer === 0
+        ? 0.09
+        : -0.07;
+
+    for (let i = 0; i <= segments; i++) {
+      const t =
+        i /
+        segments;
+
+      const z =
+        (t - 0.5) *
+        3.7;
+
+      const width =
+        0.58 *
+        Math.pow(
+          Math.max(
+            0,
+            Math.sin(Math.PI * t)
+          ),
+          0.52
+        ) *
+        (
+          1.0 -
+          0.10 *
+          Math.max(
+            0,
+            (t - 0.68) / 0.32
+          )
+        );
+
+      vertices.push(
+        -width, y, z,
+        width, y, z
+      );
+    }
+  }
+
+  const row =
+    (segments + 1) * 2;
+
+  for (let i = 0; i < segments; i++) {
+    const a = i * 2;
+    const b = a + 1;
+    const c = a + 2;
+    const d = a + 3;
+
+    boardIndices.push(
+      a, c, b,
+      b, c, d
+    );
+
+    const A = row + a;
+    const B = row + b;
+    const C = row + c;
+    const D = row + d;
+
+    boardIndices.push(
+      A, B, C,
+      B, D, C
+    );
+  }
+
+  for (let i = 0; i <= segments; i++) {
+    const a = i * 2;
+    const b = a + 1;
+
+    const A = row + a;
+    const B = row + b;
+
+    if (i < segments) {
+      const c = a + 2;
+      const d = b + 2;
+
+      const C = A + 2;
+      const D = B + 2;
+
+      boardIndices.push(
+        a, A, c,
+        A, C, c,
+
+        b, d, B,
+        d, D, B
+      );
+    }
+  }
+
+  boardIndices.push(
+    0,
+    1,
+    row,
+
+    1,
+    row + 1,
+    row
+  );
+
+  const end = segments * 2;
+
+  boardIndices.push(
+    end,
+    row + end,
+    end + 1,
+
+    end + 1,
+    row + end,
+    row + end + 1
+  );
+
+  const geometry =
+    new THREE.BufferGeometry();
+
+  geometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute(
+      vertices,
+      3
+    )
+  );
+
+  geometry.setIndex(boardIndices);
   geometry.computeVertexNormals();
+
   return geometry;
 }
-let reefShader=null;
-function makeReefMaterial(){
-  const material=new THREE.MeshStandardMaterial({color:0x776f5b,roughness:0.92,metalness:0});
-  material.onBeforeCompile=shader=>{
-    reefShader=shader;
-    shader.uniforms.uCausticTime={value:0};
-    shader.vertexShader=shader.vertexShader.replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvarying vec3 vCausticWorld;\nvCausticWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
-    shader.fragmentShader='uniform float uCausticTime;\nvarying vec3 vCausticWorld;\n'+shader.fragmentShader;
-    shader.fragmentShader=shader.fragmentShader.replace('#include <dithering_fragment>',`float c1=sin(vCausticWorld.x*2.4+uCausticTime*1.25+sin(vCausticWorld.z*1.8));
-float c2=sin(vCausticWorld.z*2.9-uCausticTime*1.05+sin(vCausticWorld.x*1.55));
-float caustic=pow(max(0.0,0.52+0.26*c1+0.26*c2),7.0);
-gl_FragColor.rgb+=vec3(0.16,0.28,0.25)*caustic;
-#include <dithering_fragment>`);
-  };
-  material.customProgramCacheKey=()=>"reef-caustics-v2";
-  return material;
-}
 
-function updateSeafloorGeometry(){
-  if(seafloorMesh){scene.remove(seafloorMesh);seafloorMesh.geometry.dispose();}
-  seafloorMesh=new THREE.Mesh(
-    makeSeafloorGeometry(),
-    makeReefMaterial()
+const board =
+  new THREE.Group();
+
+const boardDeck =
+  new THREE.Mesh(
+    createBoardGeometry(),
+
+    new THREE.MeshStandardMaterial({
+      color: 0xf0c84b,
+      roughness: 0.43,
+      metalness: 0.02,
+      flatShading: true
+    })
   );
-  seafloorMesh.receiveShadow=true;
-  scene.add(seafloorMesh);
-}
 
-// -----------------------------------------------------------------------------
-// Continuous reconstructed water surface
-// -----------------------------------------------------------------------------
-// The FLIP particles remain the simulation state. Rendering uses a smoothed
-// density isocontour (marching squares) and builds a connected water volume.
-// This removes the repeated particle curtains and preserves real overhangs.
-const SURFACE_ISO=0.28;
-const SURFACE_SLICES=15;
-let waterMesh=null;
-let waterGeometry=null;
-let lastContour=[];
-let maxSpeed=0;
+boardDeck.castShadow = true;
+boardDeck.receiveShadow = true;
 
-const waterMaterial=new THREE.MeshPhysicalMaterial({
-  color:0x0b96a7,
-  roughness:0.035,
-  metalness:0,
-  transmission:0.66,
-  thickness:4.0,
-  ior:1.333,
-  attenuationColor:new THREE.Color(0x047486),
-  attenuationDistance:6.8,
-  clearcoat:1,
-  clearcoatRoughness:0.018,
-  envMapIntensity:1.9,
-  specularIntensity:1.0,
-  specularColor:new THREE.Color(0xe9ffff),
-  emissive:new THREE.Color(0x002d35),
-  emissiveIntensity:0.16,
-  side:THREE.DoubleSide,
-  transparent:false
-});
-let waterShader=null;
-waterMaterial.onBeforeCompile=shader=>{
-  waterShader=shader;
-  shader.uniforms.uWaterTime={value:0};
-  shader.vertexShader='varying vec3 vWaterWorld;\n'+shader.vertexShader;
-  shader.vertexShader=shader.vertexShader.replace(
-    '#include <worldpos_vertex>',
-    '#include <worldpos_vertex>\nvWaterWorld=worldPosition.xyz;'
+board.add(boardDeck);
+
+const fin =
+  new THREE.Mesh(
+    new THREE.ConeGeometry(
+      0.16,
+      0.46,
+      4
+    ),
+
+    new THREE.MeshStandardMaterial({
+      color: 0x183747,
+      roughness: 0.7,
+      flatShading: true
+    })
   );
-  shader.fragmentShader='uniform float uWaterTime;\nvarying vec3 vWaterWorld;\n'+shader.fragmentShader;
-  shader.fragmentShader=shader.fragmentShader.replace(
-    '#include <normal_fragment_begin>',
-    `#include <normal_fragment_begin>
-     float rippleA=sin(vWaterWorld.x*2.3+vWaterWorld.z*1.6-uWaterTime*1.8);
-     float rippleB=sin(vWaterWorld.x*-1.4+vWaterWorld.z*2.8-uWaterTime*1.25);
-     float crestMask=smoothstep(2.8,6.8,vWaterWorld.y);
-     normal=normalize(normal+vec3((rippleA+rippleB)*0.018*(0.35+crestMask),0.0,(rippleA-rippleB)*0.012));`
-  );
-};
-waterMaterial.customProgramCacheKey=()=>"flip-water-ripples-v3";
 
-function interpolateIso(ax,ay,av,bx,by,bv,iso){
-  const d=bv-av;
-  const t=Math.abs(d)<1e-6?0.5:clamp((iso-av)/d,0,1);
-  return {x:lerp(ax,bx,t),y:lerp(ay,by,t)};
-}
+fin.rotation.z = Math.PI;
+fin.position.set(0, -0.25, 0.85);
 
-function marchingSegments(field,w,h,iso){
-  const segs=[];
-  const edgePoint=(edge,x,y,v0,v1,v2,v3)=>{
-    if(edge===0) return interpolateIso(x,y,v0,x+1,y,v1,iso);
-    if(edge===1) return interpolateIso(x+1,y,v1,x+1,y+1,v2,iso);
-    if(edge===2) return interpolateIso(x+1,y+1,v2,x,y+1,v3,iso);
-    return interpolateIso(x,y+1,v3,x,y,v0,iso);
-  };
-  const add=(x,y,e0,e1,v0,v1,v2,v3)=>segs.push([
-    edgePoint(e0,x,y,v0,v1,v2,v3),
-    edgePoint(e1,x,y,v0,v1,v2,v3)
-  ]);
-  for(let y=0;y<h-1;y++){
-    for(let x=0;x<w-1;x++){
-      const v0=field[x*h+y];
-      const v1=field[(x+1)*h+y];
-      const v2=field[(x+1)*h+y+1];
-      const v3=field[x*h+y+1];
-      const code=(v0>=iso?1:0)|(v1>=iso?2:0)|(v2>=iso?4:0)|(v3>=iso?8:0);
-      switch(code){
-        case 1:add(x,y,3,0,v0,v1,v2,v3);break;
-        case 2:add(x,y,0,1,v0,v1,v2,v3);break;
-        case 3:add(x,y,3,1,v0,v1,v2,v3);break;
-        case 4:add(x,y,1,2,v0,v1,v2,v3);break;
-        case 5:{
-          const center=(v0+v1+v2+v3)*0.25;
-          if(center>=iso){add(x,y,3,2,v0,v1,v2,v3);add(x,y,0,1,v0,v1,v2,v3);}
-          else{add(x,y,3,0,v0,v1,v2,v3);add(x,y,1,2,v0,v1,v2,v3);}
-          break;
-        }
-        case 6:add(x,y,0,2,v0,v1,v2,v3);break;
-        case 7:add(x,y,3,2,v0,v1,v2,v3);break;
-        case 8:add(x,y,2,3,v0,v1,v2,v3);break;
-        case 9:add(x,y,2,0,v0,v1,v2,v3);break;
-        case 10:{
-          const center=(v0+v1+v2+v3)*0.25;
-          if(center>=iso){add(x,y,0,3,v0,v1,v2,v3);add(x,y,1,2,v0,v1,v2,v3);}
-          else{add(x,y,0,1,v0,v1,v2,v3);add(x,y,2,3,v0,v1,v2,v3);}
-          break;
-        }
-        case 11:add(x,y,1,2,v0,v1,v2,v3);break;
-        case 12:add(x,y,1,3,v0,v1,v2,v3);break;
-        case 13:add(x,y,0,1,v0,v1,v2,v3);break;
-        case 14:add(x,y,3,0,v0,v1,v2,v3);break;
-      }
-    }
-  }
-  return segs;
-}
-
-function connectSegments(segments){
-  const key=p=>Math.round(p.x*1000)+","+Math.round(p.y*1000);
-  const buckets=new Map();
-  segments.forEach((s,i)=>{
-    for(const p of s){
-      const k=key(p);
-      if(!buckets.has(k)) buckets.set(k,[]);
-      buckets.get(k).push(i);
-    }
-  });
-  const used=new Uint8Array(segments.length);
-  const loops=[];
-  for(let seed=0;seed<segments.length;seed++){
-    if(used[seed]) continue;
-    used[seed]=1;
-    const loop=[segments[seed][0],segments[seed][1]];
-    let current=segments[seed][1];
-    for(let guard=0;guard<segments.length+8;guard++){
-      const list=buckets.get(key(current))||[];
-      let next=-1;
-      for(const idx of list) if(!used[idx]){next=idx;break;}
-      if(next<0) break;
-      used[next]=1;
-      const s=segments[next];
-      const aKey=key(s[0]);
-      current=aKey===key(current)?s[1]:s[0];
-      loop.push(current);
-      if(key(current)===key(loop[0])) break;
-    }
-    if(loop.length>16) loops.push(loop);
-  }
-  return loops;
-}
-
-function polygonArea(points){
-  let a=0;
-  for(let i=0;i<points.length;i++){
-    const p=points[i],q=points[(i+1)%points.length];
-    a+=p.x*q.y-q.x*p.y;
-  }
-  return a*0.5;
-}
-
-function smoothLoop(points,passes=2){
-  let p=points.slice();
-  if(p.length>2 && Math.hypot(p[0].x-p[p.length-1].x,p[0].y-p[p.length-1].y)<0.01) p.pop();
-  for(let pass=0;pass<passes;pass++){
-    const q=[];
-    for(let i=0;i<p.length;i++){
-      const a=p[(i-1+p.length)%p.length],b=p[i],c=p[(i+1)%p.length];
-      q.push({x:a.x*0.2+b.x*0.6+c.x*0.2,y:a.y*0.2+b.y*0.6+c.y*0.2});
-    }
-    p=q;
-  }
-  if(p.length>360){
-    const stride=Math.ceil(p.length/360);
-    p=p.filter((_,i)=>i%stride===0);
-  }
-  return p;
-}
-
-function reconstructContour(){
-  if(!fluid||fluid.particleRestDensity<=0) return lastContour;
-  const w=fluid.fNumX+2,h=fluid.fNumY+2;
-  let field=new Float32Array(w*h);
-  for(let x=0;x<fluid.fNumX;x++){
-    for(let y=0;y<fluid.fNumY;y++){
-      const k=x*fluid.n+y;
-      const density=fluid.particleDensity[k]/fluid.particleRestDensity;
-      const occupied=fluid.cellType[k]===FLUID?0.28:0;
-      field[(x+1)*h+y+1]=Math.max(density,occupied);
-    }
-  }
-  // Two compact blur passes convert the particles into a smooth liquid SDF-like field.
-  for(let pass=0;pass<2;pass++){
-    const next=new Float32Array(field.length);
-    for(let x=1;x<w-1;x++) for(let y=1;y<h-1;y++){
-      next[x*h+y]=(
-        field[x*h+y]*4+
-        field[(x-1)*h+y]+field[(x+1)*h+y]+
-        field[x*h+y-1]+field[x*h+y+1]+
-        .5*(field[(x-1)*h+y-1]+field[(x+1)*h+y-1]+field[(x-1)*h+y+1]+field[(x+1)*h+y+1])
-      )/10;
-    }
-    field=next;
-  }
-  const loops=connectSegments(marchingSegments(field,w,h,SURFACE_ISO));
-  if(!loops.length) return lastContour;
-  loops.sort((a,b)=>Math.abs(polygonArea(b))-Math.abs(polygonArea(a)));
-  let loop=smoothLoop(loops[0],2);
-  // Grid density nodes are centered at half a FLIP cell, with one padded border.
-  loop=loop.map(p=>new THREE.Vector2(
-    (p.x-1+0.5)*fluid.h,
-    (p.y-1+0.5)*fluid.h
-  ));
-  if(THREE.ShapeUtils.isClockWise(loop)===false) loop.reverse();
-  lastContour=loop;
-  return loop;
-}
-
-function buildWaterGeometry(contour){
-  if(contour.length<8) return null;
-  const count=contour.length;
-  const positions=[];
-  const indices=[];
-  // The central slice is exact. Neighboring slices only add subtle spanwise
-  // visual variation; they do not prescribe or alter the FLIP cross-section.
-  for(let s=0;s<SURFACE_SLICES;s++){
-    const st=s/(SURFACE_SLICES-1);
-    const z=lerp(-WATER_HALF_SPAN,WATER_HALF_SPAN,st);
-    const span=Math.sin(st*Math.PI);
-    const phase=Math.sin(z*0.72+simTime*0.45);
-    for(const p of contour){
-      const bed=currentBed(clamp(p.x,0,DOMAIN_W));
-      const freeWeight=smoothstep(bed+0.35,MEAN_LEVEL-0.15,p.y);
-      const crestWeight=smoothstep(MEAN_LEVEL-0.25,MEAN_LEVEL+1.5,p.y);
-      const x=p.x+freeWeight*(0.05*phase+0.035*Math.sin(p.y*1.8+z));
-      const y=p.y+crestWeight*span*0.035*Math.sin(z*0.9+simTime*0.6);
-      positions.push(simToWorldX(x),simToWorldY(y),z);
-    }
-  }
-  for(let s=0;s<SURFACE_SLICES-1;s++){
-    for(let i=0;i<count;i++){
-      const n=(i+1)%count;
-      const a=s*count+i,b=s*count+n,c=(s+1)*count+i,d=(s+1)*count+n;
-      indices.push(a,c,b,b,c,d);
-    }
-  }
-  const tris=THREE.ShapeUtils.triangulateShape(contour,[]);
-  const front=0,back=(SURFACE_SLICES-1)*count;
-  for(const tri of tris){
-    indices.push(front+tri[2],front+tri[1],front+tri[0]);
-    indices.push(back+tri[0],back+tri[1],back+tri[2]);
-  }
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-  geo.computeBoundingSphere();
-  return geo;
-}
-
-// Foam remains particle-based, but only low-density/high-speed surface particles
-// are shown and each gets a deterministic spanwise position instead of curtains.
-const MAX_FOAM=4200;
-const foamPositions=new Float32Array(MAX_FOAM*3);
-const foamSizes=new Float32Array(MAX_FOAM);
-const foamGeometry=new THREE.BufferGeometry();
-foamGeometry.setAttribute("position",new THREE.BufferAttribute(foamPositions,3).setUsage(THREE.DynamicDrawUsage));
-foamGeometry.setAttribute("size",new THREE.BufferAttribute(foamSizes,1).setUsage(THREE.DynamicDrawUsage));
-const foamMaterial=new THREE.ShaderMaterial({
-  transparent:true,depthWrite:false,blending:THREE.NormalBlending,
-  vertexShader:`attribute float size;varying float vA;void main(){vec4 mv=modelViewMatrix*vec4(position,1.);gl_PointSize=size*(220.0/max(1.0,-mv.z));vA=clamp(size/12.0,0.0,1.0);gl_Position=projectionMatrix*mv;}`,
-  fragmentShader:`varying float vA;void main(){vec2 q=gl_PointCoord-.5;float d=dot(q,q);if(d>.25)discard;float a=smoothstep(.25,.03,d)*(.35+.65*vA);gl_FragColor=vec4(vec3(.88,1.,1.),a);}`
-});
-const foamPoints=new THREE.Points(foamGeometry,foamMaterial);
-foamPoints.frustumCulled=false;
-foamPoints.renderOrder=4;
-scene.add(foamPoints);
-
-function particleRelativeDensity(i){
-  const x=clamp(Math.floor(fluid.particlePos[2*i]*fluid.inv),0,fluid.fNumX-1);
-  const y=clamp(Math.floor(fluid.particlePos[2*i+1]*fluid.inv),0,fluid.fNumY-1);
-  const d=fluid.particleDensity[x*fluid.n+y];
-  return fluid.particleRestDensity>0?d/fluid.particleRestDensity:1;
-}
-
-function updateFoam(){
-  let cursor=0;maxSpeed=0;
-  for(let i=0;i<fluid.numParticles&&cursor<MAX_FOAM;i++){
-    const x=fluid.particlePos[2*i],y=fluid.particlePos[2*i+1];
-    const vx=fluid.particleVel[2*i],vy=fluid.particleVel[2*i+1];
-    const speed=Math.hypot(vx,vy);maxSpeed=Math.max(maxSpeed,speed);
-    const density=particleRelativeDensity(i);
-    const exposed=clamp((0.88-density)/0.28,0,1);
-    const breaking=clamp((speed-3.2)/4.5,0,1)*clamp((1.6-vy)/3.6,0,1);
-    const foam=Math.max(exposed*0.82,breaking);
-    if(foam<0.42) continue;
-    const hash=Math.sin(i*12.9898+simTime*0.37)*43758.5453;
-    const z=lerp(-WATER_HALF_SPAN,WATER_HALF_SPAN,hash-Math.floor(hash));
-    const o=cursor*3;
-    foamPositions[o]=simToWorldX(x);
-    foamPositions[o+1]=simToWorldY(y)+0.015;
-    foamPositions[o+2]=z;
-    foamSizes[cursor]=5.5+foam*7.5;
-    cursor++;
-  }
-  foamGeometry.setDrawRange(0,cursor);
-  foamGeometry.attributes.position.needsUpdate=true;
-  foamGeometry.attributes.size.needsUpdate=true;
-  document.querySelector("#speedStat").textContent=maxSpeed.toFixed(1)+" m/s";
-}
-
-function updateSurfaceGeometry(force=false){
-  if(!fluid) return;
-  const contour=reconstructContour();
-  const geo=buildWaterGeometry(contour);
-  if(geo){
-    if(!waterMesh){
-      waterGeometry=geo;
-      waterMesh=new THREE.Mesh(waterGeometry,waterMaterial);
-      waterMesh.castShadow=true;
-      waterMesh.receiveShadow=true;
-      waterMesh.renderOrder=2;
-      scene.add(waterMesh);
-    }else{
-      const old=waterMesh.geometry;
-      waterMesh.geometry=geo;
-      waterGeometry=geo;
-      old.dispose();
-    }
-  }
-  updateFoam();
-}
-
-// -----------------------------------------------------------------------------
-// Optional solver-grid overlay
-// -----------------------------------------------------------------------------
-let gridLines=null;
-function rebuildGridLines(){
-  if(gridLines){scene.remove(gridLines);gridLines.geometry.dispose();}
-  if(!fluid) return;
-  const pts=[];
-  for(let i=0;i<fluid.fNumX;i+=3){
-    const x=simToWorldX(i*fluid.h);
-    pts.push(x,simToWorldY(0),WATER_HALF_SPAN+0.12,x,simToWorldY(DOMAIN_H),WATER_HALF_SPAN+0.12);
-  }
-  for(let j=0;j<fluid.fNumY;j+=3){
-    const y=simToWorldY(j*fluid.h);
-    pts.push(simToWorldX(0),y,WATER_HALF_SPAN+0.12,simToWorldX(DOMAIN_W),y,WATER_HALF_SPAN+0.12);
-  }
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute("position",new THREE.Float32BufferAttribute(pts,3));
-  gridLines=new THREE.LineSegments(geo,new THREE.LineBasicMaterial({color:0xbcefff,transparent:true,opacity:0.17,depthWrite:false}));
-  gridLines.visible=showGrid;
-  scene.add(gridLines);
-}
-
-// -----------------------------------------------------------------------------
-// Low-poly surfboard sampled from the simulated shoulder
-// -----------------------------------------------------------------------------
-function createBoard(){
-  const group=new THREE.Group();
-  const segments=16,length=2.6,width=0.6,thickness=0.11;
-  const vertices=[],indices=[];
-  for(let ring=0;ring<2;ring++){
-    const y=ring?thickness/2:-thickness/2;
-    for(let i=0;i<segments;i++){
-      const a=Math.PI*2*i/segments;
-      const z=Math.cos(a)*length/2;
-      const taper=Math.pow(Math.max(0,1-Math.pow(Math.abs(z)/(length/2),1.7)),0.34);
-      const x=Math.sin(a)*width/2*taper;
-      const rocker=0.11*Math.pow(Math.abs(z)/(length/2),2.5);
-      vertices.push(x,y+rocker,z);
-    }
-  }
-  const top=vertices.length/3;vertices.push(0,thickness/2+.015,0);
-  const bottom=vertices.length/3;vertices.push(0,-thickness/2,0);
-  for(let i=0;i<segments;i++){
-    const n=(i+1)%segments;
-    indices.push(top,segments+i,segments+n,bottom,n,i,i,n,segments+i,n,segments+n,segments+i);
-  }
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute("position",new THREE.Float32BufferAttribute(vertices,3));
-  geo.setIndex(indices);geo.computeVertexNormals();
-  const deck=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0xf0cf54,roughness:.55,flatShading:true}));
-  deck.castShadow=true;group.add(deck);
-  const stripe=new THREE.Mesh(new THREE.BoxGeometry(.07,.022,1.08),new THREE.MeshStandardMaterial({color:0x164d5f,roughness:.7}));
-  stripe.position.y=.08;group.add(stripe);
-  return group;
-}
-const board=createBoard();
+board.add(fin);
 scene.add(board);
-let boardZ=-3.4;
-let boardYVelocity=0;
-function surfaceSampleAt(x){
-  let top=currentBed(x),sumVX=0,sumVY=0,count=0;
-  const radius=0.32;
-  for(let i=0;i<fluid.numParticles;i++){
-    const px=fluid.particlePos[2*i];
-    if(Math.abs(px-x)>radius) continue;
-    const py=fluid.particlePos[2*i+1];
-    if(py>top) top=py;
-    if(py>top-0.7){sumVX+=fluid.particleVel[2*i];sumVY+=fluid.particleVel[2*i+1];count++;}
-  }
-  return {y:top,vx:count?sumVX/count:0,vy:count?sumVY/count:0};
-}
-function findCrest(){
-  let crestX=7,crestY=-Infinity;
-  for(let i=0;i<fluid.numParticles;i++){
-    const y=fluid.particlePos[2*i+1];
-    if(y>crestY){crestY=y;crestX=fluid.particlePos[2*i];}
-  }
-  return {x:crestX,y:crestY};
-}
-function updateBoard(dt){
-  const crest=findCrest();
-  const x=clamp(crest.x-2.2,2,DOMAIN_W-2);
-  const sample=surfaceSampleAt(x);
-  const targetY=sample.y+0.17;
-  boardYVelocity+=(targetY-(board.position.y-WORLD_Y_OFFSET))*18*dt;
-  boardYVelocity*=Math.exp(-5*dt);
-  const boardSimY=(board.position.y-WORLD_Y_OFFSET)+boardYVelocity*dt;
-  boardZ+=(-0.6-0.12*clamp(sample.vx,0,8))*dt;
-  if(boardZ<-WATER_HALF_SPAN+0.5) boardZ=WATER_HALF_SPAN-0.5;
-  board.position.set(simToWorldX(x),simToWorldY(boardSimY),boardZ);
-  const e=.18;
-  const left=surfaceSampleAt(clamp(x-e,0,DOMAIN_W)).y;
-  const right=surfaceSampleAt(clamp(x+e,0,DOMAIN_W)).y;
-  const slope=(right-left)/(2*e);
-  board.rotation.order="YXZ";
-  board.rotation.x=0.04*Math.sin(simTime*4);
-  board.rotation.y=Math.PI/2;
-  board.rotation.z=Math.atan(slope)*0.65;
-}
 
-// -----------------------------------------------------------------------------
-// Overhang detection: multiple separated vertical fluid bands in an x-bin.
-// This is measured from particles; it is not used to drive the wave.
-// -----------------------------------------------------------------------------
-function detectOverhang(){
-  const bins=120;
-  const lists=Array.from({length:bins},()=>[]);
-  for(let i=0;i<fluid.numParticles;i++){
-    const x=fluid.particlePos[2*i];
-    const b=clamp(Math.floor(x/DOMAIN_W*bins),0,bins-1);
-    lists[b].push(fluid.particlePos[2*i+1]);
-  }
-  let bestGap=0;
-  for(const ys of lists){
-    if(ys.length<6) continue;
-    ys.sort((a,b)=>a-b);
-    for(let i=1;i<ys.length;i++) bestGap=Math.max(bestGap,ys[i]-ys[i-1]);
-  }
-  return bestGap>0.32;
-}
+/* -------------------------------------------------------
+   Surfboard dynamics
+------------------------------------------------------- */
 
-// -----------------------------------------------------------------------------
-// Controls and main loop
-// -----------------------------------------------------------------------------
-document.querySelector("#pauseBtn").onclick=()=>{
-  paused=!paused;
-  document.querySelector("#pauseBtn").textContent=paused?"Resume":"Pause";
-  document.querySelector("#status").textContent=paused?"paused":"running";
-};
-document.querySelector("#resetBtn").onclick=()=>createSimulation();
-document.querySelector("#viewBtn").onclick=()=>{
-  sideView=!sideView;
-  controls.enabled=!sideView;
-  document.querySelector("#viewBtn").textContent=sideView?"Free 3D view":"Side physics view";
-};
-document.querySelector("#gridBtn").onclick=()=>{
-  showGrid=!showGrid;
-  if(gridLines) gridLines.visible=showGrid;
-  document.querySelector("#gridBtn").textContent=showGrid?"Hide solver grid":"Show solver grid";
-};
-document.querySelector("#loopBtn").onclick=()=>{
-  autoLoop=!autoLoop;
-  document.querySelector("#loopBtn").textContent=autoLoop?"Loop: on":"Loop: off";
+const boardState = {
+  x: 13.0,
+  z: -2.5,
+  velocityX: 0,
+  velocityZ: -0.2
 };
 
-createSimulation();
-let last=performance.now();
-let frame=0;
-const FIXED_DT=1/90;
+const boardSample = {
+  x: 0,
+  y: 0,
+  z: 0,
+  depth: 0,
+  breaking: 0,
+  crest: 0,
+  front: 0,
+  foam: 0,
+  flowZ: 0,
+  bottom: 0
+};
 
-function animate(now){
-  requestAnimationFrame(animate);
-  const realDt=Math.min(0.05,(now-last)/1000);
-  last=now;
+const sampleXPositive = {
+  x: 0,
+  y: 0,
+  z: 0
+};
 
-  if(!paused){
-    accumulator+=realDt;
-    let steps=0;
-    while(accumulator>=FIXED_DT && steps<3){
-      fluid.step(FIXED_DT,+ui.flipRatio.value,+ui.pressureIters.value,true);
-      simTime+=FIXED_DT;
-      accumulator-=FIXED_DT;
-      steps++;
+const sampleXNegative = {
+  x: 0,
+  y: 0,
+  z: 0
+};
+
+const sampleZPositive = {
+  x: 0,
+  y: 0,
+  z: 0
+};
+
+const sampleZNegative = {
+  x: 0,
+  y: 0,
+  z: 0
+};
+
+const boardTargetPosition =
+  new THREE.Vector3();
+
+const boardTargetQuaternion =
+  new THREE.Quaternion();
+
+const tangentX =
+  new THREE.Vector3();
+
+const tangentZ =
+  new THREE.Vector3();
+
+const boardUp =
+  new THREE.Vector3();
+
+const boardRight =
+  new THREE.Vector3();
+
+const boardBasis =
+  new THREE.Matrix4();
+
+function resetBoard() {
+  boardState.x = 13.0;
+  boardState.z = -2.5;
+  boardState.velocityX = 0;
+  boardState.velocityZ = -0.12;
+
+  localWaveData(
+    boardState.x,
+    boardState.z,
+    simTime,
+    boardSample
+  );
+
+  board.position.set(
+    boardSample.x,
+    boardSample.y + 0.22,
+    boardSample.z
+  );
+}
+
+resetBoard();
+
+function updateBoard(deltaTime, time) {
+  localWaveData(
+    boardState.x,
+    boardState.z,
+    time,
+    boardSample
+  );
+
+  const breakerPush =
+    boardSample.breaking *
+    boardSample.crest;
+
+  /*
+    Shoreward flow acceleration and drag.
+  */
+  boardState.velocityZ +=
+    (
+      boardSample.flowZ *
+      (
+        0.18 +
+        breakerPush * 1.15
+      ) -
+      boardState.velocityZ * 0.48
+    ) *
+    deltaTime;
+
+  boardState.velocityX +=
+    (
+      Math.sin(
+        time * 0.48 +
+        boardState.z * 0.08
+      ) *
+      0.22 +
+
+      Math.sin(
+        boardState.x * 0.11
+      ) *
+      0.08 -
+
+      boardState.velocityX *
+      0.65
+    ) *
+    deltaTime;
+
+  boardState.x +=
+    boardState.velocityX *
+    deltaTime;
+
+  boardState.z +=
+    boardState.velocityZ *
+    deltaTime;
+
+  boardState.x = clamp(
+    boardState.x,
+    -31,
+    31
+  );
+
+  if (
+    boardState.z < -27 ||
+    boardSample.depth < 0.13
+  ) {
+    resetBoard();
+  }
+
+  /*
+    Sample the water around the board to estimate two
+    surface tangents and an orientation normal.
+  */
+  localWaveData(
+    boardState.x,
+    boardState.z,
+    time,
+    boardSample
+  );
+
+  const epsilon = 0.18;
+
+  localWaveData(
+    boardState.x + epsilon,
+    boardState.z,
+    time,
+    sampleXPositive
+  );
+
+  localWaveData(
+    boardState.x - epsilon,
+    boardState.z,
+    time,
+    sampleXNegative
+  );
+
+  localWaveData(
+    boardState.x,
+    boardState.z + epsilon,
+    time,
+    sampleZPositive
+  );
+
+  localWaveData(
+    boardState.x,
+    boardState.z - epsilon,
+    time,
+    sampleZNegative
+  );
+
+  tangentX.set(
+    sampleXPositive.x -
+    sampleXNegative.x,
+
+    sampleXPositive.y -
+    sampleXNegative.y,
+
+    sampleXPositive.z -
+    sampleXNegative.z
+  ).normalize();
+
+  /*
+    Local +Z on the board points shoreward.
+  */
+  tangentZ.set(
+    sampleZNegative.x -
+    sampleZPositive.x,
+
+    sampleZNegative.y -
+    sampleZPositive.y,
+
+    sampleZNegative.z -
+    sampleZPositive.z
+  ).normalize();
+
+  boardUp
+    .crossVectors(
+      tangentZ,
+      tangentX
+    )
+    .normalize();
+
+  if (boardUp.y < 0) {
+    boardUp.negate();
+  }
+
+  boardRight
+    .crossVectors(
+      boardUp,
+      tangentZ
+    )
+    .normalize();
+
+  tangentZ
+    .crossVectors(
+      boardRight,
+      boardUp
+    )
+    .normalize();
+
+  boardBasis.makeBasis(
+    boardRight,
+    boardUp,
+    tangentZ
+  );
+
+  boardTargetQuaternion
+    .setFromRotationMatrix(
+      boardBasis
+    );
+
+  boardTargetPosition.set(
+    boardSample.x,
+    boardSample.y + 0.20,
+    boardSample.z
+  );
+
+  board.position.lerp(
+    boardTargetPosition,
+    1 -
+    Math.exp(
+      -8 *
+      deltaTime
+    )
+  );
+
+  board.quaternion.slerp(
+    boardTargetQuaternion,
+    1 -
+    Math.exp(
+      -5 *
+      deltaTime
+    )
+  );
+
+  board.rotation.z +=
+    Math.sin(time * 2.1) *
+    0.0015;
+}
+
+/* -------------------------------------------------------
+   Reef rocks
+------------------------------------------------------- */
+
+const rockMaterial =
+  new THREE.MeshStandardMaterial({
+    color: 0x4d4935,
+    roughness: 0.96,
+    flatShading: true
+  });
+
+for (let i = 0; i < 32; i++) {
+  const x =
+    THREE.MathUtils.randFloat(
+      -35,
+      35
+    );
+
+  const z =
+    THREE.MathUtils.randFloat(
+      -10,
+      8
+    );
+
+  if (channelFactor(x) > 0.58) {
+    continue;
+  }
+
+  const y =
+    bedHeight(x, z);
+
+  if (y < -2.5) {
+    continue;
+  }
+
+  const rock =
+    new THREE.Mesh(
+      new THREE.DodecahedronGeometry(
+        THREE.MathUtils.randFloat(
+          0.2,
+          0.65
+        ),
+        0
+      ),
+      rockMaterial
+    );
+
+  rock.scale.y =
+    THREE.MathUtils.randFloat(
+      0.55,
+      1.1
+    );
+
+  rock.position.set(
+    x,
+    y + 0.12,
+    z
+  );
+
+  rock.rotation.set(
+    Math.random() * 2,
+    Math.random() * 2,
+    Math.random() * 2
+  );
+
+  rock.castShadow = true;
+  rock.receiveShadow = true;
+
+  scene.add(rock);
+}
+
+/* -------------------------------------------------------
+   Interface
+------------------------------------------------------- */
+
+function bindRange(id, key, digits = 1) {
+  const element =
+    document.getElementById(id);
+
+  const output =
+    document.getElementById(
+      id + 'Out'
+    );
+
+  const update = () => {
+    params[key] =
+      Number(element.value);
+
+    output.value =
+      Number(element.value)
+        .toFixed(digits);
+  };
+
+  element.addEventListener(
+    'input',
+    update
+  );
+
+  update();
+}
+
+bindRange(
+  'height',
+  'waveHeight',
+  1
+);
+
+bindRange(
+  'period',
+  'period',
+  1
+);
+
+bindRange(
+  'reef',
+  'reefHeight',
+  2
+);
+
+document
+  .getElementById('reef')
+  .addEventListener(
+    'input',
+    updateBedGeometry
+  );
+
+bindRange(
+  'curl',
+  'curl',
+  2
+);
+
+bindRange(
+  'spray',
+  'spray',
+  2
+);
+
+document
+  .getElementById('pause')
+  .onclick = () => {
+    paused = !paused;
+
+    document
+      .getElementById('pause')
+      .textContent =
+        paused
+          ? 'Resume'
+          : 'Pause';
+  };
+
+document
+  .getElementById('resetBoard')
+  .onclick = resetBoard;
+
+let barrelCamera = false;
+
+document
+  .getElementById('camera')
+  .onclick = () => {
+    barrelCamera =
+      !barrelCamera;
+
+    if (barrelCamera) {
+      camera.position.set(
+        18,
+        5.2,
+        -2
+      );
+
+      controls.target.set(
+        2,
+        2.4,
+        -5
+      );
+    } else {
+      camera.position.set(
+        30,
+        15,
+        34
+      );
+
+      controls.target.set(
+        0,
+        1.2,
+        -3
+      );
     }
-    updateBoard(realDt);
-  }
+  };
 
-  frame++;
-  if((frame&1)===0) updateSurfaceGeometry();
-  if(frame%12===0){
-    document.querySelector("#timeStat").textContent=simTime.toFixed(2)+" s";
-    const curling=detectOverhang();
-    const el=document.querySelector("#overhangStat");
-    el.textContent=curling?"detected":"forming";
-    el.style.color=curling?"#8effaa":"#ffe38a";
-  }
+/* -------------------------------------------------------
+   Resize
+------------------------------------------------------- */
 
-  if(sideView){
-    camera.position.lerp(new THREE.Vector3(0,5.8,17.5),0.08);
-    controls.target.lerp(new THREE.Vector3(-0.3,4.4,0),0.08);
-    camera.lookAt(controls.target);
-  }else{
-    controls.update();
-  }
+addEventListener('resize', () => {
+  camera.aspect =
+    innerWidth /
+    innerHeight;
 
-  if(autoLoop && simTime>4.15) createSimulation();
-  if(reefShader) reefShader.uniforms.uCausticTime.value=simTime;
-  if(waterShader) waterShader.uniforms.uWaterTime.value=simTime;
-  renderer.render(scene,camera);
-}
-requestAnimationFrame(animate);
-
-addEventListener("resize",()=>{
-  camera.aspect=innerWidth/innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+
+  renderer.setPixelRatio(
+    Math.min(
+      devicePixelRatio,
+      1.75
+    )
+  );
+
+  renderer.setSize(
+    innerWidth,
+    innerHeight
+  );
+
+  const pixelRatio =
+    renderer.getPixelRatio();
+
+  refractionTarget.setSize(
+    Math.max(
+      1,
+      Math.floor(
+        innerWidth *
+        pixelRatio
+      )
+    ),
+
+    Math.max(
+      1,
+      Math.floor(
+        innerHeight *
+        pixelRatio
+      )
+    )
+  );
+
+  waterMat.uniforms.resolution.value.set(
+    innerWidth * pixelRatio,
+    innerHeight * pixelRatio
+  );
 });
+
+/* -------------------------------------------------------
+   Animation
+------------------------------------------------------- */
+
+const clock =
+  new THREE.Clock();
+
+const status =
+  document.getElementById('status');
+
+updateWater(0);
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const rawDeltaTime =
+    Math.min(
+      clock.getDelta(),
+      0.035
+    );
+
+  const deltaTime =
+    paused
+      ? 0
+      : rawDeltaTime;
+
+  if (!paused) {
+    simTime += deltaTime;
+  }
+
+  updateWater(simTime);
+
+  if (!paused) {
+    spawnWhitewater(
+      deltaTime,
+      simTime
+    );
+
+    updateParticles(
+      deltaTime
+    );
+
+    updateBoard(
+      deltaTime,
+      simTime
+    );
+  }
+
+  bedMat.uniforms.time.value =
+    simTime;
+
+  waterMat.uniforms.time.value =
+    simTime;
+
+  controls.update();
+
+  /*
+    First render the scene without water. This image is
+    sampled and distorted by the water shader.
+
+    Board and particles are omitted from the refraction
+    pass because they sit on or above the surface.
+  */
+  waterMesh.visible = false;
+  particlePoints.visible = false;
+  board.visible = false;
+
+  renderer.setRenderTarget(
+    refractionTarget
+  );
+
+  renderer.render(
+    scene,
+    camera
+  );
+
+  renderer.setRenderTarget(null);
+
+  waterMesh.visible = true;
+  particlePoints.visible = true;
+  board.visible = true;
+
+  renderer.render(
+    scene,
+    camera
+  );
+
+  frameCount++;
+
+  const now =
+    performance.now();
+
+  if (now - fpsTime > 500) {
+    fps =
+      Math.round(
+        frameCount *
+        1000 /
+        (now - fpsTime)
+      );
+
+    frameCount = 0;
+    fpsTime = now;
+  }
+
+  status.textContent =
+    `${fps} fps\n` +
+    `${renderer.info.render.triangles.toLocaleString()} triangles`;
+}
+
+animate();
 </script>
 </body>
 </html>
