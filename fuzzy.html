@@ -1,0 +1,1876 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Three Fuzzy Path Mutation Strategies</title>
+  <style>
+    :root {
+      --bg:#080c12; --panel:#101824; --panel2:#0b111a; --text:#eaf2ff;
+      --muted:#9aa8b8; --border:#2b3544; --blue:#58a6ff;
+      --yellow:#ffd166; --pink:#f778ba; --green:#3fb950; --red:#f85149;
+      --code:#05080d;
+    }
+
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+    html, body {
+      margin:0;
+      min-height:100%;
+      overflow:hidden;
+      overscroll-behavior:none;
+      touch-action:none;
+      background:
+        radial-gradient(circle at top left, rgba(88,166,255,.18), transparent 36%),
+        radial-gradient(circle at top right, rgba(247,120,186,.12), transparent 35%),
+        var(--bg);
+      color:var(--text);
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+
+    body {
+      display:grid;
+      place-items:center;
+      padding:12px;
+    }
+
+    .app { width:min(100%,760px); }
+
+    h1 {
+      margin:0 0 6px;
+      font-size:clamp(23px,7vw,44px);
+      line-height:.95;
+      letter-spacing:-.055em;
+    }
+
+    .sub {
+      margin:0 0 12px;
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.35;
+    }
+
+    .panel {
+      position:relative;
+      padding:12px;
+      border:1px solid var(--border);
+      border-radius:22px;
+      background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015));
+      box-shadow:0 24px 80px rgba(0,0,0,.34);
+      overflow:hidden;
+    }
+
+    canvas {
+      width:100%;
+      aspect-ratio:1/1;
+      display:block;
+      border:1px solid var(--border);
+      border-radius:18px;
+      background:var(--panel2);
+      touch-action:none;
+      user-select:none;
+    }
+
+    .buttons {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+      margin-top:12px;
+    }
+
+    button {
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:15px 14px;
+      color:var(--text);
+      font-size:18px;
+      font-weight:900;
+      letter-spacing:.02em;
+      background:#1d2632;
+      cursor:pointer;
+      user-select:none;
+    }
+
+    button:active { transform:translateY(1px); }
+    button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+
+    button.clear { background:#2a2024; border-color:#5b3037; }
+    button.save { background:#0b5cad; border-color:#1f6feb; }
+
+    .control {
+      margin-top:12px;
+    }
+
+    label {
+      display:block;
+      margin:0 0 5px;
+      color:var(--muted);
+      font-size:12px;
+    }
+
+    input, select {
+      width:100%;
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:11px 12px;
+      background:var(--code);
+      color:var(--text);
+      outline:none;
+      font:14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    }
+
+    select {
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      font-weight:800;
+    }
+
+    .status {
+      min-height:150px;
+      margin-top:12px;
+      padding:12px;
+      border:1px solid var(--border);
+      border-radius:16px;
+      background:rgba(255,255,255,.035);
+      color:var(--muted);
+      white-space:pre-wrap;
+      line-height:1.35;
+      overflow-wrap:anywhere;
+    }
+
+    .status.good { color:#c3f6cf; border-color:rgba(63,185,80,.7); }
+    .status.warn { color:#ffe2a5; border-color:rgba(210,153,34,.7); }
+    .status.bad { color:#ffd0cd; border-color:rgba(248,81,73,.7); }
+
+    .big {
+      pointer-events:none;
+      position:absolute;
+      inset:0;
+      display:grid;
+      place-items:center;
+      opacity:0;
+      transform:scale(.92);
+      transition:opacity 180ms ease, transform 220ms cubic-bezier(.2,1.4,.3,1);
+    }
+
+    .big.show { opacity:1; transform:scale(1); }
+
+    .big-inner {
+      width:min(92%,560px);
+      padding:24px;
+      text-align:center;
+      border:2px solid rgba(63,185,80,.85);
+      border-radius:26px;
+      background:rgba(3,17,10,.88);
+      box-shadow:0 0 45px rgba(63,185,80,.45), inset 0 0 30px rgba(63,185,80,.12);
+      backdrop-filter:blur(8px);
+    }
+
+    .decrypted {
+      font-size:clamp(44px,12vw,92px);
+      line-height:.9;
+      letter-spacing:-.075em;
+      font-weight:1000;
+      color:#7dff9b;
+      text-shadow:0 0 22px rgba(63,185,80,.85);
+    }
+
+    .plain {
+      margin-top:12px;
+      color:#eaffef;
+      font-size:clamp(16px,4vw,24px);
+      overflow-wrap:anywhere;
+    }
+
+    .tiny {
+      margin-top:10px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.3;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <h1>Three Mutation Strategies</h1>
+    <p class="sub">
+      Draw the secret path, hit SAVE, then draw the player path. Use the selector to test three different fuzzy-search approaches.
+    </p>
+
+    <div class="panel">
+      <canvas id="canvas" width="720" height="720"></canvas>
+
+      <div id="big" class="big">
+        <div class="big-inner">
+          <div class="decrypted">DECRYPTED</div>
+          <div id="plain" class="plain"></div>
+          <div class="tiny">Recovered from the selected strategy.</div>
+        </div>
+      </div>
+
+      <div class="buttons">
+        <button id="clearBtn" class="clear">CLEAR</button>
+        <button id="saveBtn" class="save">SAVE</button>
+      </div>
+
+      <div class="control">
+        <label>Mutation strategy</label>
+        <select id="strategySelect">
+          <option value="localBeam">1. Local Offset Beam — fastest exact-key search</option>
+          <option value="dtwFrechet">2. DTW / Fréchet Beam — shape-aware exact-key search</option>
+          <option value="helperBundle">3. Helper Bundle — fuzzy-extractor-style recovery</option>
+        </select>
+      </div>
+
+      <div class="control">
+        <label>Data encrypted by the first saved path</label>
+        <input id="secretInput" value="The hidden reef channel opens at sunrise." />
+      </div>
+
+      <div id="status" class="status">Draw the secret path, then hit SAVE.</div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+
+const CANVAS_SIZE = 720;
+const GRID = 16;
+const CELL = CANVAS_SIZE / GRID;
+const POINTS = 5;
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const clearBtn = document.getElementById("clearBtn");
+const saveBtn = document.getElementById("saveBtn");
+const statusBox = document.getElementById("status");
+const secretInput = document.getElementById("secretInput");
+const strategySelect = document.getElementById("strategySelect");
+const big = document.getElementById("big");
+const plain = document.getElementById("plain");
+
+let mode = "enroll";
+let drawing = false;
+let rawPath = [];
+
+let playerAttemptRaw = [];
+let playerAttemptSampled = [];
+let displayedCandidate = null;
+let winningFive = null;
+
+let exactPackage = null;
+let helperPackage = null;
+let mutationCancelToken = 0;
+let activePointerId = null;
+let confetti = [];
+
+const PROFILES = {
+  localBeam: {
+    label:"Local Offset Beam",
+    scorer:"local",
+    radii:[0.35,0.55,0.8,1.1,1.45,1.9,2.45,3.1],
+    topPerSlot:24,
+    maxResultsPerRadius:90000,
+    maxDecrypts:70000,
+    uiEvery:24
+  },
+  dtwFrechet: {
+    label:"DTW / Fréchet Beam",
+    scorer:"dtw",
+    radii:[0.55,0.85,1.2,1.7,2.35,3.1,4.0],
+    topPerSlot:32,
+    maxResultsPerRadius:120000,
+    maxDecrypts:95000,
+    uiEvery:24
+  },
+  helperSearch: {
+    label:"Helper Bundle Search",
+    scorer:"hybrid",
+    radii:[0.45,0.7,1.0,1.35,1.8,2.35,3.0,3.8],
+    topPerSlot:34,
+    maxResultsPerRadius:140000,
+    maxDecrypts:14000,
+    uiEvery:18
+  },
+  helperBuild: {
+    label:"Helper Bundle Builder",
+    scorer:"hybrid",
+    radii:[0.35,0.55,0.8,1.1,1.45,1.9,2.45],
+    topPerSlot:30,
+    maxResultsPerRadius:120000,
+    maxDecrypts:1400,
+    uiEvery:50
+  }
+};
+
+/* ---------------- basic helpers ---------------- */
+
+function setStatus(kind, text) {
+  statusBox.className = "status" + (kind ? " " + kind : "");
+  statusBox.textContent = text;
+}
+
+function clamp(n, lo, hi) {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function canvasPoint(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: clamp((clientX - r.left) * canvas.width / r.width, 0, CANVAS_SIZE - 1),
+    y: clamp((clientY - r.top) * canvas.height / r.height, 0, CANVAS_SIZE - 1)
+  };
+}
+
+function gridPointFromPixel(p) {
+  return {
+    x: clamp(Math.floor(p.x / CELL), 0, GRID - 1),
+    y: clamp(Math.floor(p.y / CELL), 0, GRID - 1)
+  };
+}
+
+function pixelFromGrid(g) {
+  return {
+    x: (g.x + .5) * CELL,
+    y: (g.y + .5) * CELL
+  };
+}
+
+function gridKey(points) {
+  return points.map(p => `${p.x},${p.y}`).join("|");
+}
+
+function addRawPoint(p) {
+  const last = rawPath[rawPath.length - 1];
+  if (!last || Math.hypot(last.x - p.x, last.y - p.y) >= 3) {
+    rawPath.push(p);
+  }
+}
+
+/* ---------------- input ---------------- */
+
+function startDraw(p) {
+  if (mode === "mutating" || mode === "decrypted" || mode === "saving") return;
+
+  drawing = true;
+  rawPath = [];
+  addRawPoint(p);
+
+  big.classList.remove("show");
+  plain.textContent = "";
+  draw();
+}
+
+function moveDraw(p) {
+  if (!drawing || mode === "mutating" || mode === "decrypted" || mode === "saving") return;
+  addRawPoint(p);
+  draw();
+}
+
+function endDraw(p) {
+  if (!drawing) return;
+
+  drawing = false;
+  addRawPoint(p);
+  draw();
+
+  if (mode === "test") {
+    startMutationSearch().catch(err => {
+      mode = "test";
+      setStatus("bad", "Mutation error: " + err.message + "\nTap CLEAR and redraw.");
+      draw();
+    });
+  }
+}
+
+if (window.PointerEvent) {
+  canvas.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    activePointerId = e.pointerId;
+    try { canvas.setPointerCapture(e.pointerId); } catch {}
+    startDraw(canvasPoint(e.clientX, e.clientY));
+  }, { passive:false });
+
+  canvas.addEventListener("pointermove", e => {
+    if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    e.preventDefault();
+    moveDraw(canvasPoint(e.clientX, e.clientY));
+  }, { passive:false });
+
+  canvas.addEventListener("pointerup", e => {
+    if (activePointerId !== null && e.pointerId !== activePointerId) return;
+    e.preventDefault();
+    try { canvas.releasePointerCapture(e.pointerId); } catch {}
+    activePointerId = null;
+    endDraw(canvasPoint(e.clientX, e.clientY));
+  }, { passive:false });
+
+  canvas.addEventListener("pointercancel", e => {
+    e.preventDefault();
+    drawing = false;
+    activePointerId = null;
+  }, { passive:false });
+}
+
+/* ---------------- rendering ---------------- */
+
+function draw() {
+  ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  ctx.fillStyle = "#0b111a";
+  ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  drawGrid();
+
+  if (mode === "enroll" || mode === "test" || mode === "saving") {
+    drawRawPath(rawPath, "#58a6ff", 5, .95);
+    const five = simplifyRawPathToFiveGrid(rawPath);
+    if (five.length) {
+      drawCandidatePolyline(five, "#f778ba", 4, true, .95);
+      drawPointNumbers(five, "#f778ba");
+    }
+  }
+
+  if (mode === "mutating") {
+    drawRawPath(playerAttemptRaw, "#58a6ff", 5, .42);
+    drawRawPath(playerAttemptSampled, "#58a6ff", 2, .70);
+
+    if (displayedCandidate) {
+      drawCandidatePolyline(displayedCandidate, "#ffd166", 9, false, .95);
+      drawCandidatePolyline(displayedCandidate, "#f778ba", 3, false, 1);
+      drawPointNumbers(displayedCandidate, "#ffd166");
+    }
+  }
+
+  if (mode === "decrypted") {
+    drawRawPath(playerAttemptRaw, "#58a6ff", 5, .25);
+
+    if (winningFive) {
+      drawCandidatePolyline(winningFive, "#3fb950", 10, false, 1);
+      drawCandidatePolyline(winningFive, "#7dff9b", 3, false, 1);
+      drawPointNumbers(winningFive, "#7dff9b");
+    }
+
+    updateConfetti();
+    drawConfetti();
+    requestAnimationFrame(draw);
+  }
+}
+
+function drawGrid() {
+  ctx.save();
+  ctx.strokeStyle = "#263244";
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i <= GRID; i++) {
+    const p = i * CELL;
+    ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, CANVAS_SIZE); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(CANVAS_SIZE, p); ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawRawPath(points, color, width, alpha) {
+  if (!points || points.length < 2) return;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCandidatePolyline(gridPoints, color, width, dashed, alpha) {
+  if (!gridPoints || gridPoints.length < 1) return;
+
+  const pts = gridPoints.map(pixelFromGrid);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.shadowColor = color;
+  ctx.shadowBlur = width >= 8 ? 22 : 0;
+  ctx.setLineDash(dashed ? [11, 8] : []);
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+
+  if (pts.length === 1) {
+    ctx.lineTo(pts[0].x + .1, pts[0].y + .1);
+  } else if (pts.length === 2) {
+    ctx.lineTo(pts[1].x, pts[1].y);
+  } else {
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mid = {
+        x:(pts[i].x + pts[i + 1].x) / 2,
+        y:(pts[i].y + pts[i + 1].y) / 2
+      };
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mid.x, mid.y);
+    }
+    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+  }
+
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPointNumbers(points, color) {
+  ctx.save();
+  ctx.font = "900 16px system-ui";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  const seen = new Map();
+
+  for (let i = 0; i < points.length; i++) {
+    const p = pixelFromGrid(points[i]);
+    const k = points[i].x + "," + points[i].y;
+    const n = seen.get(k) || 0;
+    seen.set(k, n + 1);
+
+    const ox = n * 14;
+    const oy = -n * 14;
+
+    ctx.beginPath();
+    ctx.arc(p.x + ox, p.y + oy, 14, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 15;
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#07100b";
+    ctx.fillText(String(i + 1), p.x + ox, p.y + oy + .5);
+  }
+
+  ctx.restore();
+}
+
+/* ---------------- path processing ---------------- */
+
+function simplifyRawPathToFiveGrid(path) {
+  const cleaned = cleanRawPath(path);
+  if (cleaned.length === 0) return [];
+
+  const sampled = resampleByArcLength(cleaned, POINTS);
+  return sampled.map(gridPointFromPixel);
+}
+
+function cleanRawPath(path) {
+  const out = [];
+
+  for (const p of path) {
+    const last = out[out.length - 1];
+    if (!last || Math.hypot(last.x - p.x, last.y - p.y) >= 2.5) {
+      out.push({ x:p.x, y:p.y });
+    }
+  }
+
+  return out;
+}
+
+function resampleByArcLength(points, count) {
+  if (points.length < 2) return points.slice();
+
+  const dist = [0];
+
+  for (let i = 1; i < points.length; i++) {
+    dist[i] = dist[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+
+  const total = dist[dist.length - 1];
+
+  if (total <= 1e-9) {
+    return Array.from({ length:count }, () => ({ ...points[0] }));
+  }
+
+  const out = [];
+
+  for (let i = 0; i < count; i++) {
+    const target = total * i / (count - 1);
+    let j = 1;
+
+    while (j < dist.length && dist[j] < target) j++;
+
+    if (j >= dist.length) {
+      out.push({ ...points[points.length - 1] });
+      continue;
+    }
+
+    const d0 = dist[j - 1];
+    const d1 = dist[j];
+    const u = (target - d0) / Math.max(1e-9, d1 - d0);
+    const a = points[j - 1];
+    const b = points[j];
+
+    out.push({
+      x:a.x + (b.x - a.x) * u,
+      y:a.y + (b.y - a.y) * u
+    });
+  }
+
+  return out;
+}
+
+function pathLength(points) {
+  let len = 0;
+  for (let i = 1; i < points.length; i++) {
+    len += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+  return len;
+}
+
+function buildReferenceFromPath(path) {
+  const clean = cleanRawPath(path);
+  const sampled80 = resampleByArcLength(clean, 80);
+  const sampled48 = resampleByArcLength(clean, 48);
+  const sampled32 = resampleByArcLength(clean, 32);
+  const progressPoints = resampleByArcLength(clean, 180);
+  const baseFive = simplifyRawPathToFiveGrid(clean);
+
+  return {
+    clean,
+    sampled80,
+    sampled48,
+    sampled32,
+    progressPoints,
+    baseFive
+  };
+}
+
+function nearestProgressOnStroke(p, progressPoints) {
+  let best = Infinity;
+  let bestIndex = 0;
+
+  for (let i = 0; i < progressPoints.length; i++) {
+    const q = progressPoints[i];
+    const d = Math.hypot(p.x - q.x, p.y - q.y);
+
+    if (d < best) {
+      best = d;
+      bestIndex = i;
+    }
+  }
+
+  return {
+    dist:best,
+    index:bestIndex,
+    t:bestIndex / Math.max(1, progressPoints.length - 1)
+  };
+}
+
+function angleDiff(a, b) {
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return Math.abs(d);
+}
+
+function segmentAngle(a, b) {
+  return Math.atan2(b.y - a.y, b.x - a.x);
+}
+
+/* ---------------- candidate curve model ---------------- */
+
+function quadraticPoint(a, c, b, t) {
+  const mt = 1 - t;
+  return {
+    x: mt * mt * a.x + 2 * mt * t * c.x + t * t * b.x,
+    y: mt * mt * a.y + 2 * mt * t * c.y + t * t * b.y
+  };
+}
+
+function denseCandidateCurve(gridPoints, steps) {
+  const pts = gridPoints.map(pixelFromGrid);
+  const dense = [];
+
+  if (pts.length === 0) return dense;
+
+  dense.push({ ...pts[0] });
+
+  if (pts.length === 1) return dense;
+
+  if (pts.length === 2) {
+    const a = pts[0];
+    const b = pts[1];
+
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps;
+      dense.push({
+        x:a.x + (b.x - a.x) * t,
+        y:a.y + (b.y - a.y) * t
+      });
+    }
+
+    return dense;
+  }
+
+  let current = pts[0];
+
+  for (let i = 1; i < pts.length - 1; i++) {
+    const control = pts[i];
+    const end = {
+      x:(pts[i].x + pts[i + 1].x) / 2,
+      y:(pts[i].y + pts[i + 1].y) / 2
+    };
+
+    for (let s = 1; s <= steps; s++) {
+      dense.push(quadraticPoint(current, control, end, s / steps));
+    }
+
+    current = end;
+  }
+
+  const last = pts[pts.length - 1];
+
+  for (let s = 1; s <= steps; s++) {
+    const t = s / steps;
+    dense.push({
+      x:current.x + (last.x - current.x) * t,
+      y:current.y + (last.y - current.y) * t
+    });
+  }
+
+  return dense;
+}
+
+function sampleCandidateCurve(candidate, count) {
+  const dense = denseCandidateCurve(candidate, 18);
+  return resampleByArcLength(dense, count);
+}
+
+/* ---------------- similarity metrics ---------------- */
+
+function normalizedDistance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y) / CELL;
+}
+
+function dtwDistance(a, b, window) {
+  const n = a.length;
+  const m = b.length;
+  const w = Math.max(window || Math.abs(n - m), Math.abs(n - m));
+
+  let prev = new Float64Array(m + 1);
+  let curr = new Float64Array(m + 1);
+
+  for (let j = 0; j <= m; j++) prev[j] = Infinity;
+  prev[0] = 0;
+
+  for (let i = 1; i <= n; i++) {
+    for (let j = 0; j <= m; j++) curr[j] = Infinity;
+
+    const jStart = Math.max(1, i - w);
+    const jEnd = Math.min(m, i + w);
+
+    for (let j = jStart; j <= jEnd; j++) {
+      const cost = normalizedDistance(a[i - 1], b[j - 1]);
+      curr[j] = cost + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+    }
+
+    [prev, curr] = [curr, prev];
+  }
+
+  return prev[m] / Math.max(n, m);
+}
+
+function discreteFrechetDistance(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const ca = Array.from({ length:n }, () => new Float64Array(m));
+
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < m; j++) {
+      ca[i][j] = -1;
+    }
+  }
+
+  function c(i, j) {
+    if (ca[i][j] >= 0) return ca[i][j];
+
+    const d = normalizedDistance(a[i], b[j]);
+
+    if (i === 0 && j === 0) ca[i][j] = d;
+    else if (i > 0 && j === 0) ca[i][j] = Math.max(c(i - 1, 0), d);
+    else if (i === 0 && j > 0) ca[i][j] = Math.max(c(0, j - 1), d);
+    else ca[i][j] = Math.max(Math.min(c(i - 1, j), c(i - 1, j - 1), c(i, j - 1)), d);
+
+    return ca[i][j];
+  }
+
+  return c(n - 1, m - 1);
+}
+
+function localStructurePenalty(candidateSample, referenceSample) {
+  let total = 0;
+  let count = 0;
+
+  for (let i = 1; i < candidateSample.length - 1; i++) {
+    const a0 = candidateSample[i - 1];
+    const a1 = candidateSample[i];
+    const a2 = candidateSample[i + 1];
+
+    const b0 = referenceSample[i - 1];
+    const b1 = referenceSample[i];
+    const b2 = referenceSample[i + 1];
+
+    const ah1 = segmentAngle(a0, a1);
+    const ah2 = segmentAngle(a1, a2);
+    const bh1 = segmentAngle(b0, b1);
+    const bh2 = segmentAngle(b1, b2);
+
+    const candidateTurn = angleDiff(ah1, ah2);
+    const referenceTurn = angleDiff(bh1, bh2);
+
+    total += angleDiff(ah1, bh1) * 0.55;
+    total += Math.abs(candidateTurn - referenceTurn) * 0.75;
+    count++;
+  }
+
+  return total / Math.max(1, count);
+}
+
+/* ---------------- candidate generation ---------------- */
+
+function buildSlotLists(reference, radiusCells, profile) {
+  const lists = [];
+
+  for (let slot = 0; slot < POINTS; slot++) {
+    const targetT = slot / (POINTS - 1);
+    const targetIndex = Math.round(targetT * (reference.progressPoints.length - 1));
+    const targetPoint = reference.progressPoints[targetIndex];
+    const slotList = [];
+
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        const gp = { x, y };
+        const px = pixelFromGrid(gp);
+
+        const nearest = nearestProgressOnStroke(px, reference.progressPoints);
+        const distToStroke = nearest.dist / CELL;
+        const progressError = Math.abs(nearest.t - targetT);
+        const distToTarget = Math.hypot(px.x - targetPoint.x, px.y - targetPoint.y) / CELL;
+        const base = reference.baseFive[slot];
+        const baseDist = Math.hypot(gp.x - base.x, gp.y - base.y);
+
+        const permissive = profile.scorer !== "local";
+        const maxProgress = permissive ? 0.32 + radiusCells * 0.08 : 0.20 + radiusCells * 0.055;
+        const maxDist = permissive ? radiusCells + 0.95 : radiusCells + 0.55;
+
+        if (distToTarget > maxDist && distToStroke > maxDist) continue;
+        if (progressError > maxProgress) continue;
+
+        const cost =
+          distToTarget * 7.0 +
+          distToStroke * 3.0 +
+          progressError * 34.0 +
+          baseDist * 1.8;
+
+        slotList.push({
+          cell:gp,
+          cost,
+          t:nearest.t,
+          distToStroke,
+          progressError
+        });
+      }
+    }
+
+    const base = reference.baseFive[slot];
+
+    if (!slotList.some(v => v.cell.x === base.x && v.cell.y === base.y)) {
+      const px = pixelFromGrid(base);
+      const nearest = nearestProgressOnStroke(px, reference.progressPoints);
+      const targetT = slot / (POINTS - 1);
+      slotList.push({
+        cell:{ ...base },
+        cost:0.1 + Math.abs(nearest.t - targetT) * 20,
+        t:nearest.t,
+        distToStroke:nearest.dist / CELL,
+        progressError:Math.abs(nearest.t - targetT)
+      });
+    }
+
+    slotList.sort((a, b) => a.cost - b.cost);
+    lists.push(uniqueCellList(slotList).slice(0, profile.topPerSlot));
+  }
+
+  return lists;
+}
+
+function uniqueCellList(list) {
+  const seen = new Set();
+  const out = [];
+
+  for (const item of list) {
+    const k = item.cell.x + "," + item.cell.y;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(item);
+  }
+
+  return out;
+}
+
+function looseCandidateGate(candidate, reference, radius, profile) {
+  const sampled = sampleCandidateCurve(candidate, 48);
+  const ref = reference.sampled48;
+
+  const candidateLen = pathLength(sampled);
+  const referenceLen = pathLength(ref);
+  const ratio = candidateLen / Math.max(1, referenceLen);
+
+  if (ratio < 0.35 || ratio > 2.75) return false;
+
+  let avgSame = 0;
+  let maxSame = 0;
+  let backtrack = 0;
+  let prevT = -Infinity;
+
+  for (let i = 0; i < sampled.length; i++) {
+    const d = normalizedDistance(sampled[i], ref[i]);
+    avgSame += d;
+    maxSame = Math.max(maxSame, d);
+
+    const nearest = nearestProgressOnStroke(sampled[i], reference.progressPoints);
+    if (nearest.t + 0.05 < prevT) {
+      backtrack += prevT - nearest.t;
+    }
+    prevT = Math.max(prevT, nearest.t);
+  }
+
+  avgSame /= sampled.length;
+
+  const loose = profile.scorer !== "local";
+  if (avgSame > (loose ? 2.2 + radius * 0.95 : 1.65 + radius * 0.75)) return false;
+  if (maxSame > (loose ? 4.8 + radius * 1.1 : 3.6 + radius * 0.95)) return false;
+  if (backtrack > (loose ? 0.24 : 0.16)) return false;
+
+  return true;
+}
+
+function candidateLoss(candidate, reference, lists, indices, profile) {
+  const pixels = candidate.map(pixelFromGrid);
+  const sampled48 = sampleCandidateCurve(candidate, 48);
+  const sampled32 = resampleByArcLength(sampled48, 32);
+
+  let sameIndex = 0;
+  for (let i = 0; i < sampled48.length; i++) {
+    sameIndex += normalizedDistance(sampled48[i], reference.sampled48[i]);
+  }
+  sameIndex /= sampled48.length;
+
+  let listCost = 0;
+  let progressPenalty = 0;
+  let prevT = -Infinity;
+
+  for (let i = 0; i < POINTS; i++) {
+    const targetT = i / (POINTS - 1);
+    const t = lists[i][indices[i]].t;
+    listCost += lists[i][indices[i]].cost;
+
+    if (t + 0.02 < prevT) progressPenalty += 90;
+    if (i > 0 && t - prevT < 0.065) progressPenalty += 18;
+
+    progressPenalty += Math.abs(t - targetT) * 9;
+    prevT = Math.max(prevT, t);
+  }
+
+  let endpointPenalty = 0;
+  endpointPenalty += normalizedDistance(pixels[0], reference.sampled80[0]);
+  endpointPenalty += normalizedDistance(pixels[pixels.length - 1], reference.sampled80[reference.sampled80.length - 1]);
+
+  const candidateLen = pathLength(sampled48);
+  const referenceLen = pathLength(reference.sampled48);
+  const lengthPenalty = Math.abs(candidateLen - referenceLen) / Math.max(CELL, referenceLen);
+
+  let offsetSmoothness = 0;
+  for (let i = 1; i < POINTS; i++) {
+    const a = candidate[i - 1];
+    const b = candidate[i];
+    const ra = reference.baseFive[i - 1];
+    const rb = reference.baseFive[i];
+
+    const offA = { x:a.x - ra.x, y:a.y - ra.y };
+    const offB = { x:b.x - rb.x, y:b.y - rb.y };
+
+    offsetSmoothness += Math.hypot(offB.x - offA.x, offB.y - offA.y);
+  }
+
+  let headingPenalty = 0;
+  let bendPenalty = 0;
+  const refPixels = reference.baseFive.map(pixelFromGrid);
+
+  for (let i = 1; i < POINTS; i++) {
+    const ca = pixels[i - 1];
+    const cb = pixels[i];
+    const ra = refPixels[i - 1];
+    const rb = refPixels[i];
+
+    const clen = Math.hypot(cb.x - ca.x, cb.y - ca.y);
+    const rlen = Math.hypot(rb.x - ra.x, rb.y - ra.y);
+
+    if (clen > CELL * 0.25 && rlen > CELL * 0.25) {
+      headingPenalty += angleDiff(segmentAngle(ca, cb), segmentAngle(ra, rb));
+    }
+  }
+
+  for (let i = 1; i < POINTS - 1; i++) {
+    const ca = segmentAngle(pixels[i - 1], pixels[i]);
+    const cb = segmentAngle(pixels[i], pixels[i + 1]);
+    const ra = segmentAngle(refPixels[i - 1], refPixels[i]);
+    const rb = segmentAngle(refPixels[i], refPixels[i + 1]);
+
+    bendPenalty += Math.abs(angleDiff(ca, cb) - angleDiff(ra, rb));
+  }
+
+  let dtw = 0;
+  let frechet = 0;
+  let localStructure = 0;
+
+  if (profile.scorer === "dtw" || profile.scorer === "hybrid") {
+    dtw = dtwDistance(sampled32, reference.sampled32, 7);
+    frechet = discreteFrechetDistance(sampled32, reference.sampled32);
+    localStructure = localStructurePenalty(sampled32, reference.sampled32);
+  }
+
+  if (profile.scorer === "local") {
+    return (
+      sameIndex * 5.8 +
+      listCost * 0.11 +
+      progressPenalty +
+      endpointPenalty * 4.2 +
+      lengthPenalty * 5.0 +
+      offsetSmoothness * 5.6 +
+      headingPenalty * 2.9 +
+      bendPenalty * 2.1
+    );
+  }
+
+  if (profile.scorer === "dtw") {
+    return (
+      sameIndex * 4.3 +
+      dtw * 6.8 +
+      frechet * 2.9 +
+      localStructure * 4.1 +
+      listCost * 0.075 +
+      progressPenalty +
+      endpointPenalty * 4.6 +
+      lengthPenalty * 5.5 +
+      offsetSmoothness * 3.3 +
+      headingPenalty * 2.8 +
+      bendPenalty * 2.4
+    );
+  }
+
+  return (
+    sameIndex * 4.8 +
+    dtw * 4.9 +
+    frechet * 2.4 +
+    localStructure * 3.8 +
+    listCost * 0.080 +
+    progressPenalty +
+    endpointPenalty * 4.5 +
+    lengthPenalty * 5.2 +
+    offsetSmoothness * 4.4 +
+    headingPenalty * 2.7 +
+    bendPenalty * 2.3
+  );
+}
+
+class CandidateSearch {
+  constructor(reference, lists, profile) {
+    this.reference = reference;
+    this.lists = lists;
+    this.profile = profile;
+    this.heap = new MinHeap();
+    this.visited = new Set();
+    this.results = 0;
+    this.maxResults = profile.maxResultsPerRadius;
+
+    this.push([0,0,0,0,0]);
+  }
+
+  next() {
+    if (this.results >= this.maxResults) return null;
+
+    const item = this.heap.pop();
+    if (!item) return null;
+
+    this.results++;
+
+    for (let i = 0; i < POINTS; i++) {
+      const next = item.indices.slice();
+      next[i]++;
+      if (next[i] < this.lists[i].length) {
+        this.push(next);
+      }
+    }
+
+    return item;
+  }
+
+  push(indices) {
+    const indexKey = indices.join(",");
+    if (this.visited.has(indexKey)) return;
+    this.visited.add(indexKey);
+
+    const points = [];
+    for (let i = 0; i < POINTS; i++) {
+      points.push({ ...this.lists[i][indices[i]].cell });
+    }
+
+    const loss = candidateLoss(points, this.reference, this.lists, indices, this.profile);
+
+    this.heap.push({
+      indices,
+      points,
+      loss,
+      priority:loss
+    });
+  }
+}
+
+class MinHeap {
+  constructor() { this.a = []; }
+
+  push(x) {
+    this.a.push(x);
+    this.up(this.a.length - 1);
+  }
+
+  pop() {
+    if (this.a.length === 0) return null;
+    const top = this.a[0];
+    const last = this.a.pop();
+    if (this.a.length) {
+      this.a[0] = last;
+      this.down(0);
+    }
+    return top;
+  }
+
+  less(i, j) {
+    return this.a[i].priority < this.a[j].priority;
+  }
+
+  up(i) {
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (!this.less(i, p)) break;
+      [this.a[p], this.a[i]] = [this.a[i], this.a[p]];
+      i = p;
+    }
+  }
+
+  down(i) {
+    while (true) {
+      const l = i * 2 + 1;
+      const r = l + 1;
+      let m = i;
+
+      if (l < this.a.length && this.less(l, m)) m = l;
+      if (r < this.a.length && this.less(r, m)) m = r;
+      if (m === i) break;
+
+      [this.a[m], this.a[i]] = [this.a[i], this.a[m]];
+      i = m;
+    }
+  }
+}
+
+/* ---------------- candidate collection for helper bundle ---------------- */
+
+function collectCandidateItems(reference, profile, maxItems) {
+  const seen = new Set();
+  const out = [];
+
+  for (const radius of profile.radii) {
+    const lists = buildSlotLists(reference, radius, profile);
+    const search = new CandidateSearch(reference, lists, profile);
+
+    while (out.length < maxItems) {
+      const item = search.next();
+      if (!item) break;
+
+      const k = gridKey(item.points);
+      if (seen.has(k)) continue;
+      seen.add(k);
+
+      if (!looseCandidateGate(item.points, reference, radius, profile)) continue;
+
+      out.push({
+        points:item.points.map(p => ({ ...p })),
+        loss:item.loss,
+        radius
+      });
+    }
+
+    if (out.length >= maxItems) break;
+  }
+
+  out.sort((a, b) => a.loss - b.loss);
+  return out.slice(0, maxItems);
+}
+
+/* ---------------- crypto ---------------- */
+
+async function deriveKeyFromFivePoints(five, salt, purpose) {
+  const packed = packFivePoints(five);
+  const label = new TextEncoder().encode(purpose);
+  const material = concatBytes(label, salt, packed);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", material));
+
+  return crypto.subtle.importKey(
+    "raw",
+    digest,
+    { name:"AES-GCM" },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function helperTagFromFivePoints(five, salt) {
+  const packed = packFivePoints(five);
+  const label = new TextEncoder().encode("helper-bundle-tag/v1");
+  const material = concatBytes(label, salt, packed);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", material));
+  return bytesToBase64(digest.slice(0, 12));
+}
+
+function packFivePoints(five) {
+  const out = new Uint8Array(POINTS);
+  for (let i = 0; i < POINTS; i++) {
+    const p = five[i] || { x:0, y:0 };
+    out[i] = ((p.x & 15) << 4) | (p.y & 15);
+  }
+  return out;
+}
+
+async function encryptExactWithFivePoints(five, plaintext) {
+  const salt = randomBytes(16);
+  const iv = randomBytes(12);
+  const aad = new TextEncoder().encode("exact-five-point-ciphertext/v10");
+  const key = await deriveKeyFromFivePoints(five, salt, "exact-five-point-key/v10");
+  const data = new TextEncoder().encode(plaintext);
+
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name:"AES-GCM", iv, additionalData:aad },
+      key,
+      data
+    )
+  );
+
+  return {
+    saltB64:bytesToBase64(salt),
+    ivB64:bytesToBase64(iv),
+    aadB64:bytesToBase64(aad),
+    ciphertextB64:bytesToBase64(ciphertext)
+  };
+}
+
+async function tryDecryptExactWithCandidate(five) {
+  const salt = base64ToBytes(exactPackage.saltB64);
+  const iv = base64ToBytes(exactPackage.ivB64);
+  const aad = base64ToBytes(exactPackage.aadB64);
+  const ciphertext = base64ToBytes(exactPackage.ciphertextB64);
+  const key = await deriveKeyFromFivePoints(five, salt, "exact-five-point-key/v10");
+
+  const plainBuffer = await crypto.subtle.decrypt(
+    { name:"AES-GCM", iv, additionalData:aad },
+    key,
+    ciphertext
+  );
+
+  return new TextDecoder().decode(new Uint8Array(plainBuffer));
+}
+
+async function buildHelperBundle(saveReference, exactFive, plaintext) {
+  const helperSalt = randomBytes(16);
+  const helperAad = new TextEncoder().encode("helper-bundle-key-wrap/v1");
+
+  const dataKeyRaw = randomBytes(32);
+  const dataKey = await crypto.subtle.importKey(
+    "raw",
+    dataKeyRaw,
+    { name:"AES-GCM" },
+    false,
+    ["encrypt", "decrypt"]
+  );
+
+  const dataIv = randomBytes(12);
+  const dataAad = new TextEncoder().encode("helper-bundle-data/v1");
+  const plaintextBytes = new TextEncoder().encode(plaintext);
+
+  const dataCipher = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name:"AES-GCM", iv:dataIv, additionalData:dataAad },
+      dataKey,
+      plaintextBytes
+    )
+  );
+
+  const helperItems = collectCandidateItems(saveReference, PROFILES.helperBuild, 1250);
+
+  helperItems.unshift({
+    points: exactFive.map(p => ({ ...p })),
+    loss:-1,
+    radius:0
+  });
+
+  const wrappers = {};
+  let added = 0;
+  let skipped = 0;
+
+  for (let i = 0; i < helperItems.length; i++) {
+    const five = helperItems[i].points;
+    const tag = await helperTagFromFivePoints(five, helperSalt);
+
+    if (wrappers[tag]) {
+      skipped++;
+      continue;
+    }
+
+    const key = await deriveKeyFromFivePoints(five, helperSalt, "helper-bundle-wrap-key/v1");
+    const wrapIv = randomBytes(12);
+    const wrappedKey = new Uint8Array(
+      await crypto.subtle.encrypt(
+        { name:"AES-GCM", iv:wrapIv, additionalData:helperAad },
+        key,
+        dataKeyRaw
+      )
+    );
+
+    wrappers[tag] = {
+      ivB64:bytesToBase64(wrapIv),
+      wrappedKeyB64:bytesToBase64(wrappedKey)
+    };
+
+    added++;
+
+    if (i % 40 === 0) {
+      setStatus(
+        "warn",
+        "SAVING...\n" +
+        "Exact package done.\n" +
+        "Building helper bundle for fuzzy mode...\n" +
+        "Helper variants wrapped: " + added.toLocaleString()
+      );
+      await sleep(1);
+    }
+  }
+
+  return {
+    saltB64:bytesToBase64(helperSalt),
+    helperAadB64:bytesToBase64(helperAad),
+    dataIvB64:bytesToBase64(dataIv),
+    dataAadB64:bytesToBase64(dataAad),
+    dataCipherB64:bytesToBase64(dataCipher),
+    wrappers,
+    wrapperCount:added,
+    skipped
+  };
+}
+
+async function tryHelperCandidate(five) {
+  const salt = base64ToBytes(helperPackage.saltB64);
+  const tag = await helperTagFromFivePoints(five, salt);
+  const wrapper = helperPackage.wrappers[tag];
+
+  if (!wrapper) return null;
+
+  const helperAad = base64ToBytes(helperPackage.helperAadB64);
+  const wrapIv = base64ToBytes(wrapper.ivB64);
+  const wrappedKey = base64ToBytes(wrapper.wrappedKeyB64);
+
+  const wrapKey = await deriveKeyFromFivePoints(five, salt, "helper-bundle-wrap-key/v1");
+
+  const dataKeyRawBuffer = await crypto.subtle.decrypt(
+    { name:"AES-GCM", iv:wrapIv, additionalData:helperAad },
+    wrapKey,
+    wrappedKey
+  );
+
+  const dataKey = await crypto.subtle.importKey(
+    "raw",
+    new Uint8Array(dataKeyRawBuffer),
+    { name:"AES-GCM" },
+    false,
+    ["decrypt"]
+  );
+
+  const dataIv = base64ToBytes(helperPackage.dataIvB64);
+  const dataAad = base64ToBytes(helperPackage.dataAadB64);
+  const dataCipher = base64ToBytes(helperPackage.dataCipherB64);
+
+  const plainBuffer = await crypto.subtle.decrypt(
+    { name:"AES-GCM", iv:dataIv, additionalData:dataAad },
+    dataKey,
+    dataCipher
+  );
+
+  return new TextDecoder().decode(new Uint8Array(plainBuffer));
+}
+
+function randomBytes(n) {
+  const out = new Uint8Array(n);
+  crypto.getRandomValues(out);
+  return out;
+}
+
+function concatBytes(...arrays) {
+  const total = arrays.reduce((n, a) => n + a.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const a of arrays) {
+    out.set(a, off);
+    off += a.length;
+  }
+  return out;
+}
+
+function bytesToBase64(bytes) {
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s);
+}
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/* ---------------- search runners ---------------- */
+
+async function startMutationSearch() {
+  if (!exactPackage) {
+    setStatus("bad", "No saved path yet. Draw the secret path and hit SAVE first.");
+    return;
+  }
+
+  playerAttemptRaw = cleanRawPath(rawPath);
+  if (playerAttemptRaw.length < 8) {
+    setStatus("warn", "Draw a longer test path.");
+    return;
+  }
+
+  const reference = buildReferenceFromPath(playerAttemptRaw);
+  playerAttemptSampled = reference.sampled80;
+
+  mode = "mutating";
+  saveBtn.disabled = true;
+  big.classList.remove("show");
+  plain.textContent = "";
+  winningFive = null;
+
+  const token = ++mutationCancelToken;
+  const strategy = strategySelect.value;
+
+  if (strategy === "helperBundle") {
+    await runHelperBundleSearch(reference, token);
+  } else {
+    await runExactSearch(reference, token, PROFILES[strategy]);
+  }
+}
+
+async function runExactSearch(reference, token, profile) {
+  const triedGridKeys = new Set();
+
+  let decryptAttempts = 0;
+  let considered = 0;
+  let rejected = 0;
+  let duplicated = 0;
+  let bestLoss = Infinity;
+  let startedAt = performance.now();
+
+  setStatus(
+    "warn",
+    profile.label + " started.\n" +
+    "This still needs the exact original 5 grid cells.\n" +
+    "Best-looking candidates are tested first."
+  );
+  draw();
+
+  for (const radius of profile.radii) {
+    if (token !== mutationCancelToken) return;
+
+    const lists = buildSlotLists(reference, radius, profile);
+    const search = new CandidateSearch(reference, lists, profile);
+
+    let lastUi = 0;
+
+    while (token === mutationCancelToken) {
+      const item = search.next();
+      if (!item) break;
+
+      considered++;
+
+      const candidateKey = gridKey(item.points);
+      if (triedGridKeys.has(candidateKey)) {
+        duplicated++;
+        continue;
+      }
+
+      triedGridKeys.add(candidateKey);
+
+      if (!looseCandidateGate(item.points, reference, radius, profile)) {
+        rejected++;
+        continue;
+      }
+
+      decryptAttempts++;
+      displayedCandidate = item.points;
+      bestLoss = Math.min(bestLoss, item.loss);
+
+      const now = performance.now();
+      if (now - lastUi > profile.uiEvery) {
+        lastUi = now;
+        setStatus(
+          "warn",
+          profile.label + "\n" +
+          "Radius: " + radius.toFixed(2) + " cells\n" +
+          "AES decrypt attempts: " + decryptAttempts.toLocaleString() + "\n" +
+          "Candidates considered: " + considered.toLocaleString() + "\n" +
+          "Rejected by loose gate: " + rejected.toLocaleString() + "\n" +
+          "Duplicates skipped: " + duplicated.toLocaleString() + "\n" +
+          "Candidate: " + candidateKey + "\n" +
+          "Loss: " + item.loss.toFixed(2) + "\n" +
+          "Best loss: " + bestLoss.toFixed(2)
+        );
+        draw();
+        await sleep(6);
+      }
+
+      try {
+        const plaintext = await tryDecryptExactWithCandidate(item.points);
+        if (token !== mutationCancelToken) return;
+
+        finishSuccess(
+          plaintext,
+          item.points,
+          profile.label,
+          "AES decrypt attempts: " + decryptAttempts.toLocaleString() + "\n" +
+          "Candidates considered: " + considered.toLocaleString() + "\n" +
+          "Time: " + Math.round(performance.now() - startedAt) + " ms"
+        );
+        return;
+      } catch {
+        // wrong exact key
+      }
+
+      if (decryptAttempts >= profile.maxDecrypts) break;
+      if (decryptAttempts % 250 === 0) await sleep(1);
+    }
+
+    if (decryptAttempts >= profile.maxDecrypts) break;
+  }
+
+  mode = "test";
+  saveBtn.disabled = true;
+  setStatus(
+    "bad",
+    profile.label + " did not decrypt.\n\n" +
+    "AES decrypt attempts: " + decryptAttempts.toLocaleString() + "\n" +
+    "Candidates considered: " + considered.toLocaleString() + "\n" +
+    "Rejected: " + rejected.toLocaleString() + "\n" +
+    "Duplicates skipped: " + duplicated.toLocaleString() + "\n\n" +
+    "Reason: exact AES needs the original 5 cells. If the saved 5-cell path is not in the searched candidate set, exact mode cannot recover it.\n\n" +
+    "Try mode 3 for actual fuzzy recovery, or redraw closer."
+  );
+  draw();
+}
+
+async function runHelperBundleSearch(reference, token) {
+  if (!helperPackage) {
+    setStatus("bad", "No helper bundle exists. Save the secret path again.");
+    mode = "test";
+    return;
+  }
+
+  const profile = PROFILES.helperSearch;
+  const triedGridKeys = new Set();
+
+  let lookups = 0;
+  let considered = 0;
+  let rejected = 0;
+  let duplicated = 0;
+  let bestLoss = Infinity;
+  let startedAt = performance.now();
+
+  setStatus(
+    "warn",
+    "Helper Bundle Search started.\n" +
+    "This is the fuzzy-extractor-style mode.\n" +
+    "It checks candidate tags first, avoiding failed AES decrypt spam.\n" +
+    "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString()
+  );
+  draw();
+
+  for (const radius of profile.radii) {
+    if (token !== mutationCancelToken) return;
+
+    const lists = buildSlotLists(reference, radius, profile);
+    const search = new CandidateSearch(reference, lists, profile);
+
+    let lastUi = 0;
+
+    while (token === mutationCancelToken) {
+      const item = search.next();
+      if (!item) break;
+
+      considered++;
+
+      const candidateKey = gridKey(item.points);
+      if (triedGridKeys.has(candidateKey)) {
+        duplicated++;
+        continue;
+      }
+
+      triedGridKeys.add(candidateKey);
+
+      if (!looseCandidateGate(item.points, reference, radius, profile)) {
+        rejected++;
+        continue;
+      }
+
+      lookups++;
+      displayedCandidate = item.points;
+      bestLoss = Math.min(bestLoss, item.loss);
+
+      const now = performance.now();
+      if (now - lastUi > profile.uiEvery) {
+        lastUi = now;
+        setStatus(
+          "warn",
+          "Helper Bundle Search\n" +
+          "Radius: " + radius.toFixed(2) + " cells\n" +
+          "Tag lookups: " + lookups.toLocaleString() + "\n" +
+          "Candidates considered: " + considered.toLocaleString() + "\n" +
+          "Rejected: " + rejected.toLocaleString() + "\n" +
+          "Duplicates skipped: " + duplicated.toLocaleString() + "\n" +
+          "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n" +
+          "Candidate: " + candidateKey + "\n" +
+          "Loss: " + item.loss.toFixed(2) + "\n" +
+          "Best loss: " + bestLoss.toFixed(2)
+        );
+        draw();
+        await sleep(4);
+      }
+
+      try {
+        const plaintext = await tryHelperCandidate(item.points);
+        if (token !== mutationCancelToken) return;
+
+        if (plaintext !== null) {
+          finishSuccess(
+            plaintext,
+            item.points,
+            "Helper Bundle Search",
+            "Tag lookups: " + lookups.toLocaleString() + "\n" +
+            "Candidates considered: " + considered.toLocaleString() + "\n" +
+            "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n" +
+            "Time: " + Math.round(performance.now() - startedAt) + " ms"
+          );
+          return;
+        }
+      } catch {
+        // Tag collision or wrong candidate. Very unlikely, but safe to ignore.
+      }
+
+      if (lookups >= profile.maxDecrypts) break;
+      if (lookups % 400 === 0) await sleep(1);
+    }
+
+    if (lookups >= profile.maxDecrypts) break;
+  }
+
+  mode = "test";
+  saveBtn.disabled = true;
+  setStatus(
+    "bad",
+    "Helper Bundle Search did not recover.\n\n" +
+    "Tag lookups: " + lookups.toLocaleString() + "\n" +
+    "Candidates considered: " + considered.toLocaleString() + "\n" +
+    "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n\n" +
+    "Reason: the redraw candidate set did not overlap the saved helper variant set.\n" +
+    "Redraw closer, or increase helperBuild/helperSearch limits in the code."
+  );
+  draw();
+}
+
+function finishSuccess(plaintext, points, strategyLabel, details) {
+  winningFive = points.map(p => ({ ...p }));
+  displayedCandidate = winningFive;
+  mode = "decrypted";
+
+  setStatus(
+    "good",
+    "DECRYPTED with " + strategyLabel + ".\n" +
+    details + "\n" +
+    "Recovered points: " + gridKey(winningFive)
+  );
+
+  plain.textContent = plaintext;
+  big.classList.add("show");
+  launchConfetti();
+  draw();
+}
+
+/* ---------------- confetti ---------------- */
+
+function launchConfetti() {
+  confetti = [];
+  for (let i = 0; i < 220; i++) {
+    confetti.push({
+      x:CANVAS_SIZE / 2,
+      y:CANVAS_SIZE / 2,
+      vx:(Math.random() * 2 - 1) * 9,
+      vy:-Math.random() * 14 - 4,
+      g:.28 + Math.random() * .18,
+      w:5 + Math.random() * 9,
+      h:9 + Math.random() * 14,
+      rot:Math.random() * Math.PI * 2,
+      vr:(Math.random() * 2 - 1) * .22,
+      color:["#3fb950","#7dff9b","#58a6ff","#f778ba","#d29922","#ffffff"][Math.floor(Math.random() * 6)]
+    });
+  }
+}
+
+function updateConfetti() {
+  for (const c of confetti) {
+    c.x += c.vx;
+    c.y += c.vy;
+    c.vy += c.g;
+    c.rot += c.vr;
+    if (c.y > CANVAS_SIZE + 60) {
+      c.x = Math.random() * CANVAS_SIZE;
+      c.y = -40;
+      c.vy = Math.random() * 2;
+    }
+  }
+}
+
+function drawConfetti() {
+  ctx.save();
+  for (const c of confetti) {
+    ctx.translate(c.x, c.y);
+    ctx.rotate(c.rot);
+    ctx.fillStyle = c.color;
+    ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  ctx.restore();
+}
+
+/* ---------------- buttons ---------------- */
+
+clearBtn.addEventListener("click", () => {
+  mutationCancelToken++;
+  drawing = false;
+  activePointerId = null;
+
+  rawPath = [];
+  playerAttemptRaw = [];
+  playerAttemptSampled = [];
+  displayedCandidate = null;
+  winningFive = null;
+  confetti = [];
+
+  big.classList.remove("show");
+  plain.textContent = "";
+
+  if (exactPackage) {
+    mode = "test";
+    saveBtn.disabled = true;
+    setStatus("warn", "Draw the player's test path. Mutation starts when your thumb lifts.");
+  } else {
+    mode = "enroll";
+    saveBtn.disabled = false;
+    setStatus("", "Draw the secret path, then hit SAVE.");
+  }
+
+  draw();
+});
+
+saveBtn.addEventListener("click", async () => {
+  if (mode !== "enroll") return;
+
+  if (!window.crypto || !crypto.subtle) {
+    setStatus("bad", "WebCrypto is not available. Open this over HTTPS or localhost.");
+    return;
+  }
+
+  const five = simplifyRawPathToFiveGrid(rawPath);
+  const clean = cleanRawPath(rawPath);
+
+  if (five.length !== POINTS || clean.length < 8) {
+    setStatus("warn", "Draw a longer secret path before hitting SAVE.");
+    return;
+  }
+
+  try {
+    mode = "saving";
+    saveBtn.disabled = true;
+    draw();
+
+    setStatus("warn", "SAVING...\nBuilding exact AES package.");
+    exactPackage = await encryptExactWithFivePoints(
+      five,
+      secretInput.value || "encrypted data"
+    );
+
+    const saveReference = buildReferenceFromPath(clean);
+
+    helperPackage = await buildHelperBundle(
+      saveReference,
+      five,
+      secretInput.value || "encrypted data"
+    );
+
+    rawPath = [];
+    displayedCandidate = null;
+    winningFive = null;
+
+    mode = "test";
+    saveBtn.disabled = true;
+
+    setStatus(
+      "good",
+      "SAVED.\nThe grid was cleared.\n\n" +
+      "Exact package ready.\n" +
+      "Helper bundle variants: " + helperPackage.wrapperCount.toLocaleString() + "\n\n" +
+      "Now choose a strategy and draw the player's test path."
+    );
+
+    draw();
+  } catch (err) {
+    mode = "enroll";
+    saveBtn.disabled = false;
+    setStatus("bad", "Save failed: " + err.message);
+    draw();
+  }
+});
+
+draw();
+</script>
+</body>
+</html> 
