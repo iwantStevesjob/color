@@ -1,251 +1,391 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Three Fuzzy Path Mutation Strategies</title>
-  <style>
-    :root {
-      --bg:#080c12; --panel:#101824; --panel2:#0b111a; --text:#eaf2ff;
-      --muted:#9aa8b8; --border:#2b3544; --blue:#58a6ff;
-      --yellow:#ffd166; --pink:#f778ba; --green:#3fb950; --red:#f85149;
-      --code:#05080d;
-    }
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Muscle Memory Fuzzy Path Trainer</title>
+<style>
+:root {
+  --bg:#080c12; --panel:#101824; --panel2:#0b111a; --text:#eaf2ff;
+  --muted:#9aa8b8; --border:#2b3544; --blue:#58a6ff;
+  --yellow:#ffd166; --pink:#f778ba; --green:#3fb950; --red:#f85149;
+  --code:#05080d;
+}
 
-    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+* {
+  box-sizing:border-box;
+  -webkit-tap-highlight-color:transparent;
+}
 
-    html, body {
-      margin:0;
-      min-height:100%;
-      overflow:hidden;
-      overscroll-behavior:none;
-      touch-action:none;
-      background:
-        radial-gradient(circle at top left, rgba(88,166,255,.18), transparent 36%),
-        radial-gradient(circle at top right, rgba(247,120,186,.12), transparent 35%),
-        var(--bg);
-      color:var(--text);
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    }
+html, body {
+  margin:0;
+  min-height:100%;
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior-y:auto;
+  touch-action:auto;
+  background:
+    radial-gradient(circle at top left, rgba(88,166,255,.18), transparent 36%),
+    radial-gradient(circle at top right, rgba(247,120,186,.12), transparent 35%),
+    var(--bg);
+  color:var(--text);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
 
-    body {
-      display:grid;
-      place-items:center;
-      padding:12px;
-    }
+body {
+  display:block;
+  padding:12px;
+}
 
-    .app { width:min(100%,760px); }
+.app {
+  width:min(100%,760px);
+  margin:0 auto;
+  padding-bottom:48px;
+}
 
-    h1 {
-      margin:0 0 6px;
-      font-size:clamp(23px,7vw,44px);
-      line-height:.95;
-      letter-spacing:-.055em;
-    }
+h1 {
+  margin:0 0 6px;
+  font-size:clamp(23px,7vw,44px);
+  line-height:.95;
+  letter-spacing:-.055em;
+}
 
-    .sub {
-      margin:0 0 12px;
-      color:var(--muted);
-      font-size:14px;
-      line-height:1.35;
-    }
+.sub {
+  margin:0 0 12px;
+  color:var(--muted);
+  font-size:14px;
+  line-height:1.35;
+}
 
-    .panel {
-      position:relative;
-      padding:12px;
-      border:1px solid var(--border);
-      border-radius:22px;
-      background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015));
-      box-shadow:0 24px 80px rgba(0,0,0,.34);
-      overflow:hidden;
-    }
+.panel {
+  position:relative;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:22px;
+  background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015));
+  box-shadow:0 24px 80px rgba(0,0,0,.34);
+}
 
-    canvas {
-      width:100%;
-      aspect-ratio:1/1;
-      display:block;
-      border:1px solid var(--border);
-      border-radius:18px;
-      background:var(--panel2);
-      touch-action:none;
-      user-select:none;
-    }
+canvas {
+  width:100%;
+  aspect-ratio:1/1;
+  display:block;
+  border:1px solid var(--border);
+  border-radius:18px;
+  background:var(--panel2);
+  touch-action:none;
+  user-select:none;
+}
 
-    .buttons {
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:10px;
-      margin-top:12px;
-    }
+.buttons {
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:10px;
+  margin-top:12px;
+}
 
-    button {
-      border:1px solid var(--border);
-      border-radius:16px;
-      padding:15px 14px;
-      color:var(--text);
-      font-size:18px;
-      font-weight:900;
-      letter-spacing:.02em;
-      background:#1d2632;
-      cursor:pointer;
-      user-select:none;
-    }
+button {
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:15px 10px;
+  color:var(--text);
+  font-size:15px;
+  font-weight:900;
+  letter-spacing:.02em;
+  background:#1d2632;
+  cursor:pointer;
+  user-select:none;
+}
 
-    button:active { transform:translateY(1px); }
-    button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+button:active { transform:translateY(1px); }
+button:disabled { opacity:.45; cursor:not-allowed; transform:none; }
 
-    button.clear { background:#2a2024; border-color:#5b3037; }
-    button.save { background:#0b5cad; border-color:#1f6feb; }
+button.clear { background:#2a2024; border-color:#5b3037; }
+button.undo { background:#252430; border-color:#45415b; }
+button.save { background:#0b5cad; border-color:#1f6feb; }
 
-    .control {
-      margin-top:12px;
-    }
+.control {
+  margin-top:12px;
+}
 
-    label {
-      display:block;
-      margin:0 0 5px;
-      color:var(--muted);
-      font-size:12px;
-    }
+label {
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:10px;
+  margin:0 0 5px;
+  color:var(--muted);
+  font-size:12px;
+}
 
-    input, select {
-      width:100%;
-      border:1px solid var(--border);
-      border-radius:14px;
-      padding:11px 12px;
-      background:var(--code);
-      color:var(--text);
-      outline:none;
-      font:14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    }
+.label-value {
+  color:var(--text);
+  font-weight:900;
+  font-size:12px;
+}
 
-    select {
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      font-weight:800;
-    }
+input, select {
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:11px 12px;
+  background:var(--code);
+  color:var(--text);
+  outline:none;
+  font:14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
 
-    .status {
-      min-height:150px;
-      margin-top:12px;
-      padding:12px;
-      border:1px solid var(--border);
-      border-radius:16px;
-      background:rgba(255,255,255,.035);
-      color:var(--muted);
-      white-space:pre-wrap;
-      line-height:1.35;
-      overflow-wrap:anywhere;
-    }
+input[type="range"] {
+  padding:0;
+  height:38px;
+  accent-color:#58a6ff;
+}
 
-    .status.good { color:#c3f6cf; border-color:rgba(63,185,80,.7); }
-    .status.warn { color:#ffe2a5; border-color:rgba(210,153,34,.7); }
-    .status.bad { color:#ffd0cd; border-color:rgba(248,81,73,.7); }
+select {
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-weight:800;
+}
 
-    .big {
-      pointer-events:none;
-      position:absolute;
-      inset:0;
-      display:grid;
-      place-items:center;
-      opacity:0;
-      transform:scale(.92);
-      transition:opacity 180ms ease, transform 220ms cubic-bezier(.2,1.4,.3,1);
-    }
+.two {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
 
-    .big.show { opacity:1; transform:scale(1); }
+.rankbox {
+  margin-top:12px;
+  padding:13px;
+  border:1px solid rgba(255,209,102,.45);
+  border-radius:16px;
+  background:rgba(255,209,102,.055);
+  color:#ffe9b8;
+  font-size:12px;
+  line-height:1.38;
+  white-space:pre-wrap;
+}
 
-    .big-inner {
-      width:min(92%,560px);
-      padding:24px;
-      text-align:center;
-      border:2px solid rgba(63,185,80,.85);
-      border-radius:26px;
-      background:rgba(3,17,10,.88);
-      box-shadow:0 0 45px rgba(63,185,80,.45), inset 0 0 30px rgba(63,185,80,.12);
-      backdrop-filter:blur(8px);
-    }
+.rankbox.expert {
+  border-color:rgba(63,185,80,.75);
+  background:rgba(63,185,80,.08);
+  color:#c9fbd4;
+}
 
-    .decrypted {
-      font-size:clamp(44px,12vw,92px);
-      line-height:.9;
-      letter-spacing:-.075em;
-      font-weight:1000;
-      color:#7dff9b;
-      text-shadow:0 0 22px rgba(63,185,80,.85);
-    }
+.rankbox.advanced {
+  border-color:rgba(88,166,255,.65);
+  background:rgba(88,166,255,.07);
+  color:#cfe6ff;
+}
 
-    .plain {
-      margin-top:12px;
-      color:#eaffef;
-      font-size:clamp(16px,4vw,24px);
-      overflow-wrap:anywhere;
-    }
+.rankbox.bad {
+  border-color:rgba(248,81,73,.7);
+  background:rgba(248,81,73,.07);
+  color:#ffd0cd;
+}
 
-    .tiny {
-      margin-top:10px;
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.3;
-    }
-  </style>
+.readout {
+  margin-top:12px;
+  padding:12px;
+  border:1px solid rgba(88,166,255,.35);
+  border-radius:16px;
+  background:rgba(88,166,255,.06);
+  color:#cfe6ff;
+  font-size:12px;
+  line-height:1.35;
+  white-space:pre-wrap;
+}
+
+.hint {
+  margin:7px 0 0;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.3;
+}
+
+.status {
+  min-height:150px;
+  margin-top:12px;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:16px;
+  background:rgba(255,255,255,.035);
+  color:var(--muted);
+  white-space:pre-wrap;
+  line-height:1.35;
+  overflow-wrap:anywhere;
+}
+
+.status.good { color:#c3f6cf; border-color:rgba(63,185,80,.7); }
+.status.warn { color:#ffe2a5; border-color:rgba(210,153,34,.7); }
+.status.bad { color:#ffd0cd; border-color:rgba(248,81,73,.7); }
+
+.big {
+  pointer-events:none;
+  position:absolute;
+  inset:0;
+  display:grid;
+  place-items:center;
+  opacity:0;
+  transform:scale(.92);
+  transition:opacity 180ms ease, transform 220ms cubic-bezier(.2,1.4,.3,1);
+}
+
+.big.show {
+  opacity:1;
+  transform:scale(1);
+}
+
+.big-inner {
+  width:min(92%,560px);
+  padding:24px;
+  text-align:center;
+  border:2px solid rgba(63,185,80,.85);
+  border-radius:26px;
+  background:rgba(3,17,10,.88);
+  box-shadow:0 0 45px rgba(63,185,80,.45), inset 0 0 30px rgba(63,185,80,.12);
+  backdrop-filter:blur(8px);
+}
+
+.decrypted {
+  font-size:clamp(44px,12vw,92px);
+  line-height:.9;
+  letter-spacing:-.075em;
+  font-weight:1000;
+  color:#7dff9b;
+  text-shadow:0 0 22px rgba(63,185,80,.85);
+}
+
+.plain {
+  margin-top:12px;
+  color:#eaffef;
+  font-size:clamp(16px,4vw,24px);
+  overflow-wrap:anywhere;
+}
+
+.tiny {
+  margin-top:10px;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.3;
+}
+
+@media (max-width:640px) {
+  .two { grid-template-columns:1fr; }
+  .buttons { grid-template-columns:1fr; }
+  .status { min-height:132px; }
+}
+</style>
 </head>
 
 <body>
-  <div class="app">
-    <h1>Three Mutation Strategies</h1>
-    <p class="sub">
-      Draw the secret path, hit SAVE, then draw the player path. Use the selector to test three different fuzzy-search approaches.
-    </p>
+<div class="app">
+  <h1>Muscle Memory Trainer</h1>
+  <p class="sub">
+    Train by drawing the secret gesture repeatedly, SAVE it, then unlock by redrawing repeatedly. The app ranks your redraw skill and adjusts helper strength.
+  </p>
 
-    <div class="panel">
-      <canvas id="canvas" width="720" height="720"></canvas>
+  <div class="panel">
+    <canvas id="canvas" width="720" height="720"></canvas>
 
-      <div id="big" class="big">
-        <div class="big-inner">
-          <div class="decrypted">DECRYPTED</div>
-          <div id="plain" class="plain"></div>
-          <div class="tiny">Recovered from the selected strategy.</div>
-        </div>
+    <div id="big" class="big">
+      <div class="big-inner">
+        <div class="decrypted">DECRYPTED</div>
+        <div id="plain" class="plain"></div>
+        <div class="tiny">Recovered from the selected strategy.</div>
       </div>
-
-      <div class="buttons">
-        <button id="clearBtn" class="clear">CLEAR</button>
-        <button id="saveBtn" class="save">SAVE</button>
-      </div>
-
-      <div class="control">
-        <label>Mutation strategy</label>
-        <select id="strategySelect">
-          <option value="localBeam">1. Local Offset Beam — fastest exact-key search</option>
-          <option value="dtwFrechet">2. DTW / Fréchet Beam — shape-aware exact-key search</option>
-          <option value="helperBundle">3. Helper Bundle — fuzzy-extractor-style recovery</option>
-        </select>
-      </div>
-
-      <div class="control">
-        <label>Data encrypted by the first saved path</label>
-        <input id="secretInput" value="The hidden reef channel opens at sunrise." />
-      </div>
-
-      <div id="status" class="status">Draw the secret path, then hit SAVE.</div>
     </div>
+
+    <div class="buttons">
+      <button id="undoBtn" class="undo">UNDO PATH</button>
+      <button id="clearBtn" class="clear">CLEAR</button>
+      <button id="saveBtn" class="save">SAVE</button>
+    </div>
+
+    <div class="two">
+      <div class="control">
+        <label>
+          <span>Path points</span>
+          <span id="pointValue" class="label-value">5 points</span>
+        </label>
+        <input id="pointSlider" type="range" min="3" max="12" step="1" value="5" />
+        <p class="hint">More points increases raw keyspace, but makes redraw recovery harder.</p>
+      </div>
+
+      <div class="control">
+        <label>
+          <span>Virtual grid multiplier</span>
+          <span id="gridValue" class="label-value">1× = 16×16</span>
+        </label>
+        <input id="gridSlider" type="range" min="0" max="3" step="1" value="0" />
+        <p class="hint">1×, 10×, 100×, 1000×. Visual grid stays readable; crypto grid grows virtually.</p>
+      </div>
+    </div>
+
+    <div class="control">
+      <label>
+        <span>Visible debug ghosts</span>
+        <span id="ghostValue" class="label-value">28 ghosts</span>
+      </label>
+      <input id="ghostSlider" type="range" min="0" max="120" step="1" value="28" />
+      <p class="hint">
+        This only controls how many ghosts are drawn. Actual helper variants are ranked automatically.
+      </p>
+    </div>
+
+    <div class="control">
+      <label>Mutation strategy</label>
+      <select id="strategySelect">
+        <option value="localBeam">1. Local Offset Beam — fastest exact-key search</option>
+        <option value="dtwFrechet">2. DTW / Fréchet Beam — shape-aware exact-key search</option>
+        <option value="helperBundle" selected>3. Helper Bundle — fuzzy-extractor-style recovery</option>
+      </select>
+      <p class="hint">For serious use, Helper Bundle is the only mode that should recover from fuzzy redraws.</p>
+    </div>
+
+    <div class="control">
+      <label>Data encrypted by the trained path cluster</label>
+      <input id="secretInput" value="The hidden reef channel opens at sunrise." />
+    </div>
+
+    <div id="rankReadout" class="rankbox">Draw at least two paths to get a rank.</div>
+    <div id="securityReadout" class="readout"></div>
+    <div id="status" class="status">Draw the same secret path repeatedly. Each completed stroke is added to training. Hit SAVE when the overlap looks stable.</div>
   </div>
+</div>
 
 <script>
 "use strict";
 
 const CANVAS_SIZE = 720;
-const GRID = 16;
-const CELL = CANVAS_SIZE / GRID;
-const POINTS = 5;
+const BASE_GRID = 16;
+const BASE_CELL = CANVAS_SIZE / BASE_GRID;
+const GRID_MULTIPLIERS = [1, 10, 100, 1000];
+const RECOVERY_BUCKET_PX = 12;
+const CONSENSUS_SAMPLES = 96;
+
+let POINTS = 5;
+let GRID_MULTIPLIER = 1;
+let GRID = BASE_GRID * GRID_MULTIPLIER;
+let GHOST_LIMIT = 28;
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+
+const undoBtn = document.getElementById("undoBtn");
 const clearBtn = document.getElementById("clearBtn");
 const saveBtn = document.getElementById("saveBtn");
 const statusBox = document.getElementById("status");
 const secretInput = document.getElementById("secretInput");
 const strategySelect = document.getElementById("strategySelect");
+
+const pointSlider = document.getElementById("pointSlider");
+const pointValue = document.getElementById("pointValue");
+const gridSlider = document.getElementById("gridSlider");
+const gridValue = document.getElementById("gridValue");
+const ghostSlider = document.getElementById("ghostSlider");
+const ghostValue = document.getElementById("ghostValue");
+const rankReadout = document.getElementById("rankReadout");
+const securityReadout = document.getElementById("securityReadout");
+
 const big = document.getElementById("big");
 const plain = document.getElementById("plain");
 
@@ -253,16 +393,29 @@ let mode = "enroll";
 let drawing = false;
 let rawPath = [];
 
+let enrollPaths = [];
+let consensusPath = [];
+let consensusPoints = [];
+
+let unlockPaths = [];
+let unlockConsensusPath = [];
+let unlockConsensusPoints = [];
+
 let playerAttemptRaw = [];
 let playerAttemptSampled = [];
 let displayedCandidate = null;
-let winningFive = null;
+let winningPoints = null;
 
 let exactPackage = null;
 let helperPackage = null;
 let mutationCancelToken = 0;
 let activePointerId = null;
 let confetti = [];
+
+let savedGhostCandidates = [];
+let savedGhostKeys = new Set();
+let liveGhostCandidates = [];
+let liveGhostKeys = new Set();
 
 const PROFILES = {
   localBeam: {
@@ -289,21 +442,25 @@ const PROFILES = {
     radii:[0.45,0.7,1.0,1.35,1.8,2.35,3.0,3.8],
     topPerSlot:34,
     maxResultsPerRadius:140000,
-    maxDecrypts:14000,
+    maxDecrypts:22000,
     uiEvery:18
   },
   helperBuild: {
     label:"Helper Bundle Builder",
     scorer:"hybrid",
-    radii:[0.35,0.55,0.8,1.1,1.45,1.9,2.45],
-    topPerSlot:30,
-    maxResultsPerRadius:120000,
-    maxDecrypts:1400,
+    radii:[0.35,0.55,0.8,1.1,1.45,1.9,2.45,3.1],
+    topPerSlot:34,
+    maxResultsPerRadius:150000,
+    maxDecrypts:2600,
     uiEvery:50
   }
 };
 
-/* ---------------- basic helpers ---------------- */
+/* ---------------- general helpers ---------------- */
+
+function cellSize() {
+  return CANVAS_SIZE / GRID;
+}
 
 function setStatus(kind, text) {
   statusBox.className = "status" + (kind ? " " + kind : "");
@@ -312,6 +469,24 @@ function setStatus(kind, text) {
 
 function clamp(n, lo, hi) {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function mean(arr) {
+  if (!arr.length) return 0;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function stdev(arr) {
+  if (arr.length < 2) return 0;
+  const m = mean(arr);
+  return Math.sqrt(mean(arr.map(v => (v - m) * (v - m))));
+}
+
+function percentile(arr, p) {
+  if (!arr.length) return 0;
+  const s = arr.slice().sort((a, b) => a - b);
+  const idx = clamp(Math.floor((s.length - 1) * p), 0, s.length - 1);
+  return s[idx];
 }
 
 function sleep(ms) {
@@ -327,21 +502,31 @@ function canvasPoint(clientX, clientY) {
 }
 
 function gridPointFromPixel(p) {
+  const c = cellSize();
   return {
-    x: clamp(Math.floor(p.x / CELL), 0, GRID - 1),
-    y: clamp(Math.floor(p.y / CELL), 0, GRID - 1)
+    x: clamp(Math.floor(p.x / c), 0, GRID - 1),
+    y: clamp(Math.floor(p.y / c), 0, GRID - 1)
   };
 }
 
 function pixelFromGrid(g) {
+  const c = cellSize();
   return {
-    x: (g.x + .5) * CELL,
-    y: (g.y + .5) * CELL
+    x: (g.x + 0.5) * c,
+    y: (g.y + 0.5) * c
   };
 }
 
 function gridKey(points) {
   return points.map(p => `${p.x},${p.y}`).join("|");
+}
+
+function compactGridKey(points) {
+  if (points.length <= 7) return gridKey(points);
+
+  return points.slice(0, 4).map(p => `${p.x},${p.y}`).join("|") +
+    "|...|" +
+    points.slice(-3).map(p => `${p.x},${p.y}`).join("|");
 }
 
 function addRawPoint(p) {
@@ -351,6 +536,429 @@ function addRawPoint(p) {
   }
 }
 
+function rawSecurityBits() {
+  return POINTS * 2 * Math.log2(GRID);
+}
+
+function approxSpaceText(bits) {
+  if (bits < 60) {
+    return Math.pow(2, bits).toLocaleString(undefined, { maximumFractionDigits:0 });
+  }
+
+  const log10 = bits * Math.LOG10E * Math.LN2;
+  const exp = Math.floor(log10);
+  const mantissa = Math.pow(10, log10 - exp);
+  return mantissa.toFixed(2) + "e" + exp;
+}
+
+/* ---------------- proficiency model ---------------- */
+
+function evaluatePathProficiency(paths) {
+  const cleanPaths = paths.map(cleanRawPath).filter(p => p.length >= 8);
+
+  if (cleanPaths.length < 2) {
+    return {
+      ready:false,
+      score:null,
+      rank:"Unranked",
+      className:"",
+      message:"Draw at least two complete paths to rank your redraw skill.",
+      recommendation:"Need more data.",
+      helperMultiplier:1.25,
+      suggested:"Debug setting: 1× grid, 5 points.",
+      metricsText:""
+    };
+  }
+
+  const resampled = cleanPaths.map(p => resampleByArcLength(p, CONSENSUS_SAMPLES));
+  const consensus = buildConsensusPath(cleanPaths);
+  const lengths = cleanPaths.map(pathLength);
+  const consensusLen = pathLength(consensus);
+
+  const dists = [];
+  const startPoints = [];
+  const endPoints = [];
+
+  for (const path of resampled) {
+    startPoints.push(path[0]);
+    endPoints.push(path[path.length - 1]);
+
+    for (let i = 0; i < CONSENSUS_SAMPLES; i++) {
+      dists.push(Math.hypot(path[i].x - consensus[i].x, path[i].y - consensus[i].y));
+    }
+  }
+
+  const avgDistN = mean(dists) / BASE_CELL;
+  const p90DistN = percentile(dists, 0.90) / BASE_CELL;
+  const maxDistN = Math.max(...dists) / BASE_CELL;
+
+  const startMean = {
+    x:mean(startPoints.map(p => p.x)),
+    y:mean(startPoints.map(p => p.y))
+  };
+  const endMean = {
+    x:mean(endPoints.map(p => p.x)),
+    y:mean(endPoints.map(p => p.y))
+  };
+
+  const startSpreadN = mean(startPoints.map(p => Math.hypot(p.x - startMean.x, p.y - startMean.y))) / BASE_CELL;
+  const endSpreadN = mean(endPoints.map(p => Math.hypot(p.x - endMean.x, p.y - endMean.y))) / BASE_CELL;
+
+  const lenMean = Math.max(1, mean(lengths));
+  const lengthCV = stdev(lengths) / lenMean;
+
+  const turnError = turnConsistencyError(resampled, consensus);
+
+  let rawScore = 100;
+  rawScore -= avgDistN * 27;
+  rawScore -= p90DistN * 15;
+  rawScore -= startSpreadN * 10;
+  rawScore -= endSpreadN * 10;
+  rawScore -= lengthCV * 90;
+  rawScore -= turnError * 16;
+
+  if (consensusLen < BASE_CELL * 1.2) rawScore -= 18;
+
+  let sampleCap = 100;
+  if (cleanPaths.length < 3) sampleCap = 68;
+  else if (cleanPaths.length < 5) sampleCap = 78;
+  else if (cleanPaths.length < 8) sampleCap = 88;
+  else if (cleanPaths.length < 12) sampleCap = 95;
+
+  const score = clamp(Math.min(rawScore, sampleCap), 0, 100);
+  const band = rankBand(score);
+
+  const metricsText =
+    "Score: " + score.toFixed(1) + "/100\n" +
+    "Samples: " + cleanPaths.length + "\n" +
+    "Average overlap error: " + avgDistN.toFixed(2) + " base cells\n" +
+    "90% overlap error: " + p90DistN.toFixed(2) + " base cells\n" +
+    "Worst outlier error: " + maxDistN.toFixed(2) + " base cells\n" +
+    "Start spread: " + startSpreadN.toFixed(2) + " base cells\n" +
+    "End spread: " + endSpreadN.toFixed(2) + " base cells\n" +
+    "Length variation: " + (lengthCV * 100).toFixed(1) + "%\n" +
+    "Turn inconsistency: " + turnError.toFixed(2);
+
+  return {
+    ready:true,
+    score,
+    rank:band.rank,
+    className:band.className,
+    message:band.message,
+    recommendation:band.recommendation,
+    helperMultiplier:band.helperMultiplier,
+    suggested:band.suggested,
+    metricsText
+  };
+}
+
+function turnConsistencyError(resampledPaths, consensus) {
+  if (resampledPaths.length < 2 || consensus.length < 4) return 0;
+
+  const step = 4;
+  const errors = [];
+
+  for (const path of resampledPaths) {
+    for (let i = step; i < CONSENSUS_SAMPLES - step; i += step) {
+      const a0 = path[i - step];
+      const a1 = path[i];
+      const a2 = path[i + step];
+
+      const b0 = consensus[i - step];
+      const b1 = consensus[i];
+      const b2 = consensus[i + step];
+
+      const ah1 = segmentAngle(a0, a1);
+      const ah2 = segmentAngle(a1, a2);
+      const bh1 = segmentAngle(b0, b1);
+      const bh2 = segmentAngle(b1, b2);
+
+      const headingError = angleDiff(ah1, bh1);
+      const turnA = angleDiff(ah1, ah2);
+      const turnB = angleDiff(bh1, bh2);
+      const bendError = Math.abs(turnA - turnB);
+
+      errors.push(headingError * 0.6 + bendError * 0.9);
+    }
+  }
+
+  return mean(errors);
+}
+
+function rankBand(score) {
+  if (score < 35) {
+    return {
+      rank:"Beginner",
+      className:"bad",
+      helperMultiplier:1.85,
+      message:"Beginner. You kind of suck at redrawing this gesture right now. The paths barely agree, so the app has to be forgiving and security takes a hit.",
+      recommendation:"Do not use high grid settings yet. Your redraw spread is too wide.",
+      suggested:"Suggested: 1× grid, 5 points, 12–20 training paths, 8–12 unlock redraws."
+    };
+  }
+
+  if (score < 50) {
+    return {
+      rank:"Novice",
+      className:"bad",
+      helperMultiplier:1.55,
+      message:"Novice. There is some repeated intent, but the overlap is still sloppy. You need more muscle memory before pushing security.",
+      recommendation:"Stay conservative. Prioritize reliable unlocks over giant theoretical keyspace.",
+      suggested:"Suggested: 1× grid, 5–6 points, 12–18 training paths, 6–10 unlock redraws."
+    };
+  }
+
+  if (score < 65) {
+    return {
+      rank:"Apprentice",
+      className:"",
+      helperMultiplier:1.25,
+      message:"Apprentice. The shape is recognizable, but still too noisy for aggressive settings.",
+      recommendation:"You can try 10×, but keep the point count moderate.",
+      suggested:"Suggested: 10× grid, 5–6 points, 10–15 training paths, 5–8 unlock redraws."
+    };
+  }
+
+  if (score < 80) {
+    return {
+      rank:"Competent",
+      className:"advanced",
+      helperMultiplier:1.0,
+      message:"Competent. Your redraws are starting to form a real corridor. This is the first range where balanced settings make sense.",
+      recommendation:"Good balance range. The helper bundle does not need to be insanely wide.",
+      suggested:"Suggested: 10× grid, 7–8 points, 8–15 training paths, 4–8 unlock redraws."
+    };
+  }
+
+  if (score < 92) {
+    return {
+      rank:"Advanced",
+      className:"advanced",
+      helperMultiplier:0.78,
+      message:"Advanced. Strong overlap. Your muscle memory is good enough to reduce helper forgiveness and improve security.",
+      recommendation:"Use 10× with more points, or cautiously test 100× with fewer points.",
+      suggested:"Suggested: 10× grid with 8 points, or 100× grid with 5–6 points."
+    };
+  }
+
+  return {
+    rank:"Expert",
+    className:"expert",
+    helperMultiplier:0.55,
+    message:"Expert. Your redraw overlap is tight. Your account should be very secure for this gesture, and you should have no problem unlocking if you keep drawing like this.",
+    recommendation:"You can use stricter settings because your consensus corridor is stable.",
+    suggested:"Suggested: 100× grid, 6–8 points, 10–20 training paths, 5–10 unlock redraws."
+  };
+}
+
+function currentProficiency() {
+  if (mode === "enroll" || mode === "saving") return evaluatePathProficiency(enrollPaths);
+  if (mode === "test" || mode === "mutating" || mode === "decrypted") return evaluatePathProficiency(unlockPaths);
+  return evaluatePathProficiency(enrollPaths);
+}
+
+function helperVariantLimit() {
+  const trainCount = Math.max(1, enrollPaths.length);
+  const prof = evaluatePathProficiency(enrollPaths);
+
+  const base = 1000 + POINTS * 180;
+  const trainingBonus = trainCount * 650;
+  const gridBonus = GRID_MULTIPLIER >= 100 ? 1200 : 0;
+
+  const unrankedMultiplier = trainCount < 2 ? 1.35 : prof.helperMultiplier;
+  const target = (base + trainingBonus + gridBonus) * unrankedMultiplier;
+
+  return Math.round(clamp(target, 1800, 12000));
+}
+
+function updateRankReadout() {
+  const prof = currentProficiency();
+  rankReadout.className = "rankbox" + (prof.className ? " " + prof.className : "");
+
+  const label = (mode === "enroll" || mode === "saving") ? "Enrollment rank" : "Unlock rank";
+
+  rankReadout.textContent =
+    label + ": " + prof.rank + "\n" +
+    prof.message + "\n\n" +
+    prof.recommendation + "\n" +
+    prof.suggested + "\n\n" +
+    "Helper multiplier from rank: " + prof.helperMultiplier.toFixed(2) + "×\n" +
+    "Current helper target if saved now: " + helperVariantLimit().toLocaleString() + "\n\n" +
+    prof.metricsText;
+}
+
+/* ---------------- readouts / state ---------------- */
+
+function currentVisibleStackCount() {
+  if (mode === "enroll" || mode === "saving") {
+    return enrollPaths.length + ((rawPath.length > 1) ? 1 : 0);
+  }
+
+  if (mode === "test" || mode === "mutating" || mode === "decrypted") {
+    return unlockPaths.length + ((mode === "test" && rawPath.length > 1) ? 1 : 0);
+  }
+
+  return 0;
+}
+
+function updateSecurityReadout() {
+  const bits = rawSecurityBits();
+
+  let phaseText = "";
+  let visible = currentVisibleStackCount();
+  let opacity = visible > 0 ? 1 / visible : 1;
+
+  if (mode === "enroll" || mode === "saving") {
+    phaseText =
+      "Enrollment stack\n" +
+      "Training paths: " + enrollPaths.length + "\n" +
+      "Current path opacity: " + (visible ? (opacity * 100).toFixed(1) + "% each" : "none yet") + "\n";
+  } else {
+    phaseText =
+      "Unlock stack\n" +
+      "Unlock redraws: " + unlockPaths.length + "\n" +
+      "Current path opacity: " + (visible ? (opacity * 100).toFixed(1) + "% each" : "none yet") + "\n";
+  }
+
+  securityReadout.textContent =
+    "Current geometry\n" +
+    phaseText +
+    "Points: " + POINTS + "\n" +
+    "Virtual grid: " + GRID + " × " + GRID + " cells\n" +
+    "Virtual cell size: " + cellSize().toFixed(4) + " px\n" +
+    "Raw coordinate keyspace: about " + bits.toFixed(1) + " bits\n" +
+    "Raw combinations: ~" + approxSpaceText(bits) + "\n" +
+    "Rank-adjusted helper variants if saved now: ~" + helperVariantLimit().toLocaleString() + "\n\n" +
+    "Model\n" +
+    "SAVE averages enrollment strokes into a consensus key.\n" +
+    "Helper Bundle stores plausible candidates from every enrollment stroke plus the consensus.\n" +
+    "DECRYPT averages unlock redraws into an unlock consensus and searches that consensus first.\n" +
+    "Better rank = fewer helpers = stronger offline security.\n" +
+    "Worse rank = more helpers = easier unlock but weaker security.\n\n" +
+    "Colors\n" +
+    "White = muscle-memory path stack.\n" +
+    "Blue = consensus path.\n" +
+    "Green = saved helper candidates.\n" +
+    "Yellow = live search candidates.";
+
+  updateRankReadout();
+}
+
+function updateControls() {
+  pointValue.textContent = POINTS + " points";
+  gridValue.textContent = GRID_MULTIPLIER + "× = " + GRID + "×" + GRID;
+  ghostValue.textContent = GHOST_LIMIT + " ghosts";
+
+  if (mode === "enroll") {
+    saveBtn.textContent = "SAVE";
+    saveBtn.disabled = enrollPaths.length === 0;
+    undoBtn.disabled = enrollPaths.length === 0;
+    undoBtn.textContent = "UNDO PATH";
+  } else if (mode === "test") {
+    saveBtn.textContent = "DECRYPT";
+    saveBtn.disabled = unlockPaths.length === 0;
+    undoBtn.disabled = unlockPaths.length === 0;
+    undoBtn.textContent = "UNDO REDRAW";
+  } else {
+    saveBtn.textContent = mode === "saving" ? "SAVING..." : "DECRYPT";
+    saveBtn.disabled = true;
+    undoBtn.disabled = true;
+  }
+}
+
+function resetPackagesBecauseGeometryChanged() {
+  if (mode === "saving" || mode === "mutating") return;
+
+  mutationCancelToken++;
+  exactPackage = null;
+  helperPackage = null;
+
+  enrollPaths = [];
+  consensusPath = [];
+  consensusPoints = [];
+
+  unlockPaths = [];
+  unlockConsensusPath = [];
+  unlockConsensusPoints = [];
+
+  rawPath = [];
+  playerAttemptRaw = [];
+  playerAttemptSampled = [];
+  displayedCandidate = null;
+  winningPoints = null;
+  confetti = [];
+
+  savedGhostCandidates = [];
+  savedGhostKeys = new Set();
+  liveGhostCandidates = [];
+  liveGhostKeys = new Set();
+
+  big.classList.remove("show");
+  plain.textContent = "";
+
+  mode = "enroll";
+  setStatus("warn", "Geometry changed, so the saved key and all path stacks were cleared.\n\nDraw repeated training paths again, then hit SAVE.");
+  updateSecurityReadout();
+  updateControls();
+  draw();
+}
+
+function rememberLiveGhost(points) {
+  const k = gridKey(points);
+  if (liveGhostKeys.has(k)) return;
+
+  liveGhostKeys.add(k);
+  liveGhostCandidates.unshift(points.map(p => ({ ...p })));
+
+  if (liveGhostCandidates.length > 700) {
+    liveGhostCandidates.length = 700;
+  }
+}
+
+function setSavedGhostsFromItems(items) {
+  savedGhostCandidates = [];
+  savedGhostKeys = new Set();
+
+  for (const item of items) {
+    const points = item.points || item;
+    const k = gridKey(points);
+    if (savedGhostKeys.has(k)) continue;
+
+    savedGhostKeys.add(k);
+    savedGhostCandidates.push(points.map(p => ({ ...p })));
+
+    if (savedGhostCandidates.length >= 6000) break;
+  }
+}
+
+/* ---------------- controls ---------------- */
+
+pointSlider.addEventListener("input", () => {
+  POINTS = Number(pointSlider.value);
+  resetPackagesBecauseGeometryChanged();
+});
+
+gridSlider.addEventListener("input", () => {
+  GRID_MULTIPLIER = GRID_MULTIPLIERS[Number(gridSlider.value)];
+  GRID = BASE_GRID * GRID_MULTIPLIER;
+  resetPackagesBecauseGeometryChanged();
+});
+
+ghostSlider.addEventListener("input", () => {
+  GHOST_LIMIT = Number(ghostSlider.value);
+  updateSecurityReadout();
+  updateControls();
+  draw();
+});
+
+strategySelect.addEventListener("change", () => {
+  if (mode !== "mutating") {
+    liveGhostCandidates = [];
+    liveGhostKeys = new Set();
+    draw();
+  }
+});
+
 /* ---------------- input ---------------- */
 
 function startDraw(p) {
@@ -358,6 +966,12 @@ function startDraw(p) {
 
   drawing = true;
   rawPath = [];
+
+  if (mode === "test") {
+    liveGhostCandidates = [];
+    liveGhostKeys = new Set();
+  }
+
   addRawPoint(p);
 
   big.classList.remove("show");
@@ -376,45 +990,90 @@ function endDraw(p) {
 
   drawing = false;
   addRawPoint(p);
-  draw();
+
+  const cleaned = cleanRawPath(rawPath);
+
+  if (mode === "enroll") {
+    if (cleaned.length >= 8) {
+      enrollPaths.push(cleaned);
+      rawPath = [];
+
+      const prof = evaluatePathProficiency(enrollPaths);
+
+      setStatus(
+        prof.className === "bad" ? "warn" : "good",
+        "Training path added.\n\n" +
+        "Training paths: " + enrollPaths.length + "\n" +
+        "Current rank: " + prof.rank + "\n" +
+        "Each white path opacity: " + (100 / enrollPaths.length).toFixed(1) + "%\n\n" +
+        prof.message + "\n\n" +
+        "Keep redrawing until the overlap stabilizes, then hit SAVE."
+      );
+    } else {
+      setStatus("warn", "That path was too short. Draw a longer training path.");
+    }
+
+    updateSecurityReadout();
+    updateControls();
+    draw();
+    return;
+  }
 
   if (mode === "test") {
-    startMutationSearch().catch(err => {
-      mode = "test";
-      setStatus("bad", "Mutation error: " + err.message + "\nTap CLEAR and redraw.");
-      draw();
-    });
+    if (cleaned.length >= 8) {
+      unlockPaths.push(cleaned);
+      rawPath = [];
+      unlockConsensusPath = buildConsensusPath(unlockPaths);
+      unlockConsensusPoints = simplifyRawPathToGridPoints(unlockConsensusPath);
+
+      const prof = evaluatePathProficiency(unlockPaths);
+
+      setStatus(
+        prof.className === "bad" ? "warn" : "good",
+        "Unlock redraw added.\n\n" +
+        "Unlock redraws: " + unlockPaths.length + "\n" +
+        "Unlock rank: " + prof.rank + "\n" +
+        "Each white path opacity: " + (100 / unlockPaths.length).toFixed(1) + "%\n" +
+        "Consensus points: " + (unlockConsensusPoints.length ? compactGridKey(unlockConsensusPoints) : "not ready") + "\n\n" +
+        prof.message + "\n\n" +
+        "Keep redrawing until the overlap stabilizes, then hit DECRYPT."
+      );
+    } else {
+      setStatus("warn", "That redraw was too short. Draw a longer unlock path.");
+    }
+
+    updateSecurityReadout();
+    updateControls();
+    draw();
   }
 }
 
-if (window.PointerEvent) {
-  canvas.addEventListener("pointerdown", e => {
-    e.preventDefault();
-    activePointerId = e.pointerId;
-    try { canvas.setPointerCapture(e.pointerId); } catch {}
-    startDraw(canvasPoint(e.clientX, e.clientY));
-  }, { passive:false });
+canvas.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  activePointerId = e.pointerId;
+  try { canvas.setPointerCapture(e.pointerId); } catch {}
+  startDraw(canvasPoint(e.clientX, e.clientY));
+}, { passive:false });
 
-  canvas.addEventListener("pointermove", e => {
-    if (activePointerId !== null && e.pointerId !== activePointerId) return;
-    e.preventDefault();
-    moveDraw(canvasPoint(e.clientX, e.clientY));
-  }, { passive:false });
+canvas.addEventListener("pointermove", e => {
+  if (activePointerId !== null && e.pointerId !== activePointerId) return;
+  e.preventDefault();
+  moveDraw(canvasPoint(e.clientX, e.clientY));
+}, { passive:false });
 
-  canvas.addEventListener("pointerup", e => {
-    if (activePointerId !== null && e.pointerId !== activePointerId) return;
-    e.preventDefault();
-    try { canvas.releasePointerCapture(e.pointerId); } catch {}
-    activePointerId = null;
-    endDraw(canvasPoint(e.clientX, e.clientY));
-  }, { passive:false });
+canvas.addEventListener("pointerup", e => {
+  if (activePointerId !== null && e.pointerId !== activePointerId) return;
+  e.preventDefault();
+  try { canvas.releasePointerCapture(e.pointerId); } catch {}
+  activePointerId = null;
+  endDraw(canvasPoint(e.clientX, e.clientY));
+}, { passive:false });
 
-  canvas.addEventListener("pointercancel", e => {
-    e.preventDefault();
-    drawing = false;
-    activePointerId = null;
-  }, { passive:false });
-}
+canvas.addEventListener("pointercancel", e => {
+  e.preventDefault();
+  drawing = false;
+  activePointerId = null;
+}, { passive:false });
 
 /* ---------------- rendering ---------------- */
 
@@ -422,14 +1081,34 @@ function draw() {
   ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
   ctx.fillStyle = "#0b111a";
   ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
   drawGrid();
 
-  if (mode === "enroll" || mode === "test" || mode === "saving") {
-    drawRawPath(rawPath, "#58a6ff", 5, .95);
-    const five = simplifyRawPathToFiveGrid(rawPath);
-    if (five.length) {
-      drawCandidatePolyline(five, "#f778ba", 4, true, .95);
-      drawPointNumbers(five, "#f778ba");
+  if (GHOST_LIMIT > 0) {
+    drawGhostCandidates(savedGhostCandidates, "#3fb950", 0.075, GHOST_LIMIT, 1.35);
+    drawGhostCandidates(liveGhostCandidates, "#ffd166", 0.105, GHOST_LIMIT, 1.45);
+  }
+
+  if (mode === "enroll" || mode === "saving") {
+    drawPathStack(enrollPaths, rawPath, "training");
+    if (enrollPaths.length >= 2) {
+      const avg = buildConsensusPath(enrollPaths);
+      drawRawPath(avg, "#58a6ff", 3, 0.62);
+    }
+  }
+
+  if (mode === "test") {
+    drawPathStack(unlockPaths, rawPath, "unlock");
+
+    if (unlockPaths.length >= 2) {
+      const avg = buildConsensusPath(unlockPaths);
+      drawRawPath(avg, "#58a6ff", 4, 0.75);
+      const points = simplifyRawPathToGridPoints(avg);
+      if (points.length) {
+        drawCandidatePolyline(points, "#58a6ff", 3, true, 0.78);
+      }
+    } else if (unlockPaths.length === 1) {
+      drawRawPath(unlockPaths[0], "#58a6ff", 3, 0.45);
     }
   }
 
@@ -447,28 +1126,98 @@ function draw() {
   if (mode === "decrypted") {
     drawRawPath(playerAttemptRaw, "#58a6ff", 5, .25);
 
-    if (winningFive) {
-      drawCandidatePolyline(winningFive, "#3fb950", 10, false, 1);
-      drawCandidatePolyline(winningFive, "#7dff9b", 3, false, 1);
-      drawPointNumbers(winningFive, "#7dff9b");
+    if (winningPoints) {
+      drawCandidatePolyline(winningPoints, "#3fb950", 10, false, 1);
+      drawCandidatePolyline(winningPoints, "#7dff9b", 3, false, 1);
+      drawPointNumbers(winningPoints, "#7dff9b");
     }
 
     updateConfetti();
     drawConfetti();
     requestAnimationFrame(draw);
   }
+
+  drawGhostLegend();
 }
 
 function drawGrid() {
   ctx.save();
-  ctx.strokeStyle = "#263244";
+
+  const visibleLines = GRID <= 64 ? GRID : BASE_GRID;
+  ctx.strokeStyle = GRID <= 64 ? "#263244" : "rgba(88,166,255,.22)";
   ctx.lineWidth = 1;
 
-  for (let i = 0; i <= GRID; i++) {
-    const p = i * CELL;
+  for (let i = 0; i <= visibleLines; i++) {
+    const p = i * CANVAS_SIZE / visibleLines;
     ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, CANVAS_SIZE); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(CANVAS_SIZE, p); ctx.stroke();
   }
+
+  if (GRID > 64) {
+    ctx.fillStyle = "rgba(234,242,255,.72)";
+    ctx.font = "800 13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+    ctx.fillText("virtual grid: " + GRID + "×" + GRID, 14, 24);
+    ctx.fillText("drawn guide: 16×16", 14, 44);
+  }
+
+  ctx.restore();
+}
+
+function drawPathStack(paths, current, label) {
+  const includeCurrent = current && current.length > 1;
+  const total = paths.length + (includeCurrent ? 1 : 0);
+  if (total <= 0) return;
+
+  const alpha = 1 / total;
+
+  for (const p of paths) {
+    drawRawPath(p, "#ffffff", 7, alpha);
+  }
+
+  if (includeCurrent) {
+    drawRawPath(current, "#ffffff", 7, alpha);
+  }
+
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,.88)";
+  ctx.font = "900 13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+  ctx.fillText(label + " paths: " + paths.length, 14, CANVAS_SIZE - 28);
+  ctx.fillText("opacity each: " + (alpha * 100).toFixed(1) + "%", 14, CANVAS_SIZE - 10);
+  ctx.restore();
+}
+
+function drawGhostLegend() {
+  if (GHOST_LIMIT <= 0) return;
+
+  ctx.save();
+  ctx.font = "800 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+  ctx.textBaseline = "middle";
+
+  const x = 14;
+  let y = CANVAS_SIZE - 68;
+
+  ctx.fillStyle = "rgba(0,0,0,.38)";
+  ctx.fillRect(8, CANVAS_SIZE - 86, 330, 74);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(x, y - 5, 18, 10);
+  ctx.fillStyle = "rgba(234,242,255,.86)";
+  const stackLabel = mode === "enroll" || mode === "saving" ? "training stack: " + enrollPaths.length : "unlock stack: " + unlockPaths.length;
+  ctx.fillText(stackLabel, x + 26, y);
+
+  y += 22;
+
+  ctx.fillStyle = "#3fb950";
+  ctx.fillRect(x, y - 5, 18, 10);
+  ctx.fillStyle = "rgba(234,242,255,.86)";
+  ctx.fillText("saved helper ghosts: " + Math.min(GHOST_LIMIT, savedGhostCandidates.length), x + 26, y);
+
+  y += 22;
+
+  ctx.fillStyle = "#ffd166";
+  ctx.fillRect(x, y - 5, 18, 10);
+  ctx.fillStyle = "rgba(234,242,255,.86)";
+  ctx.fillText("live search ghosts: " + Math.min(GHOST_LIMIT, liveGhostCandidates.length), x + 26, y);
 
   ctx.restore();
 }
@@ -488,6 +1237,51 @@ function drawRawPath(points, color, width, alpha) {
 
   for (let i = 1; i < points.length; i++) {
     ctx.lineTo(points[i].x, points[i].y);
+  }
+
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawGhostCandidates(list, color, baseAlpha, limit, width) {
+  if (!list || !list.length || limit <= 0) return;
+
+  const count = Math.min(limit, list.length);
+
+  for (let i = count - 1; i >= 0; i--) {
+    const age = i / Math.max(1, count - 1);
+    const alpha = baseAlpha * (1.05 - age * 0.65);
+    drawGhostPolyline(list[i], color, width, alpha);
+  }
+}
+
+function drawGhostPolyline(gridPoints, color, width, alpha) {
+  if (!gridPoints || gridPoints.length < 2) return;
+
+  const pts = gridPoints.map(pixelFromGrid);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+
+  if (pts.length === 2) {
+    ctx.lineTo(pts[1].x, pts[1].y);
+  } else {
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mid = {
+        x:(pts[i].x + pts[i + 1].x) / 2,
+        y:(pts[i].y + pts[i + 1].y) / 2
+      };
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, mid.x, mid.y);
+    }
+
+    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
   }
 
   ctx.stroke();
@@ -524,6 +1318,7 @@ function drawCandidatePolyline(gridPoints, color, width, dashed, alpha) {
       };
       ctx.quadraticCurveTo(pts[i].x, pts[i].y, mid.x, mid.y);
     }
+
     ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
   }
 
@@ -533,7 +1328,7 @@ function drawCandidatePolyline(gridPoints, color, width, dashed, alpha) {
 
 function drawPointNumbers(points, color) {
   ctx.save();
-  ctx.font = "900 16px system-ui";
+  ctx.font = "900 14px system-ui";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
@@ -549,7 +1344,7 @@ function drawPointNumbers(points, color) {
     const oy = -n * 14;
 
     ctx.beginPath();
-    ctx.arc(p.x + ox, p.y + oy, 14, 0, Math.PI * 2);
+    ctx.arc(p.x + ox, p.y + oy, 13, 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.shadowColor = color;
     ctx.shadowBlur = 15;
@@ -565,7 +1360,7 @@ function drawPointNumbers(points, color) {
 
 /* ---------------- path processing ---------------- */
 
-function simplifyRawPathToFiveGrid(path) {
+function simplifyRawPathToGridPoints(path) {
   const cleaned = cleanRawPath(path);
   if (cleaned.length === 0) return [];
 
@@ -578,6 +1373,7 @@ function cleanRawPath(path) {
 
   for (const p of path) {
     const last = out[out.length - 1];
+
     if (!last || Math.hypot(last.x - p.x, last.y - p.y) >= 2.5) {
       out.push({ x:p.x, y:p.y });
     }
@@ -604,7 +1400,7 @@ function resampleByArcLength(points, count) {
   const out = [];
 
   for (let i = 0; i < count; i++) {
-    const target = total * i / (count - 1);
+    const target = count === 1 ? 0 : total * i / (count - 1);
     let j = 1;
 
     while (j < dist.length && dist[j] < target) j++;
@@ -629,30 +1425,90 @@ function resampleByArcLength(points, count) {
   return out;
 }
 
+function buildConsensusPath(paths) {
+  const cleanPaths = paths.map(cleanRawPath).filter(p => p.length >= 2);
+  if (!cleanPaths.length) return [];
+
+  if (cleanPaths.length === 1) {
+    return cleanPaths[0].map(p => ({ ...p }));
+  }
+
+  const resampled = cleanPaths.map(p => resampleByArcLength(p, CONSENSUS_SAMPLES));
+  const out = [];
+
+  for (let i = 0; i < CONSENSUS_SAMPLES; i++) {
+    let x = 0;
+    let y = 0;
+
+    for (const path of resampled) {
+      x += path[i].x;
+      y += path[i].y;
+    }
+
+    out.push({
+      x:x / resampled.length,
+      y:y / resampled.length
+    });
+  }
+
+  return out;
+}
+
 function pathLength(points) {
   let len = 0;
+
   for (let i = 1; i < points.length; i++) {
     len += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
   }
+
   return len;
 }
 
 function buildReferenceFromPath(path) {
   const clean = cleanRawPath(path);
-  const sampled80 = resampleByArcLength(clean, 80);
-  const sampled48 = resampleByArcLength(clean, 48);
-  const sampled32 = resampleByArcLength(clean, 32);
-  const progressPoints = resampleByArcLength(clean, 180);
-  const baseFive = simplifyRawPathToFiveGrid(clean);
 
   return {
     clean,
-    sampled80,
-    sampled48,
-    sampled32,
-    progressPoints,
-    baseFive
+    sampled80:resampleByArcLength(clean, 80),
+    sampled48:resampleByArcLength(clean, 48),
+    sampled32:resampleByArcLength(clean, 32),
+    progressPoints:resampleByArcLength(clean, 180),
+    basePoints:simplifyRawPathToGridPoints(clean)
   };
+}
+
+function buildUnlockSearchReferences() {
+  const refs = [];
+  const seen = new Set();
+
+  unlockConsensusPath = buildConsensusPath(unlockPaths);
+  unlockConsensusPoints = simplifyRawPathToGridPoints(unlockConsensusPath);
+
+  if (unlockConsensusPath.length >= 8) {
+    refs.push({
+      label:"unlock consensus",
+      reference:buildReferenceFromPath(unlockConsensusPath)
+    });
+    seen.add("consensus");
+  }
+
+  const recent = unlockPaths.slice().reverse();
+
+  for (let i = 0; i < recent.length; i++) {
+    const p = recent[i];
+    const k = p.length + ":" + Math.round(p[0].x) + "," + Math.round(p[0].y) + ":" + Math.round(p[p.length - 1].x) + "," + Math.round(p[p.length - 1].y);
+    if (seen.has(k)) continue;
+    seen.add(k);
+
+    refs.push({
+      label:"unlock redraw " + (unlockPaths.length - i),
+      reference:buildReferenceFromPath(p)
+    });
+
+    if (refs.length >= 1 + Math.min(8, unlockPaths.length)) break;
+  }
+
+  return refs;
 }
 
 function nearestProgressOnStroke(p, progressPoints) {
@@ -691,6 +1547,7 @@ function segmentAngle(a, b) {
 
 function quadraticPoint(a, c, b, t) {
   const mt = 1 - t;
+
   return {
     x: mt * mt * a.x + 2 * mt * t * c.x + t * t * b.x,
     y: mt * mt * a.y + 2 * mt * t * c.y + t * t * b.y
@@ -752,14 +1609,13 @@ function denseCandidateCurve(gridPoints, steps) {
 }
 
 function sampleCandidateCurve(candidate, count) {
-  const dense = denseCandidateCurve(candidate, 18);
-  return resampleByArcLength(dense, count);
+  return resampleByArcLength(denseCandidateCurve(candidate, 18), count);
 }
 
 /* ---------------- similarity metrics ---------------- */
 
 function normalizedDistance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y) / CELL;
+  return Math.hypot(a.x - b.x, a.y - b.y) / BASE_CELL;
 }
 
 function dtwDistance(a, b, window) {
@@ -796,9 +1652,7 @@ function discreteFrechetDistance(a, b) {
   const ca = Array.from({ length:n }, () => new Float64Array(m));
 
   for (let i = 0; i < n; i++) {
-    for (let j = 0; j < m; j++) {
-      ca[i][j] = -1;
-    }
+    for (let j = 0; j < m; j++) ca[i][j] = -1;
   }
 
   function c(i, j) {
@@ -850,82 +1704,110 @@ function localStructurePenalty(candidateSample, referenceSample) {
 
 function buildSlotLists(reference, radiusCells, profile) {
   const lists = [];
+  const c = cellSize();
 
   for (let slot = 0; slot < POINTS; slot++) {
-    const targetT = slot / (POINTS - 1);
+    const targetT = slot / Math.max(1, POINTS - 1);
     const targetIndex = Math.round(targetT * (reference.progressPoints.length - 1));
     const targetPoint = reference.progressPoints[targetIndex];
+    const base = reference.basePoints[slot];
     const slotList = [];
 
-    for (let y = 0; y < GRID; y++) {
-      for (let x = 0; x < GRID; x++) {
-        const gp = { x, y };
-        const px = pixelFromGrid(gp);
+    function addGridCandidate(gp, bias) {
+      const key = gp.x + "," + gp.y;
+      if (slotList.some(v => v.key === key)) return;
 
-        const nearest = nearestProgressOnStroke(px, reference.progressPoints);
-        const distToStroke = nearest.dist / CELL;
-        const progressError = Math.abs(nearest.t - targetT);
-        const distToTarget = Math.hypot(px.x - targetPoint.x, px.y - targetPoint.y) / CELL;
-        const base = reference.baseFive[slot];
-        const baseDist = Math.hypot(gp.x - base.x, gp.y - base.y);
-
-        const permissive = profile.scorer !== "local";
-        const maxProgress = permissive ? 0.32 + radiusCells * 0.08 : 0.20 + radiusCells * 0.055;
-        const maxDist = permissive ? radiusCells + 0.95 : radiusCells + 0.55;
-
-        if (distToTarget > maxDist && distToStroke > maxDist) continue;
-        if (progressError > maxProgress) continue;
-
-        const cost =
-          distToTarget * 7.0 +
-          distToStroke * 3.0 +
-          progressError * 34.0 +
-          baseDist * 1.8;
-
-        slotList.push({
-          cell:gp,
-          cost,
-          t:nearest.t,
-          distToStroke,
-          progressError
-        });
-      }
-    }
-
-    const base = reference.baseFive[slot];
-
-    if (!slotList.some(v => v.cell.x === base.x && v.cell.y === base.y)) {
-      const px = pixelFromGrid(base);
+      const px = pixelFromGrid(gp);
       const nearest = nearestProgressOnStroke(px, reference.progressPoints);
-      const targetT = slot / (POINTS - 1);
+      const distToStroke = nearest.dist / BASE_CELL;
+      const progressError = Math.abs(nearest.t - targetT);
+      const distToTarget = Math.hypot(px.x - targetPoint.x, px.y - targetPoint.y) / BASE_CELL;
+      const basePx = pixelFromGrid(base);
+      const baseDist = Math.hypot(px.x - basePx.x, px.y - basePx.y) / BASE_CELL;
+
+      const permissive = profile.scorer !== "local";
+      const maxProgress = permissive ? 0.32 + radiusCells * 0.08 : 0.20 + radiusCells * 0.055;
+      const maxDist = permissive ? radiusCells + 0.95 : radiusCells + 0.55;
+
+      if (distToTarget > maxDist && distToStroke > maxDist) return;
+      if (progressError > maxProgress) return;
+
+      const cost =
+        distToTarget * 7.0 +
+        distToStroke * 3.0 +
+        progressError * 34.0 +
+        baseDist * 1.8 +
+        (bias || 0);
+
       slotList.push({
-        cell:{ ...base },
-        cost:0.1 + Math.abs(nearest.t - targetT) * 20,
+        key,
+        cell:{ x:gp.x, y:gp.y },
+        cost,
         t:nearest.t,
-        distToStroke:nearest.dist / CELL,
-        progressError:Math.abs(nearest.t - targetT)
+        distToStroke,
+        progressError
       });
     }
 
+    function addPixelCandidate(px, py, bias) {
+      addGridCandidate(gridPointFromPixel({ x:px, y:py }), bias || 0);
+    }
+
+    addGridCandidate(base, -5);
+    addPixelCandidate(targetPoint.x, targetPoint.y, -3);
+
+    const targetGrid = gridPointFromPixel(targetPoint);
+    const micro = GRID_MULTIPLIER >= 100 ? 5 : 3;
+
+    for (let dy = -micro; dy <= micro; dy++) {
+      for (let dx = -micro; dx <= micro; dx++) {
+        if (dx * dx + dy * dy > micro * micro) continue;
+
+        addGridCandidate({
+          x:clamp(targetGrid.x + dx, 0, GRID - 1),
+          y:clamp(targetGrid.y + dy, 0, GRID - 1)
+        }, 0);
+      }
+    }
+
+    const radiusPx = radiusCells * BASE_CELL;
+    const startX = Math.floor((targetPoint.x - radiusPx) / RECOVERY_BUCKET_PX) * RECOVERY_BUCKET_PX;
+    const endX = Math.ceil((targetPoint.x + radiusPx) / RECOVERY_BUCKET_PX) * RECOVERY_BUCKET_PX;
+    const startY = Math.floor((targetPoint.y - radiusPx) / RECOVERY_BUCKET_PX) * RECOVERY_BUCKET_PX;
+    const endY = Math.ceil((targetPoint.y + radiusPx) / RECOVERY_BUCKET_PX) * RECOVERY_BUCKET_PX;
+
+    let guard = 0;
+    const maxAdds = 3600;
+
+    for (let y = startY; y <= endY; y += RECOVERY_BUCKET_PX) {
+      for (let x = startX; x <= endX; x += RECOVERY_BUCKET_PX) {
+        if (guard++ > maxAdds) break;
+        if (x < 0 || x >= CANVAS_SIZE || y < 0 || y >= CANVAS_SIZE) continue;
+        if (Math.hypot(x - targetPoint.x, y - targetPoint.y) > radiusPx * 1.18) continue;
+        addPixelCandidate(x, y, 0);
+      }
+
+      if (guard > maxAdds) break;
+    }
+
+    if (c > RECOVERY_BUCKET_PX) {
+      const extra = Math.ceil(radiusPx / c);
+
+      for (let dy = -extra; dy <= extra; dy++) {
+        for (let dx = -extra; dx <= extra; dx++) {
+          addGridCandidate({
+            x:clamp(targetGrid.x + dx, 0, GRID - 1),
+            y:clamp(targetGrid.y + dy, 0, GRID - 1)
+          }, 0);
+        }
+      }
+    }
+
     slotList.sort((a, b) => a.cost - b.cost);
-    lists.push(uniqueCellList(slotList).slice(0, profile.topPerSlot));
+    lists.push(slotList.slice(0, profile.topPerSlot));
   }
 
   return lists;
-}
-
-function uniqueCellList(list) {
-  const seen = new Set();
-  const out = [];
-
-  for (const item of list) {
-    const k = item.cell.x + "," + item.cell.y;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(item);
-  }
-
-  return out;
 }
 
 function looseCandidateGate(candidate, reference, radius, profile) {
@@ -949,9 +1831,7 @@ function looseCandidateGate(candidate, reference, radius, profile) {
     maxSame = Math.max(maxSame, d);
 
     const nearest = nearestProgressOnStroke(sampled[i], reference.progressPoints);
-    if (nearest.t + 0.05 < prevT) {
-      backtrack += prevT - nearest.t;
-    }
+    if (nearest.t + 0.05 < prevT) backtrack += prevT - nearest.t;
     prevT = Math.max(prevT, nearest.t);
   }
 
@@ -971,9 +1851,11 @@ function candidateLoss(candidate, reference, lists, indices, profile) {
   const sampled32 = resampleByArcLength(sampled48, 32);
 
   let sameIndex = 0;
+
   for (let i = 0; i < sampled48.length; i++) {
     sameIndex += normalizedDistance(sampled48[i], reference.sampled48[i]);
   }
+
   sameIndex /= sampled48.length;
 
   let listCost = 0;
@@ -981,12 +1863,12 @@ function candidateLoss(candidate, reference, lists, indices, profile) {
   let prevT = -Infinity;
 
   for (let i = 0; i < POINTS; i++) {
-    const targetT = i / (POINTS - 1);
+    const targetT = i / Math.max(1, POINTS - 1);
     const t = lists[i][indices[i]].t;
     listCost += lists[i][indices[i]].cost;
 
     if (t + 0.02 < prevT) progressPenalty += 90;
-    if (i > 0 && t - prevT < 0.065) progressPenalty += 18;
+    if (i > 0 && t - prevT < 0.045) progressPenalty += 16;
 
     progressPenalty += Math.abs(t - targetT) * 9;
     prevT = Math.max(prevT, t);
@@ -998,24 +1880,32 @@ function candidateLoss(candidate, reference, lists, indices, profile) {
 
   const candidateLen = pathLength(sampled48);
   const referenceLen = pathLength(reference.sampled48);
-  const lengthPenalty = Math.abs(candidateLen - referenceLen) / Math.max(CELL, referenceLen);
+  const lengthPenalty = Math.abs(candidateLen - referenceLen) / Math.max(BASE_CELL, referenceLen);
 
   let offsetSmoothness = 0;
+
   for (let i = 1; i < POINTS; i++) {
     const a = candidate[i - 1];
     const b = candidate[i];
-    const ra = reference.baseFive[i - 1];
-    const rb = reference.baseFive[i];
+    const ra = reference.basePoints[i - 1];
+    const rb = reference.basePoints[i];
 
-    const offA = { x:a.x - ra.x, y:a.y - ra.y };
-    const offB = { x:b.x - rb.x, y:b.y - rb.y };
+    const offA = {
+      x:(pixelFromGrid(a).x - pixelFromGrid(ra).x) / BASE_CELL,
+      y:(pixelFromGrid(a).y - pixelFromGrid(ra).y) / BASE_CELL
+    };
+
+    const offB = {
+      x:(pixelFromGrid(b).x - pixelFromGrid(rb).x) / BASE_CELL,
+      y:(pixelFromGrid(b).y - pixelFromGrid(rb).y) / BASE_CELL
+    };
 
     offsetSmoothness += Math.hypot(offB.x - offA.x, offB.y - offA.y);
   }
 
   let headingPenalty = 0;
   let bendPenalty = 0;
-  const refPixels = reference.baseFive.map(pixelFromGrid);
+  const refPixels = reference.basePoints.map(pixelFromGrid);
 
   for (let i = 1; i < POINTS; i++) {
     const ca = pixels[i - 1];
@@ -1026,7 +1916,7 @@ function candidateLoss(candidate, reference, lists, indices, profile) {
     const clen = Math.hypot(cb.x - ca.x, cb.y - ca.y);
     const rlen = Math.hypot(rb.x - ra.x, rb.y - ra.y);
 
-    if (clen > CELL * 0.25 && rlen > CELL * 0.25) {
+    if (clen > BASE_CELL * 0.04 && rlen > BASE_CELL * 0.04) {
       headingPenalty += angleDiff(segmentAngle(ca, cb), segmentAngle(ra, rb));
     }
   }
@@ -1104,7 +1994,7 @@ class CandidateSearch {
     this.results = 0;
     this.maxResults = profile.maxResultsPerRadius;
 
-    this.push([0,0,0,0,0]);
+    this.push(Array.from({ length:POINTS }, () => 0));
   }
 
   next() {
@@ -1118,6 +2008,7 @@ class CandidateSearch {
     for (let i = 0; i < POINTS; i++) {
       const next = item.indices.slice();
       next[i]++;
+
       if (next[i] < this.lists[i].length) {
         this.push(next);
       }
@@ -1131,7 +2022,12 @@ class CandidateSearch {
     if (this.visited.has(indexKey)) return;
     this.visited.add(indexKey);
 
+    for (let i = 0; i < POINTS; i++) {
+      if (!this.lists[i] || !this.lists[i][indices[i]]) return;
+    }
+
     const points = [];
+
     for (let i = 0; i < POINTS; i++) {
       points.push({ ...this.lists[i][indices[i]].cell });
     }
@@ -1148,7 +2044,9 @@ class CandidateSearch {
 }
 
 class MinHeap {
-  constructor() { this.a = []; }
+  constructor() {
+    this.a = [];
+  }
 
   push(x) {
     this.a.push(x);
@@ -1157,12 +2055,15 @@ class MinHeap {
 
   pop() {
     if (this.a.length === 0) return null;
+
     const top = this.a[0];
     const last = this.a.pop();
+
     if (this.a.length) {
       this.a[0] = last;
       this.down(0);
     }
+
     return top;
   }
 
@@ -1173,7 +2074,9 @@ class MinHeap {
   up(i) {
     while (i > 0) {
       const p = (i - 1) >> 1;
+
       if (!this.less(i, p)) break;
+
       [this.a[p], this.a[i]] = [this.a[i], this.a[p]];
       i = p;
     }
@@ -1194,8 +2097,6 @@ class MinHeap {
     }
   }
 }
-
-/* ---------------- candidate collection for helper bundle ---------------- */
 
 function collectCandidateItems(reference, profile, maxItems) {
   const seen = new Set();
@@ -1229,10 +2130,66 @@ function collectCandidateItems(reference, profile, maxItems) {
   return out.slice(0, maxItems);
 }
 
+function collectCandidateItemsFromTraining(trainingPaths, consensus, exactPoints, maxItems) {
+  const all = [];
+  const seen = new Set();
+
+  const refs = [];
+
+  if (consensus && consensus.length >= 2) {
+    refs.push({
+      label:"consensus",
+      ref:buildReferenceFromPath(consensus),
+      weight:-12
+    });
+  }
+
+  for (let i = 0; i < trainingPaths.length; i++) {
+    refs.push({
+      label:"training-" + (i + 1),
+      ref:buildReferenceFromPath(trainingPaths[i]),
+      weight:i * 0.08
+    });
+  }
+
+  const perRef = Math.max(350, Math.ceil(maxItems / Math.max(1, refs.length) * 1.55));
+
+  for (const entry of refs) {
+    const items = collectCandidateItems(entry.ref, PROFILES.helperBuild, perRef);
+
+    for (const item of items) {
+      const k = gridKey(item.points);
+      if (seen.has(k)) continue;
+      seen.add(k);
+
+      all.push({
+        points:item.points,
+        loss:item.loss + entry.weight,
+        radius:item.radius,
+        source:entry.label
+      });
+    }
+  }
+
+  const exactKey = gridKey(exactPoints);
+  if (!seen.has(exactKey)) {
+    all.push({
+      points:exactPoints.map(p => ({ ...p })),
+      loss:-999,
+      radius:0,
+      source:"exact-consensus"
+    });
+    seen.add(exactKey);
+  }
+
+  all.sort((a, b) => a.loss - b.loss);
+  return all.slice(0, maxItems);
+}
+
 /* ---------------- crypto ---------------- */
 
-async function deriveKeyFromFivePoints(five, salt, purpose) {
-  const packed = packFivePoints(five);
+async function deriveKeyFromPoints(points, salt, purpose) {
+  const packed = packPoints(points);
   const label = new TextEncoder().encode(purpose);
   const material = concatBytes(label, salt, packed);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", material));
@@ -1246,28 +2203,36 @@ async function deriveKeyFromFivePoints(five, salt, purpose) {
   );
 }
 
-async function helperTagFromFivePoints(five, salt) {
-  const packed = packFivePoints(five);
-  const label = new TextEncoder().encode("helper-bundle-tag/v1");
+async function helperTagFromPoints(points, salt) {
+  const packed = packPoints(points);
+  const label = new TextEncoder().encode("helper-bundle-tag/v5-ranked-muscle-memory");
   const material = concatBytes(label, salt, packed);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", material));
   return bytesToBase64(digest.slice(0, 12));
 }
 
-function packFivePoints(five) {
-  const out = new Uint8Array(POINTS);
-  for (let i = 0; i < POINTS; i++) {
-    const p = five[i] || { x:0, y:0 };
-    out[i] = ((p.x & 15) << 4) | (p.y & 15);
+function packPoints(points) {
+  const out = new Uint8Array(8 + points.length * 8);
+  const view = new DataView(out.buffer);
+
+  view.setUint16(0, 0x4650, false);
+  view.setUint16(2, points.length, false);
+  view.setUint32(4, GRID, false);
+
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i] || { x:0, y:0 };
+    view.setUint32(8 + i * 8, p.x >>> 0, false);
+    view.setUint32(8 + i * 8 + 4, p.y >>> 0, false);
   }
+
   return out;
 }
 
-async function encryptExactWithFivePoints(five, plaintext) {
+async function encryptExactWithPoints(points, plaintext) {
   const salt = randomBytes(16);
   const iv = randomBytes(12);
-  const aad = new TextEncoder().encode("exact-five-point-ciphertext/v10");
-  const key = await deriveKeyFromFivePoints(five, salt, "exact-five-point-key/v10");
+  const aad = new TextEncoder().encode("exact-variable-point-ciphertext/v5-ranked-muscle-memory");
+  const key = await deriveKeyFromPoints(points, salt, "exact-variable-point-key/v5-ranked-muscle-memory");
   const data = new TextEncoder().encode(plaintext);
 
   const ciphertext = new Uint8Array(
@@ -1278,7 +2243,15 @@ async function encryptExactWithFivePoints(five, plaintext) {
     )
   );
 
+  const prof = evaluatePathProficiency(enrollPaths);
+
   return {
+    pointCount:POINTS,
+    gridSize:GRID,
+    trainingPaths:enrollPaths.length,
+    enrollmentRank:prof.rank,
+    enrollmentScore:prof.score,
+    rawBits:rawSecurityBits(),
     saltB64:bytesToBase64(salt),
     ivB64:bytesToBase64(iv),
     aadB64:bytesToBase64(aad),
@@ -1286,12 +2259,12 @@ async function encryptExactWithFivePoints(five, plaintext) {
   };
 }
 
-async function tryDecryptExactWithCandidate(five) {
+async function tryDecryptExactWithCandidate(points) {
   const salt = base64ToBytes(exactPackage.saltB64);
   const iv = base64ToBytes(exactPackage.ivB64);
   const aad = base64ToBytes(exactPackage.aadB64);
   const ciphertext = base64ToBytes(exactPackage.ciphertextB64);
-  const key = await deriveKeyFromFivePoints(five, salt, "exact-five-point-key/v10");
+  const key = await deriveKeyFromPoints(points, salt, "exact-variable-point-key/v5-ranked-muscle-memory");
 
   const plainBuffer = await crypto.subtle.decrypt(
     { name:"AES-GCM", iv, additionalData:aad },
@@ -1302,9 +2275,9 @@ async function tryDecryptExactWithCandidate(five) {
   return new TextDecoder().decode(new Uint8Array(plainBuffer));
 }
 
-async function buildHelperBundle(saveReference, exactFive, plaintext) {
+async function buildHelperBundleFromTraining(trainingPaths, consensus, exactPoints, plaintext) {
   const helperSalt = randomBytes(16);
-  const helperAad = new TextEncoder().encode("helper-bundle-key-wrap/v1");
+  const helperAad = new TextEncoder().encode("helper-bundle-key-wrap/v5-ranked-muscle-memory");
 
   const dataKeyRaw = randomBytes(32);
   const dataKey = await crypto.subtle.importKey(
@@ -1316,7 +2289,7 @@ async function buildHelperBundle(saveReference, exactFive, plaintext) {
   );
 
   const dataIv = randomBytes(12);
-  const dataAad = new TextEncoder().encode("helper-bundle-data/v1");
+  const dataAad = new TextEncoder().encode("helper-bundle-data/v5-ranked-muscle-memory");
   const plaintextBytes = new TextEncoder().encode(plaintext);
 
   const dataCipher = new Uint8Array(
@@ -1327,29 +2300,50 @@ async function buildHelperBundle(saveReference, exactFive, plaintext) {
     )
   );
 
-  const helperItems = collectCandidateItems(saveReference, PROFILES.helperBuild, 1250);
+  const targetVariantCount = helperVariantLimit();
+  const prof = evaluatePathProficiency(trainingPaths);
 
-  helperItems.unshift({
-    points: exactFive.map(p => ({ ...p })),
-    loss:-1,
-    radius:0
-  });
+  setStatus(
+    "warn",
+    "SAVING...\n" +
+    "Generating helper candidates from the ranked training cluster.\n" +
+    "Training rank: " + prof.rank + "\n" +
+    "Training score: " + (prof.score === null ? "unranked" : prof.score.toFixed(1)) + "\n" +
+    "Training paths: " + trainingPaths.length + "\n" +
+    "Rank helper multiplier: " + prof.helperMultiplier.toFixed(2) + "×\n" +
+    "Target helper variants: " + targetVariantCount.toLocaleString()
+  );
+  draw();
+  await sleep(1);
+
+  const helperItems = collectCandidateItemsFromTraining(
+    trainingPaths,
+    consensus,
+    exactPoints,
+    targetVariantCount
+  );
+
+  setSavedGhostsFromItems(helperItems);
+  liveGhostCandidates = [];
+  liveGhostKeys = new Set();
+  draw();
 
   const wrappers = {};
   let added = 0;
   let skipped = 0;
 
   for (let i = 0; i < helperItems.length; i++) {
-    const five = helperItems[i].points;
-    const tag = await helperTagFromFivePoints(five, helperSalt);
+    const points = helperItems[i].points;
+    const tag = await helperTagFromPoints(points, helperSalt);
 
     if (wrappers[tag]) {
       skipped++;
       continue;
     }
 
-    const key = await deriveKeyFromFivePoints(five, helperSalt, "helper-bundle-wrap-key/v1");
+    const key = await deriveKeyFromPoints(points, helperSalt, "helper-bundle-wrap-key/v5-ranked-muscle-memory");
     const wrapIv = randomBytes(12);
+
     const wrappedKey = new Uint8Array(
       await crypto.subtle.encrypt(
         { name:"AES-GCM", iv:wrapIv, additionalData:helperAad },
@@ -1369,15 +2363,27 @@ async function buildHelperBundle(saveReference, exactFive, plaintext) {
       setStatus(
         "warn",
         "SAVING...\n" +
-        "Exact package done.\n" +
-        "Building helper bundle for fuzzy mode...\n" +
+        "Wrapping ranked helper variants.\n" +
+        "Training rank: " + prof.rank + "\n" +
+        "Training paths: " + trainingPaths.length + "\n" +
+        "Points: " + POINTS + "\n" +
+        "Grid: " + GRID + "×" + GRID + "\n" +
+        "Saved helper ghosts: " + savedGhostCandidates.length.toLocaleString() + "\n" +
         "Helper variants wrapped: " + added.toLocaleString()
       );
+      draw();
       await sleep(1);
     }
   }
 
   return {
+    pointCount:POINTS,
+    gridSize:GRID,
+    trainingPaths:trainingPaths.length,
+    enrollmentRank:prof.rank,
+    enrollmentScore:prof.score,
+    helperMultiplier:prof.helperMultiplier,
+    rawBits:rawSecurityBits(),
     saltB64:bytesToBase64(helperSalt),
     helperAadB64:bytesToBase64(helperAad),
     dataIvB64:bytesToBase64(dataIv),
@@ -1389,9 +2395,9 @@ async function buildHelperBundle(saveReference, exactFive, plaintext) {
   };
 }
 
-async function tryHelperCandidate(five) {
+async function tryHelperCandidate(points) {
   const salt = base64ToBytes(helperPackage.saltB64);
-  const tag = await helperTagFromFivePoints(five, salt);
+  const tag = await helperTagFromPoints(points, salt);
   const wrapper = helperPackage.wrappers[tag];
 
   if (!wrapper) return null;
@@ -1399,8 +2405,7 @@ async function tryHelperCandidate(five) {
   const helperAad = base64ToBytes(helperPackage.helperAadB64);
   const wrapIv = base64ToBytes(wrapper.ivB64);
   const wrappedKey = base64ToBytes(wrapper.wrappedKeyB64);
-
-  const wrapKey = await deriveKeyFromFivePoints(five, salt, "helper-bundle-wrap-key/v1");
+  const wrapKey = await deriveKeyFromPoints(points, salt, "helper-bundle-wrap-key/v5-ranked-muscle-memory");
 
   const dataKeyRawBuffer = await crypto.subtle.decrypt(
     { name:"AES-GCM", iv:wrapIv, additionalData:helperAad },
@@ -1439,10 +2444,12 @@ function concatBytes(...arrays) {
   const total = arrays.reduce((n, a) => n + a.length, 0);
   const out = new Uint8Array(total);
   let off = 0;
+
   for (const a of arrays) {
     out.set(a, off);
     off += a.length;
   }
+
   return out;
 }
 
@@ -1455,7 +2462,11 @@ function bytesToBase64(bytes) {
 function base64ToBytes(b64) {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+
   return out;
 }
 
@@ -1463,36 +2474,56 @@ function base64ToBytes(b64) {
 
 async function startMutationSearch() {
   if (!exactPackage) {
-    setStatus("bad", "No saved path yet. Draw the secret path and hit SAVE first.");
+    setStatus("bad", "No saved path yet. Draw training paths and hit SAVE first.");
     return;
   }
 
-  playerAttemptRaw = cleanRawPath(rawPath);
-  if (playerAttemptRaw.length < 8) {
-    setStatus("warn", "Draw a longer test path.");
+  if (exactPackage.pointCount !== POINTS || exactPackage.gridSize !== GRID) {
+    setStatus(
+      "bad",
+      "Saved geometry does not match current sliders.\n\n" +
+      "Saved points/grid: " + exactPackage.pointCount + " / " + exactPackage.gridSize + "×" + exactPackage.gridSize + "\n" +
+      "Current points/grid: " + POINTS + " / " + GRID + "×" + GRID + "\n\n" +
+      "Change sliders before saving, not after."
+    );
     return;
   }
 
-  const reference = buildReferenceFromPath(playerAttemptRaw);
-  playerAttemptSampled = reference.sampled80;
+  if (!unlockPaths.length) {
+    setStatus("warn", "Draw one or more unlock redraws before hitting DECRYPT.");
+    return;
+  }
+
+  const unlockProf = evaluatePathProficiency(unlockPaths);
+  const searchRefs = buildUnlockSearchReferences();
+
+  if (!searchRefs.length) {
+    setStatus("warn", "Unlock consensus is not usable yet. Add longer unlock redraws.");
+    return;
+  }
+
+  playerAttemptRaw = unlockConsensusPath.length ? unlockConsensusPath : unlockPaths[unlockPaths.length - 1];
+  playerAttemptSampled = resampleByArcLength(playerAttemptRaw, 80);
 
   mode = "mutating";
-  saveBtn.disabled = true;
+  updateControls();
   big.classList.remove("show");
   plain.textContent = "";
-  winningFive = null;
+  winningPoints = null;
+  liveGhostCandidates = [];
+  liveGhostKeys = new Set();
 
   const token = ++mutationCancelToken;
   const strategy = strategySelect.value;
 
   if (strategy === "helperBundle") {
-    await runHelperBundleSearch(reference, token);
+    await runHelperBundleSearch(searchRefs, token, unlockProf);
   } else {
-    await runExactSearch(reference, token, PROFILES[strategy]);
+    await runExactSearch(searchRefs, token, PROFILES[strategy], unlockProf);
   }
 }
 
-async function runExactSearch(reference, token, profile) {
+async function runExactSearch(searchRefs, token, profile, unlockProf) {
   const triedGridKeys = new Set();
 
   let decryptAttempts = 0;
@@ -1505,104 +2536,136 @@ async function runExactSearch(reference, token, profile) {
   setStatus(
     "warn",
     profile.label + " started.\n" +
-    "This still needs the exact original 5 grid cells.\n" +
-    "Best-looking candidates are tested first."
+    "Unlock rank: " + unlockProf.rank + "\n" +
+    "Unlock redraws: " + unlockPaths.length + "\n" +
+    "Search priority: unlock consensus first, individual redraws second.\n" +
+    "Points: " + POINTS + "\n" +
+    "Grid: " + GRID + "×" + GRID + "\n" +
+    "Raw keyspace: " + rawSecurityBits().toFixed(1) + " bits\n\n" +
+    "This still needs the exact consensus grid key."
   );
   draw();
 
-  for (const radius of profile.radii) {
+  for (const refEntry of searchRefs) {
     if (token !== mutationCancelToken) return;
 
-    const lists = buildSlotLists(reference, radius, profile);
-    const search = new CandidateSearch(reference, lists, profile);
+    for (const radius of profile.radii) {
+      if (token !== mutationCancelToken) return;
 
-    let lastUi = 0;
+      const reference = refEntry.reference;
+      const lists = buildSlotLists(reference, radius, profile);
+      const search = new CandidateSearch(reference, lists, profile);
 
-    while (token === mutationCancelToken) {
-      const item = search.next();
-      if (!item) break;
+      let lastUi = 0;
 
-      considered++;
+      while (token === mutationCancelToken) {
+        const item = search.next();
+        if (!item) break;
 
-      const candidateKey = gridKey(item.points);
-      if (triedGridKeys.has(candidateKey)) {
-        duplicated++;
-        continue;
-      }
+        considered++;
 
-      triedGridKeys.add(candidateKey);
+        const candidateKey = gridKey(item.points);
+        if (triedGridKeys.has(candidateKey)) {
+          duplicated++;
+          continue;
+        }
 
-      if (!looseCandidateGate(item.points, reference, radius, profile)) {
-        rejected++;
-        continue;
-      }
+        triedGridKeys.add(candidateKey);
 
-      decryptAttempts++;
-      displayedCandidate = item.points;
-      bestLoss = Math.min(bestLoss, item.loss);
+        if (!looseCandidateGate(item.points, reference, radius, profile)) {
+          rejected++;
+          continue;
+        }
 
-      const now = performance.now();
-      if (now - lastUi > profile.uiEvery) {
-        lastUi = now;
-        setStatus(
-          "warn",
-          profile.label + "\n" +
-          "Radius: " + radius.toFixed(2) + " cells\n" +
-          "AES decrypt attempts: " + decryptAttempts.toLocaleString() + "\n" +
-          "Candidates considered: " + considered.toLocaleString() + "\n" +
-          "Rejected by loose gate: " + rejected.toLocaleString() + "\n" +
-          "Duplicates skipped: " + duplicated.toLocaleString() + "\n" +
-          "Candidate: " + candidateKey + "\n" +
-          "Loss: " + item.loss.toFixed(2) + "\n" +
-          "Best loss: " + bestLoss.toFixed(2)
-        );
-        draw();
-        await sleep(6);
-      }
+        decryptAttempts++;
+        displayedCandidate = item.points;
+        rememberLiveGhost(item.points);
+        bestLoss = Math.min(bestLoss, item.loss);
 
-      try {
-        const plaintext = await tryDecryptExactWithCandidate(item.points);
-        if (token !== mutationCancelToken) return;
+        const now = performance.now();
 
-        finishSuccess(
-          plaintext,
-          item.points,
-          profile.label,
-          "AES decrypt attempts: " + decryptAttempts.toLocaleString() + "\n" +
-          "Candidates considered: " + considered.toLocaleString() + "\n" +
-          "Time: " + Math.round(performance.now() - startedAt) + " ms"
-        );
-        return;
-      } catch {
-        // wrong exact key
+        if (now - lastUi > profile.uiEvery) {
+          lastUi = now;
+
+          setStatus(
+            "warn",
+            profile.label + "\n" +
+            "Unlock rank: " + unlockProf.rank + "\n" +
+            "Current search source: " + refEntry.label + "\n" +
+            "Unlock redraws: " + unlockPaths.length + "\n" +
+            "Points: " + POINTS + "\n" +
+            "Grid: " + GRID + "×" + GRID + "\n" +
+            "Radius: " + radius.toFixed(2) + " base cells\n" +
+            "AES decrypt attempts: " + decryptAttempts.toLocaleString() + "\n" +
+            "Candidates considered: " + considered.toLocaleString() + "\n" +
+            "Live ghosts collected: " + liveGhostCandidates.length.toLocaleString() + "\n" +
+            "Rejected by loose gate: " + rejected.toLocaleString() + "\n" +
+            "Duplicates skipped: " + duplicated.toLocaleString() + "\n" +
+            "Candidate: " + compactGridKey(item.points) + "\n" +
+            "Loss: " + item.loss.toFixed(2) + "\n" +
+            "Best loss: " + bestLoss.toFixed(2)
+          );
+
+          draw();
+          await sleep(6);
+        }
+
+        try {
+          const plaintext = await tryDecryptExactWithCandidate(item.points);
+          if (token !== mutationCancelToken) return;
+
+          finishSuccess(
+            plaintext,
+            item.points,
+            profile.label,
+            "Unlock rank: " + unlockProf.rank + "\n" +
+            "Search source: " + refEntry.label + "\n" +
+            "Unlock redraws: " + unlockPaths.length + "\n" +
+            "AES decrypt attempts: " + decryptAttempts.toLocaleString() + "\n" +
+            "Candidates considered: " + considered.toLocaleString() + "\n" +
+            "Live ghosts collected: " + liveGhostCandidates.length.toLocaleString() + "\n" +
+            "Time: " + Math.round(performance.now() - startedAt) + " ms"
+          );
+          return;
+        } catch {}
+
+        if (decryptAttempts >= profile.maxDecrypts) break;
+        if (decryptAttempts % 250 === 0) await sleep(1);
       }
 
       if (decryptAttempts >= profile.maxDecrypts) break;
-      if (decryptAttempts % 250 === 0) await sleep(1);
     }
 
     if (decryptAttempts >= profile.maxDecrypts) break;
   }
 
   mode = "test";
-  saveBtn.disabled = true;
+  updateControls();
+
   setStatus(
     "bad",
     profile.label + " did not decrypt.\n\n" +
+    "Unlock rank: " + unlockProf.rank + "\n" +
+    "Unlock redraws used: " + unlockPaths.length + "\n" +
+    "Search sources tried: " + searchRefs.length + "\n" +
+    "Points: " + POINTS + "\n" +
+    "Grid: " + GRID + "×" + GRID + "\n" +
+    "Raw keyspace: " + rawSecurityBits().toFixed(1) + " bits\n" +
     "AES decrypt attempts: " + decryptAttempts.toLocaleString() + "\n" +
     "Candidates considered: " + considered.toLocaleString() + "\n" +
+    "Live ghosts collected: " + liveGhostCandidates.length.toLocaleString() + "\n" +
     "Rejected: " + rejected.toLocaleString() + "\n" +
     "Duplicates skipped: " + duplicated.toLocaleString() + "\n\n" +
-    "Reason: exact AES needs the original 5 cells. If the saved 5-cell path is not in the searched candidate set, exact mode cannot recover it.\n\n" +
-    "Try mode 3 for actual fuzzy recovery, or redraw closer."
+    "Reason: exact AES needs the consensus cells. Use Helper Bundle or improve your unlock rank."
   );
   draw();
 }
 
-async function runHelperBundleSearch(reference, token) {
+async function runHelperBundleSearch(searchRefs, token, unlockProf) {
   if (!helperPackage) {
-    setStatus("bad", "No helper bundle exists. Save the secret path again.");
+    setStatus("bad", "No helper bundle exists. Save the trained path cluster again.");
     mode = "test";
+    updateControls();
     return;
   }
 
@@ -1619,114 +2682,161 @@ async function runHelperBundleSearch(reference, token) {
   setStatus(
     "warn",
     "Helper Bundle Search started.\n" +
-    "This is the fuzzy-extractor-style mode.\n" +
-    "It checks candidate tags first, avoiding failed AES decrypt spam.\n" +
-    "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString()
+    "Enrollment rank: " + helperPackage.enrollmentRank + "\n" +
+    "Unlock rank: " + unlockProf.rank + "\n" +
+    "Unlock redraws: " + unlockPaths.length + "\n" +
+    "Search priority: unlock consensus first, individual redraws second.\n" +
+    "Training paths used: " + helperPackage.trainingPaths + "\n" +
+    "Points: " + POINTS + "\n" +
+    "Grid: " + GRID + "×" + GRID + "\n" +
+    "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n\n" +
+    "Green ghosts are saved acceptable variants.\n" +
+    "Yellow ghosts are candidates generated from your unlock consensus/search."
   );
   draw();
 
-  for (const radius of profile.radii) {
+  for (const refEntry of searchRefs) {
     if (token !== mutationCancelToken) return;
 
-    const lists = buildSlotLists(reference, radius, profile);
-    const search = new CandidateSearch(reference, lists, profile);
+    for (const radius of profile.radii) {
+      if (token !== mutationCancelToken) return;
 
-    let lastUi = 0;
+      const reference = refEntry.reference;
+      const lists = buildSlotLists(reference, radius, profile);
+      const search = new CandidateSearch(reference, lists, profile);
 
-    while (token === mutationCancelToken) {
-      const item = search.next();
-      if (!item) break;
+      let lastUi = 0;
 
-      considered++;
+      while (token === mutationCancelToken) {
+        const item = search.next();
+        if (!item) break;
 
-      const candidateKey = gridKey(item.points);
-      if (triedGridKeys.has(candidateKey)) {
-        duplicated++;
-        continue;
-      }
+        considered++;
 
-      triedGridKeys.add(candidateKey);
+        const candidateKey = gridKey(item.points);
+        if (triedGridKeys.has(candidateKey)) {
+          duplicated++;
+          continue;
+        }
 
-      if (!looseCandidateGate(item.points, reference, radius, profile)) {
-        rejected++;
-        continue;
-      }
+        triedGridKeys.add(candidateKey);
 
-      lookups++;
-      displayedCandidate = item.points;
-      bestLoss = Math.min(bestLoss, item.loss);
+        if (!looseCandidateGate(item.points, reference, radius, profile)) {
+          rejected++;
+          continue;
+        }
 
-      const now = performance.now();
-      if (now - lastUi > profile.uiEvery) {
-        lastUi = now;
-        setStatus(
-          "warn",
-          "Helper Bundle Search\n" +
-          "Radius: " + radius.toFixed(2) + " cells\n" +
-          "Tag lookups: " + lookups.toLocaleString() + "\n" +
-          "Candidates considered: " + considered.toLocaleString() + "\n" +
-          "Rejected: " + rejected.toLocaleString() + "\n" +
-          "Duplicates skipped: " + duplicated.toLocaleString() + "\n" +
-          "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n" +
-          "Candidate: " + candidateKey + "\n" +
-          "Loss: " + item.loss.toFixed(2) + "\n" +
-          "Best loss: " + bestLoss.toFixed(2)
-        );
-        draw();
-        await sleep(4);
-      }
+        lookups++;
+        displayedCandidate = item.points;
+        rememberLiveGhost(item.points);
+        bestLoss = Math.min(bestLoss, item.loss);
 
-      try {
-        const plaintext = await tryHelperCandidate(item.points);
-        if (token !== mutationCancelToken) return;
+        const now = performance.now();
 
-        if (plaintext !== null) {
-          finishSuccess(
-            plaintext,
-            item.points,
-            "Helper Bundle Search",
+        if (now - lastUi > profile.uiEvery) {
+          lastUi = now;
+
+          setStatus(
+            "warn",
+            "Helper Bundle Search\n" +
+            "Enrollment rank: " + helperPackage.enrollmentRank + "\n" +
+            "Unlock rank: " + unlockProf.rank + "\n" +
+            "Current search source: " + refEntry.label + "\n" +
+            "Unlock redraws: " + unlockPaths.length + "\n" +
+            "Training paths used: " + helperPackage.trainingPaths + "\n" +
+            "Points: " + POINTS + "\n" +
+            "Grid: " + GRID + "×" + GRID + "\n" +
+            "Radius: " + radius.toFixed(2) + " base cells\n" +
             "Tag lookups: " + lookups.toLocaleString() + "\n" +
             "Candidates considered: " + considered.toLocaleString() + "\n" +
+            "Saved helper ghosts: " + savedGhostCandidates.length.toLocaleString() + "\n" +
+            "Live ghosts collected: " + liveGhostCandidates.length.toLocaleString() + "\n" +
+            "Rejected: " + rejected.toLocaleString() + "\n" +
+            "Duplicates skipped: " + duplicated.toLocaleString() + "\n" +
             "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n" +
-            "Time: " + Math.round(performance.now() - startedAt) + " ms"
+            "Candidate: " + compactGridKey(item.points) + "\n" +
+            "Loss: " + item.loss.toFixed(2) + "\n" +
+            "Best loss: " + bestLoss.toFixed(2)
           );
-          return;
+
+          draw();
+          await sleep(4);
         }
-      } catch {
-        // Tag collision or wrong candidate. Very unlikely, but safe to ignore.
+
+        try {
+          const plaintext = await tryHelperCandidate(item.points);
+          if (token !== mutationCancelToken) return;
+
+          if (plaintext !== null) {
+            finishSuccess(
+              plaintext,
+              item.points,
+              "Helper Bundle Search",
+              "Enrollment rank: " + helperPackage.enrollmentRank + "\n" +
+              "Unlock rank: " + unlockProf.rank + "\n" +
+              "Search source: " + refEntry.label + "\n" +
+              "Unlock redraws: " + unlockPaths.length + "\n" +
+              "Tag lookups: " + lookups.toLocaleString() + "\n" +
+              "Candidates considered: " + considered.toLocaleString() + "\n" +
+              "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n" +
+              "Saved helper ghosts: " + savedGhostCandidates.length.toLocaleString() + "\n" +
+              "Live ghosts collected: " + liveGhostCandidates.length.toLocaleString() + "\n" +
+              "Time: " + Math.round(performance.now() - startedAt) + " ms"
+            );
+            return;
+          }
+        } catch {}
+
+        if (lookups >= profile.maxDecrypts) break;
+        if (lookups % 400 === 0) await sleep(1);
       }
 
       if (lookups >= profile.maxDecrypts) break;
-      if (lookups % 400 === 0) await sleep(1);
     }
 
     if (lookups >= profile.maxDecrypts) break;
   }
 
   mode = "test";
-  saveBtn.disabled = true;
+  updateControls();
+
   setStatus(
     "bad",
     "Helper Bundle Search did not recover.\n\n" +
+    "Enrollment rank: " + helperPackage.enrollmentRank + "\n" +
+    "Unlock rank: " + unlockProf.rank + "\n" +
+    "Unlock redraws used: " + unlockPaths.length + "\n" +
+    "Search sources tried: " + searchRefs.length + "\n" +
+    "Training paths used: " + helperPackage.trainingPaths + "\n" +
+    "Points: " + POINTS + "\n" +
+    "Grid: " + GRID + "×" + GRID + "\n" +
     "Tag lookups: " + lookups.toLocaleString() + "\n" +
     "Candidates considered: " + considered.toLocaleString() + "\n" +
-    "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n\n" +
-    "Reason: the redraw candidate set did not overlap the saved helper variant set.\n" +
-    "Redraw closer, or increase helperBuild/helperSearch limits in the code."
+    "Saved helper variants: " + helperPackage.wrapperCount.toLocaleString() + "\n" +
+    "Saved helper ghosts: " + savedGhostCandidates.length.toLocaleString() + "\n" +
+    "Live ghosts collected: " + liveGhostCandidates.length.toLocaleString() + "\n\n" +
+    "Reason: the yellow unlock candidate set did not overlap the green trained helper set.\n" +
+    "If your unlock rank is low, you suck at redrawing this one right now. Add more redraws or train a simpler gesture."
   );
   draw();
 }
 
 function finishSuccess(plaintext, points, strategyLabel, details) {
-  winningFive = points.map(p => ({ ...p }));
-  displayedCandidate = winningFive;
+  winningPoints = points.map(p => ({ ...p }));
+  displayedCandidate = winningPoints;
   mode = "decrypted";
+  updateControls();
 
   setStatus(
     "good",
     "DECRYPTED with " + strategyLabel + ".\n" +
+    "Training paths used: " + (helperPackage ? helperPackage.trainingPaths : exactPackage.trainingPaths) + "\n" +
+    "Unlock redraws used: " + unlockPaths.length + "\n" +
+    "Points: " + POINTS + "\n" +
+    "Grid: " + GRID + "×" + GRID + "\n" +
+    "Raw keyspace: " + rawSecurityBits().toFixed(1) + " bits\n" +
     details + "\n" +
-    "Recovered points: " + gridKey(winningFive)
+    "Recovered points: " + compactGridKey(winningPoints)
   );
 
   plain.textContent = plaintext;
@@ -1739,6 +2849,7 @@ function finishSuccess(plaintext, points, strategyLabel, details) {
 
 function launchConfetti() {
   confetti = [];
+
   for (let i = 0; i < 220; i++) {
     confetti.push({
       x:CANVAS_SIZE / 2,
@@ -1761,6 +2872,7 @@ function updateConfetti() {
     c.y += c.vy;
     c.vy += c.g;
     c.rot += c.vr;
+
     if (c.y > CANVAS_SIZE + 60) {
       c.x = Math.random() * CANVAS_SIZE;
       c.y = -40;
@@ -1771,6 +2883,7 @@ function updateConfetti() {
 
 function drawConfetti() {
   ctx.save();
+
   for (const c of confetti) {
     ctx.translate(c.x, c.y);
     ctx.rotate(c.rot);
@@ -1778,10 +2891,52 @@ function drawConfetti() {
     ctx.fillRect(-c.w / 2, -c.h / 2, c.w, c.h);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
+
   ctx.restore();
 }
 
 /* ---------------- buttons ---------------- */
+
+undoBtn.addEventListener("click", () => {
+  if (mode === "enroll") {
+    if (!enrollPaths.length) return;
+
+    enrollPaths.pop();
+
+    setStatus(
+      enrollPaths.length ? "warn" : "",
+      enrollPaths.length
+        ? "Removed last training path.\n\nTraining paths: " + enrollPaths.length + "\nEach white path opacity: " + (100 / enrollPaths.length).toFixed(1) + "%"
+        : "All training paths removed. Draw the same secret path repeatedly, then hit SAVE."
+    );
+
+    updateSecurityReadout();
+    updateControls();
+    draw();
+    return;
+  }
+
+  if (mode === "test") {
+    if (!unlockPaths.length) return;
+
+    unlockPaths.pop();
+    unlockConsensusPath = buildConsensusPath(unlockPaths);
+    unlockConsensusPoints = simplifyRawPathToGridPoints(unlockConsensusPath);
+    liveGhostCandidates = [];
+    liveGhostKeys = new Set();
+
+    setStatus(
+      unlockPaths.length ? "warn" : "",
+      unlockPaths.length
+        ? "Removed last unlock redraw.\n\nUnlock redraws: " + unlockPaths.length + "\nEach white path opacity: " + (100 / unlockPaths.length).toFixed(1) + "%"
+        : "All unlock redraws removed. Redraw the unlock gesture repeatedly, then hit DECRYPT."
+    );
+
+    updateSecurityReadout();
+    updateControls();
+    draw();
+  }
+});
 
 clearBtn.addEventListener("click", () => {
   mutationCancelToken++;
@@ -1792,85 +2947,165 @@ clearBtn.addEventListener("click", () => {
   playerAttemptRaw = [];
   playerAttemptSampled = [];
   displayedCandidate = null;
-  winningFive = null;
+  winningPoints = null;
   confetti = [];
+
+  liveGhostCandidates = [];
+  liveGhostKeys = new Set();
 
   big.classList.remove("show");
   plain.textContent = "";
 
-  if (exactPackage) {
-    mode = "test";
-    saveBtn.disabled = true;
-    setStatus("warn", "Draw the player's test path. Mutation starts when your thumb lifts.");
-  } else {
+  if (mode === "enroll" || !exactPackage) {
+    enrollPaths = [];
+    consensusPath = [];
+    consensusPoints = [];
+    unlockPaths = [];
+    unlockConsensusPath = [];
+    unlockConsensusPoints = [];
+    savedGhostCandidates = [];
+    savedGhostKeys = new Set();
+
+    exactPackage = null;
+    helperPackage = null;
+
     mode = "enroll";
-    saveBtn.disabled = false;
-    setStatus("", "Draw the secret path, then hit SAVE.");
+    setStatus("", "Training cleared. Draw the same secret path repeatedly. Hit SAVE when the overlap looks stable.");
+  } else {
+    unlockPaths = [];
+    unlockConsensusPath = [];
+    unlockConsensusPoints = [];
+
+    mode = "test";
+    setStatus(
+      "warn",
+      "Unlock redraws cleared.\n\n" +
+      "Redraw the unlock gesture repeatedly. Hit DECRYPT when the overlap looks stable.\n\n" +
+      "Saved training paths: " + exactPackage.trainingPaths + "\n" +
+      "Saved enrollment rank: " + exactPackage.enrollmentRank + "\n" +
+      "Saved geometry: " + POINTS + " points, " + GRID + "×" + GRID + " grid."
+    );
   }
 
+  updateSecurityReadout();
+  updateControls();
   draw();
 });
 
 saveBtn.addEventListener("click", async () => {
-  if (mode !== "enroll") return;
+  if (mode === "enroll") {
+    await saveTrainingCluster();
+    return;
+  }
 
+  if (mode === "test") {
+    await startMutationSearch();
+  }
+});
+
+async function saveTrainingCluster() {
   if (!window.crypto || !crypto.subtle) {
     setStatus("bad", "WebCrypto is not available. Open this over HTTPS or localhost.");
     return;
   }
 
-  const five = simplifyRawPathToFiveGrid(rawPath);
-  const clean = cleanRawPath(rawPath);
-
-  if (five.length !== POINTS || clean.length < 8) {
-    setStatus("warn", "Draw a longer secret path before hitting SAVE.");
+  if (!enrollPaths.length) {
+    setStatus("warn", "Draw at least one training path before hitting SAVE.");
     return;
   }
 
   try {
     mode = "saving";
-    saveBtn.disabled = true;
+    updateControls();
+
+    rawPath = [];
+    savedGhostCandidates = [];
+    savedGhostKeys = new Set();
+    liveGhostCandidates = [];
+    liveGhostKeys = new Set();
+
+    consensusPath = buildConsensusPath(enrollPaths);
+    consensusPoints = simplifyRawPathToGridPoints(consensusPath);
+
+    if (consensusPoints.length !== POINTS || consensusPath.length < 8) {
+      throw new Error("Consensus path was too short. Add longer training paths.");
+    }
+
+    const prof = evaluatePathProficiency(enrollPaths);
+
     draw();
 
-    setStatus("warn", "SAVING...\nBuilding exact AES package.");
-    exactPackage = await encryptExactWithFivePoints(
-      five,
+    setStatus(
+      "warn",
+      "SAVING...\n" +
+      "Building exact AES package from the enrollment consensus path.\n" +
+      "Training rank: " + prof.rank + "\n" +
+      "Training score: " + (prof.score === null ? "unranked" : prof.score.toFixed(1)) + "\n" +
+      "Training paths: " + enrollPaths.length + "\n" +
+      "Consensus points: " + compactGridKey(consensusPoints) + "\n" +
+      "Grid: " + GRID + "×" + GRID + "\n" +
+      "Raw keyspace: " + rawSecurityBits().toFixed(1) + " bits"
+    );
+
+    exactPackage = await encryptExactWithPoints(
+      consensusPoints,
       secretInput.value || "encrypted data"
     );
 
-    const saveReference = buildReferenceFromPath(clean);
-
-    helperPackage = await buildHelperBundle(
-      saveReference,
-      five,
+    helperPackage = await buildHelperBundleFromTraining(
+      enrollPaths,
+      consensusPath,
+      consensusPoints,
       secretInput.value || "encrypted data"
     );
 
     rawPath = [];
     displayedCandidate = null;
-    winningFive = null;
+    winningPoints = null;
+
+    unlockPaths = [];
+    unlockConsensusPath = [];
+    unlockConsensusPoints = [];
 
     mode = "test";
-    saveBtn.disabled = true;
+    updateControls();
 
     setStatus(
       "good",
-      "SAVED.\nThe grid was cleared.\n\n" +
-      "Exact package ready.\n" +
-      "Helper bundle variants: " + helperPackage.wrapperCount.toLocaleString() + "\n\n" +
-      "Now choose a strategy and draw the player's test path."
+      "SAVED.\nThe enrollment stack was converted into crypto material.\n\n" +
+      "Training rank: " + prof.rank + "\n" +
+      "Training score: " + (prof.score === null ? "unranked" : prof.score.toFixed(1)) + "\n" +
+      "Training paths used: " + enrollPaths.length + "\n" +
+      "Consensus points: " + compactGridKey(consensusPoints) + "\n" +
+      "Virtual grid: " + GRID + "×" + GRID + "\n" +
+      "Raw keyspace: " + rawSecurityBits().toFixed(1) + " bits\n" +
+      "Rank helper multiplier: " + prof.helperMultiplier.toFixed(2) + "×\n" +
+      "Helper bundle variants: " + helperPackage.wrapperCount.toLocaleString() + "\n" +
+      "Saved helper ghosts: " + savedGhostCandidates.length.toLocaleString() + "\n\n" +
+      "Now redraw the unlock gesture repeatedly.\n" +
+      "When the overlap looks stable, hit DECRYPT."
     );
 
+    updateSecurityReadout();
     draw();
   } catch (err) {
     mode = "enroll";
-    saveBtn.disabled = false;
+    updateControls();
     setStatus("bad", "Save failed: " + err.message);
     draw();
   }
-});
+}
 
+/* ---------------- boot ---------------- */
+
+POINTS = Number(pointSlider.value);
+GRID_MULTIPLIER = GRID_MULTIPLIERS[Number(gridSlider.value)];
+GRID = BASE_GRID * GRID_MULTIPLIER;
+GHOST_LIMIT = Number(ghostSlider.value);
+
+updateSecurityReadout();
+updateControls();
 draw();
 </script>
 </body>
-</html> 
+</html>
