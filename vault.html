@@ -1,0 +1,2653 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>WebRTC P2P PIN Vault Demo</title>
+  <style>
+    :root {
+      --bg: #060912;
+      --panel: rgba(15, 23, 42, .88);
+      --panel2: rgba(8, 14, 26, .94);
+      --text: #eef6ff;
+      --muted: #95a4b8;
+      --border: #263349;
+      --blue: #60a5fa;
+      --cyan: #22d3ee;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --red: #fb7185;
+      --purple: #a78bfa;
+      --code: #030711;
+      --shadow: 0 22px 70px rgba(0,0,0,.34);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(96,165,250,.18), transparent 30%),
+        radial-gradient(circle at 88% 4%, rgba(167,139,250,.14), transparent 28%),
+        radial-gradient(circle at 50% 100%, rgba(34,211,238,.08), transparent 35%),
+        linear-gradient(180deg, #060912, #02040a 78%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow-x: hidden;
+    }
+
+    body {
+      padding: 14px;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.12;
+    }
+
+    h1 {
+      font-size: clamp(25px, 5vw, 46px);
+      letter-spacing: -0.055em;
+    }
+
+    h2 {
+      font-size: 18px;
+      letter-spacing: -0.025em;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.46;
+      margin: 8px 0 0;
+    }
+
+    button, input, textarea, select {
+      font: inherit;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      padding: 11px 12px;
+      color: var(--text);
+      background: #07101f;
+      outline: none;
+    }
+
+    textarea {
+      min-height: 145px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.42;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: rgba(96,165,250,.8);
+      box-shadow: 0 0 0 3px rgba(96,165,250,.13);
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .02em;
+    }
+
+    button {
+      border: 0;
+      border-radius: 14px;
+      padding: 11px 13px;
+      font-weight: 900;
+      background: var(--blue);
+      color: #03101d;
+      cursor: pointer;
+      transition: transform .12s ease, filter .12s ease, opacity .12s ease;
+    }
+
+    button:hover {
+      filter: brightness(1.08);
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .48;
+    }
+
+    button.secondary {
+      color: var(--text);
+      background: #142036;
+      border: 1px solid var(--border);
+    }
+
+    button.good {
+      color: #02130c;
+      background: var(--green);
+    }
+
+    button.warn {
+      color: #160e02;
+      background: var(--yellow);
+    }
+
+    button.danger {
+      color: white;
+      background: #be253d;
+    }
+
+    .app {
+      max-width: 1320px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    .hero, .card {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .hero {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .card {
+      padding: 15px;
+      min-width: 0;
+    }
+
+    .heroTop {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .grid3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 930px) {
+      .heroTop, .grid, .grid3 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .warning {
+      border: 1px solid rgba(251,191,36,.36);
+      background: rgba(251,191,36,.09);
+      border-radius: 18px;
+      padding: 12px;
+      color: #ffe7a7;
+      font-size: 13px;
+      line-height: 1.42;
+    }
+
+    .row {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 11px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    @media (max-width: 650px) {
+      .split {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pillRow {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .pill {
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: rgba(8, 14, 26, .74);
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .pill.ok {
+      color: #c3fce0;
+      border-color: rgba(52,211,153,.36);
+      background: rgba(52,211,153,.1);
+    }
+
+    .pill.bad {
+      color: #ffd0d7;
+      border-color: rgba(251,113,133,.36);
+      background: rgba(251,113,133,.1);
+    }
+
+    .pill.warn {
+      color: #ffe7a7;
+      border-color: rgba(251,191,36,.36);
+      background: rgba(251,191,36,.1);
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 9px;
+    }
+
+    @media (max-width: 980px) {
+      .stats {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .stat {
+      border: 1px solid var(--border);
+      background: rgba(8, 14, 26, .78);
+      border-radius: 17px;
+      padding: 11px;
+      min-height: 75px;
+    }
+
+    .stat .k {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 900;
+    }
+
+    .stat .v {
+      margin-top: 7px;
+      font-weight: 950;
+      font-size: 17px;
+      overflow-wrap: anywhere;
+    }
+
+    .guide {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 9px;
+    }
+
+    @media (max-width: 900px) {
+      .guide {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .guideStep {
+      border: 1px solid var(--border);
+      background: rgba(8, 14, 26, .78);
+      border-radius: 18px;
+      padding: 13px;
+      min-height: 132px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .guideStep .num {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      color: #03101d;
+      background: var(--blue);
+      font-weight: 950;
+      margin-bottom: 10px;
+    }
+
+    .guideStep strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .guideStep span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.38;
+    }
+
+    .networkWrap {
+      position: relative;
+      min-height: 430px;
+      overflow: hidden;
+      border-radius: 22px;
+      border: 1px solid var(--border);
+      background:
+        radial-gradient(circle at center, rgba(96,165,250,.10), transparent 30%),
+        linear-gradient(180deg, rgba(7,16,31,.94), rgba(2,6,14,.96));
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: 430px;
+    }
+
+    .nodeCard {
+      position: absolute;
+      min-width: 140px;
+      max-width: 190px;
+      border: 1px solid var(--border);
+      background: rgba(6, 12, 24, .9);
+      box-shadow: 0 14px 34px rgba(0,0,0,.28);
+      border-radius: 16px;
+      padding: 10px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    .nodeCard.self {
+      border-color: rgba(96,165,250,.55);
+      box-shadow: 0 0 0 3px rgba(96,165,250,.10), 0 18px 44px rgba(0,0,0,.35);
+    }
+
+    .nodeCard.coordinator {
+      border-color: rgba(167,139,250,.55);
+    }
+
+    .nodeCard.peer {
+      border-color: rgba(52,211,153,.42);
+    }
+
+    .nodeCard .name {
+      font-weight: 950;
+      font-size: 13px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .nodeCard .meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #111b2e;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 950;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .badge.green {
+      color: #c3fce0;
+      border-color: rgba(52,211,153,.4);
+      background: rgba(52,211,153,.12);
+    }
+
+    .badge.blue {
+      color: #d3e9ff;
+      border-color: rgba(96,165,250,.4);
+      background: rgba(96,165,250,.12);
+    }
+
+    .badge.purple {
+      color: #e7ddff;
+      border-color: rgba(167,139,250,.42);
+      background: rgba(167,139,250,.12);
+    }
+
+    .badge.red {
+      color: #ffd0d7;
+      border-color: rgba(251,113,133,.38);
+      background: rgba(251,113,133,.12);
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 9px;
+    }
+
+    @media (max-width: 900px) {
+      .steps {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .step {
+      border: 1px solid var(--border);
+      background: rgba(8, 14, 26, .78);
+      border-radius: 17px;
+      padding: 12px;
+      min-height: 104px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .step::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(96,165,250,.2), transparent);
+      opacity: 0;
+      transition: opacity .18s ease;
+    }
+
+    .step.active::before {
+      opacity: 1;
+    }
+
+    .step.done {
+      border-color: rgba(52,211,153,.36);
+    }
+
+    .step strong {
+      position: relative;
+      display: block;
+      margin-bottom: 7px;
+      font-size: 14px;
+    }
+
+    .step span {
+      position: relative;
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .peerList {
+      display: grid;
+      gap: 9px;
+    }
+
+    .peerRow {
+      border: 1px solid var(--border);
+      background: rgba(8, 14, 26, .74);
+      border-radius: 16px;
+      padding: 10px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .peerRow .name {
+      font-weight: 900;
+      overflow-wrap: anywhere;
+    }
+
+    .peerRow .details {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 3px;
+      overflow-wrap: anywhere;
+    }
+
+    .output, .log {
+      border: 1px solid var(--border);
+      background: var(--code);
+      border-radius: 18px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.46;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .output {
+      min-height: 210px;
+      max-height: 460px;
+    }
+
+    .log {
+      min-height: 260px;
+      max-height: 460px;
+    }
+
+    .small {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.42;
+    }
+
+    .okText { color: var(--green); }
+    .badText { color: var(--red); }
+    .warnText { color: var(--yellow); }
+    .blueText { color: var(--blue); }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .progress {
+      height: 10px;
+      width: 100%;
+      overflow: hidden;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #07101f;
+      margin: 10px 0;
+    }
+
+    .bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--blue), var(--purple), var(--cyan));
+      transition: width .2s ease;
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 12px 0;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .sectionTitle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .sectionTitle h2 {
+      margin-bottom: 0;
+    }
+
+    .stepLabel {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid rgba(96,165,250,.38);
+      background: rgba(96,165,250,.1);
+      color: #d3e9ff;
+      border-radius: 999px;
+      padding: 5px 8px;
+      font-size: 11px;
+      font-weight: 950;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="hero">
+      <div class="heroTop">
+        <div>
+          <h1>WebRTC P2P PIN Vault Demo</h1>
+          <p>
+            Open this same HTML on your laptop and phones. The laptop creates the encrypted vault. The phones become remote peer guardians that help unlock it through WebRTC.
+          </p>
+          <div class="pillRow">
+            <span class="pill ok">Real WebRTC room</span>
+            <span class="pill ok">Laptop + phones</span>
+            <span class="pill ok">Threshold unlock</span>
+            <span class="pill warn">Educational cryptography demo</span>
+            <span class="pill warn">Not production banking</span>
+          </div>
+        </div>
+
+        <div class="warning">
+          <strong>Demo setup:</strong> serve this file from HTTPS, or use a local dev server on your laptop. Open the same URL on the iPhone, 3 Android phones, and the laptop. Use the same room code and room secret everywhere.
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="k">My WebRTC ID</div>
+          <div class="v" id="statSelf">loading</div>
+        </div>
+        <div class="stat">
+          <div class="k">Room</div>
+          <div class="v" id="statRoom">not joined</div>
+        </div>
+        <div class="stat">
+          <div class="k">This device</div>
+          <div class="v" id="statRole">unknown</div>
+        </div>
+        <div class="stat">
+          <div class="k">Peers connected</div>
+          <div class="v" id="statPeers">0</div>
+        </div>
+        <div class="stat">
+          <div class="k">Vault</div>
+          <div class="v" id="statVault">empty</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="sectionTitle">
+        <h2>Test guide</h2>
+        <span class="stepLabel">Do this first</span>
+      </div>
+
+      <div class="guide">
+        <div class="guideStep">
+          <div class="num">1</div>
+          <strong>Host the file</strong>
+          <span>
+            Put this file on your laptop and serve it over HTTPS or a local server. Do not rely on a random <span class="mono">file://</span> open on phones.
+          </span>
+        </div>
+
+        <div class="guideStep">
+          <div class="num">2</div>
+          <strong>Open on all devices</strong>
+          <span>
+            Open the same URL on laptop, old iPhone, and 3 Motorola Android phones. Use the same room code and secret.
+          </span>
+        </div>
+
+        <div class="guideStep">
+          <div class="num">3</div>
+          <strong>Set roles</strong>
+          <span>
+            Laptop should be <b>Coordinator</b>. Phones should be <b>Phone peer guardian</b>. Auto-detect usually does this.
+          </span>
+        </div>
+
+        <div class="guideStep">
+          <div class="num">4</div>
+          <strong>Create vault</strong>
+          <span>
+            On the laptop, wait until phones appear in the network map. Then create the vault with PIN <span class="mono">1234</span>.
+          </span>
+        </div>
+
+        <div class="guideStep">
+          <div class="num">5</div>
+          <strong>Unlock</strong>
+          <span>
+            On the laptop, unlock with the PIN. The phone peers answer blinded requests and return enough encrypted shares.
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <div class="sectionTitle">
+          <h2>Step 1 — Join WebRTC room</h2>
+          <span class="stepLabel">all devices</span>
+        </div>
+
+        <div class="split">
+          <div class="row">
+            <label for="roomId">Room code</label>
+            <input id="roomId" autocomplete="off" />
+          </div>
+          <div class="row">
+            <label for="roomSecret">Room secret</label>
+            <input id="roomSecret" autocomplete="off" />
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="row">
+            <label for="displayName">Device name</label>
+            <input id="displayName" autocomplete="off" />
+          </div>
+          <div class="row">
+            <label for="role">Role</label>
+            <select id="role">
+              <option value="auto">Auto-detect</option>
+              <option value="coordinator">Coordinator / laptop</option>
+              <option value="peer">Phone peer guardian</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="row">
+            <label for="strategy">Discovery mode</label>
+            <select id="strategy">
+              <option value="nostr" selected>Default</option>
+              <option value="mqtt">Fallback A</option>
+              <option value="torrent">Fallback B</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="threshold">Unlock threshold</label>
+            <select id="threshold">
+              <option value="2">2 phones required</option>
+              <option value="3" selected>3 phones required</option>
+              <option value="4">4 phones required</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="buttons">
+          <button id="joinBtn">Join / rejoin</button>
+          <button class="secondary" id="copyInviteBtn">Copy invite URL</button>
+          <button class="secondary" id="sendHelloBtn">Announce device</button>
+          <button class="danger" id="leaveBtn">Leave</button>
+        </div>
+
+        <p class="small">
+          Copy the invite URL from the laptop and send it to the phones. The secret is placed in the URL hash so it is not sent as a normal query parameter.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="sectionTitle">
+          <h2>Step 2 — Watch the unlock flow</h2>
+          <span class="stepLabel">visual explainer</span>
+        </div>
+
+        <div class="steps">
+          <div class="step" id="step-pin">
+            <strong>1. PIN</strong>
+            <span>Laptop uses 4-digit PIN as one input, not the real vault key.</span>
+          </div>
+          <div class="step" id="step-blind">
+            <strong>2. Blind</strong>
+            <span>Laptop blinds PIN-derived messages before asking phones.</span>
+          </div>
+          <div class="step" id="step-peer">
+            <strong>3. Phones</strong>
+            <span>Phones rate-limit and sign blinded requests without seeing the PIN.</span>
+          </div>
+          <div class="step" id="step-shares">
+            <strong>4. Shares</strong>
+            <span>Laptop decrypts enough Shamir shares returned by phones.</span>
+          </div>
+          <div class="step" id="step-vault">
+            <strong>5. Vault</strong>
+            <span>PIN + laptop device factor + threshold secret unwrap the vault key.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="sectionTitle">
+        <h2>Step 3 — Live WebRTC network</h2>
+        <span class="stepLabel">wait for phones</span>
+      </div>
+
+      <div class="networkWrap" id="networkWrap">
+        <svg id="networkSvg" viewBox="0 0 1000 430" preserveAspectRatio="none"></svg>
+        <div id="nodeCards"></div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <div class="sectionTitle">
+          <h2>Step 4 — Create vault</h2>
+          <span class="stepLabel">laptop only</span>
+        </div>
+
+        <div class="split">
+          <div class="row">
+            <label for="setupPin">Create vault PIN</label>
+            <input id="setupPin" inputmode="numeric" maxlength="4" autocomplete="off" value="1234" />
+          </div>
+          <div class="row">
+            <label for="kdfIterations">PBKDF2 demo cost</label>
+            <select id="kdfIterations">
+              <option value="50000">50,000 fast</option>
+              <option value="120000" selected>120,000 balanced</option>
+              <option value="250000">250,000 slower</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="vaultText">Banking data encrypted locally on laptop</label>
+          <textarea id="vaultText">{
+  "account": "P2P IndexedDB Checking Demo",
+  "balance": "1250.00",
+  "currency": "USD",
+  "lastSettlement": "demo-local-ledger",
+  "transactions": [
+    {"to": "alice.peer", "amount": "25.00", "status": "witnessed"},
+    {"to": "bob.peer", "amount": "10.00", "status": "pending"}
+  ],
+  "privateNote": "This plaintext should only appear after the peer threshold unlock succeeds."
+}</textarea>
+        </div>
+
+        <div class="progress hidden" id="setupProgress">
+          <div class="bar" id="setupBar"></div>
+        </div>
+
+        <div class="buttons">
+          <button class="good" id="createVaultBtn">Create vault using phones</button>
+          <button class="secondary" id="exportVaultBtn">Show laptop IndexedDB</button>
+          <button class="danger" id="deleteVaultBtn">Delete laptop vault</button>
+        </div>
+
+        <p class="small">
+          The laptop keeps encrypted vault data. The phones keep encrypted peer shares. The PIN alone is not enough.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="sectionTitle">
+          <h2>Step 5 — Unlock test</h2>
+          <span class="stepLabel">laptop only</span>
+        </div>
+
+        <div class="row">
+          <label for="unlockPin">Unlock PIN</label>
+          <input id="unlockPin" inputmode="numeric" maxlength="4" autocomplete="off" value="1234" />
+        </div>
+
+        <div class="buttons">
+          <button class="good" id="unlockVaultBtn">Unlock using phones</button>
+          <button class="secondary" id="offlineAttackBtn">Simulate stolen laptop IndexedDB</button>
+          <button class="secondary" id="eraseDeviceBtn">Erase laptop device factor</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <h3>Unlocked plaintext / result</h3>
+        <div class="output" id="vaultOutput">Nothing unlocked yet.</div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <div class="sectionTitle">
+          <h2>Phone guardian storage</h2>
+          <span class="stepLabel">phones</span>
+        </div>
+
+        <div class="buttons" style="margin-bottom:10px;">
+          <button class="secondary" id="showPeerStoreBtn">Show this device’s peer storage</button>
+          <button class="secondary" id="resetRatesBtn">Reset this device’s rate limits</button>
+          <button class="danger" id="deletePeerStoreBtn">Delete this device’s peer shares</button>
+        </div>
+        <div class="output" id="peerStoreOutput">No peer storage shown yet.</div>
+      </div>
+
+      <div class="card">
+        <div class="sectionTitle">
+          <h2>Connected devices</h2>
+          <span class="stepLabel">live list</span>
+        </div>
+        <div class="peerList" id="peerList"></div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Encrypted laptop export</h2>
+        <div class="output" id="exportOutput">No export yet.</div>
+      </div>
+
+      <div class="card">
+        <h2>Activity log</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {joinRoom, selfId} from 'https://esm.run/trystero';
+
+    const $ = id => document.getElementById(id);
+
+    const APP_ID = "steves-webrtc-indexeddb-bank-demo-v3";
+    const DB_NAME = "webrtc_p2p_bank_vault_demo";
+    const DB_VERSION = 1;
+    const VAULT_STORE = "vaults";
+    const CURRENT_VAULT_KEY = "current";
+    const PEER_ACCOUNTS_KEY = "webrtc_demo_peer_accounts_v3";
+    const PEER_RATE_KEY = "webrtc_demo_peer_rates_v3";
+    const PEER_OPRF_KEY = "webrtc_demo_peer_oprf_private_jwk_v3";
+    const DEVICE_FACTOR_PREFIX = "webrtc_demo_laptop_device_factor_";
+    const RATE_WINDOW_MS = 60_000;
+    const RATE_MAX_ATTEMPTS = 5;
+    const RATE_LOCK_MS = 60_000;
+
+    const app = {
+      room: null,
+      joined: false,
+      roomId: "",
+      roomSecret: "",
+      role: "peer",
+      displayName: "",
+      strategy: "nostr",
+      oprfPrivateJwk: null,
+      oprfPublic: null,
+      peers: new Map(),
+      actions: {},
+      activeStep: null,
+      doneSteps: new Set(),
+      lastPackets: []
+    };
+
+    function log(msg, kind = "info") {
+      const t = new Date().toLocaleTimeString();
+      const icon = kind === "ok" ? "✓" : kind === "bad" ? "✖" : kind === "warn" ? "!" : "•";
+      $("log").textContent += `[${t}] ${icon} ${msg}\n`;
+      $("log").scrollTop = $("log").scrollHeight;
+    }
+
+    function setStep(step, done = false) {
+      app.activeStep = step;
+      if (done) app.doneSteps.add(step);
+
+      for (const id of ["pin", "blind", "peer", "shares", "vault"]) {
+        const el = $(`step-${id}`);
+        el.classList.toggle("active", app.activeStep === id);
+        el.classList.toggle("done", app.doneSteps.has(id));
+      }
+    }
+
+    function resetSteps() {
+      app.activeStep = null;
+      app.doneSteps.clear();
+      setStep(null);
+    }
+
+    function setSetupProgress(show, pct = 0) {
+      $("setupProgress").classList.toggle("hidden", !show);
+      $("setupBar").style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    }
+
+    function assertPin(pin) {
+      if (!/^\d{4}$/.test(pin)) throw new Error("PIN must be exactly 4 digits.");
+    }
+
+    function isLikelyMobile() {
+      return /iphone|ipad|android|mobile/i.test(navigator.userAgent) || innerWidth < 740;
+    }
+
+    function resolvedRole() {
+      const selected = $("role").value;
+      if (selected !== "auto") return selected;
+      return isLikelyMobile() ? "peer" : "coordinator";
+    }
+
+    function defaultDeviceName() {
+      const ua = navigator.userAgent.toLowerCase();
+
+      if (ua.includes("iphone")) return "old iPhone";
+      if (ua.includes("android")) return "Motorola Android";
+      if (ua.includes("windows")) return "Windows laptop";
+      if (ua.includes("mac")) return "Mac";
+      return isLikelyMobile() ? "Phone peer" : "Laptop";
+    }
+
+    function utf8(str) {
+      return new TextEncoder().encode(str);
+    }
+
+    function text(bytes) {
+      return new TextDecoder().decode(bytes);
+    }
+
+    function randomBytes(len) {
+      const out = new Uint8Array(len);
+      crypto.getRandomValues(out);
+      return out;
+    }
+
+    function concatBytes(...arrays) {
+      const total = arrays.reduce((n, a) => n + a.length, 0);
+      const out = new Uint8Array(total);
+      let off = 0;
+      for (const a of arrays) {
+        out.set(a, off);
+        off += a.length;
+      }
+      return out;
+    }
+
+    function b64(bytes) {
+      let s = "";
+      for (const b of bytes) s += String.fromCharCode(b);
+      return btoa(s);
+    }
+
+    function unb64(s) {
+      const bin = atob(s);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+
+    function b64urlToBytes(s) {
+      s = s.replace(/-/g, "+").replace(/_/g, "/");
+      while (s.length % 4) s += "=";
+      return unb64(s);
+    }
+
+    function bytesToB64url(bytes) {
+      return b64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    }
+
+    async function sha256(bytes) {
+      return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    }
+
+    async function shortHash(str, chars = 12) {
+      return bytesToB64url(await sha256(utf8(str))).slice(0, chars);
+    }
+
+    async function pbkdf2Pin(pin, salt, iterations) {
+      const baseKey = await crypto.subtle.importKey(
+        "raw",
+        utf8(pin),
+        "PBKDF2",
+        false,
+        ["deriveBits"]
+      );
+
+      const bits = await crypto.subtle.deriveBits(
+        {
+          name: "PBKDF2",
+          hash: "SHA-256",
+          salt,
+          iterations
+        },
+        baseKey,
+        256
+      );
+
+      return new Uint8Array(bits);
+    }
+
+    async function hkdf(ikm, salt, info, lengthBytes = 32) {
+      const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+
+      const bits = await crypto.subtle.deriveBits(
+        {
+          name: "HKDF",
+          hash: "SHA-256",
+          salt,
+          info: utf8(info)
+        },
+        key,
+        lengthBytes * 8
+      );
+
+      return new Uint8Array(bits);
+    }
+
+    async function aesKey(raw) {
+      return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+    }
+
+    async function aesEncrypt(rawKey, plaintextBytes, aad = new Uint8Array()) {
+      const iv = randomBytes(12);
+      const key = await aesKey(rawKey);
+
+      const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+        {
+          name: "AES-GCM",
+          iv,
+          additionalData: aad
+        },
+        key,
+        plaintextBytes
+      ));
+
+      return {
+        iv: b64(iv),
+        ciphertext: b64(ciphertext)
+      };
+    }
+
+    async function aesDecrypt(rawKey, packed, aad = new Uint8Array()) {
+      const key = await aesKey(rawKey);
+
+      const plaintext = await crypto.subtle.decrypt(
+        {
+          name: "AES-GCM",
+          iv: unb64(packed.iv),
+          additionalData: aad
+        },
+        key,
+        unb64(packed.ciphertext)
+      );
+
+      return new Uint8Array(plaintext);
+    }
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(VAULT_STORE)) {
+            db.createObjectStore(VAULT_STORE);
+          }
+        };
+
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function idbGet(key) {
+      const db = await openDB();
+
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(VAULT_STORE, "readonly");
+        const store = tx.objectStore(VAULT_STORE);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function idbSet(key, value) {
+      const db = await openDB();
+
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(VAULT_STORE, "readwrite");
+        const store = tx.objectStore(VAULT_STORE);
+        const req = store.put(value, key);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function idbDelete(key) {
+      const db = await openDB();
+
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(VAULT_STORE, "readwrite");
+        const store = tx.objectStore(VAULT_STORE);
+        const req = store.delete(key);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function getDeviceFactor(accountId) {
+      const s = localStorage.getItem(DEVICE_FACTOR_PREFIX + accountId);
+      return s ? unb64(s) : null;
+    }
+
+    function saveDeviceFactor(accountId, bytes) {
+      localStorage.setItem(DEVICE_FACTOR_PREFIX + accountId, b64(bytes));
+    }
+
+    function eraseDeviceFactor(accountId) {
+      localStorage.removeItem(DEVICE_FACTOR_PREFIX + accountId);
+    }
+
+    function loadPeerAccounts() {
+      try {
+        return JSON.parse(localStorage.getItem(PEER_ACCOUNTS_KEY) || "{}");
+      } catch {
+        return {};
+      }
+    }
+
+    function savePeerAccounts(accounts) {
+      localStorage.setItem(PEER_ACCOUNTS_KEY, JSON.stringify(accounts));
+    }
+
+    function loadRates() {
+      try {
+        return JSON.parse(localStorage.getItem(PEER_RATE_KEY) || "{}");
+      } catch {
+        return {};
+      }
+    }
+
+    function saveRates(rates) {
+      localStorage.setItem(PEER_RATE_KEY, JSON.stringify(rates));
+    }
+
+    function rateLimitCheck(rateKey, charge) {
+      const now = Date.now();
+      const rates = loadRates();
+
+      if (!rates[rateKey]) {
+        rates[rateKey] = {
+          windowStart: now,
+          count: 0,
+          lockedUntil: 0
+        };
+      }
+
+      const r = rates[rateKey];
+
+      if (r.lockedUntil && now < r.lockedUntil) {
+        saveRates(rates);
+        return {
+          allowed: false,
+          count: r.count,
+          max: RATE_MAX_ATTEMPTS,
+          resetInMs: Math.max(0, RATE_WINDOW_MS - (now - r.windowStart)),
+          lockedUntil: r.lockedUntil,
+          reason: `locked for ${Math.ceil((r.lockedUntil - now) / 1000)}s`
+        };
+      }
+
+      if (now - r.windowStart > RATE_WINDOW_MS) {
+        r.windowStart = now;
+        r.count = 0;
+        r.lockedUntil = 0;
+      }
+
+      if (r.count >= RATE_MAX_ATTEMPTS) {
+        r.lockedUntil = now + RATE_LOCK_MS;
+        saveRates(rates);
+        return {
+          allowed: false,
+          count: r.count,
+          max: RATE_MAX_ATTEMPTS,
+          resetInMs: RATE_WINDOW_MS,
+          lockedUntil: r.lockedUntil,
+          reason: "rate limit exceeded"
+        };
+      }
+
+      if (charge) r.count += 1;
+
+      saveRates(rates);
+
+      return {
+        allowed: true,
+        count: r.count,
+        max: RATE_MAX_ATTEMPTS,
+        resetInMs: Math.max(0, RATE_WINDOW_MS - (now - r.windowStart)),
+        lockedUntil: 0,
+        reason: "allowed"
+      };
+    }
+
+    function gfMul(a, b) {
+      let p = 0;
+      for (let i = 0; i < 8; i++) {
+        if (b & 1) p ^= a;
+        const hi = a & 0x80;
+        a = (a << 1) & 0xff;
+        if (hi) a ^= 0x1b;
+        b >>= 1;
+      }
+      return p;
+    }
+
+    function gfPow(a, n) {
+      let result = 1;
+      let base = a;
+      while (n > 0) {
+        if (n & 1) result = gfMul(result, base);
+        base = gfMul(base, base);
+        n >>= 1;
+      }
+      return result;
+    }
+
+    function gfInv(a) {
+      if (a === 0) throw new Error("GF inverse of zero.");
+      return gfPow(a, 254);
+    }
+
+    function gfDiv(a, b) {
+      return gfMul(a, gfInv(b));
+    }
+
+    function shamirSplit(secret, n, k) {
+      if (k < 2 || n < k || n > 255) throw new Error("Invalid threshold parameters.");
+
+      const shares = Array.from({ length: n }, (_, i) => ({
+        x: i + 1,
+        y: new Uint8Array(secret.length)
+      }));
+
+      for (let byteIndex = 0; byteIndex < secret.length; byteIndex++) {
+        const coeffs = [secret[byteIndex]];
+        for (let c = 1; c < k; c++) coeffs.push(randomBytes(1)[0]);
+
+        for (const share of shares) {
+          let y = coeffs[0];
+          let xPower = 1;
+
+          for (let c = 1; c < coeffs.length; c++) {
+            xPower = gfMul(xPower, share.x);
+            y ^= gfMul(coeffs[c], xPower);
+          }
+
+          share.y[byteIndex] = y;
+        }
+      }
+
+      return shares;
+    }
+
+    function shamirReconstruct(shares, secretLength) {
+      const out = new Uint8Array(secretLength);
+
+      for (let byteIndex = 0; byteIndex < secretLength; byteIndex++) {
+        let value = 0;
+
+        for (let i = 0; i < shares.length; i++) {
+          const xi = shares[i].x;
+          const yi = shares[i].y[byteIndex];
+
+          let basis = 1;
+
+          for (let j = 0; j < shares.length; j++) {
+            if (i === j) continue;
+            const xj = shares[j].x;
+            basis = gfMul(basis, gfDiv(xj, xi ^ xj));
+          }
+
+          value ^= gfMul(yi, basis);
+        }
+
+        out[byteIndex] = value;
+      }
+
+      return out;
+    }
+
+    function bytesToBigInt(bytes) {
+      let hex = "";
+      for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+      return BigInt("0x" + (hex || "0"));
+    }
+
+    function bigIntToBytes(num, len) {
+      let hex = num.toString(16);
+      if (hex.length % 2) hex = "0" + hex;
+
+      const raw = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < raw.length; i++) {
+        raw[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      }
+
+      if (len === undefined) return raw;
+      if (raw.length > len) return raw.slice(raw.length - len);
+
+      const out = new Uint8Array(len);
+      out.set(raw, len - raw.length);
+      return out;
+    }
+
+    function modPow(base, exp, mod) {
+      let result = 1n;
+      base %= mod;
+
+      while (exp > 0n) {
+        if (exp & 1n) result = (result * base) % mod;
+        exp >>= 1n;
+        base = (base * base) % mod;
+      }
+
+      return result;
+    }
+
+    function egcd(a, b) {
+      let oldR = a, r = b;
+      let oldS = 1n, s = 0n;
+      let oldT = 0n, t = 1n;
+
+      while (r !== 0n) {
+        const q = oldR / r;
+        [oldR, r] = [r, oldR - q * r];
+        [oldS, s] = [s, oldS - q * s];
+        [oldT, t] = [t, oldT - q * t];
+      }
+
+      return { g: oldR, x: oldS, y: oldT };
+    }
+
+    function modInv(a, m) {
+      const { g, x } = egcd((a % m + m) % m, m);
+      if (g !== 1n) throw new Error("No modular inverse.");
+      return (x % m + m) % m;
+    }
+
+    function gcd(a, b) {
+      while (b !== 0n) [a, b] = [b, a % b];
+      return a;
+    }
+
+    function randomBigIntBelow(max) {
+      const len = Math.ceil(max.toString(2).length / 8);
+
+      while (true) {
+        const n = bytesToBigInt(randomBytes(len));
+        if (n > 1n && n < max) return n;
+      }
+    }
+
+    function rsaNumsFromJwk(jwk) {
+      const nBytes = b64urlToBytes(jwk.n);
+      return {
+        n: bytesToBigInt(nBytes),
+        e: bytesToBigInt(b64urlToBytes(jwk.e)),
+        d: jwk.d ? bytesToBigInt(b64urlToBytes(jwk.d)) : null,
+        len: nBytes.length
+      };
+    }
+
+    async function ensureOprfIdentity() {
+      const saved = localStorage.getItem(PEER_OPRF_KEY);
+
+      if (saved) {
+        const jwk = JSON.parse(saved);
+        app.oprfPrivateJwk = jwk;
+        app.oprfPublic = {
+          n: jwk.n,
+          e: jwk.e,
+          fp: await shortHash(`${jwk.n}.${jwk.e}`, 14)
+        };
+        return;
+      }
+
+      log("Generating this device's peer key. On old phones this can take a few seconds.", "warn");
+
+      const keyPair = await crypto.subtle.generateKey(
+        {
+          name: "RSA-PSS",
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+          hash: "SHA-256"
+        },
+        true,
+        ["sign", "verify"]
+      );
+
+      const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+      const stored = {
+        n: privateJwk.n,
+        e: privateJwk.e,
+        d: privateJwk.d
+      };
+
+      localStorage.setItem(PEER_OPRF_KEY, JSON.stringify(stored));
+
+      app.oprfPrivateJwk = stored;
+      app.oprfPublic = {
+        n: stored.n,
+        e: stored.e,
+        fp: await shortHash(`${stored.n}.${stored.e}`, 14)
+      };
+
+      log(`Generated peer key ${app.oprfPublic.fp}.`, "ok");
+    }
+
+    async function makeBlind(pin, accountId, peerId, handle, publicJwk) {
+      const pub = rsaNumsFromJwk(publicJwk);
+
+      const input = concatBytes(
+        utf8("webrtc-bank-demo-oprf-input-v3|"),
+        utf8(accountId),
+        utf8("|"),
+        utf8(peerId),
+        utf8("|"),
+        utf8(handle),
+        utf8("|"),
+        utf8(pin)
+      );
+
+      let m = bytesToBigInt(await sha256(input)) % (pub.n - 1n);
+      if (m < 2n) m += 2n;
+      while (gcd(m, pub.n) !== 1n) m += 1n;
+
+      let r;
+      do {
+        r = randomBigIntBelow(pub.n - 1n);
+      } while (gcd(r, pub.n) !== 1n);
+
+      const blinded = (m * modPow(r, pub.e, pub.n)) % pub.n;
+
+      return {
+        blinded: b64(bigIntToBytes(blinded, pub.len)),
+        r,
+        n: pub.n,
+        len: pub.len
+      };
+    }
+
+    async function unblindOprf(signedB64, blind) {
+      const signed = bytesToBigInt(unb64(signedB64));
+      const unblinded = (signed * modInv(blind.r, blind.n)) % blind.n;
+
+      return sha256(concatBytes(
+        utf8("webrtc-bank-demo-oprf-output-v3|"),
+        bigIntToBytes(unblinded, blind.len)
+      ));
+    }
+
+    async function peerSignBlinded(blindedB64) {
+      const nums = rsaNumsFromJwk(app.oprfPrivateJwk);
+      const blinded = bytesToBigInt(unb64(blindedB64)) % nums.n;
+      const signed = modPow(blinded, nums.d, nums.n);
+      return b64(bigIntToBytes(signed, nums.len));
+    }
+
+    async function deriveShareWrapKey(oprfOutput, accountId, peerId, handle) {
+      return hkdf(
+        oprfOutput,
+        await sha256(utf8(`share-wrap-salt|${accountId}|${peerId}|${handle}`)),
+        `share-wrap-key|${accountId}|${peerId}|${handle}`,
+        32
+      );
+    }
+
+    async function deriveVaultKek(pin, salt, iterations, deviceSecret, peerSecret, accountId) {
+      const pinKey = await pbkdf2Pin(pin, salt, iterations);
+
+      return hkdf(
+        concatBytes(pinKey, deviceSecret, peerSecret),
+        await sha256(utf8(`vault-kek-salt|${accountId}`)),
+        `vault-kek|${accountId}`,
+        32
+      );
+    }
+
+    async function currentVault() {
+      return idbGet(CURRENT_VAULT_KEY);
+    }
+
+    async function handleOprfRequest(req, meta = {}) {
+      const from = meta.peerId || "unknown";
+
+      try {
+        if (!req || !req.accountId || !req.handle || !req.blinded || !req.purpose) {
+          return { ok: false, error: "Malformed request." };
+        }
+
+        const isSetup = req.purpose === "setup";
+        const accounts = loadPeerAccounts();
+        const account = accounts[req.accountId];
+
+        if (!isSetup) {
+          if (!account) return { ok: false, error: "This phone does not have a share for that account." };
+          if (account.handle !== req.handle) return { ok: false, error: "Wrong peer handle for this account." };
+        }
+
+        const charge = !isSetup;
+        const rateKey = `${req.accountId}:${req.handle}`;
+        const rate = rateLimitCheck(rateKey, charge);
+
+        if (!rate.allowed) {
+          log(`Refused unlock request for ${from.slice(0, 8)}: ${rate.reason}.`, "warn");
+          render();
+          return {
+            ok: false,
+            error: rate.reason,
+            rate
+          };
+        }
+
+        const signed = await peerSignBlinded(req.blinded);
+
+        if (isSetup) {
+          log(`Answered blinded setup request for coordinator ${from.slice(0, 8)}. PIN not visible to this phone.`, "ok");
+          pulse(from, "setup");
+          render();
+          return {
+            ok: true,
+            signed,
+            peerName: app.displayName,
+            role: app.role,
+            oprfFp: app.oprfPublic.fp,
+            rate
+          };
+        }
+
+        log(`Answered blinded unlock request for coordinator ${from.slice(0, 8)}. Attempts ${rate.count}/${rate.max}.`, "ok");
+        pulse(from, "unlock");
+
+        render();
+
+        return {
+          ok: true,
+          signed,
+          peerName: app.displayName,
+          role: app.role,
+          encryptedShare: account.encryptedShare,
+          x: account.x,
+          rate
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err.message || String(err)
+        };
+      }
+    }
+
+    async function handleProvision(payload, meta = {}) {
+      const from = meta.peerId || "unknown";
+
+      try {
+        if (!payload || !payload.accountId || !payload.handle || !payload.encryptedShare || !payload.x) {
+          log("Rejected malformed provision message.", "bad");
+          return;
+        }
+
+        const accounts = loadPeerAccounts();
+
+        accounts[payload.accountId] = {
+          accountId: payload.accountId,
+          label: payload.label || "P2P vault",
+          coordinatorPeerId: from,
+          coordinatorName: payload.coordinatorName || from,
+          handle: payload.handle,
+          x: payload.x,
+          encryptedShare: payload.encryptedShare,
+          threshold: payload.threshold,
+          n: payload.n,
+          provisionedAt: new Date().toISOString()
+        };
+
+        savePeerAccounts(accounts);
+
+        log(`Stored encrypted share for account ${payload.accountId.slice(0, 10)} from ${from.slice(0, 8)}.`, "ok");
+
+        sendState(from);
+        render();
+      } catch (err) {
+        log(`Provision failed: ${err.message || err}`, "bad");
+      }
+    }
+
+    function ownHello() {
+      return {
+        displayName: app.displayName,
+        role: app.role,
+        roomId: app.roomId,
+        oprfPublic: app.oprfPublic,
+        ua: navigator.userAgent,
+        accountCount: Object.keys(loadPeerAccounts()).length,
+        t: Date.now()
+      };
+    }
+
+    async function sendHello(target = undefined) {
+      if (!app.joined || !app.actions.hello) return;
+
+      try {
+        await app.actions.hello.send(ownHello(), target ? { target } : undefined);
+      } catch (err) {
+        log(`Could not send hello: ${err.message || err}`, "warn");
+      }
+    }
+
+    async function sendState(target = undefined) {
+      if (!app.joined || !app.actions.state) return;
+
+      const accounts = loadPeerAccounts();
+      const current = await currentVault();
+
+      const payload = {
+        displayName: app.displayName,
+        role: app.role,
+        accountCount: Object.keys(accounts).length,
+        currentVaultAccountId: current ? current.accountId : null,
+        hasDeviceFactor: current ? !!getDeviceFactor(current.accountId) : false,
+        t: Date.now()
+      };
+
+      try {
+        await app.actions.state.send(payload, target ? { target } : undefined);
+      } catch {}
+    }
+
+    function updatePeer(peerId, data = {}) {
+      const old = app.peers.get(peerId) || {};
+      app.peers.set(peerId, {
+        ...old,
+        id: peerId,
+        online: true,
+        lastSeen: Date.now(),
+        displayName: data.displayName || old.displayName || peerId.slice(0, 8),
+        role: data.role || old.role || "peer",
+        oprfPublic: data.oprfPublic || old.oprfPublic || null,
+        ua: data.ua || old.ua || "",
+        accountCount: Number.isFinite(data.accountCount) ? data.accountCount : old.accountCount || 0,
+        currentVaultAccountId: data.currentVaultAccountId || old.currentVaultAccountId || null,
+        hasDeviceFactor: typeof data.hasDeviceFactor === "boolean" ? data.hasDeviceFactor : old.hasDeviceFactor || false
+      });
+    }
+
+    async function joinNetwork() {
+      if (!crypto.subtle || !indexedDB) {
+        alert("This browser needs WebCrypto and IndexedDB. Use Chrome/Safari over HTTPS or a secure local context.");
+        return;
+      }
+
+      if (app.room && app.room.leave) {
+        try { app.room.leave(); } catch {}
+      }
+
+      await ensureOprfIdentity();
+
+      app.roomId = $("roomId").value.trim();
+      app.roomSecret = $("roomSecret").value.trim();
+      app.strategy = $("strategy").value;
+      app.displayName = $("displayName").value.trim() || defaultDeviceName();
+      app.role = resolvedRole();
+
+      $("displayName").value = app.displayName;
+
+      if (!app.roomId) throw new Error("Room code is required.");
+      if (!app.roomSecret) throw new Error("Room secret is required.");
+
+      const config = {
+        appId: APP_ID,
+        password: app.roomSecret
+      };
+
+      app.peers.clear();
+      app.actions = {};
+
+      log(`Joining WebRTC room "${app.roomId}" as ${app.role}.`);
+
+      app.room = joinRoom(config, app.roomId);
+
+      app.actions.hello = app.room.makeAction("hello-v3");
+      app.actions.state = app.room.makeAction("state-v3");
+      app.actions.provision = app.room.makeAction("provision-v3");
+      app.actions.vaultNotice = app.room.makeAction("vault-notice-v3");
+      app.actions.oprf = app.room.makeAction("oprf-v3", {
+        kind: "request",
+        onRequest: handleOprfRequest
+      });
+
+      app.room.onPeerJoin = peerId => {
+        updatePeer(peerId, {});
+        log(`Peer joined: ${peerId.slice(0, 10)}.`, "ok");
+        sendHello(peerId);
+        sendState(peerId);
+        pulse(peerId, "join");
+        render();
+      };
+
+      app.room.onPeerLeave = peerId => {
+        const p = app.peers.get(peerId);
+        if (p) p.online = false;
+        log(`Peer left: ${peerId.slice(0, 10)}.`, "warn");
+        render();
+      };
+
+      app.actions.hello.onMessage = (data, meta = {}) => {
+        updatePeer(meta.peerId, data);
+        log(`Hello from ${data.displayName || meta.peerId.slice(0, 8)} (${data.role || "peer"}).`, "ok");
+        sendState(meta.peerId);
+        pulse(meta.peerId, "hello");
+        render();
+      };
+
+      app.actions.state.onMessage = (data, meta = {}) => {
+        updatePeer(meta.peerId, data);
+        render();
+      };
+
+      app.actions.provision.onMessage = handleProvision;
+
+      app.actions.vaultNotice.onMessage = (data, meta = {}) => {
+        log(`Vault notice from ${meta.peerId.slice(0, 8)}: ${data.message || "vault updated"}.`, "ok");
+        render();
+      };
+
+      app.joined = true;
+
+      localStorage.setItem("webrtc_demo_last_room", app.roomId);
+      localStorage.setItem("webrtc_demo_last_secret", app.roomSecret);
+      localStorage.setItem("webrtc_demo_last_name", app.displayName);
+      localStorage.setItem("webrtc_demo_last_role", $("role").value);
+      localStorage.setItem("webrtc_demo_last_threshold", $("threshold").value);
+
+      history.replaceState(null, "", makeInviteUrl(false));
+
+      sendHello();
+      sendState();
+
+      log(`Joined room. My WebRTC peer ID: ${selfId}.`, "ok");
+
+      render();
+    }
+
+    function leaveNetwork() {
+      if (app.room && app.room.leave) {
+        try { app.room.leave(); } catch {}
+      }
+
+      app.room = null;
+      app.joined = false;
+      app.peers.clear();
+
+      log("Left room.", "warn");
+      render();
+    }
+
+    function makeInviteUrl(includeHashSecret = true) {
+      const url = new URL(location.href);
+      url.searchParams.set("room", $("roomId").value.trim());
+      url.searchParams.set("strategy", $("strategy").value);
+
+      if (includeHashSecret) {
+        url.hash = new URLSearchParams({
+          secret: $("roomSecret").value.trim()
+        }).toString();
+      }
+
+      return url.toString();
+    }
+
+    async function copyInvite() {
+      const invite = makeInviteUrl(true);
+
+      try {
+        await navigator.clipboard.writeText(invite);
+        log("Copied invite URL with room secret in hash.", "ok");
+      } catch {
+        $("exportOutput").textContent = invite;
+        log("Clipboard failed. Invite URL placed in export box.", "warn");
+      }
+    }
+
+    async function createVault() {
+      try {
+        if (!app.joined) throw new Error("Join the WebRTC room first.");
+        app.role = resolvedRole();
+
+        if (app.role !== "coordinator") {
+          const ok = confirm("This device is not set as coordinator. Create vault from this device anyway?");
+          if (!ok) return;
+        }
+
+        const pin = $("setupPin").value.trim();
+        assertPin(pin);
+
+        const threshold = Number($("threshold").value);
+        const iterations = Number($("kdfIterations").value);
+
+        const peers = [...app.peers.values()]
+          .filter(p => p.online && p.oprfPublic && p.id !== selfId);
+
+        if (peers.length < threshold) {
+          throw new Error(`Need at least ${threshold} connected phone peers with keys. Currently usable: ${peers.length}.`);
+        }
+
+        const selected = peers.slice(0, peers.length);
+        const n = selected.length;
+        const k = threshold;
+
+        const parsed = JSON.parse($("vaultText").value);
+
+        resetSteps();
+        setSetupProgress(true, 4);
+        $("createVaultBtn").disabled = true;
+        $("vaultOutput").textContent = "Creating encrypted vault and provisioning phones...";
+
+        setStep("pin");
+        const accountId = bytesToB64url(randomBytes(18));
+        const label = `P2P vault ${new Date().toLocaleTimeString()}`;
+        const kdfSalt = randomBytes(16);
+        const dek = randomBytes(32);
+        const deviceSecret = randomBytes(32);
+        const peerSecret = randomBytes(32);
+        const shares = shamirSplit(peerSecret, n, k);
+
+        log(`Creating account ${accountId.slice(0, 12)} with ${k}-of-${n} phone threshold.`, "ok");
+        setStep("pin", true);
+
+        const committee = [];
+
+        for (let i = 0; i < selected.length; i++) {
+          const peer = selected[i];
+          const share = shares[i];
+          const handle = bytesToB64url(randomBytes(16));
+          const pctBase = 10 + (i / selected.length) * 55;
+
+          setStep("blind");
+          setSetupProgress(true, pctBase);
+
+          const blind = await makeBlind(pin, accountId, peer.id, handle, peer.oprfPublic);
+          log(`Blinded setup request for ${peer.displayName || peer.id.slice(0, 8)}.`, "ok");
+          pulse(peer.id, "blind");
+
+          setStep("peer");
+
+          const resp = await app.actions.oprf.request(
+            {
+              purpose: "setup",
+              accountId,
+              handle,
+              blinded: blind.blinded,
+              charge: false
+            },
+            {
+              target: peer.id,
+              timeoutMs: 12000
+            }
+          );
+
+          if (!resp || !resp.ok) {
+            throw new Error(`${peer.displayName || peer.id} failed setup request: ${resp && resp.error ? resp.error : "no response"}`);
+          }
+
+          const oprfOutput = await unblindOprf(resp.signed, blind);
+          const shareWrapKey = await deriveShareWrapKey(oprfOutput, accountId, peer.id, handle);
+
+          const encryptedShare = await aesEncrypt(
+            shareWrapKey,
+            share.y,
+            utf8(`encrypted-share|${accountId}|${peer.id}|${handle}|${share.x}`)
+          );
+
+          await app.actions.provision.send(
+            {
+              accountId,
+              label,
+              coordinatorName: app.displayName,
+              handle,
+              x: share.x,
+              encryptedShare,
+              threshold: k,
+              n
+            },
+            {
+              target: peer.id
+            }
+          );
+
+          committee.push({
+            peerId: peer.id,
+            peerName: peer.displayName || peer.id.slice(0, 8),
+            handle,
+            x: share.x,
+            oprfPublic: peer.oprfPublic,
+            provisionedAt: new Date().toISOString()
+          });
+
+          setSetupProgress(true, pctBase + 55 / selected.length);
+          log(`Provisioned encrypted share ${share.x} to ${peer.displayName || peer.id.slice(0, 8)}.`, "ok");
+          pulse(peer.id, "provision");
+          await new Promise(r => setTimeout(r, 120));
+        }
+
+        setStep("peer", true);
+        setStep("shares", true);
+
+        const kek = await deriveVaultKek(pin, kdfSalt, iterations, deviceSecret, peerSecret, accountId);
+
+        const wrappedDEK = await aesEncrypt(
+          kek,
+          dek,
+          utf8(`wrapped-dek|${accountId}`)
+        );
+
+        const vaultCiphertext = await aesEncrypt(
+          dek,
+          utf8(JSON.stringify(parsed, null, 2)),
+          utf8(`vault|${accountId}`)
+        );
+
+        const record = {
+          version: 3,
+          accountId,
+          label,
+          createdAt: new Date().toISOString(),
+          kdf: {
+            name: "PBKDF2-SHA256-DEMO",
+            iterations,
+            salt: b64(kdfSalt)
+          },
+          threshold: {
+            k,
+            n
+          },
+          committee,
+          wrappedDEK,
+          vaultCiphertext,
+          notes: [
+            "Laptop IndexedDB does not contain plaintext vault, DEK, PIN verifier, peerSecret, or peer shares.",
+            "Encrypted Shamir shares were sent to the phones.",
+            "Demo only: replace localStorage device factor with passkey/WebAuthn PRF in a real system."
+          ]
+        };
+
+        await idbSet(CURRENT_VAULT_KEY, record);
+        saveDeviceFactor(accountId, deviceSecret);
+
+        await app.actions.vaultNotice.send({
+          accountId,
+          label,
+          message: `Coordinator created ${k}-of-${n} vault ${accountId.slice(0, 10)}`
+        });
+
+        setStep("vault", true);
+        setSetupProgress(true, 100);
+
+        $("vaultOutput").textContent =
+          `Vault created.\n\nAccount: ${accountId}\nThreshold: ${k}-of-${n}\nPhones provisioned: ${committee.map(c => c.peerName).join(", ")}\n\nNow try unlocking with the PIN.`;
+
+        log("Encrypted vault stored in laptop IndexedDB.", "ok");
+        log("Device factor stored locally on this laptop for demo purposes.", "ok");
+
+        await sendState();
+        await exportVault();
+        render();
+      } catch (err) {
+        $("vaultOutput").textContent = `Create vault failed:\n${err.message || err}`;
+        log(`Create vault failed: ${err.message || err}`, "bad");
+      } finally {
+        $("createVaultBtn").disabled = false;
+        setTimeout(() => setSetupProgress(false, 0), 800);
+      }
+    }
+
+    async function unlockVault() {
+      try {
+        if (!app.joined) throw new Error("Join the WebRTC room first.");
+
+        const record = await currentVault();
+        if (!record) throw new Error("No laptop vault exists. Create one first.");
+
+        const pin = $("unlockPin").value.trim();
+        assertPin(pin);
+
+        const deviceSecret = getDeviceFactor(record.accountId);
+        if (!deviceSecret) {
+          throw new Error("Laptop device factor missing. Correct PIN + phones is not enough.");
+        }
+
+        resetSteps();
+        setStep("pin");
+        $("unlockVaultBtn").disabled = true;
+        $("vaultOutput").textContent = "Unlocking with real phone peers...";
+
+        const recovered = [];
+        const failures = [];
+
+        setStep("pin", true);
+
+        for (const meta of record.committee) {
+          if (recovered.length >= record.threshold.k) break;
+
+          const peer = app.peers.get(meta.peerId);
+          if (!peer || !peer.online) {
+            failures.push(`${meta.peerName}: offline`);
+            log(`${meta.peerName} is offline; skipping.`, "warn");
+            continue;
+          }
+
+          try {
+            setStep("blind");
+            const blind = await makeBlind(pin, record.accountId, meta.peerId, meta.handle, meta.oprfPublic);
+            log(`Sent blinded unlock request to ${meta.peerName}.`, "ok");
+            pulse(meta.peerId, "blind");
+
+            setStep("peer");
+            const resp = await app.actions.oprf.request(
+              {
+                purpose: "unlock",
+                accountId: record.accountId,
+                handle: meta.handle,
+                blinded: blind.blinded,
+                charge: true
+              },
+              {
+                target: meta.peerId,
+                timeoutMs: 10000
+              }
+            );
+
+            if (!resp || !resp.ok) {
+              throw new Error(resp && resp.error ? resp.error : "no usable response");
+            }
+
+            if (!resp.encryptedShare) {
+              throw new Error("peer did not return its encrypted share");
+            }
+
+            const oprfOutput = await unblindOprf(resp.signed, blind);
+            const shareWrapKey = await deriveShareWrapKey(oprfOutput, record.accountId, meta.peerId, meta.handle);
+
+            const y = await aesDecrypt(
+              shareWrapKey,
+              resp.encryptedShare,
+              utf8(`encrypted-share|${record.accountId}|${meta.peerId}|${meta.handle}|${meta.x}`)
+            );
+
+            recovered.push({
+              x: meta.x,
+              y
+            });
+
+            log(`Recovered valid share from ${meta.peerName}. (${recovered.length}/${record.threshold.k})`, "ok");
+            pulse(meta.peerId, "share");
+          } catch (err) {
+            failures.push(`${meta.peerName}: ${err.message || err}`);
+            log(`Share failed from ${meta.peerName}: ${err.message || err}`, "warn");
+          }
+        }
+
+        setStep("peer", true);
+        setStep("shares");
+
+        if (recovered.length < record.threshold.k) {
+          throw new Error(
+            `Threshold failed. Got ${recovered.length}/${record.threshold.k} shares.\n\nFailures:\n${failures.join("\n")}`
+          );
+        }
+
+        const peerSecret = shamirReconstruct(recovered.slice(0, record.threshold.k), 32);
+        setStep("shares", true);
+
+        const kek = await deriveVaultKek(
+          pin,
+          unb64(record.kdf.salt),
+          record.kdf.iterations,
+          deviceSecret,
+          peerSecret,
+          record.accountId
+        );
+
+        setStep("vault");
+
+        const dek = await aesDecrypt(
+          kek,
+          record.wrappedDEK,
+          utf8(`wrapped-dek|${record.accountId}`)
+        );
+
+        const plaintext = await aesDecrypt(
+          dek,
+          record.vaultCiphertext,
+          utf8(`vault|${record.accountId}`)
+        );
+
+        setStep("vault", true);
+
+        $("vaultOutput").textContent = text(plaintext);
+        log("Vault decrypted successfully using PIN + laptop device factor + phone threshold.", "ok");
+
+        render();
+      } catch (err) {
+        $("vaultOutput").textContent = `Unlock failed:\n${err.message || err}`;
+        log(`Unlock failed: ${err.message || err}`, "bad");
+      } finally {
+        $("unlockVaultBtn").disabled = false;
+      }
+    }
+
+    async function exportVault() {
+      const record = await currentVault();
+
+      if (!record) {
+        $("exportOutput").textContent = "No laptop vault in IndexedDB.";
+        return;
+      }
+
+      $("exportOutput").textContent = JSON.stringify(record, null, 2);
+      render();
+    }
+
+    async function deleteVault() {
+      const record = await currentVault();
+      if (!record) {
+        log("No laptop vault to delete.", "warn");
+        return;
+      }
+
+      if (!confirm("Delete the laptop vault and local device factor? Phone shares will remain on phones unless deleted there.")) return;
+
+      eraseDeviceFactor(record.accountId);
+      await idbDelete(CURRENT_VAULT_KEY);
+
+      $("vaultOutput").textContent = "Laptop vault deleted.";
+      $("exportOutput").textContent = "No laptop vault in IndexedDB.";
+
+      log("Deleted laptop vault and laptop device factor.", "warn");
+      sendState();
+      render();
+    }
+
+    async function eraseDevice() {
+      const record = await currentVault();
+      if (!record) {
+        log("No current vault.", "warn");
+        return;
+      }
+
+      eraseDeviceFactor(record.accountId);
+      log("Erased laptop device factor. Correct PIN + phones will now fail.", "warn");
+      render();
+    }
+
+    async function simulateOfflineAttack() {
+      const record = await currentVault();
+
+      if (!record) {
+        $("vaultOutput").textContent = "No laptop vault exists to steal.";
+        return;
+      }
+
+      $("vaultOutput").textContent =
+`Simulated stolen laptop IndexedDB:
+
+Attacker has:
+- encrypted vault ciphertext
+- wrapped DEK
+- KDF salt and parameters
+- committee peer IDs and handles
+- peer public keys
+
+Attacker does NOT have:
+- phone-stored encrypted Shamir shares
+- phone private peer keys
+- phone rate-limited responses
+- laptop device factor
+- plaintext DEK
+- plaintext peerSecret
+- any local PIN verifier
+
+Result:
+A copied laptop IndexedDB record is not enough to brute-force the 4-digit PIN offline in this demo. The attacker must ask the real phones, which rate-limit attempts.`;
+
+      $("exportOutput").textContent = JSON.stringify({
+        stolenLaptopIndexedDBHas: Object.keys(record),
+        missingForOfflinePinAttack: [
+          "phone encrypted Shamir shares",
+          "phone private peer keys",
+          "rate-limited phone responses",
+          "laptop device factor",
+          "plaintext peerSecret",
+          "plaintext DEK"
+        ],
+        committee: record.committee.map(c => ({
+          peerName: c.peerName,
+          peerId: c.peerId,
+          handle: c.handle,
+          x: c.x,
+          hasEncryptedShareInLaptopIndexedDB: false
+        }))
+      }, null, 2);
+
+      log("Displayed stolen IndexedDB attack simulation.", "ok");
+    }
+
+    function showPeerStore() {
+      const accounts = loadPeerAccounts();
+      const rates = loadRates();
+
+      $("peerStoreOutput").textContent = JSON.stringify({
+        thisDevice: {
+          peerId: selfId,
+          displayName: app.displayName,
+          role: app.role,
+          peerKeyFingerprint: app.oprfPublic ? app.oprfPublic.fp : null
+        },
+        storedPeerAccounts: accounts,
+        rateLimits: rates
+      }, null, 2);
+
+      log("Displayed this device's peer guardian storage.");
+    }
+
+    function deletePeerStore() {
+      if (!confirm("Delete this device's peer shares and peer key? If this is a phone, it will no longer help unlock existing vaults.")) return;
+
+      localStorage.removeItem(PEER_ACCOUNTS_KEY);
+      localStorage.removeItem(PEER_RATE_KEY);
+      localStorage.removeItem(PEER_OPRF_KEY);
+
+      $("peerStoreOutput").textContent = "Deleted peer storage. Rejoin or reload to create a new peer identity.";
+      log("Deleted this device's peer guardian shares, rates, and peer key.", "warn");
+    }
+
+    function resetRates() {
+      localStorage.removeItem(PEER_RATE_KEY);
+      $("peerStoreOutput").textContent = "Rate limits reset on this device.";
+      log("Reset rate limits on this device.", "ok");
+      sendState();
+      render();
+    }
+
+    function pulse(peerId, type) {
+      app.lastPackets.push({
+        peerId,
+        type,
+        t: Date.now()
+      });
+
+      app.lastPackets = app.lastPackets.filter(p => Date.now() - p.t < 4000);
+    }
+
+    async function render() {
+      $("statSelf").textContent = selfId ? selfId.slice(0, 10) : "loading";
+      $("statRoom").textContent = app.joined ? app.roomId : "not joined";
+      $("statRole").textContent = app.role || resolvedRole();
+      $("statPeers").textContent = [...app.peers.values()].filter(p => p.online).length;
+
+      const record = await currentVault().catch(() => null);
+      $("statVault").textContent = record ? `${record.threshold.k}-of-${record.threshold.n}` : "empty";
+
+      renderPeerList();
+      renderNetwork(record);
+    }
+
+    function renderPeerList() {
+      const peers = [...app.peers.values()].sort((a, b) => {
+        if (a.online !== b.online) return a.online ? -1 : 1;
+        return (a.displayName || "").localeCompare(b.displayName || "");
+      });
+
+      if (!peers.length) {
+        $("peerList").innerHTML = `<div class="small">No peers connected yet. Open this same file on the phones using the same room code and secret.</div>`;
+        return;
+      }
+
+      $("peerList").innerHTML = peers.map(p => {
+        const roleClass = p.role === "coordinator" ? "purple" : "green";
+        const onlineClass = p.online ? "green" : "red";
+
+        return `
+          <div class="peerRow">
+            <div>
+              <div class="name">${escapeHtml(p.displayName || p.id.slice(0, 8))}</div>
+              <div class="details">
+                ID: ${escapeHtml(p.id.slice(0, 16))} ·
+                key: ${escapeHtml(p.oprfPublic ? p.oprfPublic.fp : "missing")} ·
+                accounts: ${p.accountCount || 0}
+              </div>
+            </div>
+            <div style="display:grid;gap:6px;justify-items:end;">
+              <span class="badge ${onlineClass}">${p.online ? "online" : "offline"}</span>
+              <span class="badge ${roleClass}">${escapeHtml(p.role || "peer")}</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, ch => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[ch]));
+    }
+
+    function renderNetwork(record) {
+      const svg = $("networkSvg");
+      const cards = $("nodeCards");
+      const peers = [...app.peers.values()].filter(p => p.online);
+
+      const nodes = [
+        {
+          id: selfId,
+          displayName: app.displayName || "me",
+          role: app.role || resolvedRole(),
+          self: true,
+          accountCount: Object.keys(loadPeerAccounts()).length,
+          oprfPublic: app.oprfPublic
+        },
+        ...peers.map(p => ({ ...p, self: false }))
+      ];
+
+      const center = { x: 500, y: 215 };
+      const radiusX = 350;
+      const radiusY = 145;
+
+      const positioned = nodes.map((node, i) => {
+        if (node.self) return { ...node, x: center.x, y: center.y };
+
+        const peerIndex = i - 1;
+        const angle = peers.length === 1
+          ? -Math.PI / 2
+          : (-Math.PI / 2) + (peerIndex / peers.length) * Math.PI * 2;
+
+        return {
+          ...node,
+          x: center.x + Math.cos(angle) * radiusX,
+          y: center.y + Math.sin(angle) * radiusY
+        };
+      });
+
+      let svgHtml = `
+        <defs>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="3.5" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <linearGradient id="lineGrad" x1="0" x2="1">
+            <stop offset="0%" stop-color="#60a5fa" stop-opacity=".8"/>
+            <stop offset="100%" stop-color="#34d399" stop-opacity=".65"/>
+          </linearGradient>
+        </defs>
+      `;
+
+      for (const node of positioned) {
+        if (node.self) continue;
+
+        const isCommittee = record && record.committee.some(c => c.peerId === node.id);
+        const packet = app.lastPackets.find(p => p.peerId === node.id && Date.now() - p.t < 2500);
+        const opacity = isCommittee ? .95 : .42;
+        const stroke = isCommittee ? "url(#lineGrad)" : "rgba(149,164,184,.35)";
+        const width = packet ? 4 : isCommittee ? 3 : 2;
+
+        svgHtml += `
+          <line x1="${center.x}" y1="${center.y}" x2="${node.x}" y2="${node.y}"
+            stroke="${stroke}" stroke-width="${width}" stroke-opacity="${opacity}" stroke-linecap="round" />
+        `;
+
+        if (packet) {
+          const age = Math.min(1, (Date.now() - packet.t) / 2500);
+          const px = center.x + (node.x - center.x) * age;
+          const py = center.y + (node.y - center.y) * age;
+          const color = packet.type === "share" ? "#34d399" : packet.type === "blind" ? "#60a5fa" : packet.type === "provision" ? "#a78bfa" : "#fbbf24";
+
+          svgHtml += `
+            <circle cx="${px}" cy="${py}" r="8" fill="${color}" filter="url(#glow)">
+              <animate attributeName="r" values="5;10;5" dur="900ms" repeatCount="indefinite"/>
+            </circle>
+          `;
+        }
+      }
+
+      for (const node of positioned) {
+        const color = node.self
+          ? "#60a5fa"
+          : node.role === "coordinator"
+            ? "#a78bfa"
+            : "#34d399";
+
+        svgHtml += `
+          <circle cx="${node.x}" cy="${node.y}" r="${node.self ? 42 : 32}"
+            fill="rgba(8,14,26,.96)" stroke="${color}" stroke-width="4" filter="url(#glow)" />
+          <circle cx="${node.x}" cy="${node.y}" r="${node.self ? 8 : 6}"
+            fill="${color}" />
+        `;
+      }
+
+      svg.innerHTML = svgHtml;
+
+      cards.innerHTML = positioned.map(node => {
+        const role = node.role || "peer";
+        const cls = node.self ? "self" : role === "coordinator" ? "coordinator" : "peer";
+        const left = `${node.x / 10}%`;
+        const top = `${node.y / 4.3}%`;
+
+        const committee = record && record.committee.find(c => c.peerId === node.id);
+        const extra = node.self
+          ? `self · ${selfId.slice(0, 10)}`
+          : `${node.id.slice(0, 10)} · ${committee ? "committee" : "connected"}`;
+
+        return `
+          <div class="nodeCard ${cls}" style="left:${left};top:${top}">
+            <div class="name">${escapeHtml(node.displayName || node.id.slice(0, 8))}</div>
+            <div class="meta">${escapeHtml(role)} · ${escapeHtml(extra)}</div>
+            <div class="meta">key: ${escapeHtml(node.oprfPublic ? node.oprfPublic.fp : "missing")}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function initInputsFromUrl() {
+      const url = new URL(location.href);
+      const hash = new URLSearchParams(location.hash.slice(1));
+
+      $("roomId").value =
+        url.searchParams.get("room") ||
+        localStorage.getItem("webrtc_demo_last_room") ||
+        "steves-bank-demo-today";
+
+      $("roomSecret").value =
+        hash.get("secret") ||
+        localStorage.getItem("webrtc_demo_last_secret") ||
+        "demo-secret-change-me";
+
+      $("strategy").value =
+        url.searchParams.get("strategy") ||
+        localStorage.getItem("webrtc_demo_last_strategy") ||
+        "nostr";
+
+      $("displayName").value =
+        localStorage.getItem("webrtc_demo_last_name") ||
+        defaultDeviceName();
+
+      $("role").value =
+        localStorage.getItem("webrtc_demo_last_role") ||
+        "auto";
+
+      $("threshold").value =
+        localStorage.getItem("webrtc_demo_last_threshold") ||
+        "3";
+    }
+
+    async function boot() {
+      initInputsFromUrl();
+
+      app.displayName = $("displayName").value;
+      app.role = resolvedRole();
+      app.roomId = $("roomId").value;
+      app.roomSecret = $("roomSecret").value;
+
+      $("joinBtn").addEventListener("click", () => joinNetwork().catch(err => {
+        log(err.message || err, "bad");
+        alert(err.message || err);
+      }));
+
+      $("copyInviteBtn").addEventListener("click", copyInvite);
+      $("sendHelloBtn").addEventListener("click", () => {
+        app.displayName = $("displayName").value.trim() || defaultDeviceName();
+        app.role = resolvedRole();
+        sendHello();
+        sendState();
+        render();
+      });
+
+      $("leaveBtn").addEventListener("click", leaveNetwork);
+      $("createVaultBtn").addEventListener("click", createVault);
+      $("unlockVaultBtn").addEventListener("click", unlockVault);
+      $("exportVaultBtn").addEventListener("click", exportVault);
+      $("deleteVaultBtn").addEventListener("click", deleteVault);
+      $("offlineAttackBtn").addEventListener("click", simulateOfflineAttack);
+      $("eraseDeviceBtn").addEventListener("click", eraseDevice);
+      $("showPeerStoreBtn").addEventListener("click", showPeerStore);
+      $("deletePeerStoreBtn").addEventListener("click", deletePeerStore);
+      $("resetRatesBtn").addEventListener("click", resetRates);
+
+      for (const id of ["role", "displayName", "roomId", "roomSecret", "threshold"]) {
+        $(id).addEventListener("change", () => {
+          app.displayName = $("displayName").value.trim() || defaultDeviceName();
+          app.role = resolvedRole();
+          app.roomId = $("roomId").value.trim();
+          app.roomSecret = $("roomSecret").value.trim();
+          render();
+        });
+      }
+
+      $("statSelf").textContent = selfId.slice(0, 10);
+      $("statRole").textContent = app.role;
+      $("statRoom").textContent = "not joined";
+
+      log("Loaded demo. Joining room automatically...");
+      await joinNetwork();
+      await exportVault();
+      showPeerStore();
+      render();
+
+      setInterval(() => {
+        if (app.joined) {
+          sendState();
+          render();
+        }
+      }, 3000);
+    }
+
+    boot().catch(err => {
+      log(`Boot failed: ${err.message || err}`, "bad");
+      alert(`Boot failed: ${err.message || err}`);
+    });
+  </script>
+</body>
+</html>
