@@ -4581,6 +4581,9 @@
                         this.emit('fragment', message.data, this.peerId)
                     }
                     return
+                } else if (message.action === 'block-action') {
+                    this.emit('block-action', message.data?.namespace, message.data?.data, this.peerId)
+                    return
                 }
 
                 this.emit(message.action, message.data, this.peerId)
@@ -4615,6 +4618,10 @@
 
             sendCursor(data) {
                 this.send('sync-cursor', data)
+            }
+
+            sendBlockAction(namespace, data) {
+                this.send('block-action', { namespace, data })
             }
 
             getPeers() {
@@ -4681,8 +4688,10 @@
                 const [sendHighlight, onHighlight] = this.room.makeAction('highlight')
                 const [sendBlockOps, onBlockOps] = this.room.makeAction('store_ops')
                 const [sendDroneOps, onDroneOps] = this.room.makeAction('drone_ops')
+                const [sendBankOps, onBankOps] = this.room.makeAction('bank_ops')
                 this.blockActionSenders.store_ops = sendBlockOps
                 this.blockActionSenders.drone_ops = sendDroneOps
+                this.blockActionSenders.bank_ops = sendBankOps
                 this.rawSendFrag = sendFrag; this.rawSendLock = sendLock; this.rawSendReq = sendReq; this.rawSendId = sendId; this.rawSendCursor = sendCursor; this.rawSendFile = sendFile; this.rawSendHighlight = sendHighlight
 
                 this.room.onPeerJoin(async pid => {
@@ -4760,6 +4769,7 @@
                 })
                 onBlockOps((d, p) => this.emit('block-action', 'store_ops', d, p))
                 onDroneOps((d, p) => this.emit('block-action', 'drone_ops', d, p))
+                onBankOps((d, p) => { if (this.verifiedPeers.has(p)) this.emit('block-action', 'bank_ops', d, p) })
                 this.room.onPeerLeave(p => { this.peerIdentities.delete(p); this.emit('peer-leave', p) })
             }
 
