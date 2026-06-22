@@ -1126,6 +1126,41 @@
             font-weight: bold;
         }
 
+        .connection-handle-popup {
+            position: fixed;
+            display: none;
+            z-index: 1001;
+            min-width: 150px;
+            padding: 12px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, .9);
+            color: #fff;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, .35);
+            text-align: center;
+        }
+
+        .connection-handle-popup strong {
+            display: block;
+            margin-bottom: 10px;
+            font: bold 15px monospace;
+        }
+
+        .connection-handle-popup button {
+            width: 100%;
+            padding: 8px 10px;
+            border: 0;
+            border-radius: 4px;
+            background: #fff;
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .connection-handle-popup button:disabled {
+            opacity: .55;
+            cursor: default;
+        }
+
         #chat-header {
             height: 50px;
             display: flex;
@@ -4133,17 +4168,25 @@
         }
 
         function joinRoom(config, roomId) {
-            const connectedPeers = {}, pendingOffers = {}, handledOffers = new Set(), trackerSockets = {}, peerJoinCallbacks = [], peerLeaveCallbacks = [], peerDiscoverCallbacks = [], peerErrorCallbacks = [], actionHandlers = {}, announceIntervals = []
-            let offerPool = [], infoHash = null, isLeaving = false, readyResolve
+            const connectedPeers = {}, pendingOffers = {}, handledOffers = new Set(), trackerSockets = {}, peerJoinCallbacks = [], peerLeaveCallbacks = [], peerDiscoverCallbacks = [], peerSeenCallbacks = [], peerErrorCallbacks = [], actionHandlers = {}, announceIntervals = []
+            let offerPool = [], infoHash = null, isLeaving = false, readyResolve, offerPoolFill = null
             let syncEnabled = false
             let discoveredPeers = new Set()
             let offerPoolTimer = null
+            const roomPeerId = config.peerId || selfId
+            const offerPoolSize = config.offerPoolSize || OFFER_POOL_SIZE
             const readyPromise = new Promise(resolve => { readyResolve = resolve })
 
             async function fillOfferPool() {
                 if (isLeaving) return
-                const needed = OFFER_POOL_SIZE - offerPool.length
-                if (needed > 0) offerPool.push(...await Promise.all(Array(needed).fill().map(() => createOffer(connectedPeers, peerLeaveCallbacks, pid => peerErrorCallbacks.forEach(cb => cb(pid))))))
+                if (offerPoolFill) return offerPoolFill
+                const needed = offerPoolSize - offerPool.length
+                if (needed <= 0) return
+                offerPoolFill = Promise.all(Array(needed).fill().map(() => createOffer(connectedPeers, peerLeaveCallbacks, pid => peerErrorCallbacks.forEach(cb => cb(pid)))))
+                    .then(offers => isLeaving ? offers.forEach(o => o.pc.close()) : offerPool.push(...offers))
+                    .catch(() => { })
+                    .finally(() => { offerPoolFill = null })
+                return offerPoolFill
             }
 
             async function getOffersFromPoolAsync(n) {
@@ -4160,7 +4203,7 @@
             function setupDataChannel(dc, peerId) {
                 const handleOpen = () => peerJoinCallbacks.forEach(cb => cb(peerId))
                 if (dc.readyState === 'open') handleOpen(); else dc.onopen = handleOpen
-                dc.onclose = () => { delete connectedPeers[peerId]; peerLeaveCallbacks.forEach(cb => cb(peerId)) }
+                dc.onclose = () => { delete connectedPeers[peerId]; discoveredPeers.delete(peerId); peerLeaveCallbacks.forEach(cb => cb(peerId)) }
                 dc.onmessage = e => {
                     try {
                         if (e.data instanceof ArrayBuffer) {
@@ -4198,7 +4241,7 @@
                 await readyPromise
                 const announce = async () => {
                     if (ws.readyState !== WebSocket.OPEN || isLeaving || !infoHash) return
-                    const offers = syncEnabled ? await getOffersFromPoolAsync(3) : []
+                    const offers = syncEnabled ? await getOffersFromPoolAsync(Math.min(3, offerPoolSize)) : []
                     if (syncEnabled && offers.length === 0) return
                     if (syncEnabled) {
                         for (const o of offers) {
@@ -4211,7 +4254,7 @@
                             }, OFFER_TTL)
                         }
                     }
-                    ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, numwant: OFFER_POOL_SIZE, offers: offers.map(o => ({ offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp } })) }))
+                    ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: roomPeerId, numwant: offerPoolSize, offers: offers.map(o => ({ offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp } })) }))
                 }
                 await announce()
                 announceIntervals.push(setInterval(announce, ANNOUNCE_INTERVAL))
@@ -4219,7 +4262,9 @@
 
             async function handleTrackerMessage(ws, data) {
                 await readyPromise
-                if (data.info_hash !== infoHash || data.peer_id === selfId) return
+                if (data.info_hash !== infoHash || data.peer_id === roomPeerId) return
+                if (config.peerFilter && (!data.peer_id || !config.peerFilter(data.peer_id))) return
+                if (data.peer_id) peerSeenCallbacks.forEach(cb => cb(data.peer_id))
 
                 if (data.peer_id && !discoveredPeers.has(data.peer_id)) {
                     discoveredPeers.add(data.peer_id)
@@ -4236,7 +4281,7 @@
                 if (data.offer && data.offer_id) {
                     if (handledOffers.has(data.offer_id) || connectedPeers[data.peer_id]) return
                     handledOffers.add(data.offer_id)
-                    if (Object.values(pendingOffers).some(p => p.peerId === data.peer_id) && selfId > data.peer_id) return
+                    if (Object.values(pendingOffers).some(p => p.peerId === data.peer_id) && roomPeerId > data.peer_id) return
                     try {
                         const peerEntry = { pc: null, dc: null }
                         connectedPeers[data.peer_id] = peerEntry
@@ -4248,7 +4293,7 @@
                         peerEntry.pc = pc
                         await pc.setRemoteDescription(new RTCSessionDescription(data.offer))
                         await pc.setLocalDescription(await pc.createAnswer())
-                        ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer: await waitForIce(pc) }))
+                        ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: roomPeerId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer: await waitForIce(pc) }))
                     } catch (err) { delete connectedPeers[data.peer_id] }
                 }
 
@@ -4286,12 +4331,14 @@
                 return false
             }
 
-            TRACKERS.forEach(url => connectToTracker(url))
+            ;(config.trackers || TRACKERS).forEach(url => connectToTracker(url))
                 ; (async () => {
                     infoHash = await sha1Hash(config.appId + roomId)
                     readyResolve()
-                    await fillOfferPool()
-                    offerPoolTimer = setInterval(fillOfferPool, OFFER_TTL)
+                    if (config.prewarmOffers !== false) {
+                        await fillOfferPool()
+                        if (!isLeaving && !offerPoolTimer) offerPoolTimer = setInterval(fillOfferPool, OFFER_TTL)
+                    }
                 })()
 
             return {
@@ -4300,14 +4347,16 @@
                 onPeerLeave(cb) { peerLeaveCallbacks.push(cb) },
                 getPeers() { return connectedPeers },
                 onPeerDiscover(cb) { peerDiscoverCallbacks.push(cb) },
+                onPeerSeen(cb) { peerSeenCallbacks.push(cb) },
                 onPeerError(cb) { peerErrorCallbacks.push(cb) },
                 getDiscoveredPeers() { return discoveredPeers },
                 enableSync() {
                     if (!syncEnabled) {
                         syncEnabled = true
+                        if (!offerPoolTimer) offerPoolTimer = setInterval(fillOfferPool, OFFER_TTL)
                         Object.values(trackerSockets).forEach(async ws => {
                             if (ws.readyState === WebSocket.OPEN) {
-                                const offers = await getOffersFromPoolAsync(3)
+                                const offers = await getOffersFromPoolAsync(Math.min(3, offerPoolSize))
                                 for (const o of offers) {
                                     pendingOffers[o.offerId] = { pc: o.pc, dc: o.dc, created: o.created }
                                     setTimeout(() => {
@@ -4317,7 +4366,7 @@
                                         }
                                     }, OFFER_TTL)
                                 }
-                                ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, numwant: OFFER_POOL_SIZE, offers: offers.map(o => ({ offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp } })) }))
+                                ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: roomPeerId, numwant: offerPoolSize, offers: offers.map(o => ({ offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp } })) }))
                             }
                         })
                     }
@@ -4340,7 +4389,7 @@
                         roomHex: roomId.replace('color-', ''),
                         offer_id: o.offerId,
                         offer: { type: o.offer.type, sdp: o.offer.sdp },
-                        peer_id: selfId,
+                        peer_id: roomPeerId,
                         info_hash: infoHash
                     }
                 },
@@ -4369,7 +4418,7 @@
                         const sent = await sendManualAnswerToTrackers({
                             action: 'announce',
                             info_hash: infoHash,
-                            peer_id: selfId,
+                            peer_id: roomPeerId,
                             to_peer_id: inviteData.peer_id,
                             offer_id: inviteData.offer_id,
                             answer
@@ -4770,7 +4819,7 @@
                 onBlockOps((d, p) => this.emit('block-action', 'store_ops', d, p))
                 onDroneOps((d, p) => this.emit('block-action', 'drone_ops', d, p))
                 onBankOps((d, p) => { if (this.verifiedPeers.has(p)) this.emit('block-action', 'bank_ops', d, p) })
-                this.room.onPeerLeave(p => { this.peerIdentities.delete(p); this.emit('peer-leave', p) })
+                this.room.onPeerLeave(p => { this.verifiedPeers.delete(p); this.peerIdentities.delete(p); this.emit('peer-leave', p) })
             }
 
             async sendIdentity(targetPeerId = null) {
@@ -6597,6 +6646,12 @@
                 this.visitedRooms = []
                 this.activeLocks = {}
                 this.peerColors = {}
+                this.contacts = {}
+                this.presenceRoom = null
+                this.presenceRoomHex = null
+                this.friendPresenceRooms = new Map()
+                this.friendPresenceTimer = null
+                this.loadContacts()
                 this.initDone = false
                 this.cryptoReadyLogged = false
                 this.currentLineId = null
@@ -8496,6 +8551,124 @@
                 return Object.entries(this.mesh?.getPeers?.() || {}).filter(([, peer]) => peer?.dc?.readyState === 'open')
             }
 
+            contactStorageKey() {
+                return 'colorContacts:' + this.user.color.replace('#', '').toLowerCase()
+            }
+
+            loadContacts() {
+                try {
+                    const saved = JSON.parse(localStorage.getItem(this.contactStorageKey()) || '{}')
+                    this.contacts = Object.fromEntries(Object.entries(saved).filter(([hex]) => /^[0-9a-f]{6}$/i.test(hex)))
+                } catch (e) {
+                    this.contacts = {}
+                }
+            }
+
+            saveContacts() {
+                localStorage.setItem(this.contactStorageKey(), JSON.stringify(this.contacts))
+            }
+
+            rememberVisitor(color) {
+                const hex = String(color || '').replace('#', '').toLowerCase()
+                if (!/^[0-9a-f]{6}$/.test(hex) || hex === this.user.color.replace('#', '').toLowerCase()) return
+                const previous = this.contacts[hex] || {}
+                this.contacts[hex] = { ...previous, color: '#' + hex, lastSeen: Date.now(), onlineUntil: Date.now() + 75000 }
+                this.saveContacts()
+            }
+
+            addFriend(color) {
+                const hex = String(color || '').replace('#', '').toLowerCase()
+                if (!/^[0-9a-f]{6}$/.test(hex)) return
+                const previous = this.contacts[hex] || { color: '#' + hex, lastSeen: Date.now() }
+                this.contacts[hex] = { ...previous, friend: true }
+                this.saveContacts()
+                this.watchFriendPresence(hex)
+                this.updateConnectionSphereUI()
+            }
+
+            startPresence() {
+                const ownHex = this.user.color.replace('#', '').toLowerCase()
+                if (!/^[0-9a-f]{6}$/.test(ownHex) || this.presenceRoomHex === ownHex) return
+                this.stopPresence()
+                const appId = 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69-presence'
+                this.presenceRoomHex = ownHex
+                this.presenceRoom = joinRoom({ appId, peerId: 'P' + ownHex + genId(13), trackers: TRACKERS.slice(0, 2), offerPoolSize: 2, peerFilter: pid => pid.startsWith('W') }, 'presence-' + ownHex)
+                this.presenceRoom.enableSync()
+                Object.entries(this.contacts).forEach(([hex, contact]) => { if (contact.friend) this.watchFriendPresence(hex) })
+                this.friendPresenceTimer = setInterval(() => this.refreshFriendPresence(), 10000)
+            }
+
+            watchFriendPresence(hex) {
+                if (!this.presenceRoom || this.friendPresenceRooms.has(hex) || hex === this.presenceRoomHex) return
+                const appId = 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69-presence'
+                const room = joinRoom({ appId, peerId: 'W' + this.presenceRoomHex + genId(13), trackers: TRACKERS.slice(0, 2), offerPoolSize: 2, peerFilter: pid => pid.startsWith('P' + hex) }, 'presence-' + hex)
+                const state = { room, lastSeen: 0 }
+                const seen = pid => {
+                    state.lastSeen = Date.now()
+                    const contact = this.contacts[hex]
+                    if (contact) {
+                        contact.lastSeen = state.lastSeen
+                        contact.onlineUntil = state.lastSeen + 75000
+                        this.saveContacts()
+                        this.updateConnectionSphereUI()
+                    }
+                }
+                room.onPeerSeen(seen)
+                room.onPeerJoin(seen)
+                room.enableSync()
+                this.friendPresenceRooms.set(hex, state)
+            }
+
+            refreshFriendPresence() {
+                const now = Date.now()
+                let changed = false
+                this.friendPresenceRooms.forEach((presence, hex) => {
+                    const contact = this.contacts[hex]
+                    const connected = Object.entries(presence.room.getPeers()).some(([pid, peer]) => pid.startsWith('P' + hex) && peer.dc?.readyState === 'open')
+                    if (contact && !connected && contact.onlineUntil && contact.onlineUntil <= now && now - presence.lastSeen >= 75000) {
+                        contact.onlineUntil = 0
+                        changed = true
+                    }
+                })
+                if (changed) this.saveContacts()
+                this.updateConnectionSphereUI()
+            }
+
+            stopPresence() {
+                this.presenceRoom?.leave()
+                this.presenceRoom = null
+                this.presenceRoomHex = null
+                this.friendPresenceRooms.forEach(presence => presence.room.leave())
+                this.friendPresenceRooms.clear()
+                clearInterval(this.friendPresenceTimer)
+                this.friendPresenceTimer = null
+            }
+
+            showConnectionHandlePopup(handle, x, y) {
+                if (!handle || handle.self) {
+                    document.getElementById('connection-handle-popup')?.style.setProperty('display', 'none')
+                    return
+                }
+                const hex = handle.hex.replace('#', '').toLowerCase()
+                let popup = document.getElementById('connection-handle-popup')
+                if (!popup) {
+                    popup = document.createElement('div')
+                    popup.id = 'connection-handle-popup'
+                    popup.className = 'connection-handle-popup'
+                    popup.innerHTML = '<strong></strong><button type="button"></button>'
+                    document.body.appendChild(popup)
+                }
+                const isFriend = !!this.contacts[hex]?.friend
+                popup.querySelector('strong').textContent = '#' + hex.toUpperCase()
+                const button = popup.querySelector('button')
+                button.textContent = isFriend ? 'FRIEND' : 'ADD FRIEND'
+                button.disabled = isFriend
+                button.onclick = () => { this.addFriend(hex); button.textContent = 'FRIEND'; button.disabled = true }
+                popup.style.display = 'block'
+                popup.style.left = Math.min(window.innerWidth - popup.offsetWidth - 10, Math.max(10, x + 12)) + 'px'
+                popup.style.top = Math.min(window.innerHeight - popup.offsetHeight - 10, Math.max(10, y + 12)) + 'px'
+            }
+
             updateConnectionSphereUI(connectedPeers = null) {
                 const peers = this.connectedPeerEntries()
                 const active = this.peeking && this.ui.dashboardPanel.classList.contains('active') && document.getElementById('view-home')?.classList.contains('active') && !document.getElementById('connect-content-layer')?.classList.contains('visible')
@@ -8504,8 +8677,15 @@
                     this.ui.connectionSphereAction.textContent = count > 0 ? `${count} connected` : 'GO ONLINE'
                     this.ui.connectionSphereAction.classList.toggle('visible', active)
                 }
-                window.setConnectionSphereHandles?.([{ hex: this.user.color, self: true }, ...peers.map(([pid]) => ({ hex: this.peerColors[pid] || this.mesh?.peerIdentities?.get?.(pid)?.color, pid })).filter(handle => handle.hex)])
+                const handles = new Map(Object.entries(this.contacts).map(([hex, contact]) => [hex, { hex: '#' + hex, friend: !!contact.friend, online: Date.now() < (contact.onlineUntil || 0), lastSeen: contact.lastSeen || 0 }]))
+                peers.forEach(([pid]) => {
+                    const color = this.peerColors[pid] || this.mesh?.peerIdentities?.get?.(pid)?.color
+                    const hex = String(color || '').replace('#', '').toLowerCase()
+                    if (/^[0-9a-f]{6}$/.test(hex)) handles.set(hex, { ...(handles.get(hex) || {}), hex: '#' + hex, pid, online: true })
+                })
+                window.setConnectionSphereHandles?.([{ hex: this.user.color, self: true, online: true }, ...handles.values()])
                 window.setConnectionSphereActive?.(active)
+                if (!active) document.getElementById('connection-handle-popup')?.style.setProperty('display', 'none')
             }
 
             async goOnlineFromConnectionSphere() {
@@ -8650,6 +8830,7 @@
                 const normalizedRoomHex = nextRoomHex ? String(nextRoomHex).replace('#', '').toLowerCase() : null
                 if (normalizedRoomHex && this.proofRoomHex === normalizedRoomHex) return
 
+                this.identity?._call('cancel_token', { silent: true }).catch(() => { })
                 this.user.proofToken = null
                 this.minedForSession = false
                 this.miningInProgress = false
@@ -8680,10 +8861,10 @@
                 return await this.db.getLastEdited(roomHex).catch(() => this.db.getCursor(roomHex).catch(() => 0))
             }
 
-            requestInitialSyncFromPeer(data, pid) {
+            requestInitialSyncFromPeer(data, pid, force = false) {
                 if (this.connectionMode === 'secure-direct') return
                 if (!this.mesh || typeof data?.cursor !== 'number') return
-                if (this.hasRenderedContent() && (this.peerCursorReady || (!this.isRemoteJoinSource() && !this.isQrConnectionSource()))) return
+                if (!force && this.hasRenderedContent() && (this.peerCursorReady || (!this.isRemoteJoinSource() && !this.isQrConnectionSource()))) return
 
                 const cursor = data.cursor
                 console.log(`[EditorApp] 🎯 Peer is at line ${cursor}. Syncing range...`)
@@ -9145,6 +9326,8 @@
                     this.user.id = 'user_' + this.user.color.replace('#', '')
                     document.documentElement.style.setProperty('--highlight-selection-color', this.highlightBackground(this.highlighterColor()))
                 }
+                this.loadContacts()
+                this.startPresence()
 
                 if (roomSignature?.path?.length) {
                     this.roomSignature = this.cloneSignature(roomSignature)
@@ -9165,7 +9348,8 @@
                 this.wrongPasswordState = false
                 this.syncDebugPassword(roomHex)
                 if (this.mesh?.broadcastIdentity) this.mesh.broadcastIdentity()
-                if (this.lastPeerCursor) this.requestInitialSyncFromPeer(this.lastPeerCursor.data, this.lastPeerCursor.pid)
+                if (this.lastPeerCursor) this.requestInitialSyncFromPeer(this.lastPeerCursor.data, this.lastPeerCursor.pid, true)
+                else if (this.isRemoteJoinSource() || this.isQrConnectionSource()) this.peerCursorReady = false
                 if (this.mesh?.sendCursor && this.connectionMode !== 'secure-direct') setTimeout(() => this.mesh?.sendCursor?.({ type: 'request' }), 0)
                 console.log('[COLOR ui]', 'enterRoomUI complete', { roomId: this.roomId, roomHex, roomHasWrappedKeys: this.roomHasWrappedKeys })
 
@@ -9456,6 +9640,7 @@
 
                 this.mesh.on('peer-identity', async (data, pid) => {
                     this.peerColors[pid] = data?.color || '#ffffff'
+                    this.rememberVisitor(data?.color)
                     const roomHex = this.roomId.replace('color-', '')
                     const isOwner = this.user.color.replace('#', '').toLowerCase() === roomHex.toLowerCase()
                     if (isOwner && this.mesh.sendCursor && this.connectionMode !== 'secure-direct') {
@@ -10699,6 +10884,7 @@
                 document.querySelectorAll('.sub-header').forEach(sh => sh.classList.remove('active'))
                 await this.stopScanner()
                 this.stopNearbyDiscovery()
+                this.stopPresence()
                 await this.secureQrBootstrap.destroy()
                 this.clearStatusInterval()
                 clearTimeout(this.cursorSaveTimeout)
@@ -10911,7 +11097,7 @@
                 window.connectAndPreview = (h, options) => this.connectAndPreview(h, options)
                 window.enterRoomUI = () => this.enterRoomUI()
             }
-            async runSequencedScan() { for (const rId of this.visitedRooms) { try { const r = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, rId); await new Promise(res => setTimeout(() => { window.postMessage({ type: 'handle-ready', hex: rId.replace('color-', '#'), count: Object.keys(r.getPeers()).length }, '*'); r.leave(); res() }, 1000)) } catch (e) { } } }
+            async runSequencedScan() { for (const rId of this.visitedRooms) { try { const r = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69', prewarmOffers: false }, rId); await new Promise(res => setTimeout(() => { window.postMessage({ type: 'handle-ready', hex: rId.replace('color-', '#'), count: r.getDiscoveredPeers().size }, '*'); r.leave(); res() }, 1000)) } catch (e) { } } }
         }
 
         const WORKER_SOURCE = `
@@ -10926,11 +11112,14 @@ let _currentRoomHex = null;
 const WORKER_LOG = "[COLOR worker]";
 
 const DIFFICULTY_PREFIX = "0000"; 
+let _proofJob = 0;
 
 async function computeProof(roomHex) {
     const encoder = new TextEncoder();
+    const proofJob = ++_proofJob;
     let nonce = 0;
     while (true) {
+        if (proofJob !== _proofJob) throw new Error("Mining cancelled");
         nonce++;
         const hourStamp = Math.floor(Date.now() / 3600000); 
         const attempt = roomHex + hourStamp + nonce;
@@ -11208,8 +11397,7 @@ async function db_write_cursor({ roomHex, index }) {
 async function db_verify_remote_batch({ fragments, roomHex, peerId }) {
     if (!_peerKeys[peerId]) return {};
     const db = await openColorDB(roomHex);
-    const tx = db.transaction([roomHex], 'readwrite');
-    const store = tx.objectStore(roomHex);
+    const prepared = [];
     const verified = {};
     for (const idxString of Object.keys(fragments)) {
         const index = parseInt(idxString);
@@ -11219,31 +11407,26 @@ async function db_verify_remote_batch({ fragments, roomHex, peerId }) {
         try {
             const isValid = await verify(_peerKeys[peerId], payload, item.signature);
             if (!isValid) continue;
-            const existing = await new Promise(r => {
-                const req = store.get(index);
-                req.onsuccess = () => r(req.result);
-                req.onerror = () => r(null);
-            });
-            if (existing && existing.updated >= item.updated) continue;
-            if (existing && existing.owner && existing.owner !== item.owner) continue;
-
-            if (item.content && item.content.trim() !== '') {
-                const enc = await encrypt(item.content);
-                store.put({ 
-                    content: enc, 
-                    owner: item.owner, 
-                    updated: item.updated, 
-                    signature: item.signature 
-                }, index);
-            } else {
-                store.delete(index);
-            }
-            verified[index] = item;
+            prepared.push({ index, item, encrypted: item.content && item.content.trim() !== '' ? await encrypt(item.content) : null });
         } catch(e) { }
+    }
+    if (prepared.length === 0) { db.close(); return verified; }
+    const tx = db.transaction([roomHex], 'readwrite');
+    const store = tx.objectStore(roomHex);
+    for (const { index, item, encrypted } of prepared) {
+        const req = store.get(index);
+        req.onsuccess = () => {
+            const existing = req.result;
+            if (existing && existing.updated > item.updated) return;
+            if (existing && existing.owner && existing.owner !== item.owner) return;
+            if (encrypted) store.put({ content: encrypted, owner: item.owner, updated: item.updated, signature: item.signature }, index);
+            else store.delete(index);
+            verified[index] = item;
+        };
     }
     await new Promise(r => {
         tx.oncomplete = () => { db.close(); r(); };
-        tx.onerror = () => { db.close(); r(); };
+        tx.onerror = tx.onabort = () => { db.close(); r(); };
     });
     return verified;
 }
@@ -11497,6 +11680,7 @@ self.onmessage = async (e) => {
             case 'encrypt': res = await encrypt(data); break;
             case 'decrypt': res = await decrypt(data); break;
             case 'generate_token': res = await computeProof(data.roomHex); break;
+            case 'cancel_token': _proofJob++; res = true; break;
             case 'validate_peer': res = await isValidPeer(data.peerId, data.roomHex); break;
         }
         self.postMessage({ id, result: res });
@@ -12045,7 +12229,7 @@ self.onmessage = async e => {
         const solidFragmentShaderGLSL = `precision mediump float; uniform vec4 uColor; void main() { gl_FragColor = uColor; }`
         const defaultCones = [{ color: [1, 0, 0], pos: [0, .98, .69], vel: [0, 0, 0], name: 'RED', cssColor: '#ff4444', active: true }, { color: [0, 1, 0], pos: [-.85, -.49, .69], vel: [0, 0, 0], name: 'GREEN', cssColor: '#44ff44', active: true }, { color: [0, 0, 1], pos: [.85, -.49, .69], vel: [0, 0, 0], name: 'BLUE', cssColor: '#4444ff', active: true }]
         function findPositionFromColor(targetHex) { const t = hexToRgbNormalized(targetHex); let bd = Infinity, bp = null; for (let la = 0; la <= 30; la++) for (let lo = 0; lo <= 30; lo++) { const th = la * Math.PI / 30, ph = lo * 2 * Math.PI / 30, pos = [Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)]; const c = getSurfaceColor(pos, pos, defaultCones), d = Math.sqrt((c[0] - t[0]) ** 2 + (c[1] - t[1]) ** 2 + (c[2] - t[2]) ** 2); if (d < bd) { bd = d; bp = pos } if (d < 0.05) return bp } return bp }
-        function setConnectionSphereHandles(handles) { state.connectionHandles = (handles || []).map(handle => { const hex = '#' + String(handle.hex || '').replace('#', '').slice(0, 6); if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return null; const pos = findPositionFromColor(hex); return pos ? { pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, self: !!handle.self, pid: handle.pid || '' } : null }).filter(Boolean) }
+        function setConnectionSphereHandles(handles) { state.connectionHandles = (handles || []).map(handle => { const hex = '#' + String(handle.hex || '').replace('#', '').slice(0, 6); if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return null; const pos = findPositionFromColor(hex); return pos ? { pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, self: !!handle.self, pid: handle.pid || '', friend: !!handle.friend, online: !!handle.online, lastSeen: handle.lastSeen || 0 } : null }).filter(Boolean) }
         function setConnectionSphereActive(active) { state.connectionSphereActive = !!active }
         async function requestWorkingAdapter() {
             const attempts = [
@@ -12365,6 +12549,13 @@ self.onmessage = async e => {
             }
             return null
         }
+        function getConnectionHandleAt(x, y) {
+            for (let h of state.connectionHandles) {
+                const wp = transformPos(h.pos, state.sphere.rotation), sp = wp[2] > -0.5 ? projectToScreen(wp) : null
+                if (sp && Math.sqrt((x - sp.x) ** 2 + (y - sp.y) ** 2) < 22) return h
+            }
+            return null
+        }
         function onMouseDown(e) {
             if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return
             if (state.valueScrub.active) return
@@ -12381,6 +12572,8 @@ self.onmessage = async e => {
 
             if (state.connectionSphereActive) {
                 const p = getTargetPos(state.mouse.x, state.mouse.y)
+                document.getElementById('connection-handle-popup')?.style.setProperty('display', 'none')
+                state.connectionClick = { handle: getConnectionHandleAt(state.mouse.x, state.mouse.y), x: state.mouse.x, y: state.mouse.y }
                 state.clickData.startTime = 0
                 state.interaction = { mode: 'connection', hasTouchedSphere: true }
                 state.pathPoints = []
@@ -12441,6 +12634,7 @@ self.onmessage = async e => {
             state.mouse.y = e.clientY - r.top
 
             if (state.mouse.down && state.connectionDrag?.active) {
+                if (state.connectionClick && Math.hypot(state.mouse.x - state.connectionClick.x, state.mouse.y - state.connectionClick.y) > 8) state.connectionClick.handle = null
                 const tp = getTargetPos(state.mouse.x, state.mouse.y)
                 if (tp) {
                     if (state.connectionDrag.lastTrackPos) {
@@ -12500,7 +12694,7 @@ self.onmessage = async e => {
                 if (state.interactionSignature.path.length > 1000) { state.interactionSignature.path.shift(); state.interactionSignature.rotations.shift() }
             }
         }
-	        function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) return; state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const currentRots = state.interactionSignature.rotations ? state.interactionSignature.rotations.map(r => [...r]) : null; const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); if (state.signatureMatchPreview?.active) { if (currentPath.length > 1) { const cleanHex = hex.replace('#', ''), signature = { type: 'drag', path: currentPath, rotations: currentRots, fullPath: currentPath.map(p => [...p]), fullRotations: currentRots ? currentRots.map(r => [...r]) : null, practicePaths: [] }, attemptedSignature = window.app?.prepareDragSignature ? window.app.prepareDragSignature(signature, 2) : signature; state.signatureHex = cleanHex; state.interactionSignature = signature; if (attemptedSignature && cleanHex && window.app?.getRoomPassword) attemptedSignature.password = window.app.getRoomPassword(cleanHex, attemptedSignature); window.app?.showSignatureMatchAttempt?.(cleanHex, attemptedSignature) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const originalRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) ? state.signaturePathsRotations[0].map(r => [...r]) : null; const ratio = comparePaths(originalPath, currentPath), score = Math.round(ratio * 100); const mergedPaths = state.signaturePaths.filter(path => path.length > 1), serializedCurrentPath = JSON.stringify(currentPath); if (currentPath.length > 1 && !mergedPaths.some(path => JSON.stringify(path) === serializedCurrentPath)) mergedPaths.push(currentPath); state.signaturePaths = mergedPaths; state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, rotations: originalPath.length > 1 ? originalRots : currentRots, practicePaths: state.signaturePaths.slice(originalPath.length > 1 ? 1 : 0).map(path => path.map(p => [...p])) }; state.practice.awaitingRedraw = true; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${score}`; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { const statusEl = document.getElementById('password-security-status'), titleEl = document.getElementById('password-security-title'), descEl = document.getElementById('password-security-desc'); if (statusEl && titleEl && descEl) { statusEl.classList.add('practice-score'); titleEl.textContent = `SCORE ${score}`; descEl.textContent = score > 90 ? 'GOOD JOB!' : 'TRY AGAIN'; statusEl.style.display = 'block'; statusEl.style.pointerEvents = 'none' } window.resetSphereView?.(false, false) }, 1000); setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.signaturePathsRotations = currentRots ? [currentRots] : []; state.interactionSignature = { type: 'drag', path: currentPath, rotations: currentRots, practicePaths: [] } } state.signatureHex = hex.replace('#', ''); if (selectedHandle) { const cleanHex = hex.replace('#', ''), loginSignature = { type: 'drag', path: currentPath.map(p => [...p]), rotations: currentRots ? currentRots.map(r => [...r]) : null, fullPath: currentPath.map(p => [...p]), fullRotations: currentRots ? currentRots.map(r => [...r]) : null, practicePaths: [] }; triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, suppressLoginCard: true }); if (currentPath.length > 1) window.startSignatureMatchPreview?.(loginSignature, cleanHex) } else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0, suppressLoginCard: false }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { if (state.selectedHandle) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(state.selectedHandle.pos, transformPos(state.selectedHandle.pos, state.sphere.rotation), state.selectedHandle.color, true, 'local', { preserveSignatureState: true, suppressLoginCard: true }); return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true, 'local', { preserveSignatureState: true, suppressLoginCard: true }); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false, 'local', { preserveSignatureState: true, skipAutoEnter: true }) } } } state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }
+	        function onMouseUp(e) { if (e.target.closest('#login-card') || e.target.closest('#dashboard-panel') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer') || e.target.closest('#connection-handle-popup')) return; if (state.connectionSphereActive) { const click = state.connectionClick; state.mouse.down = false; state.connectionDrag = null; state.connectionClick = null; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (click?.handle) window.app?.showConnectionHandlePopup(click.handle, e.clientX, e.clientY); return } state.mouse.down = false; state.handle.active = false; const wasDragging = state.interaction && state.interaction.hasTouchedSphere && state.dragStart.active && state.interactionSignature.type === 'drag'; state.interaction = { mode: 'none', hasTouchedSphere: false }; if (state.valueScrub.active) { state.valueScrub.active = false; return } if (document.body.classList.contains('light-mode')) { const rect = state.canvas.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top; if (wasDragging) { const currentPath = state.interactionSignature.path.map(p => [...p]); const currentRots = state.interactionSignature.rotations ? state.interactionSignature.rotations.map(r => [...r]) : null; const selectedHandle = state.selectedHandle; const col = selectedHandle ? selectedHandle.color : getSurfaceColor([0, 0, 1], [0, 0, 1], state.cones); const hex = (selectedHandle?.hex || rgbToHex(col[0], col[1], col[2])).toLowerCase(); if (state.signatureMatchPreview?.active) { if (currentPath.length > 1) { const cleanHex = hex.replace('#', ''), signature = { type: 'drag', path: currentPath, rotations: currentRots, fullPath: currentPath.map(p => [...p]), fullRotations: currentRots ? currentRots.map(r => [...r]) : null, practicePaths: [] }, attemptedSignature = window.app?.prepareDragSignature ? window.app.prepareDragSignature(signature, 2) : signature; state.signatureHex = cleanHex; state.interactionSignature = signature; if (attemptedSignature && cleanHex && window.app?.getRoomPassword) attemptedSignature.password = window.app.getRoomPassword(cleanHex, attemptedSignature); window.app?.showSignatureMatchAttempt?.(cleanHex, attemptedSignature) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (state.practice.awaitingRedraw) { const originalPath = (state.signaturePaths[0] || []).map(p => [...p]); const originalRots = (state.signaturePathsRotations && state.signaturePathsRotations[0]) ? state.signaturePathsRotations[0].map(r => [...r]) : null; const ratio = comparePaths(originalPath, currentPath), score = Math.round(ratio * 100); const mergedPaths = state.signaturePaths.filter(path => path.length > 1), serializedCurrentPath = JSON.stringify(currentPath); if (currentPath.length > 1 && !mergedPaths.some(path => JSON.stringify(path) === serializedCurrentPath)) mergedPaths.push(currentPath); state.signaturePaths = mergedPaths; state.interactionSignature = { type: 'drag', path: originalPath.length > 1 ? originalPath : currentPath, rotations: originalPath.length > 1 ? originalRots : currentRots, practicePaths: state.signaturePaths.slice(originalPath.length > 1 ? 1 : 0).map(path => path.map(p => [...p])) }; state.practice.awaitingRedraw = true; state.renderPath = true; document.getElementById('signature-practice-btn').textContent = 'TRY AGAIN'; document.getElementById('signature-compare-result').textContent = `SCORE ${score}`; if (window.app?.db && state.signatureHex) window.app.db.saveSignature(state.signatureHex, state.interactionSignature).catch(() => { }); setTimeout(() => { const statusEl = document.getElementById('password-security-status'), titleEl = document.getElementById('password-security-title'), descEl = document.getElementById('password-security-desc'); if (statusEl && titleEl && descEl) { statusEl.classList.add('practice-score'); titleEl.textContent = `SCORE ${score}`; descEl.textContent = score > 90 ? 'GOOD JOB!' : 'TRY AGAIN'; statusEl.style.display = 'block'; statusEl.style.pointerEvents = 'none' } window.resetSphereView?.(false, false) }, 1000); setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } else { state.signaturePaths = currentPath.length > 1 ? [currentPath] : []; state.signaturePathsRotations = currentRots ? [currentRots] : []; state.interactionSignature = { type: 'drag', path: currentPath, rotations: currentRots, practicePaths: [] } } state.signatureHex = hex.replace('#', ''); if (selectedHandle) { const cleanHex = hex.replace('#', ''), loginSignature = { type: 'drag', path: currentPath.map(p => [...p]), rotations: currentRots ? currentRots.map(r => [...r]) : null, fullPath: currentPath.map(p => [...p]), fullRotations: currentRots ? currentRots.map(r => [...r]) : null, practicePaths: [] }; triggerLanding(selectedHandle.pos, transformPos(selectedHandle.pos, state.sphere.rotation), selectedHandle.color, true, 'local', { preserveSignatureState: true, suppressLoginCard: true }); if (currentPath.length > 1) window.startSignatureMatchPreview?.(loginSignature, cleanHex) } else { state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [0, 0, 1], showHandle: false, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: false, hex: hex, notified: false, rotationAxis: [1, 0, 0], rotationAngle: 0, suppressLoginCard: false }; state.handle.color = [...col]; state.hasRotated = true; document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); if (window.connectAndPreview) window.connectAndPreview(hex, { preserveSignatureState: true, skipAutoEnter: true }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) } setTimeout(() => { state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }, 500); return } if (Math.sqrt((mx - state.clickData.startX) ** 2 + (my - state.clickData.startY) ** 2) < 5 && Date.now() - state.clickData.startTime < 250) { if (state.selectedHandle) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(state.selectedHandle.pos, transformPos(state.selectedHandle.pos, state.sphere.rotation), state.selectedHandle.color, true, 'local', { preserveSignatureState: true, suppressLoginCard: true }); return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { triggerLanding(h.pos, transformPos(h.pos, state.sphere.rotation), h.color, true, 'local', { preserveSignatureState: true, suppressLoginCard: true }); return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) <= 1) { const hp = Vec3.sub(p, Vec3.scale(r.d, Math.sqrt(1 - Vec3.dot(p, p)))); triggerLanding(Vec3.normalize(hp), hp, getSurfaceColor(hp, Vec3.normalize(hp)), false, 'local', { preserveSignatureState: true, skipAutoEnter: true }) } } } state.pathPoints = []; state.pathRotations = []; state.pathStartPos = null }
         function triggerLanding(norm, pos, col, fromUrl = false, source = 'local', previewOptions = {}) { document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none'); state.landing = { active: true, progress: 0, baseRotation: [...state.sphere.rotation], startDist: Vec3.len(state.cameraPos), coneStartPositions: state.cones.map(c => [...c.pos]), handleStartPos: [...pos], showHandle: !fromUrl, targetDist: 1.0 + (0.25 * ((state.canvas.width / state.canvas.height) < 1 ? 1 : (1.2 / (state.canvas.width / state.canvas.height)))), shouldAutoEnter: false, fromUrl: fromUrl, suppressLoginCard: !!previewOptions.suppressLoginCard && source !== 'local' }; const startWorldPos = transformPos(pos, state.landing.baseRotation); state.landing.offset = [0, 0]; state.handle.color = [...col]; state.hasRotated = true; const hex = rgbToHex(col[0], col[1], col[2]); window.parent.postMessage(hex, '*'); document.getElementById('color-hex').innerText = hex.toUpperCase(); const textColor = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) > 0.5 ? 'black' : 'white'; document.getElementById('login-card').style.color = textColor; document.getElementById('top-nav').style.setProperty('--nav-color', textColor); const currentWorldNorm = transformPos(norm, state.landing.baseRotation); const cam = Vec3.normalize(state.cameraPos); const axis = Vec3.cross(currentWorldNorm, cam); const dot = Vec3.dot(currentWorldNorm, cam); state.landing.rotationAxis = Vec3.len(axis) < .001 ? [1, 0, 0] : Vec3.normalize(axis); state.landing.rotationAngle = Vec3.len(axis) < .001 ? (dot > 0 ? 0 : Math.PI) : Math.acos(Math.min(1, Math.max(-1, dot))); if (source === 'local' && (!state.interactionSignature.path || state.interactionSignature.path.length <= 1)) { if (!state.interactionSignature.clicks) state.interactionSignature.clicks = []; state.interactionSignature.clicks.push(hex.replace('#', '').toUpperCase()); state.interactionSignature.password = 'FFFFFF' + state.interactionSignature.clicks.join(''); } if (!state.historyHandles.some(h => h.hex.toLowerCase() === hex.toLowerCase())) { state.historyHandles.push({ pos: [...norm], color: [...col], hex: hex, peerCount: 0 }); } if (source === 'local' && window.app?.setPendingLoginSignature && (state.interactionSignature?.path?.length || state.interactionSignature?.clicks?.length)) window.app.setPendingLoginSignature(hex, state.interactionSignature); if (!previewOptions || !previewOptions.preserveSignatureState) state.signatureBaseRotation = Mat4.multiply(Mat4.rotationAxis(state.landing.rotationAxis, state.landing.rotationAngle), state.landing.baseRotation); if (window.connectAndPreview && !previewOptions.skipPreview) window.connectAndPreview(hex, { source, ...previewOptions }); setTimeout(() => { const btn = document.getElementById('freeze-btn'); btn.style.opacity = '0'; setTimeout(() => { btn.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" fill="none" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>'; btn.style.opacity = '1' }, 200) }, 1000) }
         function getResponsiveZ() { const aspect = state.canvas.width / state.canvas.height; return aspect < 1 ? 3.5 / aspect : 4 }
         window.getSphereScreenMetrics = (cameraZ = null) => { if (!state.canvas?.height) return null; const z = Number(cameraZ) || getResponsiveZ(), radius = (state.canvas.height / 2) / (z * Math.tan(Math.PI / 8)); return { radius, diameter: radius * 2, cx: state.canvas.width / 2, cy: state.canvas.height / 2, cameraZ: z } }
@@ -12601,7 +12795,7 @@ self.onmessage = async e => {
             return Math.max(0, Math.min(1, overlapScore * 0.3 + distanceScore * 0.25 + directionScore * 0.2 + lengthScore * 0.1 + startScore * 0.075 + endScore * 0.075))
         }
         function setupColorTooltip() { const t = document.createElement('div'); t.className = 'sphere-tooltip'; document.body.appendChild(t); window.addEventListener('mousemove', e => { if (!document.body.classList.contains('light-mode') || state.hasRotated || document.getElementById('login-card')?.classList.contains('visible') || document.getElementById('dashboard-panel')?.classList.contains('active') || e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; if (state.landing.showHandle && state.handle.pos) { const handleScreen = projectToScreen(state.handle.pos); if (handleScreen && Math.sqrt((mx - handleScreen.x) ** 2 + (my - handleScreen.y) ** 2) < 50) { t.style.display = 'none'; return } } if (state.selectedHandle && !state.dragStart.active) { const sp = projectToScreen(transformPos(state.selectedHandle.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${state.selectedHandle.hex.toUpperCase()}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${state.selectedHandle.hex}`; return } } for (let h of state.historyHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.peerCount > 0 ? "meta online" : "meta"}">${h.peerCount > 0 ? `${h.peerCount} PEER${h.peerCount > 1 ? 'S' : ''} ONLINE` : "OFFLINE"}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } const r = getMouseRay(mx, my), p = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d))); if (Vec3.dot(p, p) > 1) { t.style.display = 'none'; return } const hitPos = Vec3.add(r.o, Vec3.scale(r.d, Vec3.dot(Vec3.sub([0, 0, 0], r.o), r.d) - Math.sqrt(1 - Vec3.dot(p, p)))); const hex = rgbToHex(...getSurfaceColor(hitPos, Vec3.normalize(hitPos))).toUpperCase(); t.innerHTML = `<span class="hex">${hex}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${hex}` }) }
-        function setupConnectionSphereTooltip() { window.addEventListener('mousemove', e => { const t = document.querySelector('.sphere-tooltip'); if (!t || !state.connectionSphereActive) return; if (e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; for (let h of state.connectionHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="meta online">${h.self ? 'YOU' : 'PEER'} ONLINE</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } t.style.display = 'none' }) }
+        function setupConnectionSphereTooltip() { window.addEventListener('mousemove', e => { const t = document.querySelector('.sphere-tooltip'); if (!t || !state.connectionSphereActive) return; if (e.target.closest('#dashboard-panel') || e.target.closest('#login-card') || e.target.closest('#top-nav') || e.target.closest('#connect-content-layer') || e.target.closest('#connection-handle-popup')) { t.style.display = 'none'; return } const rect = state.canvas.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top; for (let h of state.connectionHandles) { const sp = projectToScreen(transformPos(h.pos, state.sphere.rotation)); if (sp && Math.sqrt((mx - sp.x) ** 2 + (my - sp.y) ** 2) < 20) { const status = h.self ? 'YOU' : h.online ? 'ONLINE' : h.friend ? 'FRIEND - OFFLINE' : 'VISITOR - OFFLINE'; t.innerHTML = `<span class="hex">${h.hex.toUpperCase()}</span><span class="${h.online || h.self ? 'meta online' : 'meta'}">${status}</span>`; t.style.display = 'block'; t.style.left = e.clientX + 'px'; t.style.top = e.clientY + 'px'; t.style.border = `1px solid ${h.hex}`; return } } t.style.display = 'none' }) }
         window.resetSphereView = function (animateIn = false, keepRotation = false, clearHex = false, centerPoint = null) {
             const m = state.sphere.rotation
             const preserveRotation = keepRotation || !!centerPoint
@@ -12716,8 +12910,9 @@ self.onmessage = async e => {
                     state.connectionHandles.forEach(h => {
                         const wp = transformPos(h.pos, state.sphere.rotation)
                         if (wp[2] <= -0.5) return
+                        const color = h.self || h.online ? h.color : h.color.map(value => value * .35)
                         state.uniforms.cone.set(Mat4.multiply(state.vpMatrix, Mat4.multiply(Mat4.translation(wp), Mat4.scale([h.self ? .1 : .08, h.self ? .1 : .08, h.self ? .1 : .08]))), 0)
-                        state.uniforms.cone.set([...h.color, 1.0], 16)
+                        state.uniforms.cone.set([...color, 1.0], 16)
                         state.device.queue.writeBuffer(state.buffers.coneUniform, bindIdx * 256, state.uniforms.cone)
                         pass.setBindGroup(0, state.getBindGroupForHandle(bindIdx))
                         pass.drawIndexed(state.sphere.indexCount)
@@ -12840,7 +13035,8 @@ self.onmessage = async e => {
                     const wp = transformPos(h.pos, state.sphere.rotation)
                     if (wp[2] <= -0.5) return
                     const s = h.self ? .1 : .08
-                    renderWebGLSolidMesh(state.buffers.sphereVertex, state.buffers.sphereIndex, state.sphere.indexCount, Mat4.multiply(Mat4.translation(wp), Mat4.scale([s, s, s])), [...h.color, 1.0])
+                    const color = h.self || h.online ? h.color : h.color.map(value => value * .35)
+                    renderWebGLSolidMesh(state.buffers.sphereVertex, state.buffers.sphereIndex, state.sphere.indexCount, Mat4.multiply(Mat4.translation(wp), Mat4.scale([s, s, s])), [...color, 1.0])
                 })
                 return
             }
