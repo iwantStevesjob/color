@@ -9281,6 +9281,7 @@
 
             async enterRoomUI() {
                 console.log('[COLOR ui]', 'enterRoomUI start', { roomId: this.roomId, ownerLoginApproved: this.ownerLoginApproved, isGuestScan: this.isGuestScan })
+                if (this.requiresMiningForCurrentConnection() && this.joinApprovedPeers.size === 0) return
                 document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none')
                 if (window.state?.signatureMatchPreview?.active) window.stopSignatureMatchPreview?.()
                 if (window.state?.landing) {
@@ -9387,8 +9388,8 @@
                 }
             }
 
-            startMining() {
-                if (!this.requiresMiningForCurrentConnection()) return
+            startMining(force = false) {
+                if (this.connectionMode === 'secure-direct' || (!force && !this.requiresMiningForCurrentConnection())) return
                 if (this.minedForSession || this.miningInProgress) return
                 const miningRoomId = this.roomId
                 const cleanHex = this.roomId.replace('color-', '').toLowerCase()
@@ -9619,6 +9620,7 @@
                     this.ui.roomStatus.style.color = "";
                     this.awaitingPeerCheck = false
 
+                    this.startMining()
                     this.updateStatus()
                 })
 
@@ -9631,6 +9633,7 @@
                 })
 
                 this.mesh.on('peer-join', pid => {
+                    this.startMining()
                     this.updateStatus()
                     if (this.currentLineId) this.mesh.broadcastLock({ lineId: this.currentLineId, userColor: this.user.color })
                 })
@@ -9643,6 +9646,7 @@
                     this.rememberVisitor(data?.color)
                     const roomHex = this.roomId.replace('color-', '')
                     const isOwner = this.user.color.replace('#', '').toLowerCase() === roomHex.toLowerCase()
+                    if (data?.color?.replace('#', '').toLowerCase() === roomHex.toLowerCase() && !isOwner) this.startMining(true)
                     if (isOwner && this.mesh.sendCursor && this.connectionMode !== 'secure-direct') {
                         const cursor = await this.syncCursorIndex(roomHex)
                         this.mesh.sendCursor({ type: 'response', cursor, approved: true }, pid)
@@ -9660,9 +9664,10 @@
                         this.mesh.sendCursor?.({ type: 'response', cursor, approved: this.connectionMode === 'secure-direct' || this.joinApprovedPeers.has(pid) || this.user.color.replace('#', '').toLowerCase() === this.roomId.replace('color-', '').toLowerCase() }, pid)
                     } else if (data?.type === 'response') {
                         this.lastPeerCursor = { data, pid }
-                        if (data.approved || this.connectionMode === 'secure-direct' || this.isQrConnectionSource()) this.joinApprovedPeers.add(pid)
+                        const approved = data.approved || this.connectionMode === 'secure-direct' || this.isQrConnectionSource()
+                        if (approved) this.joinApprovedPeers.add(pid)
                         this.updateStatus()
-                        this.requestInitialSyncFromPeer(data, pid)
+                        if (approved) this.requestInitialSyncFromPeer(data, pid)
                     }
                 })
 
@@ -10253,6 +10258,8 @@
                 const userHex = this.user.color.replace('#', '').toLowerCase()
                 const isFounder = cleanHex === userHex
                 const isSecureDirect = this.connectionMode === 'secure-direct'
+                const remoteGuest = this.isRemoteJoinSource() && !isFounder
+                const ownerApproved = this.joinApprovedPeers.size > 0
                 this.updateConnectionSphereUI(connectedPeers)
 
                 if (this.wrongPasswordState) {
@@ -10278,8 +10285,8 @@
                 if (onlinePeers > 0) {
                     if (this.requiresMiningForCurrentConnection() && !isFounder && this.joinApprovedPeers.size === 0) this.startMining()
                     this.ui.loginBtn.disabled = false
-                    this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
-                    if (this.isRemoteJoinSource() && !this.peerCursorReady) {
+                    this.ui.loginBtn.innerHTML = remoteGuest ? '<span>JOIN</span>' : this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
+                    if (remoteGuest && !ownerApproved) {
                         this.ui.loginBtn.classList.add('hidden')
                     } else if (!this.ui.dashboardPanel.classList.contains('active')) {
                         this.ui.loginBtn.classList.remove('hidden')
@@ -10299,9 +10306,11 @@
                     }
                     this.ui.peerCount.innerText = 'Offline'
                     this.ui.loginBtn.disabled = false
-                    this.ui.loginBtn.innerHTML = this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
+                    this.ui.loginBtn.innerHTML = remoteGuest ? '<span>JOIN</span>' : this.roomNeedsLogin() ? '<span>LOGIN</span>' : '<span>JOIN</span>'
 
-                    if (!this.ui.dashboardPanel.classList.contains('active')) {
+                    if (remoteGuest) {
+                        this.ui.loginBtn.classList.add('hidden')
+                    } else if (!this.ui.dashboardPanel.classList.contains('active')) {
                         this.ui.loginBtn.classList.remove('hidden')
                     } else {
                         this.ui.loginBtn.classList.add('hidden')
