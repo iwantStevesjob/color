@@ -1,3402 +1,1183 @@
-<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
->
-<title>PBF Reef Wave</title>
-
-<style>
-  html,
-  body {
-    margin: 0;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background: #8bc1d4;
-    font-family: system-ui, sans-serif;
-  }
-
-  canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-    touch-action: none;
-  }
-
-  #ui {
-    position: fixed;
-    z-index: 10;
-    left: 12px;
-    top: 12px;
-    width: min(340px, calc(100vw - 24px));
-    padding: 12px 14px;
-    color: #eefcff;
-    background: rgba(3, 18, 27, 0.84);
-    border: 1px solid rgba(190, 235, 255, 0.2);
-    border-radius: 13px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
-    user-select: none;
-  }
-
-  #ui h1 {
-    margin: 0 0 4px;
-    font-size: 16px;
-  }
-
-  #ui p {
-    margin: 0 0 9px;
-    color: #b7d3dc;
-    font-size: 11px;
-    line-height: 1.35;
-  }
-
-  .row {
-    display: grid;
-    grid-template-columns: 108px 1fr 44px;
-    gap: 8px;
-    align-items: center;
-    margin: 6px 0;
-    font-size: 11px;
-  }
-
-  input[type="range"] {
-    width: 100%;
-    accent-color: #20a8ca;
-  }
-
-  output {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .buttons {
-    display: flex;
-    gap: 7px;
-    flex-wrap: wrap;
-    margin-top: 9px;
-  }
-
-  button {
-    border: 1px solid rgba(190, 235, 255, 0.24);
-    border-radius: 8px;
-    background: rgba(35, 126, 157, 0.25);
-    color: #eefcff;
-    padding: 7px 10px;
-    font-size: 11px;
-  }
-
-  #stats {
-    position: fixed;
-    right: 10px;
-    bottom: 8px;
-    color: rgba(245, 255, 255, 0.75);
-    font: 11px/1.35 monospace;
-    text-align: right;
-    pointer-events: none;
-  }
-
-  @media (max-width: 640px) {
-    #ui {
-      width: 290px;
-      padding: 10px 11px;
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#071b27" />
+  <title>Tilt Surf — Mobile Three.js Surfing Game</title>
+  <style>
+    :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-right: env(safe-area-inset-right, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --safe-left: env(safe-area-inset-left, 0px);
+      --glass: rgba(3, 19, 29, 0.58);
+      --line: rgba(255,255,255,0.2);
+      --text: #f5fbff;
+      --muted: rgba(235,247,255,0.72);
+      --accent: #8cf6e5;
+      --danger: #ff7c78;
     }
 
-    #ui p {
-      display: none;
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      width: 100%; height: 100%; margin: 0; overflow: hidden;
+      background: #071b27; color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overscroll-behavior: none; touch-action: none; user-select: none;
     }
 
-    .row {
-      grid-template-columns: 90px 1fr 40px;
-      margin: 5px 0;
+    #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+    .hidden { display: none !important; }
+
+    #loading {
+      position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+      background: radial-gradient(circle at 50% 35%, #16465a, #071b27 70%);
+      letter-spacing: .15em; font-weight: 800; font-size: 12px;
     }
-  }
-</style>
+
+    #overlay {
+      position: fixed; inset: 0; z-index: 30; display: grid; place-items: center;
+      padding: calc(18px + var(--safe-top)) calc(18px + var(--safe-right)) calc(18px + var(--safe-bottom)) calc(18px + var(--safe-left));
+      background: linear-gradient(180deg, rgba(1,11,18,.25), rgba(1,11,18,.72));
+      overflow: auto;
+    }
+
+    .panel {
+      width: min(620px, 94vw); max-height: 94vh; overflow: auto;
+      border: 1px solid var(--line); border-radius: 24px;
+      background: linear-gradient(145deg, rgba(5,25,36,.86), rgba(4,14,22,.72));
+      box-shadow: 0 24px 80px rgba(0,0,0,.35);
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+      padding: clamp(20px, 4vw, 34px);
+    }
+
+    .eyebrow { font-size: 11px; letter-spacing: .2em; font-weight: 900; color: var(--accent); }
+    h1 { margin: 8px 0 8px; font-size: clamp(42px, 9vw, 82px); line-height: .88; letter-spacing: -.065em; }
+    h2 { margin: 6px 0 8px; font-size: clamp(25px, 5vw, 40px); letter-spacing: -.035em; }
+    p { color: var(--muted); line-height: 1.45; margin: 8px 0 14px; }
+
+    .control-grid {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 17px 0;
+    }
+    .control-card {
+      min-height: 72px; padding: 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.05);
+    }
+    .control-card b { display: block; font-size: 13px; margin-bottom: 4px; }
+    .control-card span { color: var(--muted); font-size: 12px; line-height: 1.25; display: block; }
+
+    .buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+    button {
+      border: 0; border-radius: 999px; min-height: 48px; padding: 0 19px;
+      color: #04242b; background: var(--accent); font-weight: 900; letter-spacing: .02em;
+      box-shadow: 0 8px 24px rgba(20, 225, 198, .18); cursor: pointer;
+    }
+    button.secondary { color: var(--text); background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15); box-shadow: none; }
+    button.danger { color: #fff; background: rgba(255,86,81,.82); }
+    button:disabled { opacity: .45; cursor: default; }
+
+    #secureWarning {
+      margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(255,157,90,.12);
+      border: 1px solid rgba(255,184,124,.26); font-size: 12px; color: #ffd8bd;
+    }
+
+    #calibrationView { text-align: center; }
+    #tiltPreview {
+      width: min(330px, 72vw); aspect-ratio: 1.8; margin: 20px auto; position: relative;
+      border-radius: 22px; border: 1px solid rgba(255,255,255,.18); overflow: hidden;
+      background: linear-gradient(#507ea1 0 49%, #123d50 50% 100%);
+      box-shadow: inset 0 0 40px rgba(0,0,0,.18);
+    }
+    #previewHorizon {
+      position: absolute; left: -20%; top: 50%; width: 140%; height: 3px;
+      background: #fff; box-shadow: 0 0 15px rgba(255,255,255,.75);
+      transform-origin: center;
+    }
+    #previewBoard {
+      position: absolute; left: 50%; top: 50%; width: 44%; height: 12px; border-radius: 999px;
+      background: var(--accent); transform: translate(-50%,-50%); box-shadow: 0 0 18px rgba(140,246,229,.5);
+    }
+    #sensorStatus { font-size: 12px; color: var(--muted); min-height: 18px; }
+
+    #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+    #topHud {
+      position: absolute; top: calc(10px + var(--safe-top)); left: calc(10px + var(--safe-left)); right: calc(10px + var(--safe-right));
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+    }
+    .hud-cluster { display: flex; gap: 8px; align-items: stretch; }
+    .hud-card {
+      min-width: 76px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 13px;
+      background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      text-shadow: 0 2px 8px rgba(0,0,0,.5);
+    }
+    .hud-card small { display: block; color: var(--muted); font-size: 9px; letter-spacing: .12em; font-weight: 800; }
+    .hud-card strong { font-size: 18px; line-height: 1.05; }
+    .icon-button {
+      pointer-events: auto; width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0;
+      color: #fff; background: var(--glass); border: 1px solid rgba(255,255,255,.15); box-shadow: none;
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    }
+
+    #message {
+      position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
+      text-align: center; font-weight: 1000; font-size: clamp(24px, 5vw, 48px); letter-spacing: -.04em;
+      text-shadow: 0 5px 22px rgba(0,0,0,.65); opacity: 0; transition: opacity .18s ease;
+    }
+    #message.show { opacity: 1; }
+    #message small { display: block; margin-top: 3px; font-size: 11px; letter-spacing: .14em; color: var(--accent); }
+
+    #trickFeed {
+      position: absolute; right: calc(14px + var(--safe-right)); top: calc(82px + var(--safe-top));
+      width: min(250px, 45vw); text-align: right;
+    }
+    .trick {
+      margin-bottom: 5px; font-size: 12px; font-weight: 900; text-shadow: 0 2px 10px rgba(0,0,0,.75);
+      animation: trickIn .22s ease-out;
+    }
+    .trick span { color: var(--accent); margin-left: 6px; }
+    @keyframes trickIn { from { opacity: 0; transform: translateX(18px); } }
+
+    #tiltHud {
+      position: absolute; left: calc(14px + var(--safe-left)); bottom: calc(20px + var(--safe-bottom));
+      width: 94px; height: 60px; border-radius: 14px; border: 1px solid rgba(255,255,255,.14);
+      background: var(--glass); overflow: hidden; backdrop-filter: blur(10px);
+    }
+    #tiltHudHorizon {
+      position: absolute; left: -20%; top: 50%; width: 140%; height: 2px; background: rgba(255,255,255,.75);
+      transform-origin: center;
+    }
+    #tiltHudDot {
+      position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
+      transform: translate(-50%,-50%); box-shadow: 0 0 12px rgba(140,246,229,.8);
+    }
+
+    #meters {
+      position: absolute; left: 50%; bottom: calc(17px + var(--safe-bottom)); transform: translateX(-50%);
+      width: min(42vw, 320px); display: grid; gap: 5px;
+    }
+    .meter { height: 7px; border-radius: 999px; overflow: hidden; background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.13); }
+    .meter > i { display: block; height: 100%; width: 50%; border-radius: inherit; background: linear-gradient(90deg, #5bd8ff, #a5ffe3); transition: width .08s linear; }
+    .meter-label { display: flex; justify-content: space-between; color: rgba(255,255,255,.75); font-size: 8px; letter-spacing: .12em; font-weight: 900; }
+
+    #mobileControls {
+      position: fixed; inset: 0; z-index: 12; pointer-events: none;
+    }
+    .game-button {
+      pointer-events: auto; position: absolute; bottom: calc(16px + var(--safe-bottom));
+      width: clamp(78px, 15vw, 118px); height: clamp(78px, 15vw, 118px); border-radius: 50%; padding: 0 8px;
+      color: #06242b; background: rgba(148,255,233,.88); border: 2px solid rgba(255,255,255,.5);
+      box-shadow: 0 12px 30px rgba(0,0,0,.25), inset 0 0 20px rgba(255,255,255,.22);
+      font-size: clamp(11px, 2vw, 15px); line-height: 1.05;
+    }
+    #actionButton { right: calc(18px + var(--safe-right)); }
+    #crouchButton {
+      right: calc(112px + 5vw + var(--safe-right)); width: clamp(62px, 11vw, 86px); height: clamp(62px, 11vw, 86px);
+      color: #fff; background: rgba(5,30,42,.7); border-color: rgba(255,255,255,.24); box-shadow: 0 10px 25px rgba(0,0,0,.25);
+    }
+    .game-button.pressed { transform: scale(.94); filter: brightness(.82); }
+
+    #touchReticle {
+      position: fixed; z-index: 15; width: 70px; height: 70px; border-radius: 50%; pointer-events: none;
+      border: 1px solid rgba(255,255,255,.35); transform: translate(-50%,-50%); opacity: 0;
+    }
+    #touchReticle::after {
+      content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; border-radius: 50%;
+      background: var(--accent); transform: translate(-50%,-50%);
+    }
+
+    #portraitPrompt {
+      position: fixed; inset: 0; z-index: 50; display: none; place-items: center; text-align: center;
+      background: #061822; padding: 30px;
+    }
+    #portraitPrompt .phone { font-size: 52px; transform: rotate(90deg); margin-bottom: 15px; }
+    @media (orientation: portrait) and (max-width: 900px) {
+      body.playing #portraitPrompt { display: grid; }
+    }
+
+    #pausePanel { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 18px; background: rgba(0,8,13,.65); }
+    #pausePanel .panel { width: min(520px, 94vw); }
+    .setting { display: grid; grid-template-columns: 120px 1fr 44px; gap: 10px; align-items: center; margin: 13px 0; }
+    .setting label { font-size: 12px; font-weight: 800; }
+    .setting output { font-size: 11px; text-align: right; color: var(--muted); }
+    input[type="range"] { width: 100%; accent-color: #8cf6e5; }
+    .toggle-line { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 12px 0; }
+    .toggle-line label { color: var(--muted); font-size: 13px; }
+
+    #fatal {
+      position: fixed; inset: 0; z-index: 200; display: none; place-items: center; padding: 24px;
+      background: #07131b; color: #fff;
+    }
+    #fatal pre { white-space: pre-wrap; color: #ffc7c4; font-size: 11px; user-select: text; }
+
+    @media (max-height: 520px) {
+      .panel { padding: 16px 20px; }
+      h1 { font-size: 44px; }
+      .control-grid { margin: 10px 0; }
+      .control-card { min-height: 55px; padding: 8px 10px; }
+      .control-card span { font-size: 10px; }
+      #tiltPreview { width: 240px; margin: 9px auto; }
+      .game-button { bottom: calc(8px + var(--safe-bottom)); }
+      #meters { bottom: calc(8px + var(--safe-bottom)); }
+    }
+  </style>
 </head>
-
 <body>
-<div id="ui">
-  <h1>Position-Based Reef Wave</h1>
+  <canvas id="game"></canvas>
+  <div id="loading">BUILDING THE LINEUP…</div>
 
-  <p>
-    Actual particle fluid dynamics in a vertical slice,
-    reconstructed as a 3D volume. No scripted barrel mesh.
-  </p>
+  <div id="overlay">
+    <section id="startView" class="panel">
+      <div class="eyebrow">MOBILE THREE.JS SURFING</div>
+      <h1>TILT<br>SURF</h1>
+      <p>Hold your phone horizontally like a miniature surfboard. Your rail angle, nose angle, pumping rhythm, and landing position directly drive the surfer.</p>
+      <div class="control-grid">
+        <div class="control-card"><b>ROLL</b><span>Tilt the long edge to engage a rail and carve.</span></div>
+        <div class="control-card"><b>PITCH</b><span>Nose down for speed. Lift it near the lip to launch.</span></div>
+        <div class="control-card"><b>PUMP</b><span>Rock forward and back rhythmically to create speed.</span></div>
+        <div class="control-card"><b>LAND</b><span>Level the phone before the board reconnects with water.</span></div>
+      </div>
+      <div class="buttons">
+        <button id="motionStart">ENABLE MOTION</button>
+        <button id="touchStart" class="secondary">USE TOUCH CONTROLS</button>
+      </div>
+      <div id="secureWarning" class="hidden">Motion sensors usually require HTTPS or localhost. This page can still run with touch controls.</div>
+    </section>
 
-  <div class="row">
-    <label for="amp">Piston stroke</label>
-    <input
-      id="amp"
-      type="range"
-      min="0.20"
-      max="0.95"
-      step="0.01"
-      value="0.64"
-    >
-    <output id="ampOut">0.64</output>
+    <section id="calibrationView" class="panel hidden">
+      <div class="eyebrow">BOARD CALIBRATION</div>
+      <h2>Hold your neutral stance</h2>
+      <p>Landscape orientation, elbows relaxed, phone roughly level. This position becomes the center of the surfboard.</p>
+      <div id="tiltPreview">
+        <div id="previewHorizon"></div>
+        <div id="previewBoard"></div>
+      </div>
+      <div id="sensorStatus">Waiting for orientation data…</div>
+      <div class="buttons" style="justify-content:center">
+        <button id="calibrateButton" disabled>CALIBRATE &amp; PADDLE OUT</button>
+        <button id="calTouch" class="secondary">TOUCH FALLBACK</button>
+      </div>
+    </section>
   </div>
 
-  <div class="row">
-    <label for="period">Wave period</label>
-    <input
-      id="period"
-      type="range"
-      min="2.4"
-      max="5.2"
-      step="0.05"
-      value="3.35"
-    >
-    <output id="periodOut">3.35</output>
+  <div id="hud" class="hidden">
+    <div id="topHud">
+      <div class="hud-cluster">
+        <div class="hud-card"><small>SCORE</small><strong id="score">0</strong></div>
+        <div class="hud-card"><small>SPEED</small><strong><span id="speed">0</span><small style="display:inline;letter-spacing:0"> km/h</small></strong></div>
+        <div class="hud-card"><small>COMBO</small><strong id="combo">x1.0</strong></div>
+      </div>
+      <div class="hud-cluster">
+        <button id="cameraButton" class="icon-button" aria-label="Change camera">CAM</button>
+        <button id="pauseButton" class="icon-button" aria-label="Pause">Ⅱ</button>
+      </div>
+    </div>
+
+    <div id="message"><span id="messageMain"></span><small id="messageSub"></small></div>
+    <div id="trickFeed"></div>
+
+    <div id="tiltHud">
+      <div id="tiltHudHorizon"></div>
+      <div id="tiltHudDot"></div>
+    </div>
+
+    <div id="meters">
+      <div class="meter-label"><span>WAVE POWER</span><span id="sectionText">SHOULDER</span></div>
+      <div class="meter"><i id="powerMeter"></i></div>
+      <div class="meter-label"><span>BALANCE</span><span id="balanceText">100%</span></div>
+      <div class="meter"><i id="balanceMeter"></i></div>
+    </div>
   </div>
 
-  <div class="row">
-    <label for="reef">Reef height</label>
-    <input
-      id="reef"
-      type="range"
-      min="0.78"
-      max="1.18"
-      step="0.01"
-      value="1.00"
-    >
-    <output id="reefOut">1.00</output>
+  <div id="mobileControls" class="hidden">
+    <button id="crouchButton" class="game-button">CROUCH</button>
+    <button id="actionButton" class="game-button">PADDLE</button>
+  </div>
+  <div id="touchReticle"></div>
+
+  <div id="pausePanel" class="hidden">
+    <section class="panel">
+      <div class="eyebrow">SESSION SETTINGS</div>
+      <h2>Pause</h2>
+      <div class="setting"><label for="sensitivity">Sensitivity</label><input id="sensitivity" type="range" min="0.55" max="1.8" value="1" step="0.05"><output id="sensitivityOut">1.00</output></div>
+      <div class="setting"><label for="smoothing">Smoothing</label><input id="smoothing" type="range" min="0.05" max="0.92" value="0.62" step="0.01"><output id="smoothingOut">0.62</output></div>
+      <div class="setting"><label for="graphics">Wave detail</label><input id="graphics" type="range" min="0" max="2" value="1" step="1"><output id="graphicsOut">MED</output></div>
+      <div class="toggle-line"><label for="invertPitch">Invert pitch control</label><input id="invertPitch" type="checkbox"></div>
+      <div class="toggle-line"><label for="soundToggle">Ocean sound</label><input id="soundToggle" type="checkbox" checked></div>
+      <div class="buttons">
+        <button id="resumeButton">RESUME</button>
+        <button id="recalibrateButton" class="secondary">RECALIBRATE</button>
+        <button id="restartButton" class="secondary">RESTART WAVE</button>
+      </div>
+    </section>
   </div>
 
-  <div class="row">
-    <label for="iters">Solver iters</label>
-    <input
-      id="iters"
-      type="range"
-      min="2"
-      max="6"
-      step="1"
-      value="4"
-    >
-    <output id="itersOut">4</output>
+  <div id="portraitPrompt">
+    <div>
+      <div class="phone">▯</div>
+      <h2>Rotate to landscape</h2>
+      <p>The phone becomes your board, so the game needs the wide orientation.</p>
+    </div>
   </div>
 
-  <div class="buttons">
-    <button id="pause">Pause</button>
-    <button id="reset">Reset</button>
-    <button id="side">Side view</button>
-    <button id="angle">3D view</button>
-    <button id="debug">Particles</button>
-  </div>
-</div>
-
-<div id="stats"></div>
-
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
-  }
-}
-</script>
-
-<script type="module">
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { MarchingCubes } from "three/addons/objects/MarchingCubes.js";
-
-const clamp = THREE.MathUtils.clamp;
-const lerp = THREE.MathUtils.lerp;
-
-const smoothstep = (a, b, value) => {
-  const t = clamp((value - a) / (b - a), 0, 1);
-  return t * t * (3 - 2 * t);
-};
-
-const smootherstep = (a, b, value) => {
-  const t = clamp((value - a) / (b - a), 0, 1);
-  return t * t * t * (t * (t * 6 - 15) + 10);
-};
-
-const params = {
-  pistonAmplitude: 0.64,
-  period: 3.35,
-  reefHeight: 1,
-  iterations: 4
-};
-
-/* =========================================================
-   SIMULATION CONSTANTS
-========================================================= */
-
-const DOMAIN_X = 34;
-const DOMAIN_Y = 14;
-const RENDER_WIDTH = 7;
-const WATER_LEVEL = 8;
-
-const SPACING = 0.29;
-const ROW_SPACING = SPACING * 0.8660254;
-const PARTICLE_RADIUS = 0.125;
-
-const H = 0.64;
-const H2 = H * H;
-
-const GRAVITY = -9.81;
-const FIXED_DT = 1 / 120;
-const MAX_SUBSTEPS = 2;
-
-const MAX_SPEED = 18;
-const VISCOSITY = 0.018;
-
-const SCORR_K = 0.0018;
-const SCORR_N = 4;
-const MAX_CORRECTION = 0.09;
-
-/*
-  Two-dimensional Poly6 density kernel:
-
-  W(r) = 4 / (π h^8) × (h² - r²)³
-*/
-const POLY6 = 4 / (Math.PI * Math.pow(H, 8));
-
-/*
-  Gradient magnitude for the two-dimensional Spiky kernel:
-
-  |∇W| = 30 / (π h^5) × (h-r)²
-*/
-const SPIKY = 30 / (Math.PI * Math.pow(H, 5));
-
-function poly6(r2) {
-  if (r2 >= H2) {
-    return 0;
-  }
-
-  const q = H2 - r2;
-
-  return POLY6 * q * q * q;
-}
-
-const WQ = poly6(
-  Math.pow(0.3 * H, 2)
-);
-
-/* =========================================================
-   BATHYMETRY
-========================================================= */
-
-function bottomY(x) {
-  /*
-    Deep section, steep reef rise, shallow reef flat,
-    then a beach that rises above the mean water level.
-  */
-  const reefRise =
-    smootherstep(
-      12.4,
-      17,
-      x
-    );
-
-  const reefTop =
-    0.52 +
-    4.15 *
-    params.reefHeight *
-    reefRise;
-
-  const beach =
-    smootherstep(
-      26,
-      33.8,
-      x
-    );
-
-  return (
-    reefTop +
-    5.55 * beach
-  );
-}
-
-function bottomSlope(x) {
-  const epsilon = 0.025;
-
-  return (
-    bottomY(x + epsilon) -
-    bottomY(x - epsilon)
-  ) / (2 * epsilon);
-}
-
-/* =========================================================
-   MOVING PISTON WAVEMAKER
-========================================================= */
-
-function pistonPosition(time) {
-  return (
-    0.78 +
-    params.pistonAmplitude *
-    Math.sin(
-      Math.PI *
-      2 *
-      time /
-      params.period
-    )
-  );
-}
-
-function pistonVelocity(time) {
-  return (
-    params.pistonAmplitude *
-    (
-      Math.PI *
-      2 /
-      params.period
-    ) *
-    Math.cos(
-      Math.PI *
-      2 *
-      time /
-      params.period
-    )
-  );
-}
-
-/* =========================================================
-   THREE.JS SCENE
-========================================================= */
-
-const renderer =
-  new THREE.WebGLRenderer({
-    antialias: true,
-    powerPreference: "high-performance"
-  });
-
-renderer.setPixelRatio(
-  Math.min(
-    devicePixelRatio,
-    1.5
-  )
-);
-
-renderer.setSize(
-  innerWidth,
-  innerHeight
-);
-
-renderer.outputColorSpace =
-  THREE.SRGBColorSpace;
-
-renderer.toneMapping =
-  THREE.ACESFilmicToneMapping;
-
-renderer.toneMappingExposure = 1.08;
-
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type =
-  THREE.PCFSoftShadowMap;
-
-document.body.appendChild(
-  renderer.domElement
-);
-
-const scene = new THREE.Scene();
-
-scene.background =
-  new THREE.Color(0x8bc1d4);
-
-scene.fog =
-  new THREE.Fog(
-    0x8bc1d4,
-    38,
-    85
-  );
-
-const camera =
-  new THREE.PerspectiveCamera(
-    48,
-    innerWidth / innerHeight,
-    0.1,
-    150
-  );
-
-camera.position.set(
-  20,
-  8.2,
-  15.5
-);
-
-const controls =
-  new OrbitControls(
-    camera,
-    renderer.domElement
-  );
-
-controls.target.set(
-  19,
-  5.1,
-  0
-);
-
-controls.enableDamping = true;
-controls.dampingFactor = 0.065;
-controls.minDistance = 5;
-controls.maxDistance = 65;
-controls.maxPolarAngle =
-  Math.PI * 0.49;
-
-scene.add(
-  new THREE.HemisphereLight(
-    0xd8f2ff,
-    0x385046,
-    1.75
-  )
-);
-
-const sun =
-  new THREE.DirectionalLight(
-    0xfff1d1,
-    3.4
-  );
-
-sun.position.set(
-  -22,
-  34,
-  16
-);
-
-sun.castShadow = true;
-
-sun.shadow.mapSize.set(
-  2048,
-  2048
-);
-
-sun.shadow.camera.left = -38;
-sun.shadow.camera.right = 38;
-sun.shadow.camera.top = 30;
-sun.shadow.camera.bottom = -20;
-sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 90;
-
-scene.add(sun);
-
-/* =========================================================
-   REEF RENDERING
-========================================================= */
-
-const REEF_X_SEG = 180;
-const REEF_Z_SEG = 18;
-
-const reefPositions = [];
-const reefColors = [];
-const reefIndices = [];
-
-for (
-  let zIndex = 0;
-  zIndex <= REEF_Z_SEG;
-  zIndex++
-) {
-  const z =
-    lerp(
-      -RENDER_WIDTH * 0.78,
-      RENDER_WIDTH * 0.78,
-      zIndex / REEF_Z_SEG
-    );
-
-  for (
-    let xIndex = 0;
-    xIndex <= REEF_X_SEG;
-    xIndex++
-  ) {
-    const x =
-      DOMAIN_X *
-      xIndex /
-      REEF_X_SEG;
-
-    const roughness =
-      0.055 *
-      Math.sin(
-        x * 1.8 +
-        z * 1.1
-      ) +
-      0.028 *
-      Math.sin(
-        x * 4.2 -
-        z * 2.3
-      );
-
-    const y =
-      bottomY(x) +
-      roughness;
-
-    reefPositions.push(
-      x,
-      y,
-      z
-    );
-
-    const wet =
-      1 -
-      smoothstep(
-        WATER_LEVEL - 0.25,
-        WATER_LEVEL + 0.2,
-        y
-      );
-
-    const reefMix =
-      smoothstep(
-        1.2,
-        4.8,
-        y
-      ) *
-      wet;
-
-    const color =
-      new THREE.Color(0xb29b62);
-
-    color.lerp(
-      new THREE.Color(0x48543a),
-      reefMix * 0.82
-    );
-
-    const shade =
-      0.86 +
-      0.14 *
-      Math.sin(
-        x * 0.61 +
-        z * 0.8
-      );
-
-    reefColors.push(
-      color.r * shade,
-      color.g * shade,
-      color.b * shade
-    );
-  }
-}
-
-for (
-  let zIndex = 0;
-  zIndex < REEF_Z_SEG;
-  zIndex++
-) {
-  for (
-    let xIndex = 0;
-    xIndex < REEF_X_SEG;
-    xIndex++
-  ) {
-    const a =
-      zIndex *
-      (REEF_X_SEG + 1) +
-      xIndex;
-
-    const b = a + 1;
-    const c = a + REEF_X_SEG + 1;
-    const d = c + 1;
-
-    reefIndices.push(
-      a, c, b,
-      b, c, d
-    );
-  }
-}
-
-const reefGeometry =
-  new THREE.BufferGeometry();
-
-reefGeometry.setAttribute(
-  "position",
-  new THREE.Float32BufferAttribute(
-    reefPositions,
-    3
-  )
-);
-
-reefGeometry.setAttribute(
-  "color",
-  new THREE.Float32BufferAttribute(
-    reefColors,
-    3
-  )
-);
-
-reefGeometry.setIndex(
-  reefIndices
-);
-
-reefGeometry.computeVertexNormals();
-
-const reefMaterial =
-  new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.96,
-    metalness: 0
-  });
-
-const reefMesh =
-  new THREE.Mesh(
-    reefGeometry,
-    reefMaterial
-  );
-
-reefMesh.receiveShadow = true;
-
-scene.add(reefMesh);
-
-function updateReefGeometry() {
-  const positions =
-    reefGeometry
-      .attributes
-      .position
-      .array;
-
-  const colors =
-    reefGeometry
-      .attributes
-      .color
-      .array;
-
-  let vertex = 0;
-
-  for (
-    let zIndex = 0;
-    zIndex <= REEF_Z_SEG;
-    zIndex++
-  ) {
-    const z =
-      lerp(
-        -RENDER_WIDTH * 0.78,
-        RENDER_WIDTH * 0.78,
-        zIndex / REEF_Z_SEG
-      );
-
-    for (
-      let xIndex = 0;
-      xIndex <= REEF_X_SEG;
-      xIndex++,
-      vertex++
-    ) {
-      const x =
-        DOMAIN_X *
-        xIndex /
-        REEF_X_SEG;
-
-      const roughness =
-        0.055 *
-        Math.sin(
-          x * 1.8 +
-          z * 1.1
-        ) +
-        0.028 *
-        Math.sin(
-          x * 4.2 -
-          z * 2.3
-        );
-
-      const y =
-        bottomY(x) +
-        roughness;
-
-      positions[
-        vertex * 3 + 1
-      ] = y;
-
-      const wet =
-        1 -
-        smoothstep(
-          WATER_LEVEL - 0.25,
-          WATER_LEVEL + 0.2,
-          y
-        );
-
-      const reefMix =
-        smoothstep(
-          1.2,
-          4.8,
-          y
-        ) *
-        wet;
-
-      const color =
-        new THREE.Color(0xb29b62);
-
-      color.lerp(
-        new THREE.Color(0x48543a),
-        reefMix * 0.82
-      );
-
-      const shade =
-        0.86 +
-        0.14 *
-        Math.sin(
-          x * 0.61 +
-          z * 0.8
-        );
-
-      colors[vertex * 3] =
-        color.r * shade;
-
-      colors[vertex * 3 + 1] =
-        color.g * shade;
-
-      colors[vertex * 3 + 2] =
-        color.b * shade;
+  <div id="fatal"><div><h2>Unable to start WebGL</h2><pre id="fatalText"></pre></div></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
     }
   }
-
-  reefGeometry
-    .attributes
-    .position
-    .needsUpdate = true;
-
-  reefGeometry
-    .attributes
-    .color
-    .needsUpdate = true;
-
-  reefGeometry.computeVertexNormals();
-
-  reefGeometry
-    .attributes
-    .normal
-    .needsUpdate = true;
-}
-
-/* =========================================================
-   PISTON VISUALIZATION
-========================================================= */
-
-const pistonMesh =
-  new THREE.Mesh(
-    new THREE.BoxGeometry(
-      0.18,
-      WATER_LEVEL + 1.2,
-      RENDER_WIDTH * 1.7
-    ),
-    new THREE.MeshStandardMaterial({
-      color: 0x263b43,
-      roughness: 0.8
-    })
-  );
-
-pistonMesh.position.y =
-  (WATER_LEVEL + 1.2) / 2;
-
-pistonMesh.castShadow = true;
-
-scene.add(pistonMesh);
-
-/* =========================================================
-   INITIAL FLUID PARTICLES
-========================================================= */
-
-function initialSurface(x) {
-  const normalized =
-    (x - 8.8) /
-    2.15;
-
-  /*
-    An initial solitary pulse means the first breaker
-    reaches the reef quickly. The piston then continues
-    generating additional waves.
-  */
-  return (
-    WATER_LEVEL +
-    1.12 *
-    Math.exp(
-      -normalized *
-      normalized
-    )
-  );
-}
-
-const initialParticles = [];
-
-let latticeRow = 0;
-
-for (
-  let particleY = 0.4;
-  particleY < WATER_LEVEL + 1.2;
-  particleY += ROW_SPACING,
-  latticeRow++
-) {
-  const shift =
-    latticeRow & 1
-      ? SPACING * 0.5
-      : 0;
-
-  for (
-    let particleX = 1.45 + shift;
-    particleX < DOMAIN_X - 0.25;
-    particleX += SPACING
-  ) {
-    const floor =
-      bottomY(particleX) +
-      PARTICLE_RADIUS * 1.1;
-
-    const surface =
-      initialSurface(particleX) -
-      PARTICLE_RADIUS;
-
-    if (
-      particleY > floor &&
-      particleY < surface
-    ) {
-      const elevation =
-        Math.max(
-          0,
-          initialSurface(particleX) -
-          WATER_LEVEL
-        );
-
-      const depthFade =
-        Math.exp(
-          -(
-            surface -
-            particleY
-          ) /
-          4.5
-        );
-
-      const initialVelocityX =
-        1.25 *
-        (
-          elevation /
-          1.12
-        ) *
-        depthFade;
-
-      const initialVelocityY =
-        -0.18 *
-        (
-          (
-            particleX -
-            8.8
-          ) /
-          2.15
-        ) *
-        (
-          elevation /
-          1.12
-        ) *
-        depthFade;
-
-      initialParticles.push(
-        particleX,
-        particleY,
-        initialVelocityX,
-        initialVelocityY
-      );
-    }
-  }
-}
-
-const PARTICLE_COUNT =
-  initialParticles.length /
-  4;
-
-const x =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const y =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const predictedX =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const predictedY =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const previousX =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const previousY =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const velocityX =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const velocityY =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const temporaryVelocityX =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const temporaryVelocityY =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const lambda =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const correctionX =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const correctionY =
-  new Float32Array(
-    PARTICLE_COUNT
-  );
-
-const neighborCount =
-  new Uint16Array(
-    PARTICLE_COUNT
-  );
-
-for (
-  let i = 0;
-  i < PARTICLE_COUNT;
-  i++
-) {
-  x[i] =
-    predictedX[i] =
-    initialParticles[i * 4];
-
-  y[i] =
-    predictedY[i] =
-    initialParticles[i * 4 + 1];
-
-  velocityX[i] =
-    initialParticles[i * 4 + 2];
-
-  velocityY[i] =
-    initialParticles[i * 4 + 3];
-}
-
-/* =========================================================
-   SPATIAL HASH GRID
-========================================================= */
-
-const GRID_WIDTH =
-  Math.ceil(
-    DOMAIN_X /
-    H
-  ) +
-  2;
-
-const GRID_HEIGHT =
-  Math.ceil(
-    DOMAIN_Y /
-    H
-  ) +
-  2;
-
-const gridHead =
-  new Int32Array(
-    GRID_WIDTH *
-    GRID_HEIGHT
-  );
-
-const gridNext =
-  new Int32Array(
-    PARTICLE_COUNT
-  );
-
-function gridX(value) {
-  return clamp(
-    Math.floor(
-      value /
-      H
-    ),
-    0,
-    GRID_WIDTH - 1
-  );
-}
-
-function gridY(value) {
-  return clamp(
-    Math.floor(
-      value /
-      H
-    ),
-    0,
-    GRID_HEIGHT - 1
-  );
-}
-
-function gridIndex(
-  gridPositionX,
-  gridPositionY
-) {
-  return (
-    gridPositionX +
-    gridPositionY *
-    GRID_WIDTH
-  );
-}
-
-function rebuildGrid(
-  usePredicted = true
-) {
-  gridHead.fill(-1);
-
-  const sourceX =
-    usePredicted
-      ? predictedX
-      : x;
-
-  const sourceY =
-    usePredicted
-      ? predictedY
-      : y;
-
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    const cell =
-      gridIndex(
-        gridX(sourceX[i]),
-        gridY(sourceY[i])
-      );
-
-    gridNext[i] =
-      gridHead[cell];
-
-    gridHead[cell] = i;
-  }
-}
-
-rebuildGrid(true);
-
-/* =========================================================
-   REFERENCE DENSITY
-
-   Measure the kernel density in an undisturbed interior
-   section of the initial particle lattice. This avoids
-   hardcoding a density that does not match the spacing.
-========================================================= */
-
-let REST_DENSITY = 1;
-
-{
-  let densitySum = 0;
-  let densitySamples = 0;
-
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    if (
-      x[i] < 3 ||
-      x[i] > 11 ||
-      y[i] > WATER_LEVEL - H ||
-      y[i] - bottomY(x[i]) < H
-    ) {
-      continue;
-    }
-
-    let density = poly6(0);
-
-    const centerX =
-      gridX(x[i]);
-
-    const centerY =
-      gridY(y[i]);
-
-    for (
-      let cellOffsetY = -1;
-      cellOffsetY <= 1;
-      cellOffsetY++
-    ) {
-      for (
-        let cellOffsetX = -1;
-        cellOffsetX <= 1;
-        cellOffsetX++
-      ) {
-        const neighborCellX =
-          centerX +
-          cellOffsetX;
-
-        const neighborCellY =
-          centerY +
-          cellOffsetY;
-
-        if (
-          neighborCellX < 0 ||
-          neighborCellX >= GRID_WIDTH ||
-          neighborCellY < 0 ||
-          neighborCellY >= GRID_HEIGHT
-        ) {
-          continue;
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // -------------------------------------------------------------------------
+    // DOM AND SMALL UTILITIES
+    // -------------------------------------------------------------------------
+    const $ = (id) => document.getElementById(id);
+    const dom = {
+      canvas: $('game'), loading: $('loading'), overlay: $('overlay'), startView: $('startView'), calibrationView: $('calibrationView'),
+      motionStart: $('motionStart'), touchStart: $('touchStart'), secureWarning: $('secureWarning'), sensorStatus: $('sensorStatus'),
+      calibrateButton: $('calibrateButton'), calTouch: $('calTouch'), previewHorizon: $('previewHorizon'), previewBoard: $('previewBoard'),
+      hud: $('hud'), mobileControls: $('mobileControls'), actionButton: $('actionButton'), crouchButton: $('crouchButton'),
+      pauseButton: $('pauseButton'), cameraButton: $('cameraButton'), pausePanel: $('pausePanel'), resumeButton: $('resumeButton'),
+      restartButton: $('restartButton'), recalibrateButton: $('recalibrateButton'), score: $('score'), speed: $('speed'), combo: $('combo'),
+      message: $('message'), messageMain: $('messageMain'), messageSub: $('messageSub'), trickFeed: $('trickFeed'),
+      tiltHudHorizon: $('tiltHudHorizon'), tiltHudDot: $('tiltHudDot'), powerMeter: $('powerMeter'), balanceMeter: $('balanceMeter'),
+      balanceText: $('balanceText'), sectionText: $('sectionText'), touchReticle: $('touchReticle'), sensitivity: $('sensitivity'),
+      smoothing: $('smoothing'), graphics: $('graphics'), invertPitch: $('invertPitch'), soundToggle: $('soundToggle'),
+      sensitivityOut: $('sensitivityOut'), smoothingOut: $('smoothingOut'), graphicsOut: $('graphicsOut'), fatal: $('fatal'), fatalText: $('fatalText')
+    };
+
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const smoothstep = (a, b, x) => {
+      const t = clamp((x - a) / (b - a), 0, 1);
+      return t * t * (3 - 2 * t);
+    };
+    const mod = (n, m) => ((n % m) + m) % m;
+    const damp = (current, target, lambda, dt) => lerp(current, target, 1 - Math.exp(-lambda * dt));
+    const rad = THREE.MathUtils.degToRad;
+    const hash = (n) => {
+      const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+      return x - Math.floor(x);
+    };
+
+    let renderer, scene, camera, clock;
+    let ocean, oceanBase, oceanColors, oceanSegX = 72, oceanSegZ = 48;
+    let lipMesh, foamPoints, sprayPoints, sprayData = [];
+    let boardRoot, boardMesh, rider, riderParts;
+    let sky, sunSprite, clouds = [], shoreGroup;
+    let running = false, paused = false, gameStarted = false;
+    let cameraMode = 0;
+    const cameraNames = ['FOLLOW', 'SIDE', 'DRONE', 'TUBE'];
+    const UP = new THREE.Vector3(0, 1, 0);
+    const tmpV1 = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpV3 = new THREE.Vector3();
+    const tmpQ = new THREE.Quaternion(), tmpM = new THREE.Matrix4();
+
+    const qualityProfiles = [
+      { sx: 48, sz: 32, pixel: 1.0, foam: 420, spray: 130, shadows: false },
+      { sx: 72, sz: 48, pixel: 1.35, foam: 650, spray: 190, shadows: false },
+      { sx: 96, sz: 64, pixel: 1.65, foam: 900, spray: 260, shadows: true }
+    ];
+    let qualityIndex = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 1 : 2;
+    dom.graphics.value = qualityIndex;
+
+    const input = {
+      mode: 'motion', hasSensor: false, sensorSeen: false,
+      beta: 0, gamma: 0, alpha: 0, neutralBeta: 0, neutralGamma: 0,
+      rawRoll: 0, rawPitch: 0, roll: 0, pitch: 0, prevRoll: 0, prevPitch: 0,
+      rollVelocity: 0, pitchVelocity: 0, sensitivity: 1, smoothing: .62, invertPitch: false,
+      actionHeld: false, actionTapped: false, crouchHeld: false,
+      touchActive: false, touchId: null, touchStartX: 0, touchStartY: 0, touchX: 0, touchY: 0,
+      keyRoll: 0, keyPitch: 0
+    };
+
+    const player = {
+      state: 'paddling', x: 15, z: -14, y: 0, heading: 0, speed: 0, balance: 1,
+      crouch: 0, stateTime: 0, wipeoutSpin: 0, airY: 0, airVY: 0, airSpin: 0, airFlip: 0,
+      score: 0, waveScore: 0, combo: 1, comboTimer: 0, best: Number(localStorage.getItem('tiltSurfBest') || 0),
+      power: 0, barrel: 0, tubeTime: 0, breakX: 22, lastQ: -14, section: 'SHOULDER',
+      lastPumpSign: 0, lastPumpTime: -10, lastRollSign: 0, lastTopTurn: -10, bottomTurnArmed: false,
+      cooldowns: Object.create(null), waveNumber: 1
+    };
+
+    // -------------------------------------------------------------------------
+    // AUDIO — lightweight procedural ocean and splash bursts
+    // -------------------------------------------------------------------------
+    let audioCtx = null, oceanGain = null, soundEnabled = true;
+    function initAudio() {
+      if (audioCtx) {
+        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        return;
+      }
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const length = audioCtx.sampleRate * 3;
+        const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+        const data = buffer.getChannelData(0);
+        let last = 0;
+        for (let i = 0; i < length; i++) {
+          const white = Math.random() * 2 - 1;
+          last = last * .985 + white * .015;
+          data[i] = last * 2.2;
         }
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer; source.loop = true;
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass'; filter.frequency.value = 760;
+        oceanGain = audioCtx.createGain(); oceanGain.gain.value = soundEnabled ? .065 : 0;
+        source.connect(filter).connect(oceanGain).connect(audioCtx.destination);
+        source.start();
+      } catch (_) {}
+    }
 
-        for (
-          let j =
-            gridHead[
-              gridIndex(
-                neighborCellX,
-                neighborCellY
-              )
-            ];
+    function splashSound(intensity = .5) {
+      if (!audioCtx || !soundEnabled) return;
+      const len = Math.floor(audioCtx.sampleRate * .18);
+      const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      const arr = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) arr[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+      const src = audioCtx.createBufferSource(); src.buffer = buf;
+      const filter = audioCtx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = 500 + intensity * 900;
+      const gain = audioCtx.createGain(); gain.gain.value = .05 + intensity * .09;
+      src.connect(filter).connect(gain).connect(audioCtx.destination); src.start();
+    }
 
-          j !== -1;
+    // -------------------------------------------------------------------------
+    // SENSOR AND FALLBACK INPUT
+    // -------------------------------------------------------------------------
+    function onOrientation(e) {
+      if (e.beta == null || e.gamma == null) return;
+      input.beta = e.beta; input.gamma = e.gamma; input.alpha = e.alpha || 0;
+      input.sensorSeen = true; input.hasSensor = true;
+      dom.calibrateButton.disabled = false;
+      dom.sensorStatus.textContent = `Sensor active · β ${e.beta.toFixed(1)}° · γ ${e.gamma.toFixed(1)}°`;
+      updateCalibrationPreview();
+    }
 
-          j = gridNext[j]
-        ) {
-          if (j === i) {
-            continue;
-          }
+    function updateCalibrationPreview() {
+      const db = clamp((input.beta - input.neutralBeta) / 28, -1, 1);
+      const dg = clamp((input.gamma - input.neutralGamma) / 28, -1, 1);
+      dom.previewHorizon.style.transform = `translateY(${db * 22}px) rotate(${dg * 28}deg)`;
+      dom.previewBoard.style.transform = `translate(-50%,-50%) rotate(${dg * 24}deg) scaleY(${1 - Math.abs(db) * .18})`;
+    }
 
-          const deltaX =
-            x[i] -
-            x[j];
-
-          const deltaY =
-            y[i] -
-            y[j];
-
-          density +=
-            poly6(
-              deltaX * deltaX +
-              deltaY * deltaY
-            );
+    async function requestMotionPermission() {
+      input.mode = 'motion';
+      let granted = true;
+      try {
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+          const result = await DeviceOrientationEvent.requestPermission();
+          granted = result === 'granted';
         }
+        if (granted && typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+          const motionResult = await DeviceMotionEvent.requestPermission();
+          granted = motionResult === 'granted';
+        }
+      } catch (err) {
+        granted = false;
+        dom.sensorStatus.textContent = `Permission error: ${err.message}`;
+      }
+      if (granted) {
+        window.addEventListener('deviceorientation', onOrientation, true);
+        dom.startView.classList.add('hidden');
+        dom.calibrationView.classList.remove('hidden');
+        setTimeout(() => {
+          if (!input.sensorSeen) dom.sensorStatus.textContent = 'No sensor data yet. Move the phone, or use touch fallback.';
+        }, 1400);
+      } else {
+        dom.sensorStatus.textContent = 'Motion access was not granted. Touch controls are available.';
+        dom.startView.classList.add('hidden');
+        dom.calibrationView.classList.remove('hidden');
+        dom.calibrateButton.disabled = true;
       }
     }
 
-    densitySum += density;
-    densitySamples++;
-  }
-
-  if (densitySamples > 0) {
-    REST_DENSITY =
-      densitySum /
-      densitySamples;
-  }
-}
-
-/* =========================================================
-   SURFBOARD RIGID BODY
-========================================================= */
-
-const boardState = {
-  x: 20,
-  y: WATER_LEVEL + 0.28,
-  angle: -0.06,
-  velocityX: 0.35,
-  velocityY: 0,
-  angularVelocity: 0
-};
-
-const BOARD_LENGTH = 2.55;
-const BOARD_HALF_LENGTH =
-  BOARD_LENGTH * 0.5;
-
-const BOARD_RADIUS = 0.16;
-const BOARD_MASS = 2.1;
-
-const BOARD_INERTIA =
-  BOARD_MASS *
-  BOARD_LENGTH *
-  BOARD_LENGTH /
-  12;
-
-const board = new THREE.Group();
-
-const boardGeometry =
-  new THREE.CapsuleGeometry(
-    0.31,
-    1.95,
-    2,
-    8
-  );
-
-boardGeometry.rotateZ(
-  Math.PI / 2
-);
-
-const boardBody =
-  new THREE.Mesh(
-    boardGeometry,
-    new THREE.MeshStandardMaterial({
-      color: 0xf05c34,
-      roughness: 0.42,
-      flatShading: true
-    })
-  );
-
-boardBody.scale.set(
-  1,
-  0.18,
-  1.25
-);
-
-boardBody.castShadow = true;
-
-board.add(boardBody);
-
-const boardStripe =
-  new THREE.Mesh(
-    new THREE.BoxGeometry(
-      1.75,
-      0.055,
-      0.09
-    ),
-    new THREE.MeshStandardMaterial({
-      color: 0xffe7a0,
-      roughness: 0.5
-    })
-  );
-
-boardStripe.position.y = 0.105;
-
-board.add(boardStripe);
-scene.add(board);
-
-function resetBoard() {
-  boardState.x = 20;
-  boardState.y =
-    WATER_LEVEL +
-    0.34;
-
-  boardState.angle = -0.06;
-  boardState.velocityX = 0.35;
-  boardState.velocityY = 0;
-  boardState.angularVelocity = 0;
-}
-
-/* =========================================================
-   PARTICLE / BOARD COLLISION
-========================================================= */
-
-function projectAgainstBoard(i) {
-  const cosine =
-    Math.cos(
-      boardState.angle
-    );
-
-  const sine =
-    Math.sin(
-      boardState.angle
-    );
-
-  const relativeX =
-    predictedX[i] -
-    boardState.x;
-
-  const relativeY =
-    predictedY[i] -
-    boardState.y;
-
-  /*
-    Transform the fluid particle into board-local space.
-  */
-  const localX =
-    relativeX *
-    cosine +
-    relativeY *
-    sine;
-
-  const localY =
-    -relativeX *
-    sine +
-    relativeY *
-    cosine;
-
-  const closestX =
-    clamp(
-      localX,
-      -BOARD_HALF_LENGTH,
-      BOARD_HALF_LENGTH
-    );
-
-  let deltaLocalX =
-    localX -
-    closestX;
-
-  let deltaLocalY =
-    localY;
-
-  const minimumDistance =
-    BOARD_RADIUS +
-    PARTICLE_RADIUS;
-
-  let distance =
-    Math.hypot(
-      deltaLocalX,
-      deltaLocalY
-    );
-
-  if (
-    distance <
-    minimumDistance
-  ) {
-    if (distance < 0.000001) {
-      deltaLocalX = 0;
-      deltaLocalY = 1;
-      distance = 1;
+    function calibrateMotion() {
+      input.neutralBeta = input.beta;
+      input.neutralGamma = input.gamma;
+      input.roll = input.pitch = input.rawRoll = input.rawPitch = 0;
     }
 
-    const penetration =
-      minimumDistance -
-      distance;
+    function chooseTouchMode() {
+      input.mode = 'touch';
+      input.hasSensor = false;
+      input.roll = input.pitch = 0;
+      startGame();
+    }
 
-    const normalLocalX =
-      deltaLocalX /
-      distance;
+    async function enterImmersive() {
+      initAudio();
+      try {
+        if (!document.fullscreenElement && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+      } catch (_) {}
+      try {
+        if (screen.orientation?.lock) await screen.orientation.lock('landscape');
+      } catch (_) {}
+    }
 
-    const normalLocalY =
-      deltaLocalY /
-      distance;
+    function updateInput(dt) {
+      input.prevRoll = input.roll; input.prevPitch = input.pitch;
+      let targetRoll = 0, targetPitch = 0;
 
-    const normalX =
-      normalLocalX *
-      cosine -
-      normalLocalY *
-      sine;
+      if (input.mode === 'motion' && input.hasSensor) {
+        const screenAngle = screen.orientation?.angle ?? window.orientation ?? 90;
+        const sign = (screenAngle === 270 || screenAngle === -90) ? -1 : 1;
+        let dGamma = (input.gamma - input.neutralGamma) * sign;
+        let dBeta = (input.beta - input.neutralBeta) * sign;
+        if (dBeta > 180) dBeta -= 360;
+        if (dBeta < -180) dBeta += 360;
+        targetRoll = clamp(dGamma / 27, -1.15, 1.15);
+        targetPitch = clamp(dBeta / 25, -1.15, 1.15);
+      } else {
+        targetRoll = input.touchActive ? input.touchX : input.keyRoll;
+        targetPitch = input.touchActive ? input.touchY : input.keyPitch;
+      }
 
-    const normalY =
-      normalLocalX *
-      sine +
-      normalLocalY *
-      cosine;
+      targetRoll *= input.sensitivity;
+      targetPitch *= input.sensitivity * (input.invertPitch ? -1 : 1);
+      input.rawRoll = clamp(targetRoll, -1.2, 1.2);
+      input.rawPitch = clamp(targetPitch, -1.2, 1.2);
 
-    predictedX[i] +=
-      normalX *
-      penetration;
+      const response = lerp(19, 3.2, input.smoothing);
+      input.roll = damp(input.roll, input.rawRoll, response, dt);
+      input.pitch = damp(input.pitch, input.rawPitch, response, dt);
+      input.rollVelocity = (input.roll - input.prevRoll) / Math.max(dt, .001);
+      input.pitchVelocity = (input.pitch - input.prevPitch) / Math.max(dt, .001);
 
-    predictedY[i] +=
-      normalY *
-      penetration;
-  }
-}
+      dom.tiltHudHorizon.style.transform = `translateY(${input.pitch * 17}px) rotate(${input.roll * 27}deg)`;
+      dom.tiltHudDot.style.transform = `translate(calc(-50% + ${input.roll * 28}px), calc(-50% + ${input.pitch * 17}px))`;
+    }
 
-/* =========================================================
-   DOMAIN COLLISIONS
-========================================================= */
+    function bindHoldButton(el, key) {
+      const down = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        input[key] = true;
+        if (key === 'actionHeld') input.actionTapped = true;
+        el.classList.add('pressed');
+      };
+      const up = (e) => {
+        e?.preventDefault?.(); e?.stopPropagation?.();
+        input[key] = false; el.classList.remove('pressed');
+      };
+      el.addEventListener('pointerdown', down);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+      el.addEventListener('pointerleave', up);
+    }
 
-function projectParticle(
-  i,
-  time
-) {
-  let particleX =
-    predictedX[i];
+    function isUIElement(target) {
+      return target.closest?.('button, input, .panel, #topHud');
+    }
 
-  let particleY =
-    predictedY[i];
+    window.addEventListener('pointerdown', (e) => {
+      if (!gameStarted || paused || input.mode !== 'touch' || isUIElement(e.target)) return;
+      input.touchActive = true; input.touchId = e.pointerId;
+      input.touchStartX = e.clientX; input.touchStartY = e.clientY;
+      dom.touchReticle.style.left = `${e.clientX}px`; dom.touchReticle.style.top = `${e.clientY}px`; dom.touchReticle.style.opacity = '1';
+    }, { passive: false });
+    window.addEventListener('pointermove', (e) => {
+      if (!input.touchActive || e.pointerId !== input.touchId) return;
+      const dx = e.clientX - input.touchStartX, dy = e.clientY - input.touchStartY;
+      input.touchX = clamp(dx / 90, -1, 1);
+      input.touchY = clamp(dy / 85, -1, 1);
+      dom.touchReticle.style.transform = `translate(calc(-50% + ${clamp(dx,-34,34)}px), calc(-50% + ${clamp(dy,-34,34)}px))`;
+    }, { passive: false });
+    const releaseTouch = (e) => {
+      if (e.pointerId !== input.touchId) return;
+      input.touchActive = false; input.touchId = null; input.touchX = input.touchY = 0;
+      dom.touchReticle.style.opacity = '0'; dom.touchReticle.style.transform = 'translate(-50%,-50%)';
+    };
+    window.addEventListener('pointerup', releaseTouch, { passive: false });
+    window.addEventListener('pointercancel', releaseTouch, { passive: false });
 
-  const leftWall =
-    pistonPosition(time) +
-    PARTICLE_RADIUS;
+    window.addEventListener('keydown', (e) => {
+      if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space'].includes(e.code)) e.preventDefault();
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') input.keyRoll = -1;
+      if (e.code === 'ArrowRight' || e.code === 'KeyD') input.keyRoll = 1;
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') input.keyPitch = -1;
+      if (e.code === 'ArrowDown' || e.code === 'KeyS') input.keyPitch = 1;
+      if (e.code === 'Space') { if (!input.actionHeld) input.actionTapped = true; input.actionHeld = true; }
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.crouchHeld = true;
+      if (e.code === 'KeyR') resetWave(false);
+      if (e.code === 'KeyC') cycleCamera();
+      if (e.code === 'Escape' && gameStarted) setPaused(!paused);
+    });
+    window.addEventListener('keyup', (e) => {
+      if (['ArrowLeft','KeyA','ArrowRight','KeyD'].includes(e.code)) input.keyRoll = 0;
+      if (['ArrowUp','KeyW','ArrowDown','KeyS'].includes(e.code)) input.keyPitch = 0;
+      if (e.code === 'Space') input.actionHeld = false;
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.crouchHeld = false;
+    });
 
-  if (particleX < leftWall) {
-    particleX = leftWall;
-  }
+    // -------------------------------------------------------------------------
+    // WORLD BUILDING
+    // -------------------------------------------------------------------------
+    function makeGradientTexture(stops, size = 512) {
+      const c = document.createElement('canvas'); c.width = 16; c.height = size;
+      const ctx = c.getContext('2d'); const g = ctx.createLinearGradient(0, 0, 0, size);
+      for (const [at, color] of stops) g.addColorStop(at, color);
+      ctx.fillStyle = g; ctx.fillRect(0, 0, c.width, c.height);
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
 
-  if (
-    particleX >
-    DOMAIN_X -
-    PARTICLE_RADIUS
-  ) {
-    particleX =
-      DOMAIN_X -
-      PARTICLE_RADIUS;
-  }
+    function makeCloudTexture() {
+      const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+      const ctx = c.getContext('2d');
+      const g = ctx.createRadialGradient(128, 64, 8, 128, 64, 105);
+      g.addColorStop(0, 'rgba(255,255,255,.9)'); g.addColorStop(.42, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      for (let i = 0; i < 9; i++) {
+        const x = 50 + Math.random() * 150, y = 38 + Math.random() * 55, rx = 34 + Math.random() * 50, ry = 18 + Math.random() * 30;
+        ctx.save(); ctx.translate(x,y); ctx.scale(rx,ry); ctx.beginPath(); ctx.arc(0,0,1,0,Math.PI*2); ctx.fill(); ctx.restore();
+      }
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
 
-  if (
-    particleY >
-    DOMAIN_Y -
-    PARTICLE_RADIUS
-  ) {
-    particleY =
-      DOMAIN_Y -
-      PARTICLE_RADIUS;
-  }
+    function buildSky() {
+      const geo = new THREE.SphereGeometry(420, 24, 16);
+      const mat = new THREE.MeshBasicMaterial({ map: makeGradientTexture([[0,'#4f9bc0'], [.43,'#8bc4d4'], [.7,'#d8d4b4'], [1,'#496d77']]), side: THREE.BackSide, fog: false });
+      sky = new THREE.Mesh(geo, mat); scene.add(sky);
 
-  if (
-    particleY <
-    PARTICLE_RADIUS
-  ) {
-    particleY =
-      PARTICLE_RADIUS;
-  }
+      const sunCanvas = document.createElement('canvas'); sunCanvas.width = sunCanvas.height = 128;
+      const sctx = sunCanvas.getContext('2d'); const sg = sctx.createRadialGradient(64,64,3,64,64,62);
+      sg.addColorStop(0,'rgba(255,251,218,1)'); sg.addColorStop(.18,'rgba(255,236,177,.95)'); sg.addColorStop(1,'rgba(255,220,160,0)');
+      sctx.fillStyle = sg; sctx.fillRect(0,0,128,128);
+      sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(sunCanvas), transparent:true, depthWrite:false, fog:false}));
+      sunSprite.position.set(-90,90,-160); sunSprite.scale.set(30,30,1); scene.add(sunSprite);
 
-  /*
-    Approximate signed distance to y = bottomY(x).
-
-    Surface normal:
-      n = normalize(-bottomSlope, 1)
-  */
-  const slope =
-    bottomSlope(
-      particleX
-    );
-
-  const inverseNormalLength =
-    1 /
-    Math.sqrt(
-      1 +
-      slope * slope
-    );
-
-  const normalX =
-    -slope *
-    inverseNormalLength;
-
-  const normalY =
-    inverseNormalLength;
-
-  const signedDistance =
-    (
-      particleY -
-      bottomY(particleX)
-    ) *
-    inverseNormalLength;
-
-  if (
-    signedDistance <
-    PARTICLE_RADIUS
-  ) {
-    const penetration =
-      PARTICLE_RADIUS -
-      signedDistance;
-
-    particleX +=
-      normalX *
-      penetration;
-
-    particleY +=
-      normalY *
-      penetration;
-  }
-
-  predictedX[i] = particleX;
-  predictedY[i] = particleY;
-
-  projectAgainstBoard(i);
-}
-
-/* =========================================================
-   PBF DENSITY CONSTRAINT
-
-   C_i = density_i / restDensity - 1
-
-   lambda_i =
-     -C_i /
-     (
-       sum_k |gradient C_i|² +
-       epsilon
-     )
-========================================================= */
-
-function computeLambdas() {
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    const particleX =
-      predictedX[i];
-
-    const particleY =
-      predictedY[i];
-
-    const centerCellX =
-      gridX(particleX);
-
-    const centerCellY =
-      gridY(particleY);
-
-    let density =
-      poly6(0);
-
-    let gradientIX = 0;
-    let gradientIY = 0;
-    let gradientSquaredSum = 0;
-    let neighbors = 0;
-
-    for (
-      let cellOffsetY = -1;
-      cellOffsetY <= 1;
-      cellOffsetY++
-    ) {
-      for (
-        let cellOffsetX = -1;
-        cellOffsetX <= 1;
-        cellOffsetX++
-      ) {
-        const neighborCellX =
-          centerCellX +
-          cellOffsetX;
-
-        const neighborCellY =
-          centerCellY +
-          cellOffsetY;
-
-        if (
-          neighborCellX < 0 ||
-          neighborCellX >= GRID_WIDTH ||
-          neighborCellY < 0 ||
-          neighborCellY >= GRID_HEIGHT
-        ) {
-          continue;
-        }
-
-        for (
-          let j =
-            gridHead[
-              gridIndex(
-                neighborCellX,
-                neighborCellY
-              )
-            ];
-
-          j !== -1;
-
-          j = gridNext[j]
-        ) {
-          if (j === i) {
-            continue;
-          }
-
-          const deltaX =
-            particleX -
-            predictedX[j];
-
-          const deltaY =
-            particleY -
-            predictedY[j];
-
-          const distanceSquared =
-            deltaX * deltaX +
-            deltaY * deltaY;
-
-          if (
-            distanceSquared >= H2 ||
-            distanceSquared <
-            0.000000000001
-          ) {
-            continue;
-          }
-
-          density +=
-            poly6(
-              distanceSquared
-            );
-
-          const distance =
-            Math.sqrt(
-              distanceSquared
-            );
-
-          const gradientCoefficient =
-            -SPIKY *
-            (H - distance) *
-            (H - distance) /
-            distance;
-
-          const gradientX =
-            gradientCoefficient *
-            deltaX /
-            REST_DENSITY;
-
-          const gradientY =
-            gradientCoefficient *
-            deltaY /
-            REST_DENSITY;
-
-          gradientIX +=
-            gradientX;
-
-          gradientIY +=
-            gradientY;
-
-          gradientSquaredSum +=
-            gradientX *
-            gradientX +
-            gradientY *
-            gradientY;
-
-          neighbors++;
-        }
+      const cloudTexture = makeCloudTexture();
+      for (let i = 0; i < 13; i++) {
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:cloudTexture, transparent:true, opacity:.25 + hash(i)*.35, depthWrite:false, fog:false}));
+        sp.position.set(-170 + hash(i*3)*340, 38 + hash(i*7)*62, -120 + hash(i*11)*130);
+        const sc = 28 + hash(i*13)*55; sp.scale.set(sc*1.8, sc, 1); scene.add(sp); clouds.push(sp);
       }
     }
 
-    gradientSquaredSum +=
-      gradientIX *
-      gradientIX +
-      gradientIY *
-      gradientIY;
+    function buildShore() {
+      shoreGroup = new THREE.Group();
+      const sand = new THREE.Mesh(new THREE.PlaneGeometry(420, 95, 1, 1), new THREE.MeshStandardMaterial({color:0xcdb885, roughness:1}));
+      sand.rotation.x = -Math.PI/2; sand.position.set(0,-1.55,118); shoreGroup.add(sand);
 
-    let constraint =
-      density /
-      REST_DENSITY -
-      1;
+      const reefMat = new THREE.MeshStandardMaterial({color:0x315f57, roughness:1, transparent:true, opacity:.58});
+      for (let i=0;i<24;i++) {
+        const g = new THREE.CircleGeometry(4 + hash(i*5)*10, 12);
+        const m = new THREE.Mesh(g, reefMat); m.rotation.x=-Math.PI/2; m.position.set(-170+hash(i*9)*340,-1.0,18+hash(i*17)*64); m.scale.y=.45+hash(i*19)*.8; shoreGroup.add(m);
+      }
 
-    /*
-      Limit free-surface attraction caused by missing
-      neighbors while still allowing surface cohesion.
-    */
-    constraint =
-      Math.max(
-        constraint,
-        -0.055
-      );
+      const mountainMat = new THREE.MeshStandardMaterial({color:0x3b665f, roughness:1, flatShading:true});
+      const mountainBack = new THREE.MeshStandardMaterial({color:0x527a72, roughness:1, flatShading:true});
+      for (let i=0;i<22;i++) {
+        const radius = 16 + hash(i*31)*28, height = 22 + hash(i*37)*52;
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(radius,height,5), i%3===0?mountainBack:mountainMat);
+        cone.position.set(-210+i*20 + hash(i*41)*10, height/2-2, 142+hash(i*43)*28);
+        cone.rotation.y=hash(i*47)*Math.PI; shoreGroup.add(cone);
+      }
 
-    lambda[i] =
-      -constraint /
-      (
-        gradientSquaredSum +
-        0.00001
-      );
+      const rockMat = new THREE.MeshStandardMaterial({color:0x4e5147, roughness:1, flatShading:true});
+      for (let i=0;i<26;i++) {
+        const r=.8+hash(i*61)*3.2;
+        const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(r,0),rockMat);
+        rock.scale.set(1.2,.6+hash(i*67),.8); rock.rotation.set(hash(i)*2,hash(i*2)*3,hash(i*3));
+        rock.position.set(-180+hash(i*71)*360,-.7,70+hash(i*73)*30); shoreGroup.add(rock);
+      }
+      scene.add(shoreGroup);
+    }
 
-    neighborCount[i] =
-      neighbors;
-  }
-}
+    function crestZ(x, t) {
+      return -0.075 * x + .72 * Math.sin(x * .032 + t * .16) + .22 * Math.sin(x * .09 - t * .21);
+    }
 
-/* =========================================================
-   POSITION CORRECTION
+    function waveHeight(x, z, t) {
+      const q = z - crestZ(x, t);
+      const amp = 5.65 + .55 * Math.sin(x * .04 + t * .12) + .22 * Math.sin(x * .11 - t * .09);
+      let h;
+      if (q < 0) h = amp * Math.exp(-(q*q) / 150);
+      else h = amp * Math.exp(-q / 9.3) - 1.15 * Math.exp(-((q - 12.5) ** 2) / 28);
+      const broken = smoothstep(player.breakX - 2, player.breakX + 14, x);
+      const crestMask = Math.exp(-(q*q) / 27);
+      h -= broken * crestMask * 1.18;
+      h += broken * .28 * Math.sin(q * 1.45 + x * .34 + t * 4.1) * Math.exp(-((q - 5) ** 2) / 90);
+      h += .14 * Math.sin(x * .34 + z * .18 + t * 1.5);
+      h += .09 * Math.sin(x * .11 - z * .41 - t * 1.05);
+      h += .045 * Math.sin(x * .88 + z * .61 + t * 2.6);
+      return h - .2;
+    }
 
-   deltaPosition_i =
-     1/restDensity *
-     sum_j (
-       lambda_i +
-       lambda_j +
-       artificialPressure
-     ) *
-     gradient W_ij
-========================================================= */
+    function waveNormal(x,z,t,target=new THREE.Vector3()) {
+      const e=.32;
+      const hx=waveHeight(x+e,z,t)-waveHeight(x-e,z,t);
+      const hz=waveHeight(x,z+e,t)-waveHeight(x,z-e,t);
+      return target.set(-hx/(2*e),1,-hz/(2*e)).normalize();
+    }
 
-function computeCorrections() {
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    const particleX =
-      predictedX[i];
+    function buildOcean() {
+      if (ocean) {
+        scene.remove(ocean); ocean.geometry.dispose(); ocean.material.dispose();
+      }
+      const p = qualityProfiles[qualityIndex]; oceanSegX=p.sx; oceanSegZ=p.sz;
+      const geo = new THREE.PlaneGeometry(380, 205, oceanSegX, oceanSegZ); geo.rotateX(-Math.PI/2);
+      const pos = geo.attributes.position; oceanBase = new Float32Array(pos.count*2); oceanColors = new Float32Array(pos.count*3);
+      for(let i=0;i<pos.count;i++){ oceanBase[i*2]=pos.getX(i); oceanBase[i*2+1]=pos.getZ(i); }
+      geo.setAttribute('color',new THREE.BufferAttribute(oceanColors,3));
+      pos.setUsage(THREE.DynamicDrawUsage); geo.attributes.color.setUsage(THREE.DynamicDrawUsage);
+      const mat = new THREE.MeshPhysicalMaterial({
+        vertexColors:true, roughness:.22, metalness:.04, transmission:0, transparent:true, opacity:.94,
+        clearcoat:.65, clearcoatRoughness:.22, side:THREE.DoubleSide
+      });
+      ocean=new THREE.Mesh(geo,mat); ocean.receiveShadow=true; scene.add(ocean);
+    }
 
-    const particleY =
-      predictedY[i];
+    function updateOcean(t) {
+      const pos=ocean.geometry.attributes.position, col=ocean.geometry.attributes.color;
+      for(let i=0;i<pos.count;i++){
+        const x=oceanBase[i*2], z=oceanBase[i*2+1], y=waveHeight(x,z,t);
+        pos.setY(i,y);
+        const q=z-crestZ(x,t), foam=smoothstep(player.breakX-1,player.breakX+20,x)*Math.exp(-(q*q)/34);
+        const depth=clamp((y+2)/8,0,1);
+        const r=lerp(.025,.08,depth)+foam*.55, g=lerp(.20,.55,depth)+foam*.38, b=lerp(.28,.66,depth)+foam*.28;
+        col.setXYZ(i,r,g,b);
+      }
+      pos.needsUpdate=true; col.needsUpdate=true;
+      if((frameCounter&1)===0) ocean.geometry.computeVertexNormals();
+    }
 
-    const centerCellX =
-      gridX(particleX);
+    function buildLip() {
+      const rows=5, cols=42, verts=rows*cols;
+      const positions=new Float32Array(verts*3), indices=[];
+      for(let x=0;x<cols-1;x++) for(let r=0;r<rows-1;r++){
+        const a=x*rows+r,b=(x+1)*rows+r,c=(x+1)*rows+r+1,d=x*rows+r+1;
+        indices.push(a,b,d,b,c,d);
+      }
+      const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(positions,3)); geo.setIndex(indices); geo.computeVertexNormals();
+      const mat=new THREE.MeshPhysicalMaterial({color:0x54bfd0,roughness:.17,transparent:true,opacity:.73,side:THREE.DoubleSide,clearcoat:.8,depthWrite:false});
+      lipMesh=new THREE.Mesh(geo,mat); lipMesh.renderOrder=2; scene.add(lipMesh);
+    }
 
-    const centerCellY =
-      gridY(particleY);
-
-    let totalCorrectionX = 0;
-    let totalCorrectionY = 0;
-
-    for (
-      let cellOffsetY = -1;
-      cellOffsetY <= 1;
-      cellOffsetY++
-    ) {
-      for (
-        let cellOffsetX = -1;
-        cellOffsetX <= 1;
-        cellOffsetX++
-      ) {
-        const neighborCellX =
-          centerCellX +
-          cellOffsetX;
-
-        const neighborCellY =
-          centerCellY +
-          cellOffsetY;
-
-        if (
-          neighborCellX < 0 ||
-          neighborCellX >= GRID_WIDTH ||
-          neighborCellY < 0 ||
-          neighborCellY >= GRID_HEIGHT
-        ) {
-          continue;
+    function updateLip(t) {
+      const pos=lipMesh.geometry.attributes.position, rows=5, cols=42;
+      const qVals=[-1.4,-.2,1.8,4.4,7.0], yOff=[0,.7,1.3,-.45,-2.05];
+      for(let c=0;c<cols;c++){
+        const u=c/(cols-1), x=player.breakX+u*58;
+        const strength=.38+.62*smoothstep(0,.18,u);
+        for(let r=0;r<rows;r++){
+          const q=qVals[r], z=crestZ(x,t)+q;
+          const base=waveHeight(x,crestZ(x,t),t);
+          const curl=yOff[r]*strength*(.88+.12*Math.sin(x*.07+t*.4));
+          pos.setXYZ(c*rows+r,x,base+curl,z);
         }
+      }
+      pos.needsUpdate=true;
+      if((frameCounter&3)===0) lipMesh.geometry.computeVertexNormals();
+      lipMesh.material.opacity=.52+player.barrel*.26;
+    }
 
-        for (
-          let j =
-            gridHead[
-              gridIndex(
-                neighborCellX,
-                neighborCellY
-              )
-            ];
+    function buildFoam() {
+      if(foamPoints){scene.remove(foamPoints);foamPoints.geometry.dispose();foamPoints.material.dispose();}
+      const count=qualityProfiles[qualityIndex].foam;
+      const pos=new Float32Array(count*3); const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+      const mat=new THREE.PointsMaterial({color:0xecffff,size:.34,transparent:true,opacity:.78,depthWrite:false,sizeAttenuation:true});
+      foamPoints=new THREE.Points(geo,mat); foamPoints.renderOrder=3; scene.add(foamPoints);
+    }
 
-          j !== -1;
+    function updateFoam(t) {
+      const pos=foamPoints.geometry.attributes.position, count=pos.count;
+      for(let i=0;i<count;i++){
+        const u=hash(i*5.17), v=hash(i*9.31), w=hash(i*13.73);
+        const x=player.breakX+u*76;
+        const q=-1.0+v*13.5 + Math.sin(t*(.4+w)+i)*.3;
+        const z=crestZ(x,t)+q;
+        const lift=(w>.84? (w-.84)*9*Math.abs(Math.sin(t*2.7+i)) : 0);
+        const y=waveHeight(x,z,t)+.22+w*.3+lift;
+        pos.setXYZ(i,x,y,z);
+      }
+      pos.needsUpdate=true;
+    }
 
-          j = gridNext[j]
-        ) {
-          if (j === i) {
-            continue;
-          }
+    function buildSpray() {
+      if(sprayPoints){scene.remove(sprayPoints);sprayPoints.geometry.dispose();sprayPoints.material.dispose();}
+      const count=qualityProfiles[qualityIndex].spray;
+      const pos=new Float32Array(count*3); sprayData=[];
+      for(let i=0;i<count;i++){ sprayData.push({life:0,v:new THREE.Vector3(),p:new THREE.Vector3(0,-100,0)}); pos[i*3+1]=-100; }
+      const geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+      const mat=new THREE.PointsMaterial({color:0xffffff,size:.18,transparent:true,opacity:.9,depthWrite:false});
+      sprayPoints=new THREE.Points(geo,mat); sprayPoints.renderOrder=5; scene.add(sprayPoints);
+    }
 
-          const deltaX =
-            particleX -
-            predictedX[j];
-
-          const deltaY =
-            particleY -
-            predictedY[j];
-
-          const distanceSquared =
-            deltaX * deltaX +
-            deltaY * deltaY;
-
-          if (
-            distanceSquared >= H2 ||
-            distanceSquared <
-            0.000000000001
-          ) {
-            continue;
-          }
-
-          const distance =
-            Math.sqrt(
-              distanceSquared
-            );
-
-          const gradientCoefficient =
-            -SPIKY *
-            (H - distance) *
-            (H - distance) /
-            distance;
-
-          const kernelValue =
-            poly6(
-              distanceSquared
-            );
-
-          const artificialPressure =
-            -SCORR_K *
-            Math.pow(
-              kernelValue /
-              WQ,
-              SCORR_N
-            );
-
-          const correctionScale =
-            lambda[i] +
-            lambda[j] +
-            artificialPressure;
-
-          totalCorrectionX +=
-            correctionScale *
-            gradientCoefficient *
-            deltaX;
-
-          totalCorrectionY +=
-            correctionScale *
-            gradientCoefficient *
-            deltaY;
-        }
+    function spawnSpray(count, strength=1) {
+      const origin=boardRoot.position;
+      for(let n=0;n<count;n++){
+        const p=sprayData.find(s=>s.life<=0); if(!p) break;
+        p.life=.35+Math.random()*.55;
+        p.p.copy(origin).add(new THREE.Vector3((Math.random()-.5)*.8,.05,(Math.random()-.5)*.5));
+        p.v.set((1+Math.random()*2)*strength,1.5+Math.random()*3.4*strength,(Math.random()-.5)*3.5).applyQuaternion(boardRoot.quaternion);
+        p.v.x*=-.35;
       }
     }
 
-    totalCorrectionX /=
-      REST_DENSITY;
-
-    totalCorrectionY /=
-      REST_DENSITY;
-
-    const correctionMagnitude =
-      Math.hypot(
-        totalCorrectionX,
-        totalCorrectionY
-      );
-
-    if (
-      correctionMagnitude >
-      MAX_CORRECTION
-    ) {
-      const scale =
-        MAX_CORRECTION /
-        correctionMagnitude;
-
-      totalCorrectionX *= scale;
-      totalCorrectionY *= scale;
+    function updateSpray(dt) {
+      const pos=sprayPoints.geometry.attributes.position;
+      for(let i=0;i<sprayData.length;i++){
+        const p=sprayData[i];
+        if(p.life>0){ p.life-=dt; p.v.y-=7.6*dt; p.p.addScaledVector(p.v,dt); pos.setXYZ(i,p.p.x,p.p.y,p.p.z); }
+        else pos.setXYZ(i,0,-100,0);
+      }
+      pos.needsUpdate=true;
     }
 
-    correctionX[i] =
-      totalCorrectionX;
+    function makeBoard() {
+      boardRoot=new THREE.Group(); scene.add(boardRoot);
+      const boardGeo=new THREE.CapsuleGeometry(.33,1.78,7,16); boardGeo.rotateZ(Math.PI/2); boardGeo.scale(1,.17,1);
+      const boardMat=new THREE.MeshStandardMaterial({color:0xf0eadf,roughness:.32,metalness:.02});
+      boardMesh=new THREE.Mesh(boardGeo,boardMat); boardMesh.castShadow=true; boardMesh.position.y=.03; boardRoot.add(boardMesh);
+      const stripe=new THREE.Mesh(new THREE.BoxGeometry(1.35,.03,.08),new THREE.MeshStandardMaterial({color:0x1d746d,roughness:.4}));
+      stripe.position.set(.15,.11,0); boardRoot.add(stripe);
+      const finMat=new THREE.MeshStandardMaterial({color:0x183c43,roughness:.5});
+      for(const z of [-.18,.18]){const fin=new THREE.Mesh(new THREE.ConeGeometry(.08,.28,3),finMat);fin.rotation.z=Math.PI;fin.position.set(-.75,-.15,z);boardRoot.add(fin);}
+      rider=buildRider(); boardRoot.add(rider);
+    }
 
-    correctionY[i] =
-      totalCorrectionY;
-  }
-}
+    function capsule(color, radius=.1, length=.5) {
+      const m=new THREE.Mesh(new THREE.CapsuleGeometry(radius,length,4,7),new THREE.MeshStandardMaterial({color,roughness:.8}));
+      m.castShadow=true; return m;
+    }
 
-/* =========================================================
-   XSPH VISCOSITY
-========================================================= */
+    function buildRider() {
+      const g=new THREE.Group();
+      const skin=0xa96543, suit=0x10191f, hair=0x1d1714;
+      const parts={};
+      parts.torso=capsule(suit,.23,.65); g.add(parts.torso);
+      parts.head=new THREE.Mesh(new THREE.SphereGeometry(.18,10,8),new THREE.MeshStandardMaterial({color:skin,roughness:.9})); parts.head.castShadow=true; g.add(parts.head);
+      parts.hair=new THREE.Mesh(new THREE.SphereGeometry(.185,9,6,0,Math.PI*2,0,Math.PI*.55),new THREE.MeshStandardMaterial({color:hair,roughness:1})); g.add(parts.hair);
+      for(const name of ['lThigh','lShin','rThigh','rShin']){parts[name]=capsule(suit,.09,.35);g.add(parts[name]);}
+      for(const name of ['lUpper','lFore','rUpper','rFore']){parts[name]=capsule(name.includes('Fore')?skin:suit,.07,.32);g.add(parts[name]);}
+      riderParts=parts; return g;
+    }
 
-function applyViscosity() {
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    const particleX =
-      predictedX[i];
+    function placeSegment(mesh,a,b) {
+      tmpV1.copy(b).sub(a); const len=tmpV1.length();
+      mesh.position.copy(a).add(b).multiplyScalar(.5);
+      mesh.quaternion.setFromUnitVectors(UP,tmpV1.normalize());
+      mesh.scale.set(1,Math.max(.2,len/.85),1);
+    }
 
-    const particleY =
-      predictedY[i];
+    function updateRiderPose(t) {
+      const p=riderParts;
+      if(player.state==='paddling'||player.state==='caught'){
+        const stroke=Math.sin(t*8)*(input.actionHeld?1:.22);
+        const hip=new THREE.Vector3(-.25,.43,0), shoulder=new THREE.Vector3(.45,.51,0), head=new THREE.Vector3(.88,.57,0);
+        placeSegment(p.torso,hip,shoulder); p.head.position.copy(head); p.hair.position.copy(head).add(new THREE.Vector3(-.02,.07,-.01));
+        const lk=new THREE.Vector3(-.55,.31,-.12), rk=new THREE.Vector3(-.55,.31,.12), lf=new THREE.Vector3(-.9,.2,-.14), rf=new THREE.Vector3(-.9,.2,.14);
+        placeSegment(p.lThigh,hip,lk);placeSegment(p.lShin,lk,lf);placeSegment(p.rThigh,hip,rk);placeSegment(p.rShin,rk,rf);
+        const ls=new THREE.Vector3(.38,.5,-.2),rs=new THREE.Vector3(.38,.5,.2);
+        const le=new THREE.Vector3(.15+stroke*.22,.18,-.42),re=new THREE.Vector3(.15-stroke*.22,.18,.42);
+        const lh=new THREE.Vector3(-.25+stroke*.42,.05,-.38),rh=new THREE.Vector3(-.25-stroke*.42,.05,.38);
+        placeSegment(p.lUpper,ls,le);placeSegment(p.lFore,le,lh);placeSegment(p.rUpper,rs,re);placeSegment(p.rFore,re,rh);
+      }else{
+        const c=player.crouch;
+        const hipY=lerp(1.02,.57,c), shoulderY=lerp(1.67,1.05,c), lean=input.pitch*.12;
+        const hip=new THREE.Vector3(0,hipY,0), shoulder=new THREE.Vector3(.03+lean,shoulderY,0), head=new THREE.Vector3(.06+lean,shoulderY+.43,0);
+        placeSegment(p.torso,hip,shoulder);p.head.position.copy(head);p.hair.position.copy(head).add(new THREE.Vector3(-.03,.07,-.01));
+        const lf=new THREE.Vector3(-.62,.16,-.13),rf=new THREE.Vector3(.62,.16,.13);
+        const lk=new THREE.Vector3(-.26,lerp(.64,.37,c),-.06),rk=new THREE.Vector3(.28,lerp(.67,.4,c),.08);
+        placeSegment(p.lThigh,hip,lk);placeSegment(p.lShin,lk,lf);placeSegment(p.rThigh,hip,rk);placeSegment(p.rShin,rk,rf);
+        const ls=new THREE.Vector3(0,shoulderY-.04,-.24),rs=new THREE.Vector3(0,shoulderY-.04,.24);
+        const armSwing=input.roll*.48;
+        const le=new THREE.Vector3(-.1-armSwing,shoulderY-.28,-.53), re=new THREE.Vector3(.12-armSwing,shoulderY-.24,.53);
+        const lh=new THREE.Vector3(-.42-armSwing,shoulderY-.11,-.65), rh=new THREE.Vector3(.45-armSwing,shoulderY-.04,.64);
+        placeSegment(p.lUpper,ls,le);placeSegment(p.lFore,le,lh);placeSegment(p.rUpper,rs,re);placeSegment(p.rFore,re,rh);
+      }
+    }
 
-    const centerCellX =
-      gridX(particleX);
+    function initThree() {
+      try {
+        renderer=new THREE.WebGLRenderer({canvas:dom.canvas,antialias:true,powerPreference:'high-performance',alpha:false});
+        renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.05;
+        renderer.shadowMap.enabled=qualityProfiles[qualityIndex].shadows;
+        renderer.setSize(innerWidth,innerHeight,false); renderer.setPixelRatio(Math.min(devicePixelRatio,qualityProfiles[qualityIndex].pixel));
+        scene=new THREE.Scene(); scene.fog=new THREE.FogExp2(0x7ab1bc,.0036);
+        camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.08,600); camera.position.set(20,8,16);
+        clock=new THREE.Clock();
+        const hemi=new THREE.HemisphereLight(0xbfeaff,0x183137,1.75); scene.add(hemi);
+        const sun=new THREE.DirectionalLight(0xffefd1,2.35); sun.position.set(-60,95,-75); sun.castShadow=qualityProfiles[qualityIndex].shadows;
+        sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-30;sun.shadow.camera.right=30;sun.shadow.camera.top=30;sun.shadow.camera.bottom=-30;scene.add(sun);
+        buildSky();buildShore();buildOcean();buildLip();buildFoam();buildSpray();makeBoard();
+        window.addEventListener('resize',onResize);
+        dom.loading.classList.add('hidden');
+        renderer.setAnimationLoop(loop);
+      } catch(err) {
+        dom.loading.classList.add('hidden'); dom.fatal.style.display='grid'; dom.fatalText.textContent=String(err.stack||err);
+      }
+    }
 
-    const centerCellY =
-      gridY(particleY);
+    function rebuildQuality() {
+      renderer.setPixelRatio(Math.min(devicePixelRatio,qualityProfiles[qualityIndex].pixel));
+      renderer.shadowMap.enabled=qualityProfiles[qualityIndex].shadows;
+      buildOcean();buildFoam();buildSpray();
+    }
 
-    let velocityDifferenceX = 0;
-    let velocityDifferenceY = 0;
+    // -------------------------------------------------------------------------
+    // GAMEPLAY
+    // -------------------------------------------------------------------------
+    function getQ(t) { return player.z-crestZ(player.x,t); }
 
-    for (
-      let cellOffsetY = -1;
-      cellOffsetY <= 1;
-      cellOffsetY++
-    ) {
-      for (
-        let cellOffsetX = -1;
-        cellOffsetX <= 1;
-        cellOffsetX++
-      ) {
-        const neighborCellX =
-          centerCellX +
-          cellOffsetX;
+    function setMessage(main,sub='',duration=1.2) {
+      dom.messageMain.textContent=main; dom.messageSub.textContent=sub; dom.message.classList.add('show');
+      clearTimeout(setMessage.timer); setMessage.timer=setTimeout(()=>dom.message.classList.remove('show'),duration*1000);
+    }
 
-        const neighborCellY =
-          centerCellY +
-          cellOffsetY;
+    function addTrick(name,basePoints) {
+      const now=performance.now()/1000;
+      if((player.cooldowns[name]||0)>now) return;
+      player.cooldowns[name]=now+.65;
+      if(player.comboTimer>0) player.combo=Math.min(6,player.combo+.25); else player.combo=1;
+      player.comboTimer=4;
+      const points=Math.round(basePoints*player.combo);
+      player.score+=points; player.waveScore+=points;
+      const el=document.createElement('div'); el.className='trick'; el.innerHTML=`${name}<span>+${points}</span>`; dom.trickFeed.prepend(el);
+      while(dom.trickFeed.children.length>5)dom.trickFeed.lastChild.remove();
+      setTimeout(()=>el.remove(),3400);
+    }
 
-        if (
-          neighborCellX < 0 ||
-          neighborCellX >= GRID_WIDTH ||
-          neighborCellY < 0 ||
-          neighborCellY >= GRID_HEIGHT
-        ) {
-          continue;
+    function setState(state) {
+      player.state=state;player.stateTime=0;
+      if(state==='paddling'){dom.actionButton.textContent='PADDLE';dom.crouchButton.textContent='DIVE';}
+      if(state==='caught'){dom.actionButton.textContent='POP UP';setMessage('THE WAVE HAS YOU','TAP POP UP',1.5);}
+      if(state==='standing'){dom.actionButton.textContent='PUMP';dom.crouchButton.textContent='CROUCH';setMessage('YOU’RE UP','TILT TO CARVE',1.2);}
+      if(state==='air'){dom.actionButton.textContent='LEVEL';dom.crouchButton.textContent='GRAB';}
+      if(state==='wipeout'){dom.actionButton.textContent='RESTART';dom.crouchButton.textContent='';}
+    }
+
+    function resetWave(show=true) {
+      if(player.waveScore>player.best){player.best=player.waveScore;localStorage.setItem('tiltSurfBest',String(player.best));}
+      player.x=15;player.z=-14;player.y=0;player.heading=0;player.speed=0;player.balance=1;player.crouch=0;
+      player.airY=0;player.airVY=0;player.airSpin=0;player.airFlip=0;player.waveScore=0;player.combo=1;player.comboTimer=0;
+      player.tubeTime=0;player.barrel=0;player.breakX=22;player.lastQ=-14;player.bottomTurnArmed=false;player.waveNumber++;
+      setState('paddling');
+      if(show)setMessage(`WAVE ${player.waveNumber}`,'HOLD PADDLE',1.15);
+      camera.position.set(player.x+10,7,player.z+12);
+    }
+
+    function wipeout(reason='WIPEOUT') {
+      if(player.state==='wipeout')return;
+      setState('wipeout');player.wipeoutSpin=(Math.random()>.5?1:-1)*(2.5+Math.random()*3);
+      splashSound(1);spawnSpray(45,1.5);setMessage(reason,'TAP RESTART',2.2);
+    }
+
+    function detectMotionTricks(q,t,dt) {
+      const now=t;
+      const pitchSign=input.pitch>.28?1:input.pitch<-.28?-1:0;
+      if(pitchSign&&pitchSign!==player.lastPumpSign&&now-player.lastPumpTime<.82&&Math.abs(input.pitchVelocity)>.7){
+        player.speed=Math.min(19,player.speed+1.05);addTrick('PUMP',45);player.lastPumpTime=now;player.lastPumpSign=pitchSign;
+      }else if(pitchSign&&pitchSign!==player.lastPumpSign){player.lastPumpTime=now;player.lastPumpSign=pitchSign;}
+
+      if(q>7.2&&Math.abs(input.roll)>.42)player.bottomTurnArmed=true;
+      if(player.bottomTurnArmed&&q<5.2&&Math.abs(input.roll)>.35){addTrick('BOTTOM TURN',170);player.bottomTurnArmed=false;}
+
+      const rSign=input.roll>.35?1:input.roll<-.35?-1:0;
+      if(q<3.1&&rSign&&rSign!==player.lastRollSign&&Math.abs(input.rollVelocity)>1.45&&now-player.lastTopTurn>.8){
+        addTrick('LIP SNAP',250);spawnSpray(18,1.25);splashSound(.55);player.lastTopTurn=now;
+      }
+      if(rSign)player.lastRollSign=rSign;
+
+      if(Math.abs(player.heading)>.58&&Math.sign(input.roll)===-Math.sign(player.heading)&&Math.abs(input.roll)>.52){
+        addTrick('CUTBACK',220);player.heading*=.76;spawnSpray(14,1.0);
+      }
+
+      if(q<1.35&&player.speed>10.5&&input.pitch<-.62&&input.pitchVelocity<-1.05&&player.state==='standing'){
+        setState('air');player.airVY=4.7+player.speed*.19;player.airY=.08;player.airSpin=0;player.airFlip=0;splashSound(.7);spawnSpray(28,1.35);
+      }
+    }
+
+    function updatePlayer(dt,t) {
+      player.stateTime+=dt;
+      player.comboTimer=Math.max(0,player.comboTimer-dt);
+      if(player.comboTimer===0)player.combo=damp(player.combo,1,3,dt);
+      player.crouch=damp(player.crouch,input.crouchHeld?1:0,8,dt);
+
+      let q=getQ(t);
+      player.power=Math.exp(-((q-3.2)**2)/40);
+      player.section=q<1.8?'LIP':q<6?'POCKET':q<12?'FACE':'FLATS';
+
+      if(player.state==='paddling'){
+        player.speed=damp(player.speed,input.actionHeld?3.6:.8,2.5,dt);
+        player.z+=player.speed*dt*.72;
+        player.x+=input.roll*dt*.7;
+        if(input.actionHeld&&q>-5.0)setState('caught');
+        if(q>2.5){player.z=crestZ(player.x,t)-12;setMessage('MISSED IT','PADDLE EARLIER',1.1);}
+      }
+      else if(player.state==='caught'){
+        player.speed=damp(player.speed,6.2,3,dt);player.z+=2.4*dt;player.x-=1.1*dt;
+        if(input.actionTapped){setState('standing');player.speed=7.2;addTrick('TAKEOFF',120);}
+        if(player.stateTime>2.4||q>7)wipeout('LATE TAKEOFF');
+      }
+      else if(player.state==='standing'){
+        const turnRate=input.roll*(.62+player.speed*.045)*(1-player.crouch*.13);
+        player.heading=clamp(player.heading+turnRate*dt,-.95,.95);
+        const carveDrag=Math.abs(input.roll)*(.12+.06*Math.abs(input.roll));
+        const pitchDrive=input.pitch*2.2;
+        const gravityDrive=player.power*(2.4+Math.max(0,q-3)*.08);
+        const pocketDrive=Math.exp(-((q-2.4)**2)/18)*1.8;
+        const drag=.16*player.speed+carveDrag*player.speed;
+        player.speed=clamp(player.speed+(gravityDrive+pocketDrive+pitchDrive-drag)*dt,2.2,19.5);
+
+        player.x-=Math.cos(player.heading)*player.speed*dt;
+        player.z+=Math.sin(player.heading)*player.speed*dt*.58 + input.pitch*1.55*dt;
+        q=getQ(t);
+        const faceReturn=clamp((5.2-q)*.12,-1.2,1.2);player.z+=faceReturn*dt;
+        player.breakX=damp(player.breakX,player.x+(player.crouch&&q<5? -2.2:5.5),2.0,dt);
+
+        const motionShock=Math.max(0,Math.abs(input.rollVelocity)-3.4)*.025+Math.max(0,Math.abs(input.pitchVelocity)-3.8)*.02;
+        const railRisk=Math.max(0,Math.abs(input.roll)-.78)*(.5+player.speed*.055);
+        const edgeRisk=(q<-.8?(-q)*.18:0)+(q>17?(q-17)*.12:0);
+        const recovery=.44+player.crouch*.32;
+        player.balance=clamp(player.balance+(recovery-motionShock-railRisk-edgeRisk)*dt,0,1);
+        if(Math.abs(input.roll)<.35)player.balance=Math.min(1,player.balance+.2*dt);
+
+        const tubeZone=smoothstep(6.1,3.6,q)*smoothstep(.3,1.4,q);
+        player.barrel=damp(player.barrel,tubeZone*(.35+.65*player.crouch),4,dt);
+        if(player.barrel>.42){
+          player.tubeTime+=dt;player.score+=dt*38*(1+player.barrel);player.waveScore+=dt*38*(1+player.barrel);
+          if(player.tubeTime>1.2&&(player.cooldowns['BARREL']||0)<t)addTrick('BARREL',Math.round(220+player.tubeTime*70));
+        }else player.tubeTime=Math.max(0,player.tubeTime-dt*.8);
+
+        if(Math.abs(input.roll)>.45&&player.speed>8){spawnSpray(qualityIndex+1,.5+Math.abs(input.roll));}
+        detectMotionTricks(q,t,dt);
+        if(player.balance<=.02)wipeout('CAUGHT A RAIL');
+        else if(q<-5.5)wipeout('OVER THE BACK');
+        else if(q>23)wipeout('LOST THE WAVE');
+      }
+      else if(player.state==='air'){
+        player.x-=Math.cos(player.heading)*player.speed*dt;
+        player.z+=Math.sin(player.heading)*player.speed*dt*.52;
+        player.airVY-=9.8*dt;player.airY+=player.airVY*dt;
+        player.airSpin+=input.roll*2.5*dt;player.airFlip-=input.pitch*1.8*dt;
+        player.breakX=damp(player.breakX,player.x+1.5,2,dt);
+        if(player.airY<=0&&player.airVY<0&&player.stateTime>.3){
+          const aligned=Math.abs(input.roll)<.43&&Math.abs(input.pitch)<.52;
+          const spinQuarter=Math.round(player.airSpin/(Math.PI/2));
+          const spinError=Math.abs(player.airSpin-spinQuarter*Math.PI/2);
+          if(aligned&&spinError<.65){
+            player.airY=0;player.balance=.78;setState('standing');addTrick(Math.abs(spinQuarter)>=2?'AIR 360':'AIR',420+Math.abs(spinQuarter)*120);splashSound(.8);spawnSpray(26,1.2);
+          }else wipeout('MISSED THE LANDING');
         }
-
-        for (
-          let j =
-            gridHead[
-              gridIndex(
-                neighborCellX,
-                neighborCellY
-              )
-            ];
-
-          j !== -1;
-
-          j = gridNext[j]
-        ) {
-          if (j === i) {
-            continue;
-          }
-
-          const deltaX =
-            particleX -
-            predictedX[j];
-
-          const deltaY =
-            particleY -
-            predictedY[j];
-
-          const distanceSquared =
-            deltaX * deltaX +
-            deltaY * deltaY;
-
-          if (
-            distanceSquared >=
-            H2
-          ) {
-            continue;
-          }
-
-          const weight =
-            poly6(
-              distanceSquared
-            ) /
-            REST_DENSITY;
-
-          velocityDifferenceX +=
-            (
-              velocityX[j] -
-              velocityX[i]
-            ) *
-            weight;
-
-          velocityDifferenceY +=
-            (
-              velocityY[j] -
-              velocityY[i]
-            ) *
-            weight;
-        }
       }
-    }
-
-    temporaryVelocityX[i] =
-      velocityX[i] +
-      VISCOSITY *
-      velocityDifferenceX;
-
-    temporaryVelocityY[i] =
-      velocityY[i] +
-      VISCOSITY *
-      velocityDifferenceY;
-  }
-
-  velocityX.set(
-    temporaryVelocityX
-  );
-
-  velocityY.set(
-    temporaryVelocityY
-  );
-}
-
-/* =========================================================
-   FLUID QUERIES FOR BOARD DYNAMICS
-========================================================= */
-
-function surfaceHeightAt(sampleX) {
-  const firstGridX =
-    gridX(
-      sampleX -
-      0.42
-    );
-
-  const lastGridX =
-    gridX(
-      sampleX +
-      0.42
-    );
-
-  let highest = -1000000000;
-
-  for (
-    let cellX = firstGridX;
-    cellX <= lastGridX;
-    cellX++
-  ) {
-    for (
-      let cellY = 0;
-      cellY < GRID_HEIGHT;
-      cellY++
-    ) {
-      for (
-        let j =
-          gridHead[
-            gridIndex(
-              cellX,
-              cellY
-            )
-          ];
-
-        j !== -1;
-
-        j = gridNext[j]
-      ) {
-        if (
-          Math.abs(
-            predictedX[j] -
-            sampleX
-          ) <
-          0.42 &&
-          neighborCount[j] >= 5 &&
-          predictedY[j] > highest
-        ) {
-          highest =
-            predictedY[j];
-        }
-      }
-    }
-  }
-
-  return highest > -100000000
-    ? highest
-    : WATER_LEVEL;
-}
-
-function fluidVelocityAt(
-  sampleX,
-  sampleY,
-  radius = 0.9
-) {
-  const centerCellX =
-    gridX(sampleX);
-
-  const centerCellY =
-    gridY(sampleY);
-
-  const cellRadius =
-    Math.ceil(
-      radius /
-      H
-    );
-
-  let averageX = 0;
-  let averageY = 0;
-  let weightSum = 0;
-
-  for (
-    let cellOffsetY = -cellRadius;
-    cellOffsetY <= cellRadius;
-    cellOffsetY++
-  ) {
-    for (
-      let cellOffsetX = -cellRadius;
-      cellOffsetX <= cellRadius;
-      cellOffsetX++
-    ) {
-      const neighborCellX =
-        centerCellX +
-        cellOffsetX;
-
-      const neighborCellY =
-        centerCellY +
-        cellOffsetY;
-
-      if (
-        neighborCellX < 0 ||
-        neighborCellX >= GRID_WIDTH ||
-        neighborCellY < 0 ||
-        neighborCellY >= GRID_HEIGHT
-      ) {
-        continue;
+      else if(player.state==='wipeout'){
+        player.speed*=Math.exp(-1.6*dt);player.x-=player.speed*dt*.55;player.airY-=2.2*dt;
+        if(input.actionTapped||player.stateTime>3.2)resetWave(false);
       }
 
-      for (
-        let j =
-          gridHead[
-            gridIndex(
-              neighborCellX,
-              neighborCellY
-            )
-          ];
+      if(player.x<-130){player.x+=220;player.breakX+=220;camera.position.x+=220;}
+      if(player.x>130){player.x-=220;player.breakX-=220;camera.position.x-=220;}
+      player.lastQ=q;
+      input.actionTapped=false;
+    }
 
-        j !== -1;
+    function updateBoardTransform(dt,t) {
+      const surfaceY=waveHeight(player.x,player.z,t);
+      const normal=waveNormal(player.x,player.z,t,tmpV1);
+      const forward=tmpV2.set(-Math.cos(player.heading),0,Math.sin(player.heading));
+      forward.addScaledVector(normal,-forward.dot(normal)).normalize();
+      const side=tmpV3.crossVectors(forward,normal).normalize();
+      tmpM.makeBasis(forward,normal,side);tmpQ.setFromRotationMatrix(tmpM);
+      const rollQ=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-input.roll*.28);
+      const pitchQ=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-input.pitch*.08);
+      tmpQ.multiply(rollQ).multiply(pitchQ);
 
-        j = gridNext[j]
-      ) {
-        const deltaX =
-          predictedX[j] -
-          sampleX;
-
-        const deltaY =
-          predictedY[j] -
-          sampleY;
-
-        const distanceSquared =
-          deltaX * deltaX +
-          deltaY * deltaY;
-
-        if (
-          distanceSquared >=
-          radius * radius
-        ) {
-          continue;
-        }
-
-        const weight =
-          1 -
-          distanceSquared /
-          (
-            radius *
-            radius
-          );
-
-        averageX +=
-          velocityX[j] *
-          weight;
-
-        averageY +=
-          velocityY[j] *
-          weight;
-
-        weightSum += weight;
+      if(player.state==='air'){
+        const airQ=new THREE.Quaternion().setFromEuler(new THREE.Euler(player.airSpin,0,player.airFlip,'XYZ'));tmpQ.multiply(airQ);
       }
-    }
-  }
-
-  if (weightSum <= 0.00001) {
-    return [0, 0];
-  }
-
-  return [
-    averageX / weightSum,
-    averageY / weightSum
-  ];
-}
-
-/* =========================================================
-   BOARD BUOYANCY, DRAG AND ROTATION
-========================================================= */
-
-function updateBoard(deltaTime) {
-  const cosine =
-    Math.cos(
-      boardState.angle
-    );
-
-  const sine =
-    Math.sin(
-      boardState.angle
-    );
-
-  let forceX = 0;
-  let forceY =
-    BOARD_MASS *
-    GRAVITY;
-
-  let torque = 0;
-
-  const sampleCount = 9;
-
-  for (
-    let sampleIndex = 0;
-    sampleIndex < sampleCount;
-    sampleIndex++
-  ) {
-    const localX =
-      lerp(
-        -BOARD_HALF_LENGTH,
-        BOARD_HALF_LENGTH,
-        sampleIndex /
-        (sampleCount - 1)
-      );
-
-    const relativeX =
-      cosine *
-      localX;
-
-    const relativeY =
-      sine *
-      localX;
-
-    const sampleX =
-      boardState.x +
-      relativeX;
-
-    const sampleY =
-      boardState.y +
-      relativeY;
-
-    const surface =
-      surfaceHeightAt(
-        sampleX
-      );
-
-    const submergedFraction =
-      clamp(
-        (
-          surface -
-          sampleY +
-          0.08
-        ) /
-        0.48,
-        0,
-        1
-      );
-
-    if (
-      submergedFraction <= 0
-    ) {
-      continue;
-    }
-
-    const fluidVelocity =
-      fluidVelocityAt(
-        sampleX,
-        sampleY,
-        0.85
-      );
-
-    const sampleVelocityX =
-      boardState.velocityX -
-      boardState.angularVelocity *
-      relativeY;
-
-    const sampleVelocityY =
-      boardState.velocityY +
-      boardState.angularVelocity *
-      relativeX;
-
-    const buoyancy =
-      (
-        55 /
-        sampleCount
-      ) *
-      submergedFraction;
-
-    const drag =
-      4.8 *
-      submergedFraction /
-      sampleCount;
-
-    const sampleForceX =
-      drag *
-      (
-        fluidVelocity[0] -
-        sampleVelocityX
-      );
-
-    const sampleForceY =
-      buoyancy +
-      drag *
-      (
-        fluidVelocity[1] -
-        sampleVelocityY
-      );
-
-    forceX += sampleForceX;
-    forceY += sampleForceY;
-
-    torque +=
-      relativeX *
-      sampleForceY -
-      relativeY *
-      sampleForceX;
-  }
-
-  boardState.velocityX +=
-    forceX /
-    BOARD_MASS *
-    deltaTime;
-
-  boardState.velocityY +=
-    forceY /
-    BOARD_MASS *
-    deltaTime;
-
-  boardState.angularVelocity +=
-    torque /
-    BOARD_INERTIA *
-    deltaTime;
-
-  boardState.angularVelocity *=
-    Math.exp(
-      -1.8 *
-      deltaTime
-    );
-
-  boardState.velocityX *=
-    Math.exp(
-      -0.12 *
-      deltaTime
-    );
-
-  boardState.velocityY *=
-    Math.exp(
-      -0.08 *
-      deltaTime
-    );
-
-  const speed =
-    Math.hypot(
-      boardState.velocityX,
-      boardState.velocityY
-    );
-
-  if (speed > 12) {
-    const scale =
-      12 /
-      speed;
-
-    boardState.velocityX *= scale;
-    boardState.velocityY *= scale;
-  }
-
-  boardState.x +=
-    boardState.velocityX *
-    deltaTime;
-
-  boardState.y +=
-    boardState.velocityY *
-    deltaTime;
-
-  boardState.angle +=
-    boardState.angularVelocity *
-    deltaTime;
-
-  /*
-    Keep the board above the reef at its center,
-    nose and tail.
-  */
-  const testOffsets = [
-    -BOARD_HALF_LENGTH,
-    0,
-    BOARD_HALF_LENGTH
-  ];
-
-  let maximumPush = 0;
-
-  for (
-    const localX
-    of testOffsets
-  ) {
-    const testX =
-      boardState.x +
-      Math.cos(
-        boardState.angle
-      ) *
-      localX;
-
-    const testY =
-      boardState.y +
-      Math.sin(
-        boardState.angle
-      ) *
-      localX;
-
-    maximumPush =
-      Math.max(
-        maximumPush,
-        bottomY(testX) +
-        BOARD_RADIUS -
-        testY
-      );
-  }
-
-  if (maximumPush > 0) {
-    boardState.y +=
-      maximumPush;
-
-    if (
-      boardState.velocityY < 0
-    ) {
-      boardState.velocityY *=
-        -0.18;
-    }
-
-    boardState.angularVelocity *=
-      0.6;
-  }
-
-  if (
-    boardState.x < 2 ||
-    boardState.x > 32.5 ||
-    boardState.y < 0 ||
-    boardState.y > 13.5
-  ) {
-    resetBoard();
-  }
-}
-
-/* =========================================================
-   SIMULATION STEP
-========================================================= */
-
-let simulationTime = 0;
-
-function simulationSubstep(
-  deltaTime
-) {
-  const currentTime =
-    simulationTime;
-
-  const wallVelocity =
-    pistonVelocity(
-      currentTime
-    );
-
-  /*
-    External forces and predicted positions.
-  */
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    previousX[i] = x[i];
-    previousY[i] = y[i];
-
-    velocityY[i] +=
-      GRAVITY *
-      deltaTime;
-
-    /*
-      Couple particles close to the piston to the
-      piston's horizontal boundary velocity.
-    */
-    const wallPosition =
-      pistonPosition(
-        currentTime
-      );
-
-    const wallInfluence =
-      1 -
-      smoothstep(
-        wallPosition + 0.3,
-        wallPosition + 1.65,
-        x[i]
-      );
-
-    velocityX[i] =
-      lerp(
-        velocityX[i],
-        wallVelocity,
-        wallInfluence *
-        0.095
-      );
-
-    predictedX[i] =
-      x[i] +
-      velocityX[i] *
-      deltaTime;
-
-    predictedY[i] =
-      y[i] +
-      velocityY[i] *
-      deltaTime;
-
-    projectParticle(
-      i,
-      currentTime
-    );
-  }
-
-  rebuildGrid(true);
-
-  /*
-    Jacobi density iterations.
-  */
-  for (
-    let iteration = 0;
-    iteration < params.iterations;
-    iteration++
-  ) {
-    computeLambdas();
-    computeCorrections();
-
-    for (
-      let i = 0;
-      i < PARTICLE_COUNT;
-      i++
-    ) {
-      predictedX[i] +=
-        correctionX[i];
-
-      predictedY[i] +=
-        correctionY[i];
-
-      projectParticle(
-        i,
-        currentTime
-      );
-    }
-
-    rebuildGrid(true);
-  }
-
-  /*
-    Derive velocity from corrected positions.
-  */
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    velocityX[i] =
-      (
-        predictedX[i] -
-        previousX[i]
-      ) /
-      deltaTime;
-
-    velocityY[i] =
-      (
-        predictedY[i] -
-        previousY[i]
-      ) /
-      deltaTime;
-
-    const speed =
-      Math.hypot(
-        velocityX[i],
-        velocityY[i]
-      );
-
-    if (speed > MAX_SPEED) {
-      const scale =
-        MAX_SPEED /
-        speed;
-
-      velocityX[i] *= scale;
-      velocityY[i] *= scale;
-    }
-
-    /*
-      Beach sponge zone absorbs outgoing whitewater
-      and reduces reflection from the far boundary.
-    */
-    const sponge =
-      smoothstep(
-        28,
-        33.4,
-        predictedX[i]
-      );
-
-    const damping =
-      Math.exp(
-        -3.8 *
-        sponge *
-        deltaTime
-      );
-
-    velocityX[i] *= damping;
-    velocityY[i] *= damping;
-
-    /*
-      Simple near-bottom friction.
-    */
-    const floorDistance =
-      predictedY[i] -
-      bottomY(
-        predictedX[i]
-      );
-
-    if (
-      floorDistance <
-      PARTICLE_RADIUS *
-      2.2
-    ) {
-      velocityX[i] *=
-        Math.exp(
-          -1.8 *
-          deltaTime
-        );
-    }
-  }
-
-  applyViscosity();
-
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    x[i] = predictedX[i];
-    y[i] = predictedY[i];
-  }
-
-  rebuildGrid(false);
-  updateBoard(deltaTime);
-
-  simulationTime += deltaTime;
-}
-
-/* =========================================================
-   MARCHING-CUBES SURFACE RECONSTRUCTION
-========================================================= */
-
-const MARCHING_RESOLUTION =
-  innerWidth < 700
-    ? 44
-    : 48;
-
-const waterMaterial =
-  new THREE.MeshPhysicalMaterial({
-    color: 0x08788c,
-    roughness: 0.18,
-    metalness: 0,
-    clearcoat: 0.45,
-    clearcoatRoughness: 0.12,
-    transmission: 0.05,
-    transparent: true,
-    opacity: 0.97,
-    ior: 1.333,
-    thickness: 1.8,
-    side: THREE.DoubleSide
-  });
-
-const waterSurface =
-  new MarchingCubes(
-    MARCHING_RESOLUTION,
-    waterMaterial,
-    false,
-    false,
-    170000
-  );
-
-waterSurface.isolation = 0.48;
-
-waterSurface.position.set(
-  DOMAIN_X / 2,
-  DOMAIN_Y / 2,
-  0
-);
-
-waterSurface.scale.set(
-  DOMAIN_X / 2,
-  DOMAIN_Y / 2,
-  RENDER_WIDTH / 2
-);
-
-waterSurface.castShadow = true;
-waterSurface.receiveShadow = true;
-waterSurface.frustumCulled = false;
-
-scene.add(waterSurface);
-
-const scalarField2D =
-  new Float32Array(
-    MARCHING_RESOLUTION *
-    MARCHING_RESOLUTION
-  );
-
-function updateSurfaceMesh() {
-  scalarField2D.fill(0);
-
-  /*
-    Anisotropic grid-space kernel compensates for
-    the rectangular simulation domain.
-  */
-  const radiusX = 1.55;
-  const radiusY = 2.15;
-  const strength = 0.145;
-
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    const gridPositionX =
-      x[i] /
-      DOMAIN_X *
-      (
-        MARCHING_RESOLUTION -
-        1
-      );
-
-    const gridPositionY =
-      y[i] /
-      DOMAIN_Y *
-      (
-        MARCHING_RESOLUTION -
-        1
-      );
-
-    const firstX =
-      Math.max(
-        0,
-        Math.floor(
-          gridPositionX -
-          radiusX
-        )
-      );
-
-    const lastX =
-      Math.min(
-        MARCHING_RESOLUTION - 1,
-        Math.ceil(
-          gridPositionX +
-          radiusX
-        )
-      );
-
-    const firstY =
-      Math.max(
-        0,
-        Math.floor(
-          gridPositionY -
-          radiusY
-        )
-      );
-
-    const lastY =
-      Math.min(
-        MARCHING_RESOLUTION - 1,
-        Math.ceil(
-          gridPositionY +
-          radiusY
-        )
-      );
-
-    for (
-      let fieldY = firstY;
-      fieldY <= lastY;
-      fieldY++
-    ) {
-      const normalizedY =
-        (
-          fieldY -
-          gridPositionY
-        ) /
-        radiusY;
-
-      for (
-        let fieldX = firstX;
-        fieldX <= lastX;
-        fieldX++
-      ) {
-        const normalizedX =
-          (
-            fieldX -
-            gridPositionX
-          ) /
-          radiusX;
-
-        const radiusSquared =
-          normalizedX *
-          normalizedX +
-          normalizedY *
-          normalizedY;
-
-        if (radiusSquared >= 1) {
-          continue;
-        }
-
-        const kernel =
-          1 -
-          radiusSquared;
-
-        scalarField2D[
-          fieldX +
-          fieldY *
-          MARCHING_RESOLUTION
-        ] +=
-          strength *
-          kernel *
-          kernel *
-          kernel;
+      if(player.state==='wipeout'){
+        const wq=new THREE.Quaternion().setFromEuler(new THREE.Euler(player.stateTime*player.wipeoutSpin,player.stateTime*1.7,player.stateTime*.9));tmpQ.multiply(wq);
       }
-    }
-  }
 
-  const field =
-    waterSurface.field;
-
-  const resolution =
-    MARCHING_RESOLUTION;
-
-  const resolutionSquared =
-    resolution *
-    resolution;
-
-  /*
-    The simulated section is assumed locally invariant
-    along the crest. The ends remain open, avoiding a
-    flat cutaway cap across the barrel opening.
-  */
-  for (
-    let fieldZ = 0;
-    fieldZ < resolution;
-    fieldZ++
-  ) {
-    const layerOffset =
-      fieldZ *
-      resolutionSquared;
-
-    for (
-      let fieldY = 0;
-      fieldY < resolution;
-      fieldY++
-    ) {
-      const row =
-        fieldY *
-        resolution;
-
-      for (
-        let fieldX = 0;
-        fieldX < resolution;
-        fieldX++
-      ) {
-        field[
-          layerOffset +
-          row +
-          fieldX
-        ] =
-          scalarField2D[
-            row +
-            fieldX
-          ];
-      }
-    }
-  }
-
-  waterSurface.update();
-}
-
-/* =========================================================
-   FOAM AND SPRAY RENDERING
-========================================================= */
-
-function createFoamTexture() {
-  const canvas =
-    document.createElement(
-      "canvas"
-    );
-
-  canvas.width = 64;
-  canvas.height = 64;
-
-  const context =
-    canvas.getContext("2d");
-
-  const gradient =
-    context.createRadialGradient(
-      32,
-      32,
-      2,
-      32,
-      32,
-      31
-    );
-
-  gradient.addColorStop(
-    0,
-    "rgba(255,255,255,1)"
-  );
-
-  gradient.addColorStop(
-    0.35,
-    "rgba(236,250,255,0.9)"
-  );
-
-  gradient.addColorStop(
-    1,
-    "rgba(210,240,250,0)"
-  );
-
-  context.fillStyle = gradient;
-
-  context.fillRect(
-    0,
-    0,
-    64,
-    64
-  );
-
-  const texture =
-    new THREE.CanvasTexture(
-      canvas
-    );
-
-  texture.colorSpace =
-    THREE.SRGBColorSpace;
-
-  return texture;
-}
-
-const foamPositions =
-  new Float32Array(
-    PARTICLE_COUNT *
-    3
-  );
-
-const foamColors =
-  new Float32Array(
-    PARTICLE_COUNT *
-    3
-  );
-
-const foamGeometry =
-  new THREE.BufferGeometry();
-
-foamGeometry.setAttribute(
-  "position",
-  new THREE.BufferAttribute(
-    foamPositions,
-    3
-  )
-);
-
-foamGeometry.setAttribute(
-  "color",
-  new THREE.BufferAttribute(
-    foamColors,
-    3
-  )
-);
-
-foamGeometry.setDrawRange(
-  0,
-  0
-);
-
-const foamMaterial =
-  new THREE.PointsMaterial({
-    map: createFoamTexture(),
-    size: 0.38,
-    sizeAttenuation: true,
-    transparent: true,
-    opacity: 0.9,
-    depthWrite: false,
-    vertexColors: true
-  });
-
-const foamPoints =
-  new THREE.Points(
-    foamGeometry,
-    foamMaterial
-  );
-
-foamPoints.frustumCulled = false;
-foamPoints.renderOrder = 3;
-
-scene.add(foamPoints);
-
-/* =========================================================
-   DEBUG PARTICLE VIEW
-========================================================= */
-
-const debugPositions =
-  new Float32Array(
-    PARTICLE_COUNT *
-    3
-  );
-
-const debugGeometry =
-  new THREE.BufferGeometry();
-
-debugGeometry.setAttribute(
-  "position",
-  new THREE.BufferAttribute(
-    debugPositions,
-    3
-  )
-);
-
-const debugPoints =
-  new THREE.Points(
-    debugGeometry,
-    new THREE.PointsMaterial({
-      color: 0x35ddff,
-      size: 0.11,
-      sizeAttenuation: true
-    })
-  );
-
-debugPoints.visible = false;
-
-scene.add(debugPoints);
-
-function updateParticleRendering() {
-  let foamCount = 0;
-
-  for (
-    let i = 0;
-    i < PARTICLE_COUNT;
-    i++
-  ) {
-    debugPositions[i * 3] =
-      x[i];
-
-    debugPositions[i * 3 + 1] =
-      y[i];
-
-    debugPositions[i * 3 + 2] =
-      0;
-
-    const speed =
-      Math.hypot(
-        velocityX[i],
-        velocityY[i]
-      );
-
-    /*
-      Low neighbor count identifies free-surface
-      particles. High velocity identifies breaking
-      and airborne particles.
-    */
-    const freeSurface =
-      neighborCount[i] < 10;
-
-    const energetic =
-      speed > 2 ||
-      Math.abs(
-        velocityY[i]
-      ) > 1.5;
-
-    const reefBreakingRegion =
-      x[i] > 14 &&
-      x[i] < 28 &&
-      y[i] >
-      WATER_LEVEL - 1.2;
-
-    if (
-      freeSurface &&
-      energetic &&
-      reefBreakingRegion
-    ) {
-      const outputIndex =
-        foamCount *
-        3;
-
-      foamPositions[
-        outputIndex
-      ] = x[i];
-
-      foamPositions[
-        outputIndex + 1
-      ] = y[i];
-
-      foamPositions[
-        outputIndex + 2
-      ] =
-        (
-          Math.random() -
-          0.5
-        ) *
-        RENDER_WIDTH *
-        0.84;
-
-      const whiteness =
-        clamp(
-          (
-            speed -
-            1.5
-          ) /
-          5,
-          0,
-          1
-        );
-
-      foamColors[
-        outputIndex
-      ] =
-        0.78 +
-        0.22 *
-        whiteness;
-
-      foamColors[
-        outputIndex + 1
-      ] =
-        0.9 +
-        0.1 *
-        whiteness;
-
-      foamColors[
-        outputIndex + 2
-      ] = 1;
-
-      foamCount++;
-    }
-  }
-
-  debugGeometry
-    .attributes
-    .position
-    .needsUpdate = true;
-
-  foamGeometry
-    .attributes
-    .position
-    .needsUpdate = true;
-
-  foamGeometry
-    .attributes
-    .color
-    .needsUpdate = true;
-
-  foamGeometry.setDrawRange(
-    0,
-    foamCount
-  );
-}
-
-/* =========================================================
-   USER INTERFACE
-========================================================= */
-
-function bindRange(
-  id,
-  property,
-  decimalPlaces
-) {
-  const input =
-    document.getElementById(id);
-
-  const output =
-    document.getElementById(
-      id + "Out"
-    );
-
-  const update = () => {
-    params[property] =
-      Number(
-        input.value
-      );
-
-    output.value =
-      Number(
-        input.value
-      ).toFixed(
-        decimalPlaces
-      );
-  };
-
-  input.addEventListener(
-    "input",
-    update
-  );
-
-  update();
-}
-
-bindRange(
-  "amp",
-  "pistonAmplitude",
-  2
-);
-
-bindRange(
-  "period",
-  "period",
-  2
-);
-
-bindRange(
-  "reef",
-  "reefHeight",
-  2
-);
-
-bindRange(
-  "iters",
-  "iterations",
-  0
-);
-
-document
-  .getElementById("reef")
-  .addEventListener(
-    "input",
-    updateReefGeometry
-  );
-
-let paused = false;
-
-document
-  .getElementById("pause")
-  .onclick = () => {
-    paused = !paused;
-
-    document
-      .getElementById("pause")
-      .textContent =
-        paused
-          ? "Resume"
-          : "Pause";
-  };
-
-document
-  .getElementById("reset")
-  .onclick = () => {
-    location.reload();
-  };
-
-document
-  .getElementById("side")
-  .onclick = () => {
-    camera.position.set(
-      20,
-      8.2,
-      15.5
-    );
-
-    controls.target.set(
-      19,
-      5.1,
-      0
-    );
-  };
-
-document
-  .getElementById("angle")
-  .onclick = () => {
-    camera.position.set(
-      24,
-      10.5,
-      18.5
-    );
-
-    controls.target.set(
-      19,
-      4.8,
-      0
-    );
-  };
-
-document
-  .getElementById("debug")
-  .onclick = () => {
-    debugPoints.visible =
-      !debugPoints.visible;
-
-    waterSurface.visible =
-      !debugPoints.visible;
-
-    document
-      .getElementById("debug")
-      .textContent =
-        debugPoints.visible
-          ? "Surface"
-          : "Particles";
-  };
-
-/* =========================================================
-   RESIZE
-========================================================= */
-
-addEventListener(
-  "resize",
-  () => {
-    camera.aspect =
-      innerWidth /
-      innerHeight;
-
-    camera.updateProjectionMatrix();
-
-    renderer.setPixelRatio(
-      Math.min(
-        devicePixelRatio,
-        1.5
-      )
-    );
-
-    renderer.setSize(
-      innerWidth,
-      innerHeight
-    );
-  }
-);
-
-/* =========================================================
-   ANIMATION LOOP
-========================================================= */
-
-const clock =
-  new THREE.Clock();
-
-let accumulator = 0;
-let frameCounter = 0;
-let displayedFPS = 0;
-let fpsStart =
-  performance.now();
-
-const stats =
-  document.getElementById(
-    "stats"
-  );
-
-updateSurfaceMesh();
-updateParticleRendering();
-
-function animate() {
-  requestAnimationFrame(
-    animate
-  );
-
-  const realDeltaTime =
-    Math.min(
-      clock.getDelta(),
-      0.04
-    );
-
-  if (!paused) {
-    accumulator +=
-      realDeltaTime;
-
-    let completedSteps = 0;
-
-    while (
-      accumulator >= FIXED_DT &&
-      completedSteps <
-      MAX_SUBSTEPS
-    ) {
-      simulationSubstep(
-        FIXED_DT
-      );
-
-      accumulator -=
-        FIXED_DT;
-
-      completedSteps++;
+      boardRoot.quaternion.slerp(tmpQ,1-Math.exp(-12*dt));
+      const y=surfaceY+.15+Math.max(0,player.airY)+(player.state==='wipeout'?Math.max(-1.8,player.airY):0);
+      boardRoot.position.set(player.x,y,player.z);
+      updateRiderPose(t);
     }
 
-    /*
-      Prevent an overloaded phone from building an
-      indefinitely large simulation-time backlog.
-    */
-    accumulator =
-      Math.min(
-        accumulator,
-        FIXED_DT *
-        MAX_SUBSTEPS
-      );
-  }
+    function updateCamera(dt,t) {
+      const pos=boardRoot.position, fwd=tmpV1.set(-Math.cos(player.heading),0,Math.sin(player.heading)).normalize();
+      const side=tmpV2.set(-fwd.z,0,fwd.x);
+      let desired=new THREE.Vector3(), look=new THREE.Vector3();
+      if(cameraMode===0){desired.copy(pos).addScaledVector(fwd,-8.8).addScaledVector(side,4.1).add(new THREE.Vector3(0,4.2,0));look.copy(pos).addScaledVector(fwd,7).add(new THREE.Vector3(0,1,0));}
+      if(cameraMode===1){desired.copy(pos).addScaledVector(side,15).add(new THREE.Vector3(0,4.8,0));look.copy(pos).add(new THREE.Vector3(0,1,0));}
+      if(cameraMode===2){desired.copy(pos).add(new THREE.Vector3(5,27,18));look.copy(pos).addScaledVector(fwd,5);}
+      if(cameraMode===3){desired.copy(pos).addScaledVector(fwd,-3.0).addScaledVector(side,-2.2).add(new THREE.Vector3(0,1.25,0));look.copy(pos).addScaledVector(fwd,6).add(new THREE.Vector3(0,.75,0));}
+      if(player.barrel>.55&&cameraMode===0){desired.lerp(pos.clone().addScaledVector(fwd,-4.2).addScaledVector(side,-2.6).add(new THREE.Vector3(0,1.6,0)),player.barrel*.65);}
+      camera.position.lerp(desired,1-Math.exp(-3.8*dt));
+      const currentLook=camera.userData.look||look.clone();currentLook.lerp(look,1-Math.exp(-5*dt));camera.userData.look=currentLook;camera.lookAt(currentLook);
+      camera.fov=damp(camera.fov,58+player.speed*.38,4,dt);camera.updateProjectionMatrix();
+    }
 
-  pistonMesh.position.x =
-    pistonPosition(
-      simulationTime
-    ) -
-    0.09;
+    function updateHUD() {
+      dom.score.textContent=Math.floor(player.score).toLocaleString();
+      dom.speed.textContent=Math.round(player.speed*3.6);
+      dom.combo.textContent=`x${player.combo.toFixed(1)}`;
+      dom.powerMeter.style.width=`${clamp(player.power,0,1)*100}%`;
+      dom.balanceMeter.style.width=`${player.balance*100}%`;
+      dom.balanceText.textContent=`${Math.round(player.balance*100)}%`;
+      dom.sectionText.textContent=player.barrel>.45?'IN THE TUBE':player.section;
+      dom.cameraButton.textContent=cameraNames[cameraMode].slice(0,4);
+    }
 
-  board.position.set(
-    boardState.x,
-    boardState.y,
-    0
-  );
+    function startGame() {
+      gameStarted=true;running=true;paused=false;
+      document.body.classList.add('playing');
+      dom.overlay.classList.add('hidden');dom.hud.classList.remove('hidden');dom.mobileControls.classList.remove('hidden');
+      if(input.mode==='touch')setMessage('TOUCH STEERING','DRAG ANY OPEN AREA',1.6);else setMessage('BOARD CALIBRATED','HOLD PADDLE',1.6);
+      resetWave(false);clock.getDelta();
+    }
 
-  board.rotation.z =
-    boardState.angle;
+    function setPaused(value) {
+      paused=value;dom.pausePanel.classList.toggle('hidden',!value);dom.mobileControls.classList.toggle('hidden',value);dom.pauseButton.textContent=value?'▶':'Ⅱ';
+      if(!value)clock.getDelta();
+    }
 
-  updateSurfaceMesh();
-  updateParticleRendering();
+    function cycleCamera(){cameraMode=(cameraMode+1)%cameraNames.length;setMessage(cameraNames[cameraMode],'CAMERA',.75);}
 
-  controls.update();
+    // -------------------------------------------------------------------------
+    // EVENTS AND MAIN LOOP
+    // -------------------------------------------------------------------------
+    bindHoldButton(dom.actionButton,'actionHeld');bindHoldButton(dom.crouchButton,'crouchHeld');
+    dom.motionStart.addEventListener('click',async()=>{await enterImmersive();await requestMotionPermission();});
+    dom.touchStart.addEventListener('click',async()=>{await enterImmersive();chooseTouchMode();});
+    dom.calTouch.addEventListener('click',chooseTouchMode);
+    dom.calibrateButton.addEventListener('click',()=>{calibrateMotion();startGame();});
+    dom.pauseButton.addEventListener('click',()=>setPaused(!paused));
+    dom.resumeButton.addEventListener('click',()=>setPaused(false));
+    dom.restartButton.addEventListener('click',()=>{resetWave(false);setPaused(false);});
+    dom.recalibrateButton.addEventListener('click',()=>{setPaused(false);gameStarted=false;running=false;document.body.classList.remove('playing');dom.hud.classList.add('hidden');dom.mobileControls.classList.add('hidden');dom.overlay.classList.remove('hidden');dom.startView.classList.add('hidden');dom.calibrationView.classList.remove('hidden');});
+    dom.cameraButton.addEventListener('click',cycleCamera);
 
-  renderer.render(
-    scene,
-    camera
-  );
+    dom.sensitivity.addEventListener('input',()=>{input.sensitivity=Number(dom.sensitivity.value);dom.sensitivityOut.textContent=input.sensitivity.toFixed(2);});
+    dom.smoothing.addEventListener('input',()=>{input.smoothing=Number(dom.smoothing.value);dom.smoothingOut.textContent=input.smoothing.toFixed(2);});
+    dom.invertPitch.addEventListener('change',()=>input.invertPitch=dom.invertPitch.checked);
+    dom.soundToggle.addEventListener('change',()=>{soundEnabled=dom.soundToggle.checked;if(oceanGain)oceanGain.gain.setTargetAtTime(soundEnabled ? .065 : 0,audioCtx.currentTime,.08);});
+    dom.graphics.addEventListener('input',()=>{qualityIndex=Number(dom.graphics.value);dom.graphicsOut.textContent=['LOW','MED','HIGH'][qualityIndex];rebuildQuality();});
+    dom.graphicsOut.textContent=['LOW','MED','HIGH'][qualityIndex];
 
-  frameCounter++;
+    if(!window.isSecureContext)dom.secureWarning.classList.remove('hidden');
 
-  const now =
-    performance.now();
+    function onResize(){renderer.setSize(innerWidth,innerHeight,false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();}
 
-  if (
-    now -
-    fpsStart >
-    500
-  ) {
-    displayedFPS =
-      Math.round(
-        frameCounter *
-        1000 /
-        (
-          now -
-          fpsStart
-        )
-      );
+    let elapsed=0,frameCounter=0;
+    function loop(){
+      const dt=Math.min(clock.getDelta(),.034);elapsed+=dt;frameCounter++;
+      for(let i=0;i<clouds.length;i++)clouds[i].position.x+=dt*(.16+i*.012);
+      if(!running||paused){renderer.render(scene,camera);return;}
+      updateInput(dt);updatePlayer(dt,elapsed);updateBoardTransform(dt,elapsed);updateCamera(dt,elapsed);
+      updateOcean(elapsed);updateLip(elapsed);updateFoam(elapsed);updateSpray(dt);updateHUD();
+      renderer.render(scene,camera);
+    }
 
-    frameCounter = 0;
-    fpsStart = now;
-  }
-
-  stats.textContent =
-    `${displayedFPS} fps\n` +
-    `${PARTICLE_COUNT.toLocaleString()} fluid particles\n` +
-    `${renderer.info.render.triangles.toLocaleString()} triangles`;
-}
-
-animate();
-</script>
+    initThree();
+  </script>
 </body>
 </html>
