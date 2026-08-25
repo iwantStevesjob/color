@@ -1,182 +1,2289 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebGL Water Pool with Interactive Sphere</title>
-    <style>
-        body, html {
-            margin: 0;
-            overflow: hidden;
-            background: #000;
-        }
-        canvas {
-            display: block;
-        }
-    </style>
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"
+>
+
+<title>Zero-G Splash</title>
+
+<style>
+* {
+    box-sizing: border-box;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+
+    background: #020408;
+
+    overscroll-behavior: none;
+    touch-action: none;
+}
+
+#fluidCanvas {
+    display: block;
+
+    width: 100vw;
+    height: 100dvh;
+
+    touch-action: none;
+}
+
+#loading {
+    position: fixed;
+    inset: 0;
+
+    z-index: 100;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 30px;
+
+    background:
+        radial-gradient(
+            circle at center,
+            #121a24 0%,
+            #05080d 55%,
+            #010204 100%
+        );
+
+    color: white;
+
+    font-family:
+        system-ui,
+        sans-serif;
+
+    font-size: 13px;
+    line-height: 1.5;
+
+    text-align: center;
+
+    transition:
+        opacity .4s ease;
+}
+
+#loading.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#status {
+    max-width: 520px;
+}
+
+#badge {
+    position: fixed;
+
+    top:
+        max(
+            10px,
+            env(safe-area-inset-top)
+        );
+
+    left: 50%;
+
+    transform:
+        translateX(-50%);
+
+    z-index: 20;
+
+    padding:
+        7px 11px;
+
+    border:
+        1px solid
+        rgba(255,255,255,.09);
+
+    border-radius:
+        999px;
+
+    background:
+        rgba(0,0,0,.3);
+
+    backdrop-filter:
+        blur(12px);
+
+    color:
+        rgba(255,255,255,.68);
+
+    font:
+        10px/1 system-ui,
+        sans-serif;
+
+    pointer-events: none;
+
+    white-space: nowrap;
+}
+
+#hint {
+    position: fixed;
+
+    left: 50%;
+
+    bottom:
+        calc(
+            18px +
+            env(safe-area-inset-bottom)
+        );
+
+    transform:
+        translateX(-50%);
+
+    z-index: 20;
+
+    padding:
+        9px 14px;
+
+    border-radius:
+        999px;
+
+    border:
+        1px solid
+        rgba(255,255,255,.08);
+
+    background:
+        rgba(0,0,0,.36);
+
+    backdrop-filter:
+        blur(12px);
+
+    color:
+        rgba(255,255,255,.76);
+
+    font:
+        11px/1.1 system-ui,
+        sans-serif;
+
+    pointer-events: none;
+
+    white-space: nowrap;
+
+    transition:
+        opacity .6s;
+}
+
+#error {
+    position: fixed;
+
+    top: 8px;
+    left: 8px;
+
+    z-index: 200;
+
+    max-width:
+        calc(100vw - 16px);
+
+    color: #ffb3b3;
+
+    background:
+        rgba(0,0,0,.72);
+
+    font:
+        10px/1.4 monospace;
+
+    padding: 8px;
+
+    display: none;
+
+    white-space: pre-wrap;
+}
+
+
+/*
+    Splash expects these DOM elements.
+    They remain present but invisible.
+*/
+
+#ui-container,
+#howto-container,
+#debug-info {
+    display: none;
+}
+
+
+/*
+    Splash creates lil-gui itself.
+
+    Hide it for this water-only MVP.
+*/
+
+.lil-gui {
+    display: none !important;
+}
+</style>
+
+
+<script
+    src="https://cdn.jsdelivr.net/npm/typescript@5.7.2/lib/typescript.js"
+></script>
+
 </head>
+
+
 <body>
-    <canvas id="canvas"></canvas>
 
-    <!-- Vertex Shader for Water -->
-    <script type="x-shader/x-vertex" id="waterVertexShader">
-        // Simplified vertex shader
-        attribute vec3 position;
-        attribute vec2 texCoord;
-        varying vec2 v_texCoord;
-        void main() {
-            gl_Position = vec4(position, 1.0);
-            v_texCoord = texCoord;
+<div id="loading">
+    <div id="status">
+        Loading Splash MLS-MPM…
+    </div>
+</div>
+
+
+<div id="badge">
+    ZERO-G • SPLASH MLS-MPM • 70,000 PARTICLES
+</div>
+
+
+<div id="hint">
+    Drag your finger through the water
+</div>
+
+
+<div id="error"></div>
+
+
+<!-- Elements expected by Splash -->
+<div id="ui-container">
+
+    <label>
+        <input
+            id="particle"
+            type="checkbox"
+        >
+    </label>
+
+    <div id="slider-container">
+
+        <input
+            id="slider"
+            type="range"
+            min="0"
+            max="100"
+            value="100"
+        >
+
+        <span id="slider-value"></span>
+
+    </div>
+
+</div>
+
+
+<div id="howto-container"></div>
+
+<div id="debug-info">
+    <span id="error-reason"></span>
+</div>
+
+
+<canvas id="fluidCanvas"></canvas>
+
+
+
+<script type="module">
+
+/*
+==============================================================
+ZERO-G SPLASH
+==============================================================
+
+Physics / rendering source:
+
+https://github.com/matsuoka-601/Splash
+
+
+IMPORTANT:
+
+This HTML does NOT implement another fluid solver.
+
+It downloads Splash's current:
+
+    camera.ts
+
+    mls-mpm/mls-mpm.ts
+
+    render/fluidRender.ts
+
+    main.ts
+
+    all WGSL shaders
+
+at runtime.
+
+
+Only three physics-related changes are made:
+
+1. Initial particles are arranged as a 3D blob rather than
+   Splash's dam-break block.
+
+2. Earth's uniform downward acceleration is removed.
+
+3. An isotropic central gravitational field is applied:
+
+       acceleration = K * (center - position)
+
+There is NO:
+
+    target radius
+    sphere mesh collider
+    spherical animation
+    lerp-to-sphere
+    shape constraint
+    target surface equation
+
+The final shape has to emerge from:
+
+    MLS-MPM pressure
+    density
+    viscosity
+    particle mass
+    center-directed gravity
+
+==============================================================
+*/
+
+
+const REPO =
+
+    "https://raw.githubusercontent.com/matsuoka-601/Splash/main";
+
+
+const TS =
+    window.ts;
+
+
+const canvas =
+    document.getElementById(
+        "fluidCanvas"
+    );
+
+
+const loading =
+    document.getElementById(
+        "loading"
+    );
+
+
+const status =
+    document.getElementById(
+        "status"
+    );
+
+
+const errorBox =
+    document.getElementById(
+        "error"
+    );
+
+
+
+// ==========================================================
+// ERROR HANDLING
+// ==========================================================
+
+function fatal(
+    error
+) {
+
+    console.error(
+        error
+    );
+
+
+    errorBox.style.display =
+        "block";
+
+
+    errorBox.textContent =
+
+        String(
+
+            error?.stack ||
+            error?.message ||
+            error
+
+        );
+
+
+    status.innerHTML =
+
+        "<b>Failed to start WebGPU Splash.</b><br><br>" +
+
+        String(
+
+            error?.message ||
+            error
+
+        );
+
+}
+
+
+window.addEventListener(
+
+    "unhandledrejection",
+
+    event => {
+
+        fatal(
+            event.reason
+        );
+
+    }
+
+);
+
+
+window.addEventListener(
+
+    "error",
+
+    event => {
+
+        if (
+            event.error
+        ) {
+
+            fatal(
+                event.error
+            );
+
         }
-    </script>
 
-    <!-- Fragment Shader for Water -->
-    <script type="x-shader/x-fragment" id="waterFragmentShader">
-        precision mediump float;
-        varying vec2 v_texCoord;
-        uniform sampler2D waterTexture;
-        void main() {
-            vec4 color = texture2D(waterTexture, v_texCoord);
-            gl_FragColor = color;
-        }
-    </script>
+    }
 
-    <!-- Vertex Shader for Sphere -->
-    <script type="x-shader/x-vertex" id="sphereVertexShader">
-        attribute vec3 position;
-        uniform mat4 modelViewMatrix;
-        uniform mat4 projectionMatrix;
-        void main() {
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-    </script>
+);
 
-    <!-- Fragment Shader for Sphere -->
-    <script type="x-shader/x-fragment" id="sphereFragmentShader">
-        precision mediump float;
-        void main() {
-            gl_FragColor = vec4(1.0, 0.5, 0.0, 1.0); // Sphere color
-        }
-    </script>
 
-    <script>
-        const canvas = document.getElementById('canvas');
-        const gl = canvas.getContext('webgl');
 
-        if (!gl) {
-            alert('WebGL not supported, please use a modern browser.');
-        }
+// ==========================================================
+// WEBGPU CHECK
+// ==========================================================
 
-        // Adjust canvas size
-        function resize() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-        }
-        window.addEventListener('resize', resize);
-        resize();
+if (
+    !navigator.gpu
+) {
 
-        // Compile shader
-        function compileShader(source, type) {
-            const shader = gl.createShader(type);
-            gl.shaderSource(shader, source);
-            gl.compileShader(shader);
-            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-                console.error(gl.getShaderInfoLog(shader));
-                gl.deleteShader(shader);
-                return null;
+    throw new Error(
+
+        "WebGPU is unavailable. " +
+
+        "Open this page through HTTPS in a current Chrome/Edge/WebGPU browser."
+
+    );
+
+}
+
+
+
+// ==========================================================
+// FETCH SOURCE FROM SPLASH
+// ==========================================================
+
+async function getText(
+    path
+) {
+
+    status.textContent =
+
+        "Loading Splash: " +
+        path;
+
+
+    const response =
+
+        await fetch(
+
+            REPO +
+            "/" +
+            path,
+
+            {
+                cache:
+                    "no-store"
             }
-            return shader;
+
+        );
+
+
+    if (
+        !response.ok
+    ) {
+
+        throw new Error(
+
+            "HTTP " +
+            response.status +
+            " loading " +
+            path
+
+        );
+
+    }
+
+
+    return await response.text();
+
+}
+
+
+
+// ==========================================================
+// PATH HELPERS
+// ==========================================================
+
+function dirname(
+    path
+) {
+
+    const i =
+        path.lastIndexOf("/");
+
+
+    return i < 0
+        ? ""
+        : path.substring(
+            0,
+            i + 1
+        );
+
+}
+
+
+
+function normalizePath(
+    path
+) {
+
+    const out =
+        [];
+
+
+    for (
+        const part
+        of path.split("/")
+    ) {
+
+        if (
+            !part ||
+            part === "."
+        ) {
+
+            continue;
+
         }
 
-        // Create program
-        function createProgram(vertexShaderSource, fragmentShaderSource) {
-            const vertexShader = compileShader(vertexShaderSource, gl.VERTEX_SHADER);
-            const fragmentShader = compileShader(fragmentShaderSource, gl.FRAGMENT_SHADER);
-            const program = gl.createProgram();
-            gl.attachShader(program, vertexShader);
-            gl.attachShader(program, fragmentShader);
-            gl.linkProgram(program);
-            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-                console.error(gl.getProgramInfoLog(program));
-                gl.deleteProgram(program);
-                return null;
-            }
-            return program;
+
+        if (
+            part === ".."
+        ) {
+
+            out.pop();
+
+        }
+        else {
+
+            out.push(
+                part
+            );
+
         }
 
-        // Shader sources
-        const waterVertexShaderSource = document.getElementById('waterVertexShader').text;
-        const waterFragmentShaderSource = document.getElementById('waterFragmentShader').text;
-        const sphereVertexShaderSource = document.getElementById('sphereVertexShader').text;
-        const sphereFragmentShaderSource = document.getElementById('sphereFragmentShader').text;
+    }
 
-        // Programs
-        const waterProgram = createProgram(waterVertexShaderSource, waterFragmentShaderSource);
-        const sphereProgram = createProgram(sphereVertexShaderSource, sphereFragmentShaderSource);
 
-        // Set up buffers and attributes for water
-        const waterPositionBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, waterPositionBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-            -1, -1, 0,
-            1, -1, 0,
-            -1, 1, 0,
-            1, 1, 0,
-        ]), gl.STATIC_DRAW);
+    return out.join("/");
 
-        const waterPositionLocation = gl.getAttribLocation(waterProgram, 'position');
-        gl.enableVertexAttribArray(waterPositionLocation);
-        gl.vertexAttribPointer(waterPositionLocation, 3, gl.FLOAT, false, 0, 0);
+}
 
-        // Set up sphere geometry
-        function createSphere(radius, latBands, longBands) {
-            const positions = [];
-            for (let lat = 0; lat <= latBands; ++lat) {
-                const theta = lat * Math.PI / latBands;
-                const sinTheta = Math.sin(theta);
-                const cosTheta = Math.cos(theta);
 
-                for (let lon = 0; lon <= longBands; ++lon) {
-                    const phi = lon * 2 * Math.PI / longBands;
-                    const sinPhi = Math.sin(phi);
-                    const cosPhi = Math.cos(phi);
 
-                    const x = cosPhi * sinTheta;
-                    const y = cosTheta;
-                    const z = sinPhi * sinTheta;
-                    positions.push(radius * x, radius * y, radius * z);
+function resolvePath(
+    parent,
+    relative
+) {
+
+    return normalizePath(
+
+        dirname(
+            parent
+        ) +
+
+        relative
+
+    );
+
+}
+
+
+
+// ==========================================================
+// PATCH 1
+//
+// SPLASH EARTH GRAVITY
+//            ↓
+// RADIAL CENTER GRAVITY
+//
+// This is applied at the GRID stage, exactly where Splash
+// currently applies gravity.
+//
+// Force is proportional to distance from the center.
+//
+// This is analogous to the gravitational field inside an
+// ideal uniform spherical mass distribution:
+//
+//       g(r) ∝ -r
+//
+// There is deliberately NO desired fluid radius.
+// ==========================================================
+
+function patchCentralGravity(
+    shader
+) {
+
+    const original =
+
+`            let strength = smoothstep(r*r, 0., cellSquareDistToMouse) * 0.2;
+            cells[id.x].vx = encodeFixedPoint(floatV.x + strength * forceDir.x);
+            cells[id.x].vy = encodeFixedPoint(floatV.y + strength * forceDir.y - 0.40 * dt);
+            cells[id.x].vz = encodeFixedPoint(floatV.z + strength * forceDir.z);`;
+
+
+    const replacement =
+
+`            let strength = smoothstep(r*r, 0., cellSquareDistToMouse) * 0.2;
+
+            // =================================================
+            // ZERO-G CENTRAL FIELD
+            //
+            // No target sphere radius exists.
+            //
+            // This field only knows:
+            //
+            //      box center
+            //      current grid-cell position
+            //
+            // acceleration is isotropic and proportional
+            // to distance from center.
+            // =================================================
+
+            let gridX: f32 =
+                f32(
+                    i32(id.x) /
+                    i32(initBoxSize.z) /
+                    i32(initBoxSize.y)
+                );
+
+            let gridY: f32 =
+                f32(
+                    (
+                        i32(id.x) /
+                        i32(initBoxSize.z)
+                    ) %
+                    i32(initBoxSize.y)
+                );
+
+            let gridZ: f32 =
+                f32(
+                    i32(id.x) %
+                    i32(initBoxSize.z)
+                );
+
+            let gravityCellPosition =
+                vec3f(
+                    gridX,
+                    gridY,
+                    gridZ
+                );
+
+            let gravityCenter =
+                realBoxSize * 0.5;
+
+            let centerVector =
+                gravityCenter -
+                gravityCellPosition;
+
+
+            // -------------------------------------------------
+            // CENTRAL GRAVITY STRENGTH
+            //
+            // Smaller = loose / floaty / huge deformations.
+            // Larger = stronger spherical equilibrium.
+            //
+            // IMPORTANT:
+            // This is NOT a radius-restoring spring.
+            // -------------------------------------------------
+
+            let centralGravity: f32 =
+                0.018;
+
+
+            floatV +=
+                centerVector *
+                centralGravity *
+                dt;
+
+
+            // Splash's original finger interaction remains.
+            // It gets added ON TOP of the central force.
+
+            cells[id.x].vx =
+                encodeFixedPoint(
+                    floatV.x +
+                    strength *
+                    forceDir.x
+                );
+
+            cells[id.x].vy =
+                encodeFixedPoint(
+                    floatV.y +
+                    strength *
+                    forceDir.y
+                );
+
+            cells[id.x].vz =
+                encodeFixedPoint(
+                    floatV.z +
+                    strength *
+                    forceDir.z
+                );`;
+
+
+    if (
+        !shader.includes(
+            original
+        )
+    ) {
+
+        throw new Error(
+
+            "Splash updateGrid.wgsl changed upstream. " +
+
+            "I refused to blindly patch the gravity shader."
+
+        );
+
+    }
+
+
+    return shader.replace(
+
+        original,
+        replacement
+
+    );
+
+}
+
+
+
+// ==========================================================
+// WGSL IMPORT LOADER
+// ==========================================================
+
+async function inlineWGSL(
+    source,
+    modulePath
+) {
+
+    const regex =
+
+        /import\s+([A-Za-z_$][\w$]*)\s+from\s+['"]([^'"]+\.wgsl)['"]\s*;?/g;
+
+
+    const matches =
+
+        [
+            ...source.matchAll(
+                regex
+            )
+        ];
+
+
+    for (
+        const match of matches
+    ) {
+
+        const wholeImport =
+            match[0];
+
+
+        const variable =
+            match[1];
+
+
+        const relative =
+            match[2];
+
+
+        const path =
+            resolvePath(
+
+                modulePath,
+                relative
+
+            );
+
+
+        let shader =
+            await getText(
+                path
+            );
+
+
+        /*
+        ------------------------------------------------------
+        ONLY MODIFY SPLASH'S GRID FORCE SHADER.
+        ------------------------------------------------------
+        */
+
+        if (
+            path ===
+            "mls-mpm/updateGrid.wgsl"
+        ) {
+
+            shader =
+                patchCentralGravity(
+                    shader
+                );
+
+        }
+
+
+        source =
+
+            source.replace(
+
+                wholeImport,
+
+                `const ${variable} = ${JSON.stringify(shader)};`
+
+            );
+
+    }
+
+
+    return source;
+
+}
+
+
+
+// ==========================================================
+// EXTERNAL MODULES
+// ==========================================================
+
+function rewritePackages(
+    source
+) {
+
+    source =
+
+        source.replace(
+
+            /from\s+['"]wgpu-matrix['"]/g,
+
+            `from "https://cdn.jsdelivr.net/npm/wgpu-matrix@3.3.0/+esm"`
+
+        );
+
+
+    source =
+
+        source.replace(
+
+            /from\s+['"]lil-gui['"]/g,
+
+            `from "https://cdn.jsdelivr.net/npm/lil-gui@0.20.0/+esm"`
+
+        );
+
+
+    return source;
+
+}
+
+
+
+// ==========================================================
+// TYPESCRIPT -> BROWSER JS
+// ==========================================================
+
+function compile(
+    source,
+    filename
+) {
+
+    const result =
+
+        TS.transpileModule(
+
+            source,
+
+            {
+
+                fileName:
+                    filename,
+
+                compilerOptions: {
+
+                    target:
+                        TS.ScriptTarget.ES2022,
+
+                    module:
+                        TS.ModuleKind.ES2022,
+
+                    moduleResolution:
+                        TS.ModuleResolutionKind.Bundler,
+
+                    useDefineForClassFields:
+                        false,
+
+                    strict:
+                        false
+
                 }
+
             }
-            return new Float32Array(positions);
+
+        );
+
+
+    return result.outputText;
+
+}
+
+
+
+// ==========================================================
+// CREATE ES MODULE BLOB
+// ==========================================================
+
+function moduleURL(
+    source
+) {
+
+    return URL.createObjectURL(
+
+        new Blob(
+
+            [
+                source
+            ],
+
+            {
+                type:
+                    "text/javascript"
+            }
+
+        )
+
+    );
+
+}
+
+
+
+// ==========================================================
+// CAMERA
+// ==========================================================
+
+async function buildCamera() {
+
+    let source =
+
+        await getText(
+            "camera.ts"
+        );
+
+
+    source =
+        rewritePackages(
+            source
+        );
+
+
+    /*
+    ----------------------------------------------------------
+    Splash's desktop camera doesn't initialize hover position
+    until the mouse moves.
+
+    Phones have no hover.
+
+    Initialize it to screen center.
+    ----------------------------------------------------------
+    */
+
+    const needle =
+
+`        this.canvas = canvas;`;
+
+
+    const replacement =
+
+`        this.canvas = canvas;
+
+        this.prevHoverX =
+            canvas.clientWidth * 0.5;
+
+        this.prevHoverY =
+            canvas.clientHeight * 0.5;
+
+        this.currentHoverX =
+            canvas.clientWidth * 0.5;
+
+        this.currentHoverY =
+            canvas.clientHeight * 0.5;`;
+
+
+    if (
+        source.includes(
+            needle
+        )
+    ) {
+
+        source =
+            source.replace(
+
+                needle,
+                replacement
+
+            );
+
+    }
+
+
+    return moduleURL(
+
+        compile(
+
+            source,
+            "camera.ts"
+
+        )
+
+    );
+
+}
+
+
+
+// ==========================================================
+// PATCH 2
+//
+// DAM BREAK INITIAL CONDITION
+//            ↓
+// CENTERED 3D SPHERICAL PARTICLE CLOUD
+//
+// This changes ONLY the INITIAL CONDITION.
+//
+// It does NOT constrain the particles afterward.
+// ==========================================================
+
+function patchInitialBlob(
+    source
+) {
+
+    const start =
+
+        source.indexOf(
+            "    initDambreak("
+        );
+
+
+    const end =
+
+        source.indexOf(
+            "    reset(",
+            start
+        );
+
+
+    if (
+        start < 0 ||
+        end < 0
+    ) {
+
+        throw new Error(
+
+            "Could not locate Splash initDambreak()."
+
+        );
+
+    }
+
+
+    const method = `
+
+    initDambreak(
+        initBoxSize: number[],
+        numParticles: number
+    ) {
+
+        /*
+        ======================================================
+        INITIAL CONDITION ONLY.
+
+        Generate a dense lattice and choose the points nearest
+        the box center.
+
+        That gives us a roughly spherical starting mass without
+        adding any spherical constraint to the simulation.
+
+        After this function finishes, the solver has absolutely
+        no knowledge of this starting radius.
+        ======================================================
+        */
+
+
+        const particlesBuf =
+            new ArrayBuffer(
+                mlsmpmParticleStructSize *
+                this.maxParticleCount
+            );
+
+
+        const spacing =
+            0.90;
+
+
+        const center = [
+
+            initBoxSize[0] * 0.5,
+
+            initBoxSize[1] * 0.5,
+
+            initBoxSize[2] * 0.5
+
+        ];
+
+
+        /*
+            Radius estimated from:
+
+                sphere volume
+                lattice spacing
+                requested particle count
+
+            The 1.10 factor only ensures enough candidates are
+            generated.
+
+            It is NOT used after initialization.
+        */
+
+        const estimatedRadius =
+
+            Math.cbrt(
+
+                (
+                    numParticles *
+                    spacing *
+                    spacing *
+                    spacing *
+                    3
+                )
+
+                /
+
+                (
+                    4 *
+                    Math.PI
+                )
+
+            )
+
+            *
+
+            1.10;
+
+
+        const maximumRadius =
+
+            Math.min(
+
+                initBoxSize[0],
+                initBoxSize[1],
+                initBoxSize[2]
+
+            )
+
+            *
+
+            0.5
+
+            -
+
+            5;
+
+
+        const searchRadius =
+
+            Math.min(
+
+                estimatedRadius,
+
+                maximumRadius
+
+            );
+
+
+        const candidates: {
+
+            x: number,
+            y: number,
+            z: number,
+            d2: number
+
+        }[] = [];
+
+
+        for (
+
+            let x =
+                center[0] -
+                searchRadius;
+
+            x <=
+                center[0] +
+                searchRadius;
+
+            x += spacing
+
+        ) {
+
+            for (
+
+                let y =
+                    center[1] -
+                    searchRadius;
+
+                y <=
+                    center[1] +
+                    searchRadius;
+
+                y += spacing
+
+            ) {
+
+                for (
+
+                    let z =
+                        center[2] -
+                        searchRadius;
+
+                    z <=
+                        center[2] +
+                        searchRadius;
+
+                    z += spacing
+
+                ) {
+
+                    const dx =
+                        x -
+                        center[0];
+
+                    const dy =
+                        y -
+                        center[1];
+
+                    const dz =
+                        z -
+                        center[2];
+
+
+                    const d2 =
+
+                        dx * dx +
+                        dy * dy +
+                        dz * dz;
+
+
+                    if (
+
+                        d2 <=
+                        searchRadius *
+                        searchRadius
+
+                    ) {
+
+                        candidates.push({
+
+                            x,
+                            y,
+                            z,
+                            d2
+
+                        });
+
+                    }
+
+                }
+
+            }
+
         }
 
-        const sphereBuffer = gl.createBuffer();
-        const sphereData = createSphere(0.1, 30, 30);
-        gl.bindBuffer(gl.ARRAY_BUFFER, sphereBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, sphereData, gl.STATIC_DRAW);
 
-        const spherePositionLocation = gl.getAttribLocation(sphereProgram, 'position');
-        gl.enableVertexAttribArray(spherePositionLocation);
-        gl.vertexAttribPointer(spherePositionLocation, 3, gl.FLOAT, false, 0, 0);
+        /*
+            Nearest N lattice sites -> isotropic blob.
 
-        // Main rendering loop
-        function render() {
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            We DON'T terminate a nested XYZ loop halfway through,
+            because doing that would create a chopped-off sphere.
+        */
 
-            // Draw water
-            gl.useProgram(waterProgram);
-            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        candidates.sort(
 
-            // Draw sphere
-            gl.useProgram(sphereProgram);
-            gl.drawArrays(gl.TRIANGLE_STRIP, 0, sphereData.length / 3);
+            (
+                a,
+                b
+            ) =>
 
-            requestAnimationFrame(render);
+                a.d2 -
+                b.d2
+
+        );
+
+
+        const actualCount =
+
+            Math.min(
+
+                numParticles,
+
+                candidates.length,
+
+                this.maxParticleCount
+
+            );
+
+
+        for (
+
+            let n = 0;
+
+            n <
+            actualCount;
+
+            n++
+
+        ) {
+
+            const p =
+                candidates[n];
+
+
+            const offset =
+
+                mlsmpmParticleStructSize *
+                n;
+
+
+            const position =
+
+                new Float32Array(
+
+                    particlesBuf,
+
+                    offset,
+
+                    3
+
+                );
+
+
+            const velocity =
+
+                new Float32Array(
+
+                    particlesBuf,
+
+                    offset + 16,
+
+                    3
+
+                );
+
+
+            const C =
+
+                new Float32Array(
+
+                    particlesBuf,
+
+                    offset + 32,
+
+                    12
+
+                );
+
+
+            /*
+                Tiny irregularity.
+
+                This is intentional.
+
+                We do NOT want to begin with a mathematically
+                perfect rendered ball and pretend the physics
+                created it.
+
+                The solver has to settle it.
+            */
+
+            const jitter =
+                0.035;
+
+
+            position.set([
+
+                p.x +
+                (
+                    Math.random() -
+                    0.5
+                ) *
+                jitter,
+
+                p.y +
+                (
+                    Math.random() -
+                    0.5
+                ) *
+                jitter,
+
+                p.z +
+                (
+                    Math.random() -
+                    0.5
+                ) *
+                jitter
+
+            ]);
+
+
+            /*
+                Begin essentially motionless.
+            */
+
+            velocity.set([
+
+                0,
+                0,
+                0
+
+            ]);
+
+
+            C.fill(
+                0
+            );
+
         }
 
-        render();
-    </script>
+
+        this.numParticles =
+            actualCount;
+
+
+        console.log(
+
+            "Zero-G blob particles:",
+
+            actualCount
+
+        );
+
+
+        const particles =
+
+            new ArrayBuffer(
+
+                mlsmpmParticleStructSize *
+                actualCount
+
+            );
+
+
+        new Uint8Array(
+            particles
+        ).set(
+
+            new Uint8Array(
+                particlesBuf,
+                0,
+                particles.byteLength
+            )
+
+        );
+
+
+        return particles;
+
+    }
+
+`;
+
+
+    return (
+
+        source.substring(
+            0,
+            start
+        )
+
+        +
+
+        method
+
+        +
+
+        source.substring(
+            end
+        )
+
+    );
+
+}
+
+
+
+// ==========================================================
+// BUILD SPLASH MLS-MPM
+// ==========================================================
+
+async function buildMLSMPM() {
+
+    let source =
+
+        await getText(
+            "mls-mpm/mls-mpm.ts"
+        );
+
+
+    /*
+    ----------------------------------------------------------
+    Slightly increase REAL dynamic viscosity.
+
+    This is not a shape-restoration trick.
+
+    It changes energy dissipation in the fluid itself, allowing
+    disturbed oscillations to decay instead of ringing forever.
+    ----------------------------------------------------------
+    */
+
+    source =
+
+        source.replace(
+
+            "dynamicViscosity: 0.1,",
+
+            "dynamicViscosity: 0.18,"
+
+        );
+
+
+    source =
+
+        patchInitialBlob(
+            source
+        );
+
+
+    source =
+
+        await inlineWGSL(
+
+            source,
+
+            "mls-mpm/mls-mpm.ts"
+
+        );
+
+
+    return moduleURL(
+
+        compile(
+
+            source,
+
+            "mls-mpm/mls-mpm.ts"
+
+        )
+
+    );
+
+}
+
+
+
+// ==========================================================
+// SPLASH FLUID RENDERER
+//
+// UNCHANGED WGSL.
+// ==========================================================
+
+async function buildRenderer() {
+
+    let source =
+
+        await getText(
+
+            "render/fluidRender.ts"
+
+        );
+
+
+    source =
+
+        await inlineWGSL(
+
+            source,
+
+            "render/fluidRender.ts"
+
+        );
+
+
+    return moduleURL(
+
+        compile(
+
+            source,
+
+            "render/fluidRender.ts"
+
+        )
+
+    );
+
+}
+
+
+
+// ==========================================================
+// MAIN.TS PATCHES
+// ==========================================================
+
+async function buildMain(
+
+    cameraURL,
+    mpmURL,
+    rendererURL
+
+) {
+
+    let source =
+
+        await getText(
+            "main.ts"
+        );
+
+
+    // -------------------------------------------------------
+    // Local module paths -> generated module blobs.
+    // -------------------------------------------------------
+
+    source =
+
+        source.replace(
+
+            /from\s+['"]\.\/camera['"]/g,
+
+            `from ${JSON.stringify(cameraURL)}`
+
+        );
+
+
+    source =
+
+        source.replace(
+
+            /from\s+['"]\.\/mls-mpm\/mls-mpm['"]/g,
+
+            `from ${JSON.stringify(mpmURL)}`
+
+        );
+
+
+    source =
+
+        source.replace(
+
+            /from\s+['"]\.\/render\/fluidRender['"]/g,
+
+            `from ${JSON.stringify(rendererURL)}`
+
+        );
+
+
+    source =
+        rewritePackages(
+            source
+        );
+
+
+
+    // -------------------------------------------------------
+    // Cubemap URLs.
+    // -------------------------------------------------------
+
+    source =
+
+        source.replace(
+
+            /'cubemap\/posx\.png'/g,
+
+            `'${REPO}/public/cubemap/posx.png'`
+
+        );
+
+
+    source =
+
+        source.replace(
+
+            /'cubemap\/negx\.png'/g,
+
+            `'${REPO}/public/cubemap/negx.png'`
+
+        );
+
+
+    source =
+
+        source.replace(
+
+            /'cubemap\/posy\.png'/g,
+
+            `'${REPO}/public/cubemap/posy.png'`
+
+        );
+
+
+    source =
+
+        source.replace(
+
+            /'cubemap\/negy\.png'/g,
+
+            `'${REPO}/public/cubemap/negy.png'`
+
+        );
+
+
+    source =
+
+        source.replace(
+
+            /'cubemap\/posz\.png'/g,
+
+            `'${REPO}/public/cubemap/posz.png'`
+
+        );
+
+
+    source =
+
+        source.replace(
+
+            /'cubemap\/negz\.png'/g,
+
+            `'${REPO}/public/cubemap/negz.png'`
+
+        );
+
+
+
+    /*
+    ----------------------------------------------------------
+    Use cubic simulation volumes.
+
+    This matters because otherwise the midpoint of Splash's
+    original dam-break box isn't visually centered vertically.
+
+    Same particle-count tiers.
+    ----------------------------------------------------------
+    */
+
+    source =
+
+        source.replace(
+
+`		{ particleCount: 40000, initBoxSize: [60, 50, 60], initDistance: 50, mouseRadius: 15, cameraTargetY: 10, guiText: 'Small (40,000 particles)' },
+		{ particleCount: 70000, initBoxSize: [70, 50, 70], initDistance: 60, mouseRadius: 15, cameraTargetY: 12, guiText: 'Medium (70,000 particles)'},
+		{ particleCount: 100000, initBoxSize: [80, 70, 80], initDistance: 70, mouseRadius: 15, cameraTargetY: 12, guiText: 'Large (100,000 particles)'},
+		{ particleCount: 180000, initBoxSize: [90, 70, 90], initDistance: 80, mouseRadius: 18, cameraTargetY: 15, guiText: 'Very Large (180,000 particles)'},`,
+
+`		{ particleCount: 40000, initBoxSize: [60, 60, 60], initDistance: 55, mouseRadius: 13, cameraTargetY: 30, guiText: 'Small (40,000 particles)' },
+		{ particleCount: 70000, initBoxSize: [70, 70, 70], initDistance: 62, mouseRadius: 14, cameraTargetY: 35, guiText: 'Medium (70,000 particles)'},
+		{ particleCount: 100000, initBoxSize: [80, 80, 80], initDistance: 72, mouseRadius: 15, cameraTargetY: 40, guiText: 'Large (100,000 particles)'},
+		{ particleCount: 180000, initBoxSize: [92, 92, 92], initDistance: 84, mouseRadius: 17, cameraTargetY: 46, guiText: 'Very Large (180,000 particles)'},`
+
+        );
+
+
+
+    /*
+    ----------------------------------------------------------
+    Force camera target to TRUE volume center.
+
+    No gravity direction / "up" is relevant to the fluid now.
+    ----------------------------------------------------------
+    */
+
+    source =
+
+        source.replace(
+
+`camera.reset(simulationParam.initDistance, [initBoxSize[0] / 2, simulationParam.cameraTargetY, initBoxSize[2] / 2],
+				mlsmpmFov, mlsmpmZoomRate)`,
+
+`camera.reset(
+                simulationParam.initDistance,
+                [
+                    initBoxSize[0] / 2,
+                    initBoxSize[1] / 2,
+                    initBoxSize[2] / 2
+                ],
+                mlsmpmFov,
+                mlsmpmZoomRate
+            )`
+
+        );
+
+
+
+    /*
+    ----------------------------------------------------------
+    Keep the box fully open.
+
+    Splash normally allows one dimension to close with slider.
+    We don't want container motion influencing our blob.
+    ----------------------------------------------------------
+    */
+
+    source =
+
+        source.replace(
+
+`		realBoxSize[2] = initBoxSize[2] * boxWidthRatio
+		mlsmpmSimulator.changeBoxSize(realBoxSize)`,
+
+`        realBoxSize[0] = initBoxSize[0]
+        realBoxSize[1] = initBoxSize[1]
+        realBoxSize[2] = initBoxSize[2]
+
+        mlsmpmSimulator.changeBoxSize(realBoxSize)`
+
+        );
+
+
+
+    return moduleURL(
+
+        compile(
+
+            source,
+            "main.ts"
+
+        )
+
+    );
+
+}
+
+
+
+// ==========================================================
+// MOBILE TOUCH BRIDGE
+// ==========================================================
+
+function installTouch() {
+
+    let activePointer =
+        null;
+
+
+    let lastX =
+        0;
+
+
+    let lastY =
+        0;
+
+
+    let hintHidden =
+        false;
+
+
+
+    function mouseMove(
+        x,
+        y
+    ) {
+
+        canvas.dispatchEvent(
+
+            new MouseEvent(
+
+                "mousemove",
+
+                {
+
+                    clientX:
+                        x,
+
+                    clientY:
+                        y,
+
+                    bubbles:
+                        false,
+
+                    buttons:
+                        0
+
+                }
+
+            )
+
+        );
+
+    }
+
+
+
+    canvas.addEventListener(
+
+        "pointerdown",
+
+        event => {
+
+            if (
+                event.pointerType !==
+                "touch"
+            ) {
+
+                return;
+
+            }
+
+
+            /*
+                Suppress compatibility mousedown.
+
+                Otherwise Splash's camera thinks we're orbiting.
+            */
+
+            event.preventDefault();
+
+
+            if (
+                activePointer !==
+                null
+            ) {
+
+                return;
+
+            }
+
+
+            activePointer =
+                event.pointerId;
+
+
+            lastX =
+                event.clientX;
+
+
+            lastY =
+                event.clientY;
+
+
+            try {
+
+                canvas.setPointerCapture(
+                    activePointer
+                );
+
+            }
+            catch {}
+
+
+            /*
+                Establish the hit point in Splash's depth map.
+            */
+
+            mouseMove(
+
+                event.clientX,
+                event.clientY
+
+            );
+
+
+            if (
+                !hintHidden
+            ) {
+
+                hintHidden =
+                    true;
+
+
+                document.getElementById(
+                    "hint"
+                ).style.opacity =
+                    "0";
+
+            }
+
+
+            /*
+                Tiny haptic cue.
+
+                This does NOT affect the physics.
+            */
+
+            if (
+                navigator.vibrate
+            ) {
+
+                navigator.vibrate(
+                    5
+                );
+
+            }
+
+        },
+
+        {
+            passive:
+                false
+        }
+
+    );
+
+
+
+    canvas.addEventListener(
+
+        "pointermove",
+
+        event => {
+
+            if (
+                event.pointerType !==
+                "touch"
+            ) {
+
+                return;
+
+            }
+
+
+            if (
+                event.pointerId !==
+                activePointer
+            ) {
+
+                return;
+
+            }
+
+
+            event.preventDefault();
+
+
+            /*
+            ==================================================
+            IMPORTANT:
+
+            We do NOT calculate our own fluid impulse.
+
+            We feed the finger coordinates into Splash.
+
+            Camera.calcMouseVelocity() and updateGrid.wgsl
+            calculate and inject the interaction through the
+            original WebGPU simulation.
+            ==================================================
+            */
+
+            mouseMove(
+
+                event.clientX,
+                event.clientY
+
+            );
+
+
+            lastX =
+                event.clientX;
+
+
+            lastY =
+                event.clientY;
+
+        },
+
+        {
+            passive:
+                false
+        }
+
+    );
+
+
+
+    function release(
+        event
+    ) {
+
+        if (
+            event.pointerId !==
+            activePointer
+        ) {
+
+            return;
+
+        }
+
+
+        activePointer =
+            null;
+
+
+        /*
+            Move interaction point away from the fluid.
+
+            The solver therefore receives no continuing finger
+            interaction after release.
+        */
+
+        mouseMove(
+
+            -10000,
+            -10000
+
+        );
+
+    }
+
+
+    canvas.addEventListener(
+        "pointerup",
+        release
+    );
+
+
+    canvas.addEventListener(
+        "pointercancel",
+        release
+    );
+
+}
+
+
+
+// ==========================================================
+// START
+// ==========================================================
+
+async function start() {
+
+    try {
+
+        installTouch();
+
+
+        status.textContent =
+            "Loading Splash camera…";
+
+
+        const cameraURL =
+            await buildCamera();
+
+
+
+        status.textContent =
+            "Loading Splash MLS-MPM shaders…";
+
+
+        const mpmURL =
+            await buildMLSMPM();
+
+
+
+        status.textContent =
+            "Loading Splash fluid renderer…";
+
+
+        const rendererURL =
+            await buildRenderer();
+
+
+
+        status.textContent =
+            "Starting 70,000-particle zero-G simulation…";
+
+
+        const mainURL =
+
+            await buildMain(
+
+                cameraURL,
+                mpmURL,
+                rendererURL
+
+            );
+
+
+
+        await import(
+            mainURL
+        );
+
+
+        setTimeout(
+
+            () => {
+
+                loading.classList.add(
+                    "hidden"
+                );
+
+            },
+
+            800
+
+        );
+
+    }
+    catch (
+        error
+    ) {
+
+        fatal(
+            error
+        );
+
+    }
+
+}
+
+
+start();
+
+</script>
+
 </body>
 </html>
