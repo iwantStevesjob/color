@@ -698,6 +698,17 @@
             display: none;
         }
 
+        .raw-data-list { display: grid; gap: 8px; max-width: 900px; }
+        .raw-data-row { display: grid; grid-template-columns: minmax(120px, 220px) minmax(0, 1fr); gap: 16px; padding: 11px 13px; border: 1px solid #e2e2e2; border-radius: 8px; background: #fafafa; }
+        .raw-data-key, .raw-data-node-key { color: #111; font-weight: 900; overflow-wrap: anywhere; }
+        .raw-data-value { min-width: 0; color: #777; font-weight: 400; overflow-wrap: anywhere; }
+        .raw-data-tree { display: grid; gap: 6px; margin-top: 7px; padding-left: 12px; border-left: 1px solid #ddd; }
+        .raw-data-node { display: grid; grid-template-columns: minmax(90px, 180px) minmax(0, 1fr); gap: 10px; }
+        .raw-data-value details > summary { color: #777; cursor: pointer; list-style-position: outside; }
+        .raw-data-long { margin: 8px 0 0; max-height: 320px; overflow: auto; padding: 10px; border-radius: 6px; background: #f0f0f0; color: #666; white-space: pre-wrap; word-break: break-word; font: 11px/1.5 Menlo, Consolas, monospace; }
+        .raw-data-empty { color: #888; font-size: .85rem; }
+        @media (max-width: 620px) { .raw-data-row, .raw-data-node { grid-template-columns: 1fr; gap: 5px; } }
+
         @keyframes fadeIn {
             from {
                 opacity: 0;
@@ -3744,6 +3755,8 @@
             </div>
             <div id="tab-raw" class="settings-pane">
                 <h2>Raw Data Inspector</h2>
+                <div id="raw-data-status" class="raw-data-empty">OPEN A COLOR TO INSPECT ITS DATA.</div>
+                <div id="raw-data-list" class="raw-data-list"></div>
             </div>
         </div>
     </div>
@@ -3794,8 +3807,10 @@
             }
 
             const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun2.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] }
-            const appName = localStorage.getItem('turnAppName')
-            const apiKey = localStorage.getItem('turnApiKey')
+            const roomHex = String(window.app?.user?.color || localStorage.getItem('lastSphereColor') || '#ffffff').replace('#', '').toLowerCase()
+            const savedTurn = await window.app?.identity?._call('db_local_read', { roomHex, key: 'local:turn-config' }).catch(() => null)
+            const appName = savedTurn?.appName
+            const apiKey = savedTurn?.apiKey
 
             if (appName && apiKey) {
                 try {
@@ -9817,7 +9832,9 @@
             async getSdkOwnerIdentity() {
                 const publicKey = await this.identity.getPublicKeyData()
                 if (!publicKey) throw new Error('Log into the owner Color first.')
-                return { publicKey, fingerprint: await this.sdkHash(JSON.stringify([publicKey.kty, publicKey.crv, publicKey.x, publicKey.y])) }
+                const owner = { publicKey, fingerprint: await this.sdkHash(JSON.stringify([publicKey.kty, publicKey.crv, publicKey.x, publicKey.y])) }
+                await this.identity._call('db_local_write', { roomHex: this.user.color.replace('#', '').toLowerCase(), key: 'local:sdk-owner-identity', value: owner })
+                return owner
             }
 
             sdkEmbeddableBlocks(payloads) {
@@ -10493,20 +10510,53 @@
             }
 
             contactStorageKey() {
-                return 'colorContacts:' + this.user.color.replace('#', '').toLowerCase()
+                return 'local:contacts'
             }
 
-            loadContacts() {
+            async loadContacts() {
+                const roomHex = this.user.color.replace('#', '').toLowerCase()
                 try {
-                    const saved = JSON.parse(localStorage.getItem(this.contactStorageKey()) || '{}')
+                    let saved = await this.identity._call('db_local_read', { roomHex, key: this.contactStorageKey() })
+                    saved ||= {}
                     this.contacts = Object.fromEntries(Object.entries(saved).filter(([hex]) => /^[0-9a-f]{6}$/i.test(hex)))
                 } catch (e) {
                     this.contacts = {}
                 }
+                window.loadTurnSettings?.()
+                window.loadSignatureRecoveryOptions?.()
             }
 
-            saveContacts() {
-                localStorage.setItem(this.contactStorageKey(), JSON.stringify(this.contacts))
+            async saveContacts() {
+                const roomHex = this.user.color.replace('#', '').toLowerCase()
+                await this.identity._call('db_local_write', { roomHex, key: this.contactStorageKey(), value: this.contacts }).catch(error => console.error('Contact save failed', error))
+            }
+
+            async renderRawData() {
+                const list = document.getElementById('raw-data-list'), status = document.getElementById('raw-data-status')
+                if (!list || !status) return
+                const roomHex = (this.roomId?.replace('color-', '') || this.user.color.replace('#', '')).toLowerCase()
+                status.textContent = 'LOADING #' + roomHex.toUpperCase() + '...'
+                list.replaceChildren()
+                const rows = await this.identity._call('db_raw_dump', { roomHex }).catch(() => [])
+                const valueNode = (input, depth = 0) => {
+                    let value = input
+                    if (typeof value === 'string') try { const parsed = JSON.parse(value); if (parsed && typeof parsed === 'object') value = parsed } catch (_) { }
+                    if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) value = { type: value.constructor.name, byteLength: value.byteLength, bytes: Array.from(new Uint8Array(value.buffer || value, value.byteOffset || 0, Math.min(value.byteLength, 256))) }
+                    if (value && typeof value === 'object') {
+                        if (depth >= 20) { const span = document.createElement('span'); span.textContent = '[MAXIMUM DEPTH]'; return span }
+                        const details = document.createElement('details'), summary = document.createElement('summary'), tree = document.createElement('div'), entries = Object.entries(value)
+                        summary.textContent = Array.isArray(value) ? '[' + entries.length + ' items]' : '{' + entries.length + ' keys}'
+                        tree.className = 'raw-data-tree'
+                        entries.forEach(([key, child]) => { const row = document.createElement('div'), label = document.createElement('div'), holder = document.createElement('div'); row.className = 'raw-data-node'; label.className = 'raw-data-node-key'; holder.className = 'raw-data-value'; label.textContent = key; holder.appendChild(valueNode(child, depth + 1)); row.append(label, holder); tree.appendChild(row) })
+                        details.append(summary, tree)
+                        return details
+                    }
+                    const text = String(value ?? 'null')
+                    if (text.length > 160 || text.includes('\n')) { const details = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre'); summary.textContent = text.slice(0, 120) + (text.length > 120 ? '…' : ''); pre.className = 'raw-data-long'; pre.textContent = text; details.append(summary, pre); return details }
+                    const span = document.createElement('span'); span.textContent = text; return span
+                }
+                rows.sort((a, b) => String(a.key).localeCompare(String(b.key), undefined, { numeric: true })).forEach(item => { const row = document.createElement('div'), key = document.createElement('div'), value = document.createElement('div'); row.className = 'raw-data-row'; key.className = 'raw-data-key'; value.className = 'raw-data-value'; key.textContent = typeof item.key === 'number' ? 'LINE ' + item.key : String(item.key); value.appendChild(valueNode(item.value)); row.append(key, value); list.appendChild(row) })
+                status.textContent = rows.length ? '#' + roomHex.toUpperCase() + ' · ' + rows.length + ' RECORDS' : 'NO DATA STORED FOR #' + roomHex.toUpperCase()
             }
 
             rememberVisitor(color) {
@@ -11464,12 +11514,6 @@
                     const savedSignature = await this.db.getSignature(cleanHex).catch(() => null)
                     this.roomSignature = savedSignature ? this.cloneSignature(savedSignature) : null
                     const returningGuest = this.isRemoteJoinSource(source) && !this.roomHasWrappedKeys && !this.roomSignature
-                    if (returningGuest && cleanHex === this.user.color.replace('#', '').toLowerCase()) {
-                        this.user.color = '#' + (localStorage.getItem('color:form-receipt-room:color-' + cleanHex) || 'ffffff')
-                        localStorage.setItem('lastSphereColor', this.user.color)
-                        this.user.id = 'user_' + this.user.color.replace('#', '')
-                        this.ui.userBadge.style.backgroundColor = this.user.color
-                    }
                     await this.loadBlockDefinitions()
                     this.syncDebugPassword(cleanHex)
                     if (this.roomHasWrappedKeys && !(this.isRemoteJoinSource(source) && cleanHex !== this.user.color.replace('#', '').toLowerCase())) await this.validateRoomLogin(cleanHex)
@@ -11984,6 +12028,7 @@
                         if (group === 'blocks' && target === 'installed') this.renderInstalledBlocks()
                         if (group === 'blocks' && target === 'discover') this.loadBlockDefinitions()
                         if (group === 'blocks' && target === 'updates') this.renderBlockUpdates()
+                        if (group === 'settings' && target === 'raw') this.renderRawData()
                     })
                 })
 
@@ -13717,6 +13762,69 @@ async function db_read_private({ roomHex, key }) {
     return row?.content instanceof ArrayBuffer ? await decrypt(row.content) : null;
 }
 
+async function db_form_receipts_write({ roomHex, ownerHex, blockInstanceId, receipts }) {
+    if (!/^[0-9a-f]{6}$/.test(roomHex) || !/^[0-9a-f]{6}$/.test(ownerHex) || !blockInstanceId) throw new Error('Invalid receipt location');
+    const db = await openColorDB(roomHex);
+    const tx = db.transaction([roomHex], 'readwrite');
+    tx.objectStore(roomHex).put({ receipts: Array.isArray(receipts) ? receipts.slice(0, 100) : [], updated: Date.now(), localOnly: true }, 'local:form-receipts:' + ownerHex + ':' + blockInstanceId);
+    await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+    db.close();
+    return true;
+}
+
+async function db_form_receipts_read({ roomHex, ownerHex, blockInstanceId = '' }) {
+    if (!/^[0-9a-f]{6}$/.test(roomHex) || !/^[0-9a-f]{6}$/.test(ownerHex)) return [];
+    const db = await openColorDB(roomHex), prefix = 'local:form-receipts:' + ownerHex + ':', receipts = [];
+    await new Promise(resolve => {
+        const request = db.transaction([roomHex], 'readonly').objectStore(roomHex).openCursor();
+        request.onsuccess = event => {
+            const cursor = event.target.result;
+            if (!cursor) { resolve(); return; }
+            if (typeof cursor.key === 'string' && cursor.key.startsWith(prefix) && (!blockInstanceId || cursor.key === prefix + blockInstanceId) && Array.isArray(cursor.value?.receipts)) receipts.push(...cursor.value.receipts);
+            cursor.continue();
+        };
+        request.onerror = () => resolve();
+    });
+    db.close();
+    return receipts.slice(0, 100);
+}
+
+async function db_local_write({ roomHex, key, value }) {
+    if (!/^[0-9a-f]{6}$/.test(roomHex) || !String(key).startsWith('local:')) throw new Error('Invalid local Color data');
+    const db = await openColorDB(roomHex), tx = db.transaction([roomHex], 'readwrite');
+    tx.objectStore(roomHex).put({ value, updated: Date.now(), localOnly: true }, key);
+    await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+    db.close();
+    return true;
+}
+
+async function db_local_read({ roomHex, key }) {
+    if (!/^[0-9a-f]{6}$/.test(roomHex) || !String(key).startsWith('local:')) return null;
+    const db = await openColorDB(roomHex), row = await new Promise(resolve => {
+        const request = db.transaction([roomHex], 'readonly').objectStore(roomHex).get(key);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => resolve(null);
+    });
+    db.close();
+    return row?.value ?? null;
+}
+
+async function db_raw_dump({ roomHex }) {
+    if (!/^[0-9a-f]{6}$/.test(roomHex)) return [];
+    const db = await openColorDB(roomHex), rows = [];
+    await new Promise(resolve => {
+        const request = db.transaction([roomHex], 'readonly').objectStore(roomHex).openCursor();
+        request.onsuccess = event => { const cursor = event.target.result; if (!cursor) { resolve(); return; } rows.push({ key: cursor.key, value: cursor.value }); cursor.continue(); };
+        request.onerror = () => resolve();
+    });
+    db.close();
+    for (const row of rows) if (row.value?.content instanceof ArrayBuffer) {
+        try { row.value = { ...row.value, content: await decrypt(row.value.content) }; }
+        catch (_) { row.value = { ...row.value, content: { encrypted: true, byteLength: row.value.content.byteLength } }; }
+    }
+    return rows;
+}
+
 // Device trust is local to this installation, independent of the selected color.
 async function db_device_links(link = null) {
     const db = await openColorDB('ffffff');
@@ -13950,6 +14058,11 @@ self.onmessage = async (e) => {
             case 'db_read_signature': res = await db_read_signature(data); break;
             case 'db_write_private': res = await db_write_private(data); break;
             case 'db_read_private': res = await db_read_private(data); break;
+            case 'db_form_receipts_write': res = await db_form_receipts_write(data); break;
+            case 'db_form_receipts_read': res = await db_form_receipts_read(data); break;
+            case 'db_local_write': res = await db_local_write(data); break;
+            case 'db_local_read': res = await db_local_read(data); break;
+            case 'db_raw_dump': res = await db_raw_dump(data); break;
             case 'db_links_load': res = await db_device_links(); break;
             case 'db_links_save': res = await db_device_links(data.link); break;
             case 'backup_authorize': res = await authorizeBackup(data); break;
@@ -15446,19 +15559,26 @@ self.onmessage = async e => {
             return Math.max(0, Math.min(1, overlapScore * 0.3 + distanceScore * 0.25 + directionScore * 0.2 + lengthScore * 0.1 + startScore * 0.075 + endScore * 0.075))
         }
         const SIGNATURE_DEFAULT_OPTIONS = { grid: 1, ghosts: 28 }
+        let signatureRecoveryOptions = { ...SIGNATURE_DEFAULT_OPTIONS }
         function getSignatureRecoveryOptions() {
-            const gridValues = [1, 10, 100, 1000]
-            const grid = gridValues.includes(Number(localStorage.getItem('signatureRecoveryGrid'))) ? Number(localStorage.getItem('signatureRecoveryGrid')) : SIGNATURE_DEFAULT_OPTIONS.grid
-            const ghosts = Math.max(4, Math.min(80, Number(localStorage.getItem('signatureRecoveryGhosts')) || SIGNATURE_DEFAULT_OPTIONS.ghosts))
-            return { grid, ghosts }
+            return { ...signatureRecoveryOptions }
         }
         window.getSignatureRecoveryOptions = getSignatureRecoveryOptions
+        window.loadSignatureRecoveryOptions = async () => {
+            const roomHex = String(window.app?.user?.color || '#ffffff').replace('#', '').toLowerCase()
+            const saved = await window.app?.identity?._call('db_local_read', { roomHex, key: 'local:signature-recovery-options' }).catch(() => null)
+            signatureRecoveryOptions = { ...SIGNATURE_DEFAULT_OPTIONS, ...(saved || {}) }
+            window.app?.updatePasswordSecurityStatus?.()
+        }
         function setSignatureRecoveryOption(key, value) {
-            if (key === 'grid') localStorage.setItem('signatureRecoveryGrid', String([1, 10, 100, 1000][Math.max(0, Math.min(3, Number(value) || 0))]))
-            if (key === 'ghosts') localStorage.setItem('signatureRecoveryGhosts', String(Math.max(4, Math.min(80, Number(value) || SIGNATURE_DEFAULT_OPTIONS.ghosts))))
+            if (key === 'grid') signatureRecoveryOptions.grid = [1, 10, 100, 1000][Math.max(0, Math.min(3, Number(value) || 0))]
+            if (key === 'ghosts') signatureRecoveryOptions.ghosts = Math.max(4, Math.min(80, Number(value) || SIGNATURE_DEFAULT_OPTIONS.ghosts))
+            const roomHex = String(window.app?.user?.color || '#ffffff').replace('#', '').toLowerCase()
+            window.app?.identity?._call('db_local_write', { roomHex, key: 'local:signature-recovery-options', value: signatureRecoveryOptions }).catch(error => console.error('Signature preference save failed', error))
             window.app?.updatePasswordSecurityStatus?.()
         }
         window.setSignatureRecoveryOption = setSignatureRecoveryOption
+        window.loadSignatureRecoveryOptions()
         function mean(values) { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0 }
         function stdev(values) { const m = mean(values); return values.length > 1 ? Math.sqrt(mean(values.map(value => (value - m) ** 2))) : 0 }
         function percentile(values, p) { if (!values.length) return 0; const sorted = values.slice().sort((a, b) => a - b); return sorted[Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p)))] }
@@ -16025,18 +16145,41 @@ self.onmessage = async e => {
         }
         init().catch(error => console.error('[Sphere] init failed', error))
         window.updateVisitedFromDB = async function () { const rooms = await (new window.ColorDB()).getAllRooms(); state.historyHandles = []; if (rooms?.length) { rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }) }) } }
+        window.addEventListener('message', async e => {
+            if (window.self === window.top || e.source !== window.parent || !['color-sdk-receipt', 'color-sdk-get-receipts'].includes(e.data?.type)) return
+            const color = String(e.data.color || '').replace('#', '').toLowerCase(), owner = String(e.data.ownerColor || '').replace('#', '').toLowerCase()
+            if (!/^[0-9a-f]{6}$/.test(color) || !/^[0-9a-f]{6}$/.test(owner)) return
+            await window.app?.deviceLinksReady?.catch(() => {})
+            if (e.data.type === 'color-sdk-get-receipts') {
+                const receipts = await window.app.identity._call('db_form_receipts_read', { roomHex: color, ownerHex: owner }).catch(() => [])
+                e.source.postMessage({ type: 'color-sdk-receipts', color: '#' + color, ownerColor: '#' + owner, receipts }, e.origin)
+                return
+            }
+            const instanceId = String(e.data.blockInstanceId || ''), source = e.data.receipt
+            if (!instanceId || !source?.id) return
+            const receipt = { id: String(source.id).slice(0, 160), requestId: String(source.requestId || source.id).slice(0, 160), submittedAt: Number(source.submittedAt) || Date.now(), readAt: Number(source.readAt) || null, pending: !!source.pending, origin: String(source.origin || '').slice(0, 2048), fields: (Array.isArray(source.fields) ? source.fields : []).slice(0, 100).map(field => ({ name: String(field?.name || '').slice(0, 100), label: String(field?.label || '').slice(0, 200), value: Array.isArray(field?.value) ? field.value.slice(0, 100).map(value => String(value).slice(0, 2000)) : String(field?.value ?? '').slice(0, 10000) })) }
+            const receipts = await window.app.identity._call('db_form_receipts_read', { roomHex: color, ownerHex: owner, blockInstanceId: instanceId }).catch(() => [])
+            const existing = receipts.findIndex(item => item.id === receipt.id || item.requestId === receipt.requestId)
+            if (existing >= 0) receipts.splice(existing, 1)
+            await window.app.identity._call('db_form_receipts_write', { roomHex: color, ownerHex: owner, blockInstanceId: instanceId, receipts: [receipt, ...receipts] }).catch(error => console.error('[SDK] receipt save failed', error))
+        })
         window.addEventListener('message', e => { if (e.data === 'getSphereColor' && e.source === window.parent) e.source.postMessage(storageScope.getItem('lastSphereColor') || '#ffffff', e.origin); if (e.data?.type === 'handle-ready' && e.source === window && e.origin === location.origin) { const hex = e.data.hex, count = e.data.count, pos = /^#[0-9a-fA-F]{6}$/.test(hex || '') && Number.isSafeInteger(count) && count >= 0 ? findPositionFromColor(hex) : null; if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: count }); const d = document.createElement('div'), color = document.createElement('span'), peers = document.createElement('span'); d.className = 'debug-room-item ' + (count > 0 ? 'active' : ''); color.textContent = hex; peers.className = 'count'; peers.textContent = count + ' peer(s)'; d.append(color, ' ', peers); document.getElementById('debug-rooms').appendChild(d) } } })
-        async function initStorageAccess() { if (window.self === window.top) return; const sdkMode = new URLSearchParams(location.search).get('sdk') === '1'; const triggerZoomToColor = hexColor => { const matchPos = findPositionFromColor(hexColor); if (matchPos) { if (!document.body.classList.contains('light-mode')) { document.body.classList.add('light-mode') } triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true); const checkLandingComplete = () => { if (state.landing.progress >= 1) { window.parent.postMessage({ type: 'zoom-done', color: hexColor }, '*') } else if (state.landing.active) { requestAnimationFrame(checkLandingComplete) } }; requestAnimationFrame(checkLandingComplete) } }; const access = async h => { try { if (h?.localStorage) storageScope = h.localStorage; const c = storageScope.getItem('lastSphereColor') || '#ffffff'; if (!storageScope.getItem('lastSphereColor')) storageScope.setItem('lastSphereColor', c); window.parent.postMessage(c, '*'); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); document.body.style.backgroundColor = c; if (!sdkMode) triggerZoomToColor(c) } catch (e) { } }; try { if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true })) } catch (e) { access(null) } else if (sdkMode) access(null); else { const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }); const b = document.createElement('button'); b.innerText = 'LOGIN'; Object.assign(b.style, { padding: '12px 24px', fontSize: '16px', cursor: 'pointer', background: '#000', color: '#fff', border: 'none', borderRadius: '8px' }); o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true })) } catch (e) { o.innerHTML = 'Access Denied' } } } } catch (e) { access(null) } }
+        async function initStorageAccess() { if (window.self === window.top) return; const sdkMode = new URLSearchParams(location.search).get('sdk') === '1'; const triggerZoomToColor = hexColor => { const matchPos = findPositionFromColor(hexColor); if (matchPos) { if (!document.body.classList.contains('light-mode')) { document.body.classList.add('light-mode') } triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true); const checkLandingComplete = () => { if (state.landing.progress >= 1) { window.parent.postMessage({ type: 'zoom-done', color: hexColor }, '*') } else if (state.landing.active) { requestAnimationFrame(checkLandingComplete) } }; requestAnimationFrame(checkLandingComplete) } }; const access = async h => { try { if (h?.localStorage) storageScope = h.localStorage; const c = storageScope.getItem('lastSphereColor') || '#ffffff'; if (!storageScope.getItem('lastSphereColor')) storageScope.setItem('lastSphereColor', c); window.parent.postMessage(c, '*'); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); document.body.style.backgroundColor = c; if (!sdkMode) triggerZoomToColor(c) } catch (e) { } }; try { if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true, indexedDB: true })) } catch (e) { access(null) } else if (sdkMode) access(null); else { const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }); const b = document.createElement('button'); b.innerText = 'LOGIN'; Object.assign(b.style, { padding: '12px 24px', fontSize: '16px', cursor: 'pointer', background: '#000', color: '#fff', border: 'none', borderRadius: '8px' }); o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true, indexedDB: true })) } catch (e) { o.innerHTML = 'Access Denied' } } } } catch (e) { access(null) } }
         initStorageAccess()
 
         const turnAppNameEl = document.getElementById('turn-app-name')
         const turnApiKeyEl = document.getElementById('turn-api-key')
 
-        turnAppNameEl.value = localStorage.getItem('turnAppName') || ''
-        turnApiKeyEl.value = localStorage.getItem('turnApiKey') || ''
-
-        turnAppNameEl.addEventListener('input', e => localStorage.setItem('turnAppName', e.target.value))
-        turnApiKeyEl.addEventListener('input', e => localStorage.setItem('turnApiKey', e.target.value))
+        const turnRoomHex = () => String(window.app?.user?.color || '#ffffff').replace('#', '').toLowerCase()
+        window.loadTurnSettings = async () => {
+            const saved = await window.app?.identity?._call('db_local_read', { roomHex: turnRoomHex(), key: 'local:turn-config' }).catch(() => null)
+            turnAppNameEl.value = saved?.appName || ''
+            turnApiKeyEl.value = saved?.apiKey || ''
+        }
+        const saveTurnSettings = () => window.app?.identity?._call('db_local_write', { roomHex: turnRoomHex(), key: 'local:turn-config', value: { appName: turnAppNameEl.value, apiKey: turnApiKeyEl.value } }).catch(error => console.error('TURN settings save failed', error))
+        turnAppNameEl.addEventListener('input', saveTurnSettings)
+        turnApiKeyEl.addEventListener('input', saveTurnSettings)
+        window.loadTurnSettings()
     </script>
     <button id="copy-highlight" aria-label="Copy highlighted text">COPY</button>
     <button id="close-keyboard" aria-label="Close keyboard">
