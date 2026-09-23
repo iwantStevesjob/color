@@ -46,7 +46,7 @@ window.Color = {
                 const hashBuffer = await crypto.subtle.digest('SHA-1', encoder.encode(str));
                 return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(36)).join('').slice(0, 20);
             }
-            function waitForIce(pc) {
+            function waitForIce(pc, fallbackDescription) {
                 return Promise.race([
                     new Promise(resolve => {
                         const checkState = () => {
@@ -59,10 +59,11 @@ window.Color = {
                         checkState();
                     }),
                     new Promise(resolve => setTimeout(resolve, ICE_TIMEOUT))
-                ]).then(() => ({
-                    type: pc.localDescription.type,
-                    sdp: pc.localDescription.sdp.replace(/a=ice-options:trickle\s\n/g, '')
-                }));
+                ]).then(() => {
+                    const description = pc.localDescription || fallbackDescription;
+                    if (!description?.sdp) throw new Error('WebRTC could not create a local session description.');
+                    return { type: description.type, sdp: description.sdp.replace(/a=ice-options:trickle\s\n/g, '') };
+                });
             }
             return {
                 joinRoom: (config, roomId) => {
@@ -157,8 +158,9 @@ window.Color = {
                     async function createOffer() {
                         const { pc, dc } = createPeerConnection(true);
                         const offerId = genId(20);
-                        await pc.setLocalDescription(await pc.createOffer());
-                        const offer = await waitForIce(pc);
+                        const localOffer = await pc.createOffer();
+                        await pc.setLocalDescription(localOffer);
+                        const offer = await waitForIce(pc, localOffer);
                         return { pc, dc, offer, offerId, created: Date.now() };
                     }
                     async function fillOfferPool() {
@@ -217,8 +219,9 @@ window.Color = {
                                 });
                                 peerEntry.pc = pc;
                                 await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                                await pc.setLocalDescription(await pc.createAnswer());
-                                const answer = await waitForIce(pc);
+                                const localAnswer = await pc.createAnswer();
+                                await pc.setLocalDescription(localAnswer);
+                                const answer = await waitForIce(pc, localAnswer);
                                 ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer: { type: answer.type, sdp: answer.sdp } }));
                             } catch (err) { delete connectedPeers[data.peer_id]; }
                         }
