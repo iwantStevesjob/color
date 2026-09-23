@@ -10882,7 +10882,7 @@
             async enterRoomUI() {
                 if (this.pendingBackupAction && (!this.pendingBackupAction.verified || this.roomId !== 'color-' + this.pendingBackupAction.color)) return
                 console.log('[COLOR ui]', 'enterRoomUI start', { roomId: this.roomId, ownerLoginApproved: this.ownerLoginApproved, isGuestScan: this.isGuestScan })
-                if (this.requiresMiningForCurrentConnection() && this.joinApprovedPeers.size === 0) return
+                if (this.requiresMiningForCurrentConnection() && this.joinApprovedPeers.size === 0 && !this.hasRenderedContent()) return
                 document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none')
                 if (window.state?.signatureMatchPreview?.active) window.stopSignatureMatchPreview?.()
                 if (window.state?.landing) {
@@ -11117,6 +11117,8 @@
                 this.roomExists = exists
 
                 if (exists) {
+                    const returningGuest = this.isRemoteJoinSource(source) && cleanHex !== this.user.color.replace('#', '').toLowerCase()
+                    if (returningGuest) await this.loadBlockDefinitions()
                     this.ui.roomStatus.textContent = 'Loading...'
                     this.ui.roomStatus.style.color = ''
                     this.roomHasWrappedKeys = await this.identity.roomHasWrappedKeys(cleanHex).catch(() => false)
@@ -11146,7 +11148,8 @@
                     const data = await this.db.getRange(cleanHex, centerIndex - 50, centerIndex + 50)
                     await this.renderFromLocalDB(data, centerIndex)
                     this.joinNetwork()
-                    if (this.ownerLoginApproved && this.roomHasWrappedKeys && window.state?.landing?.active && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
+                    if (returningGuest && window.enterRoomUI) await window.enterRoomUI()
+                    else if (this.ownerLoginApproved && this.roomHasWrappedKeys && window.state?.landing?.active && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
                     else if (this.ownerLoginApproved && this.roomHasWrappedKeys && window.enterRoomUI) window.enterRoomUI()
                     else if (options.skipAutoEnter) this.ui.roomStatus.textContent = window.state?.signatureMatchPreview?.active ? 'SEARCHING...' : this.wrongPasswordState ? 'WRONG PASSWORD' : 'COLOR AVAILABLE', this.ui.roomStatus.style.color = this.wrongPasswordState ? 'red' : ''
                     else if (!options.skipAutoEnter && !this.roomNeedsLogin() && window.state?.landing?.active && window.state.landing.progress < 1) window.state.landing.shouldAutoEnter = true
