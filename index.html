@@ -9864,6 +9864,8 @@
                     next.data.sdkSecurity ||= { maxBytes: 32768, maxPerMinute: 10, maxStored: 1000 }
                     return next
                 })
+                this.sdkConfirmedSources ||= new Set()
+                this.sdkConfirmedSources.add(instanceId + ':' + origin)
                 this.localBlockPayloadCache = null
                 this.sdkSourceCandidates.delete(instanceId + ':' + origin)
                 await this.renderSdkSourceManager()
@@ -10003,7 +10005,7 @@
                     const block = forms[Math.max(0, Number(match[1] || 1) - 1)]
                     if (!block) return this.sendSdkResponse({ kind: 'block', requestId: data.requestId, origin: requestOrigin, ownerColor: '#' + roomHex, block: null, error: 'Form not found.' }, pid)
                     const sources = Array.isArray(block.data?.sources) ? block.data.sources : []
-                    const confirmed = sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)
+                    const confirmed = this.sdkConfirmedSources?.has(block.instanceId + ':' + requestOrigin) || sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)
                     if (!confirmed) {
                         const key = block.instanceId + ':' + requestOrigin
                         this.sdkSourceCandidates.set(key, { blockInstanceId: block.instanceId, origin: requestOrigin, data, pid, seenAt: Date.now() })
@@ -10018,7 +10020,7 @@
                 const block = (await this.getLocalBlockPayloads()).find(item => item.blockId === 'form' && item.instanceId === data.blockInstanceId)
                 if (!block) return this.sendSdkResponse({ kind: 'submission', requestId: data.requestId, origin: requestOrigin, ok: false, error: 'Form not found.' }, pid)
                 const sources = Array.isArray(block.data?.sources) ? block.data.sources : []
-                if (!sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)) return this.sendSdkResponse({ kind: 'submission', requestId: data.requestId, origin: requestOrigin, ok: false, error: 'Source not confirmed.' }, pid)
+                if (!this.sdkConfirmedSources?.has(block.instanceId + ':' + requestOrigin) && !sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)) return this.sendSdkResponse({ kind: 'submission', requestId: data.requestId, origin: requestOrigin, ok: false, error: 'Source not confirmed.' }, pid)
                 if (data.schemaHash !== await this.sdkHash(block.data?.schema || '[]')) return this.sendSdkResponse({ kind: 'submission', requestId: data.requestId, origin: requestOrigin, ok: false, error: 'This form changed. Reload it and try again.' }, pid)
                 const requestId = String(data.requestId || '')
                 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return
