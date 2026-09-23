@@ -285,7 +285,8 @@ window.Color = {
         let colorSwatch = null;
         let blockRetryTimer = null;
         let submissionTimer = null;
-        const blockRequestId = crypto.randomUUID();
+        const uuid = () => crypto.randomUUID?.() || '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+        const blockRequestId = uuid();
 
         // Inject Iframe
         const iframe = document.createElement('iframe');
@@ -440,7 +441,7 @@ window.Color = {
                     const controls = [...form.elements].filter(input => input.name === field.name);
                     values[field.name] = field.type === 'checkbox' ? controls.filter(input => input.checked).map(input => input.value) : field.type === 'radio' ? controls.find(input => input.checked)?.value || '' : controls[0]?.value || '';
                 });
-                const requestId = crypto.randomUUID();
+                const requestId = uuid();
                 form.dataset.requestId = requestId;
                 status.textContent = 'SENDING...';
                 submit.disabled = true;
