@@ -10930,7 +10930,7 @@
                     this.cryptoReadyLogged = true
                 }
 
-                if ((this.ui.loginBtn.textContent === 'LOGIN' || this.ownerLoginApproved) && !this.isGuestScan) {
+                if (this.ownerLoginApproved && !this.isGuestScan) {
                     this.user.color = '#' + roomHex
                     this.ui.userBadge.style.backgroundColor = this.user.color
                     localStorage.setItem('lastSphereColor', this.user.color)
@@ -11117,13 +11117,19 @@
                 this.roomExists = exists
 
                 if (exists) {
-                    const returningGuest = this.isRemoteJoinSource(source) && cleanHex !== this.user.color.replace('#', '').toLowerCase()
-                    if (returningGuest) await this.loadBlockDefinitions()
                     this.ui.roomStatus.textContent = 'Loading...'
                     this.ui.roomStatus.style.color = ''
                     this.roomHasWrappedKeys = await this.identity.roomHasWrappedKeys(cleanHex).catch(() => false)
                     const savedSignature = await this.db.getSignature(cleanHex).catch(() => null)
                     this.roomSignature = savedSignature ? this.cloneSignature(savedSignature) : null
+                    const returningGuest = this.isRemoteJoinSource(source) && !this.roomHasWrappedKeys && !this.roomSignature
+                    if (returningGuest && cleanHex === this.user.color.replace('#', '').toLowerCase()) {
+                        this.user.color = '#' + (localStorage.getItem('color:form-receipt-room:color-' + cleanHex) || 'ffffff')
+                        localStorage.setItem('lastSphereColor', this.user.color)
+                        this.user.id = 'user_' + this.user.color.replace('#', '')
+                        this.ui.userBadge.style.backgroundColor = this.user.color
+                    }
+                    if (returningGuest) await this.loadBlockDefinitions()
                     this.syncDebugPassword(cleanHex)
                     if (this.roomHasWrappedKeys && !(this.isRemoteJoinSource(source) && cleanHex !== this.user.color.replace('#', '').toLowerCase())) await this.validateRoomLogin(cleanHex)
                     if (!preserveSignatureState && window.state) {
