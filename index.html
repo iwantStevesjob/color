@@ -9855,6 +9855,7 @@
             async confirmSdkSource(instanceId, value) {
                 const origin = this.sdkSourceOrigin(value)
                 if (!origin) throw new Error('Enter an HTTPS website address.')
+                const candidate = this.sdkSourceCandidates.get(instanceId + ':' + origin)
                 await this.updateBlockPayload(instanceId, next => {
                     next.data ||= {}
                     const sources = Array.isArray(next.data.sources) ? next.data.sources : []
@@ -9863,8 +9864,10 @@
                     next.data.sdkSecurity ||= { maxBytes: 32768, maxPerMinute: 10, maxStored: 1000 }
                     return next
                 })
+                this.localBlockPayloadCache = null
                 this.sdkSourceCandidates.delete(instanceId + ':' + origin)
                 await this.renderSdkSourceManager()
+                if (candidate?.data && candidate.pid) await this.handleSdkAction(candidate.data, candidate.pid)
             }
 
             async renderSdkSourceManager() {
@@ -10003,7 +10006,7 @@
                     const confirmed = sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)
                     if (!confirmed) {
                         const key = block.instanceId + ':' + requestOrigin
-                        this.sdkSourceCandidates.set(key, { blockInstanceId: block.instanceId, origin: requestOrigin, seenAt: Date.now() })
+                        this.sdkSourceCandidates.set(key, { blockInstanceId: block.instanceId, origin: requestOrigin, data, pid, seenAt: Date.now() })
                         while (this.sdkSourceCandidates.size > 100) this.sdkSourceCandidates.delete(this.sdkSourceCandidates.keys().next().value)
                         await this.renderSdkSourceManager()
                         return this.sendSdkResponse({ kind: 'source', status: 'pending', requestId: data.requestId, origin: requestOrigin, ownerColor: '#' + roomHex }, pid)
@@ -11453,7 +11456,7 @@
                         this.user.id = 'user_' + this.user.color.replace('#', '')
                         this.ui.userBadge.style.backgroundColor = this.user.color
                     }
-                    if (returningGuest) await this.loadBlockDefinitions()
+                    await this.loadBlockDefinitions()
                     this.syncDebugPassword(cleanHex)
                     if (this.roomHasWrappedKeys && !(this.isRemoteJoinSource(source) && cleanHex !== this.user.color.replace('#', '').toLowerCase())) await this.validateRoomLogin(cleanHex)
                     if (!preserveSignatureState && window.state) {
