@@ -636,7 +636,7 @@ window.Color = {
                     if (isRequestedBlock) {
                         ownerPeer = peerId;
                         if (message.payload.block && await digest(message.payload.block.data?.schema || '[]') !== message.payload.schemaHash) return emit('color-error', { error: 'The signed form schema does not match its fingerprint.' });
-                        if (message.payload.block) startNormalSync(peerId);
+                        if (message.payload.block) { activeBlock = message.payload.block; activeSchemaHash = message.payload.schemaHash; renderForm(activeBlock); startNormalSync(peerId); }
                         else { showBlockStatus(message.payload.error || 'FORM NOT FOUND'); emit('color-error', { error: message.payload.error || 'Form not found.' }); }
                     } else if (isRequestedSubmission) {
                         clearTimeout(submissionTimer);
