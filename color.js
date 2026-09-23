@@ -27,7 +27,7 @@ window.Color = {
                 'wss://tracker.openwebtorrent.com',
                 'wss://tracker.btorrent.xyz'
             ];
-            const OFFER_POOL_SIZE = 12;
+            const OFFER_POOL_SIZE = 3;
             const OFFER_TTL = 57333;
             const ANNOUNCE_INTERVAL = 33333;
             const ICE_TIMEOUT = 5000;
@@ -284,6 +284,7 @@ window.Color = {
         let activeSchemaHash = null;
         let colorSwatch = null;
         let blockRetryTimer = null;
+        let blockOfflineTimer = null;
         let submissionTimer = null;
         const uuid = () => crypto.randomUUID?.() || '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
         const blockRequestId = uuid();
@@ -291,7 +292,7 @@ window.Color = {
         // Inject Iframe
         const iframe = document.createElement('iframe');
         iframe.id = 'color-widget';
-        iframe.src = block ? 'https://colorlog.in?sdk=1' : 'https://colorlog.in';
+        iframe.src = 'https://colorlog.in';
         iframe.allow = 'storage-access';
         if (block) iframe.className = 'color-sdk-identity';
 
@@ -323,11 +324,18 @@ window.Color = {
                     opacity: 0;
                     pointer-events: none;
                 }
+                .color-sdk-notice { padding: 16px; border-radius: 10px; background: #eee; color: #555; font: 800 13px/1.4 system-ui, sans-serif; text-align: center; }
             `;
             document.head.appendChild(style);
         }
 
         const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
+        const showBlockStatus = message => {
+            if (!block) return;
+            let notice = container.querySelector('.color-sdk-notice');
+            if (!notice) { notice = document.createElement('div'); notice.className = 'color-sdk-notice'; container.prepend(notice); }
+            notice.textContent = message;
+        };
         const keyId = key => JSON.stringify([key?.kty, key?.crv, key?.x, key?.y]);
         const digest = async value => {
             const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value))));
@@ -359,6 +367,7 @@ window.Color = {
                 }
                 return true;
             } catch (error) {
+                showBlockStatus('COLOR OFFLINE');
                 emit('color-error', { error: error.message });
                 return false;
             }
@@ -366,6 +375,8 @@ window.Color = {
         const renderForm = payload => {
             let schema = [];
             try { schema = JSON.parse(payload.data?.schema || '[]'); } catch (_) { }
+            clearTimeout(blockOfflineTimer);
+            container.querySelector('.color-sdk-notice')?.remove();
             container.querySelectorAll('.color-sdk-form').forEach(el => el.remove());
             const wrapper = document.createElement('section');
             wrapper.className = 'color-sdk-form';
@@ -478,6 +489,8 @@ window.Color = {
                     if ((!isRequestedBlock && !isPendingSource && !isRequestedSubmission) || !await verify(message)) return;
                     if (isPendingSource) {
                         ownerPeer = peerId;
+                        clearTimeout(blockOfflineTimer);
+                        showBlockStatus('WAITING FOR OWNER CONFIRMATION');
                         emit('color-source-pending', { origin: location.origin, color: '#' + ownerColor });
                         return;
                     }
@@ -485,7 +498,7 @@ window.Color = {
                         ownerPeer = peerId;
                         if (message.payload.block && await digest(message.payload.block.data?.schema || '[]') !== message.payload.schemaHash) return emit('color-error', { error: 'The signed form schema does not match its fingerprint.' });
                         if (message.payload.block) { activeBlock = message.payload.block; activeSchemaHash = message.payload.schemaHash; clearInterval(blockRetryTimer); renderForm(activeBlock); }
-                        else emit('color-error', { error: message.payload.error || 'Form not found.' });
+                        else { showBlockStatus(message.payload.error || 'FORM NOT FOUND'); emit('color-error', { error: message.payload.error || 'Form not found.' }); }
                     } else if (isRequestedSubmission) {
                         clearTimeout(submissionTimer);
                         form.querySelector('button[type="submit"]').disabled = false;
@@ -495,7 +508,7 @@ window.Color = {
                 });
                 const requestBlock = peerId => sendSdk({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor }, peerId);
                 room.onPeerJoin(requestBlock);
-                room.onPeerLeave(peerId => { if (peerId === ownerPeer) ownerPeer = null; });
+                room.onPeerLeave(peerId => { if (peerId === ownerPeer) { ownerPeer = null; showBlockStatus('COLOR OFFLINE'); } });
                 blockRetryTimer = setInterval(() => { if (!activeBlock) requestBlock(); }, 10000);
             }
         };
@@ -523,6 +536,7 @@ window.Color = {
         };
         window.addEventListener('message', handleColorMessage);
 
+        if (block) { showBlockStatus('CONNECTING TO COLOR…'); blockOfflineTimer = setTimeout(() => { if (!activeBlock && !ownerPeer) showBlockStatus('COLOR OFFLINE'); }, 15000); }
         container.appendChild(iframe);
         connect();
 
@@ -534,7 +548,7 @@ window.Color = {
                 if (get) get(cb);
                 else pendingGetCallbacks.push(cb);
             },
-            destroy: () => { clearInterval(blockRetryTimer); clearTimeout(submissionTimer); window.removeEventListener('message', handleColorMessage); room?.leave(); iframe.remove(); },
+            destroy: () => { clearInterval(blockRetryTimer); clearTimeout(blockOfflineTimer); clearTimeout(submissionTimer); window.removeEventListener('message', handleColorMessage); room?.leave(); iframe.remove(); container.querySelector('.color-sdk-notice')?.remove(); },
             resetTrust: () => localStorage.removeItem('color-sdk-owner:' + ownerColor),
             get connected() { return Object.values(room?.getPeers?.() || {}).some(peer => peer.dc?.readyState === 'open'); },
             get color() { return visitorColor; },
