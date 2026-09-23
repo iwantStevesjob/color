@@ -6,8 +6,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Color</title>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.15/dist/purify.min.js"></script>
+    <script src="libs/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" type="text/javascript"></script>
     <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
 
@@ -2486,6 +2486,11 @@
             line-height: 1.4;
         }
 
+        .bank-auth.bank-needs-connection .bank-pin,
+        .bank-auth.bank-needs-connection .bank-pad,
+        .bank-auth.bank-needs-connection .bank-primary { display:none }
+        .bank-auth.bank-needs-connection [data-bank-connect] { color:#c62828;text-decoration:underline }
+
         .purchase-card-row {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3397,6 +3402,7 @@
         </div>
     </div>
 
+    <div id="backup-login-note" hidden style="position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:10000;max-width:90vw;padding:12px;background:#111;color:white;text-align:center"><span></span> <button id="backup-login-cancel" type="button">CANCEL</button></div>
     <nav id="info-nav" aria-label="Color information">
         <button type="button" data-info-page="about">ABOUT</button>
         <button type="button" data-info-page="backup">BACKUP</button>
@@ -3411,9 +3417,9 @@
         </section>
         <section id="info-backup" hidden>
             <h1>Backup</h1>
-            <p>Open this page on your desktop and scan its QR code from your logged-in phone. The desktop can start empty as #FFFFFF. Your phone keeps its current color and sends a saved copy to the desktop.</p>
+            <p>On the receiving device, select SHOW QR. On the device holding your color, select SCAN QR and verify your secret color-click password. Either device can be a phone or computer; an empty device starts as #FFFFFF.</p>
             <p>Paired devices remember each other and reconnect when Color is open. Changes are saved to the other device before a backup is marked complete. An offline device catches up when it returns.</p>
-            <p>You can also pair a friend and choose to keep encrypted backups for each other. Friendship does not grant access to private content. Enable passkey protection on both devices after the desktop receives its copy. Protected colors and their private bank or card records need both devices to unlock; losing either device's keys can lock both copies. Friend recovery files cannot bypass this protection. Save recovery files separately from your devices.</p>
+            <p>Your own devices keep independently encrypted copies. Enable a passkey on both devices. If the phone is lost, unlock the desktop backup with its passkey, select BLOCK, then pair the replacement phone and create its new passkey. A fingerprint never leaves the device and cannot recover data without a surviving encrypted backup. Friends can separately hold encrypted backups; keep their recovery files somewhere safe.</p>
             <div id="backup-device-list"></div>
             <div id="backup-qr-display"></div>
             <div id="backup-reader"></div>
@@ -5252,8 +5258,8 @@
                 onHighlight((d, p) => {
                     if (this.verifiedPeers.has(p)) this.emit('highlight', d, p)
                 })
-                onBlockOps((d, p) => this.emit('block-action', 'store_ops', d, p))
-                onDroneOps((d, p) => this.emit('block-action', 'drone_ops', d, p))
+                onBlockOps((d, p) => { if (this.verifiedPeers.has(p)) this.emit('block-action', 'store_ops', d, p) })
+                onDroneOps((d, p) => { if (this.verifiedPeers.has(p)) this.emit('block-action', 'drone_ops', d, p) })
                 onBankOps((d, p) => { if (this.verifiedPeers.has(p)) this.emit('block-action', 'bank_ops', d, p) })
                 this.room.onPeerLeave(p => { this.verifiedPeers.delete(p); this.peerIdentities.delete(p); this.emit('peer-leave', p) })
             }
@@ -7108,11 +7114,14 @@
                 this.deviceLinks = []
                 this.deviceConnections = new Map()
                 this.deviceRequests = new Map()
+                this.vaultCardOperations = new Set()
                 this.backupSending = new Map()
                 this.backupReceiving = new Map()
                 this.backupHashes = new Map()
                 this.friendBackupHashes = new Map()
                 this.friendRestores = new Map()
+                this.pendingVaultCardSetup = null
+                this.pendingSensitiveBlockSetup = null
                 this.statusInterval = null
                 this.cursorSaveTimeout = null
                 this.qrScanner = null
@@ -7146,6 +7155,7 @@
                 this.roomSignature = null
                 this.blocks = []
                 this.blockDefs = new Map()
+                this.localBlockDefs = new Map()
                 this.blocksOffline = navigator.onLine === false
                 this.localBlockPayloadCache = []
                 this.activeBlockDefinition = null
@@ -7154,6 +7164,8 @@
                 this.blockSetupState = {}
                 this.purchaseForm = null
                 this.pendingPurchases = new Map()
+                this.pendingStripeRequests = new Map()
+                this.stripeOrders = new Map()
                 this.blockRuntime = new Map()
                 this.selectedConnectType = null
                 this.nearbyRoom = null
@@ -7208,6 +7220,7 @@
                     for (const event of ['mousedown', 'mouseup', 'touchstart', 'touchend', 'pointerdown', 'pointerup']) node.addEventListener(event, e => e.stopPropagation())
                 }
                 this.bindEvents()
+                document.getElementById('backup-login-cancel').onclick = () => this.logout()
                 this.bindHighlighter()
                 this.setupGlobalExposure()
 
@@ -7229,6 +7242,8 @@
             }
 
             closeInfoPage() {
+                this.pendingVaultCardSetup = null
+                this.pendingSensitiveBlockSetup = null
                 this.infoPage = null
                 document.body.classList.remove('info-open')
                 document.getElementById('info-panel').hidden = true
@@ -7296,6 +7311,7 @@
                                 this.stopScanner()
                                 document.getElementById('backup-qr-display').replaceChildren()
                             }
+                            this.resumeVaultCardSetup()
                         } else {
                             this.backupSending.delete(record.id)
                             this.backupReceiving.delete(record.id)
@@ -7338,7 +7354,7 @@
                     document.getElementById('backup-qr-display').replaceChildren()
                     this.backupStatus('QR expired. Select SHOW QR to create another invitation.')
                 }, 5 * 60 * 1000)
-                this.backupStatus(mode === 'friend' ? 'Scan once to remember this friend. Backup access is optional.' : 'Ready as #' + this.user.color.replace('#', '').toUpperCase() + '. Scan from the phone holding your color.')
+                this.backupStatus(mode === 'friend' ? 'Scan once to remember this friend. Backup access is optional.' : 'Ready as #' + this.user.color.replace('#', '').toUpperCase() + '. Scan from the device holding the color you want to copy.')
             }
 
             async acceptDeviceQr(data) {
@@ -7351,15 +7367,20 @@
                     if (existing.publicKey?.x !== data.publicKey?.x || existing.publicKey?.y !== data.publicKey?.y) throw new Error('Pairing identity changed')
                     await this.stopScanner()
                     await this.showInfoPage('backup', false)
+                    if (existing.role !== 'friend' && existing.needsInitialCopy) return this.verifyBackupAction(existing, 'pair')
                     if (this.deviceConnections.get(existing.id)?.status !== 'connected') this.connectDeviceLink(existing)
                     return
                 }
                 const color = this.user.color.replace('#', '').toLowerCase()
-                if (data.mode === 'device' && (this.identity.locked || this.roomId !== 'color-' + color || !this.ui.dashboardPanel.classList.contains('active'))) throw new Error('Open the color you want to back up on this phone, then scan the desktop QR')
+                if (data.mode === 'device' && (this.identity.locked || this.roomId !== 'color-' + color || !this.ui.dashboardPanel.classList.contains('active'))) throw new Error('Open the color you want to back up, then scan the receiving device QR')
                 await this.stopScanner()
                 await this.showInfoPage('backup', false)
                 const record = { id: crypto.randomUUID(), secret: data.secret, publicKey: data.publicKey, role: data.mode === 'friend' ? 'friend' : 'phone', color, ownColor: color, created: Date.now(), needsInitialCopy: data.mode === 'device' }
                 if (data.mode === 'friend' && /^[0-9a-f]{6}$/.test(data.restoreColor || '')) record.restoreColor = data.restoreColor
+                if (data.mode === 'device') {
+                    await this.verifyBackupAction(record, 'pair', data)
+                    return
+                }
                 this.connectDeviceLink(record)
                 this.backupStatus('Connecting and verifying this device…')
             }
@@ -7386,6 +7407,7 @@
                     await this.saveDeviceLink(record)
                     if (record.role === 'friend') await connection.send({ type: 'BACKUP_PERMISSION', allowed: record.acceptsBackup === true })
                     this.renderBackupDevices()
+                    this.resumeVaultCardSetup()
                     return
                 }
                 if (message.type === 'REPLY') {
@@ -7405,6 +7427,43 @@
                             record.vaultFactor ||= Array.from(crypto.getRandomValues(new Uint8Array(32)))
                             await this.saveDeviceLink(record)
                             result = record.vaultFactor
+                        } else if (message.operation === 'STRIPE_AGENT' && record.role === 'vault' && message.color === record.color) {
+                            const gate = await this.identity.getRoomGate(message.color)
+                            if (this.identity.locked || this.roomId !== 'color-' + message.color || !gate?.unlocked) throw new Error('Open this color on the desktop and unlock its passkey first')
+                            const action = message.data?.action
+                            if (!['status', 'create_setup_intent', 'retrieve_payment_method'].includes(action)) throw new Error('This Stripe operation is not allowed over a device link')
+                            result = await this.stripeAgentRequest(action, message.data?.data)
+                        } else if (['CARD_STORE', 'CARD_USE', 'CARD_RESULT'].includes(message.operation) && record.role === 'vault' && message.color === record.color) {
+                            const gate = await this.identity.getRoomGate(message.color)
+                            if (this.identity.locked || this.roomId !== 'color-' + message.color || !gate?.unlocked) throw new Error('Open this color on the desktop and unlock its passkey first')
+                            const key = 'local:vault-card:v1'
+                            if (this.vaultCardOperations.has(key)) throw new Error('Another card request is already in progress')
+                            this.vaultCardOperations.add(key)
+                            try { if (message.operation === 'CARD_STORE') {
+                                const card = message.data || {}, digits = String(card.cardNumber || '').replace(/\D/g, '')
+                                if (!card.name || !card.email || digits.length < 12 || digits.length > 19 || !/^(0?[1-9]|1[0-2])$/.test(String(card.expMonth || '')) || !/^\d{2,4}$/.test(String(card.expYear || ''))) throw new Error('Check the card and billing details')
+                                const stored = { v: 2, name: String(card.name).slice(0, 160), email: String(card.email).slice(0, 254), cardNumber: digits, expMonth: String(card.expMonth), expYear: String(card.expYear), postalCode: String(card.postalCode || '').slice(0, 32), attempts: 0, blocked: false, savedAt: Date.now() }
+                                await this.identity._call('db_write_private', { roomHex: message.color, key, value: JSON.stringify(stored) })
+                                result = { stored: true, last4: digits.slice(-4), expMonth: stored.expMonth, expYear: stored.expYear }
+                            } else {
+                                const raw = await this.identity._call('db_read_private', { roomHex: message.color, key })
+                                const stored = JSON.parse(raw || 'null')
+                                if (!stored?.cardNumber || (stored.blocked && message.operation !== 'CARD_RESULT')) throw new Error(stored?.blocked ? 'Card locked after five unsuccessful payment attempts. Save the card again from the desktop to reset it.' : 'No card is stored in this desktop vault')
+                                delete stored.cvcSalt
+                                delete stored.cvcHash
+                                if (message.operation === 'CARD_RESULT') {
+                                    if (message.data?.success) { stored.attempts = 0; stored.blocked = false }
+                                    await this.identity._call('db_write_private', { roomHex: message.color, key, value: JSON.stringify(stored) })
+                                    result = { updated: true }
+                                } else {
+                                    const cvc = String(message.data?.cvc || '')
+                                    if (!/^\d{3,4}$/.test(cvc)) throw new Error('Enter the card CVC')
+                                    stored.attempts = Number(stored.attempts || 0) + 1
+                                    stored.blocked = stored.attempts >= 5
+                                    await this.identity._call('db_write_private', { roomHex: message.color, key, value: JSON.stringify(stored) })
+                                    result = { envelope: await this.encryptCardEnvelope(message.data?.agentPublicKey, { card: { name: stored.name, email: stored.email, cardNumber: stored.cardNumber, expMonth: stored.expMonth, expYear: stored.expYear, postalCode: stored.postalCode, cvc }, purchase: message.data?.purchase }) }
+                                }
+                            } } finally { this.vaultCardOperations.delete(key) }
                         } else if (message.operation === 'RESTORE_BACKUP' && record.role === 'friend') {
                             const sourceId = record.restoreFrom?.color === message.color ? record.restoreFrom.linkId : record.id
                             const envelope = await this.identity._call('backup_opaque_get', { linkId: sourceId, roomHex: message.color })
@@ -7435,6 +7494,7 @@
                     record.remoteProtected = true
                     await this.saveDeviceLink(record)
                     this.renderBackupDevices()
+                    this.resumeVaultCardSetup()
                     return
                 }
                 if (message.type === 'SNAPSHOT_START') {
@@ -7472,7 +7532,8 @@
                         const key = await crypto.subtle.importKey('raw', this.fileTransfers.base64ToBytes(restore.key), 'AES-GCM', false, ['decrypt'])
                         const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: this.fileTransfers.base64ToBytes(payload.iv), additionalData: new TextEncoder().encode(incoming.color) }, key, this.fileTransfers.base64ToBytes(payload.data))
                         payload = JSON.parse(new TextDecoder().decode(plain))
-                        payload.entries.push(...restore.keys)
+                        const restoredNames = new Set(payload.entries.map(([name]) => name))
+                        payload.entries.push(...restore.keys.filter(([name]) => !restoredNames.has(name)))
                         if (!restore.keys.length && !await this.identity.roomHasWrappedKeys(incoming.color)) throw new Error('This protected backup needs the color keys from your paired devices. Its recovery file does not bypass two-device protection.')
                     }
                     if (record.role === 'friend' && !restore) {
@@ -7482,6 +7543,7 @@
                         result = { written: 1, conflicts: [] }
                     } else {
                         result = await this.identity._call('backup_import', { roomHex: incoming.color, snapshot: payload, linkId: record.id })
+                        record.recoverable = !await this.identity.getRoomGate(incoming.color)
                         if (!this.visitedRooms.includes('color-' + incoming.color)) this.visitedRooms.push('color-' + incoming.color)
                         window.updateVisitedFromDB?.()
                         window.postMessage({ type: 'handle-ready', hex: '#' + incoming.color, count: 1 }, '*')
@@ -7512,74 +7574,123 @@
                 }
             }
 
-            requestDevice(record, operation, color) {
+            requestDevice(record, operation, color, data = null) {
                 return new Promise((resolve, reject) => {
+                    if (record.revoked) { reject(new Error('This device is blocked')); return }
                     const requestId = crypto.randomUUID()
                     const timer = setTimeout(() => { this.deviceRequests.delete(requestId); reject(new Error('Paired device is unavailable. Open Color there and try again.')) }, 15000)
                     this.deviceRequests.set(requestId, { linkId: record.id, resolve, reject, timer })
                     const connection = this.deviceConnections.get(record.id)
-                    if (!connection) { clearTimeout(timer); this.deviceRequests.delete(requestId); reject(new Error('Paired device is unavailable')); return }
-                    connection.send({ type: 'REQUEST', operation, color, requestId }).catch(error => { clearTimeout(timer); this.deviceRequests.delete(requestId); reject(error) })
+                    if (!connection || connection.status !== 'connected') { clearTimeout(timer); this.deviceRequests.delete(requestId); reject(new Error('Paired device is unavailable')); return }
+                    connection.send({ type: 'REQUEST', operation, color, requestId, data }).catch(error => { clearTimeout(timer); this.deviceRequests.delete(requestId); reject(error) })
                 })
+            }
+
+            async encryptCardEnvelope(publicJwk, payload) {
+                if (publicJwk?.kty !== 'RSA' || publicJwk?.alg && publicJwk.alg !== 'RSA-OAEP-256') throw new Error('This store does not have a valid payment-agent encryption key')
+                const publicKey = await crypto.subtle.importKey('jwk', publicJwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt'])
+                const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt'])
+                const rawKey = await crypto.subtle.exportKey('raw', key), iv = crypto.getRandomValues(new Uint8Array(12))
+                const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(payload)))
+                const wrappedKey = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, rawKey)
+                return { v: 1, key: this.fileTransfers.arrayBufferToBase64(wrappedKey), iv: this.fileTransfers.arrayBufferToBase64(iv), data: this.fileTransfers.arrayBufferToBase64(data) }
+            }
+
+            async createPasskeyPrf(roomHex) {
+                if (!window.isSecureContext || !navigator.credentials || !window.PublicKeyCredential) throw new Error('Passkey protection requires HTTPS or localhost and a passkey-capable browser')
+                const salt = crypto.getRandomValues(new Uint8Array(32))
+                const credential = await navigator.credentials.create({ publicKey: {
+                    challenge: crypto.getRandomValues(new Uint8Array(32)),
+                    rp: { name: 'Color' },
+                    user: { id: crypto.getRandomValues(new Uint8Array(32)), name: 'color-' + roomHex, displayName: 'Color #' + roomHex.toUpperCase() },
+                    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+                    authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
+                    attestation: 'none',
+                    extensions: { prf: { eval: { first: salt } } }
+                } })
+                const output = credential?.getClientExtensionResults?.().prf?.results?.first
+                const authData = credential?.response?.getAuthenticatorData?.()
+                if (!credential?.rawId?.byteLength || !output || output.byteLength !== 32 || !authData || authData.byteLength < 33 || !(new Uint8Array(authData)[32] & 4)) throw new Error('A verified passkey with PRF support is required. No encryption settings were changed.')
+                return { credentialId: this.fileTransfers.arrayBufferToBase64(credential.rawId), prfSalt: this.fileTransfers.arrayBufferToBase64(salt), prf: Array.from(new Uint8Array(output)) }
             }
 
             async passkeyPrf(roomHex, gate = null) {
                 if (!window.isSecureContext || !navigator.credentials || !window.PublicKeyCredential) throw new Error('Passkey protection requires HTTPS or localhost and a passkey-capable browser')
                 const salt = gate ? this.fileTransfers.base64ToBytes(gate.prfSalt) : crypto.getRandomValues(new Uint8Array(32))
                 let credentialId = gate?.credentialId
-                if (!credentialId) {
-                    const credential = await navigator.credentials.create({ publicKey: {
-                        challenge: crypto.getRandomValues(new Uint8Array(32)),
-                        rp: { name: 'Color' },
-                        user: { id: crypto.getRandomValues(new Uint8Array(32)), name: '#' + roomHex, displayName: 'Color #' + roomHex + ' on ' + this.deviceIdentity.device.os },
-                        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
-                        authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' },
-                        attestation: 'none',
-                        extensions: { prf: { eval: { first: salt } } }
-                    } })
-                    if (!credential) throw new Error('Passkey setup cancelled')
-                    if (!credential.getClientExtensionResults().prf?.enabled) throw new Error('This passkey provider does not support encrypted-data protection (PRF). No encryption settings were changed.')
-                    credentialId = this.fileTransfers.arrayBufferToBase64(credential.rawId)
-                }
+                if (!credentialId) throw new Error('Legacy protection details are missing')
                 const assertion = await navigator.credentials.get({ publicKey: {
                     challenge: crypto.getRandomValues(new Uint8Array(32)),
                     allowCredentials: [{ type: 'public-key', id: this.fileTransfers.base64ToBytes(credentialId) }],
                     userVerification: 'required',
                     extensions: { prf: { eval: { first: salt } } }
                 } })
-                const output = assertion?.getClientExtensionResults().prf?.results?.first
+                const output = assertion?.getClientExtensionResults?.().prf?.results?.first
                 const authData = assertion?.response?.authenticatorData
-                if (!output || output.byteLength !== 32 || !authData || !(new Uint8Array(authData)[32] & 4)) throw new Error('A verified passkey with PRF support is required. No encryption settings were changed.')
+                if (!output || output.byteLength !== 32 || !authData || authData.byteLength < 33 || !(new Uint8Array(authData)[32] & 4)) throw new Error('A verified passkey with PRF support is required. No encryption settings were changed.')
                 return { credentialId, prfSalt: this.fileTransfers.arrayBufferToBase64(salt), prf: Array.from(new Uint8Array(output)) }
             }
 
-            async enrollBackupPasskey(record) {
+            async verifyBackupAction(record, kind, data = null) {
                 const color = record.color
-                if (!color || record.role === 'friend' || record.revoked) throw new Error('Pair your own backup device first')
-                if (this.identity.locked || this.roomId !== 'color-' + color || this.user.color.replace('#', '') !== color) throw new Error('Open #' + color.toUpperCase() + ' on this device first, then return to Backup')
-                if (await this.identity.getRoomGate(color)) { this.backupStatus('This color already requires its passkey and paired device.'); return }
-                if (!record.lastBackup && !record.lastReceived) throw new Error('Wait until the initial backup has been saved')
-                const remoteFactor = await this.requestDevice(record, 'PREPARE_PROTECTION', color)
-                const proof = await this.passkeyPrf(color)
-                if (this.roomId !== 'color-' + color || record.revoked || this.deviceConnections.get(record.id)?.status !== 'connected') throw new Error('Pairing changed during setup. Try again.')
-                await this.identity.enrollRoomGate({ roomHex: color, ...proof, remoteFactor, vaultId: record.id })
-                proof.prf.fill(0)
-                remoteFactor.fill(0)
-                record.protected = true
-                await this.saveDeviceLink(record)
-                this.protectedLease = { color, linkId: record.id, expires: Date.now() + 45000 }
-                await this.deviceConnections.get(record.id).send({ type: 'PROTECTION_ENABLED', color })
-                await navigator.storage?.persist?.()
-                this.backupStatus('Protected on this device. Enable protection on the paired device too. Both must be available to unlock this color, including its bank and card data.')
-                this.renderBackupDevices()
+                if (!color || !await this.identity.roomHasWrappedKeys(color)) throw new Error('No saved identity keys for this backup')
+                const currentSignature = this.getRoomSignatureForSave(color)
+                const singleClickSetup = !this.identity.locked && this.roomId === 'color-' + color && this.getRoomPassword(color, currentSignature) === 'FFFFFF' + color.toUpperCase() && ['pair', 'prepare'].includes(kind)
+                const passkeyRecovery = kind === 'recover' && !this.identity.locked && this.roomId === 'color-' + color && (await this.identity.getRoomGate(color))?.unlocked
+                if (singleClickSetup || passkeyRecovery) {
+                    this.pendingBackupAction = { record, kind, data, color, verified: true, singleClickSetup }
+                    if (kind === 'pair') await this.identity._call('backup_authorize', { roomHex: color, password: 'FFFFFF' + color.toUpperCase(), linkId: record.id, operation: kind })
+                    return this.completeBackupAction()
+                }
+                const vaultCardSetup = this.pendingVaultCardSetup
+                await this.identity.lockCurrentRoom()
+                await this.logout()
+                this.pendingVaultCardSetup = vaultCardSetup
+                document.body.classList.add('light-mode')
+                this.pendingBackupAction = { record, kind, data, color }
+                const note = document.getElementById('backup-login-note')
+                note.hidden = false
+                note.querySelector('span').textContent = 'Enter the secret color-click sequence for #' + color.toUpperCase() + ' to ' + (kind === 'pair' ? 'authorize this device' : kind === 'block' ? 'block this device' : 'recover your data') + '. Use the password saved on this device.'
+            }
+
+            async completeBackupAction() {
+                const action = this.pendingBackupAction
+                if (!action?.verified || this.roomId !== 'color-' + action.color) return
+                if (action.kind === 'pair') {
+                    if (action.data && action.data.expires < Date.now()) throw new Error('QR expired. Scan again to authorize the device.')
+                    this.connectDeviceLink(action.record)
+                } else if (action.kind === 'prepare') {
+                    const connection = this.deviceConnections.get(action.record.id)
+                    if (action.record.revoked || connection?.status !== 'connected') throw new Error('The backup device must be connected before enabling passkey protection.')
+                    const proof = await this.createPasskeyPrf(action.color)
+                    const remoteFactor = action.record.role === 'vault' ? null : await this.requestDevice(action.record, 'PREPARE_PROTECTION', action.color)
+                    try {
+                        await this.identity.enrollRoomGate({ roomHex: action.color, vaultId: remoteFactor ? action.record.id : '', remoteFactor, ...proof })
+                    } finally { remoteFactor?.fill?.(0) }
+                    action.record.protected = true
+                    action.record.recoverable = true
+                    await this.saveDeviceLink(action.record)
+                    await connection.send({ type: 'PROTECTION_ENABLED', color: action.color })
+                } else if (action.kind === 'block') {
+                    await this.blockDevice(action.record, true)
+                    await this.identity.lockCurrentRoom()
+                    await this.logout()
+                }
+                this.pendingBackupAction = null
+                document.getElementById('backup-login-note').hidden = true
+                this.protectedLease = null
+                await this.showInfoPage('backup', false)
+                this.backupStatus(action.kind === 'prepare' ? action.record.role === 'vault' ? 'Desktop recovery passkey enabled. Its fingerprint can unlock this backup if the phone is lost.' : 'Fingerprint/passkey unlock enabled. One click now selects the color; your passkey and paired desktop unlock it.' : action.kind === 'recover' ? 'Recovered on this device. To copy to a replacement, show a QR on the replacement and scan it here.' : action.kind === 'block' ? 'Device blocked. Your saved backup is retained. Select RECOVER DATA to unlock it.' : action.singleClickSetup ? 'Desktop connected. After the first backup is confirmed, select ENABLE PASSKEY on both devices.' : 'Verified. Your backup uses your Color click password and can open without the other device.')
+                if (action.kind === 'prepare') await this.resumeSensitiveBlockSetup()
             }
 
             async authorizeProtectedRoom(roomHex, gate) {
                 await this.deviceLinksReady
+                const proof = await this.passkeyPrf(roomHex, gate)
+                if (!gate.requiresVault) return { prf: proof.prf }
                 const record = this.deviceLinks.find(link => link.id === gate.vaultId && !link.revoked && link.color === roomHex && link.role !== 'friend')
                 if (!record) throw new Error('The backup device is blocked or missing. This protected color cannot be decrypted.')
-                const remoteFactor = gate.requiresVault ? await this.requestDevice(record, 'VAULT_FACTOR', roomHex) : (await this.requestDevice(record, 'PRESENT', roomHex), undefined)
-                const proof = await this.passkeyPrf(roomHex, gate)
+                const remoteFactor = await this.requestDevice(record, 'VAULT_FACTOR', roomHex)
                 if (record.revoked || this.deviceConnections.get(record.id)?.status !== 'connected') throw new Error('The paired device disconnected during verification')
                 this.protectedLease = { color: roomHex, linkId: record.id, expires: Date.now() + 45000 }
                 return { prf: proof.prf, remoteFactor }
@@ -7630,7 +7741,7 @@
                         if (record.revoked || connection?.status !== 'connected' || this.backupSending.has(record.id)) continue
                         if (record.role === 'friend' ? !record.sendsBackup || !record.remoteAcceptsBackup || record.ownColor !== color : record.color !== color) continue
                         try {
-                            const snapshot = await this.identity._call('backup_export', { roomHex: color, includeKeys: record.needsInitialCopy === true })
+                            const snapshot = await this.identity._call('backup_export', { roomHex: color, linkId: record.id, includeKeys: record.role === 'friend' || record.needsInitialCopy === true })
                             // Export time is not content: excluding it prevents resending unchanged data.
                             delete snapshot.exportedAt
                             let payload = snapshot
@@ -7693,7 +7804,8 @@
                 } catch (error) { this.friendRestores.delete(record.id); throw error }
             }
 
-            async blockDevice(record) {
+            async blockDevice(record, verified = false) {
+                if (record.role !== 'friend' && !verified) return this.verifyBackupAction(record, 'block')
                 await this.deviceConnections.get(record.id)?.send({ type: 'BLOCK' }).catch(() => {})
                 record.revoked = true
                 delete record.vaultFactor
@@ -7716,18 +7828,13 @@
                     if (!record.remoteAcceptsBackup) throw new Error('Your friend must select ALLOW BACKUP first')
                     const keyName = 'local:friend-backup:' + record.id
                     let raw = await this.identity._call('db_read_private', { roomHex: color, key: keyName })
-                    if (!raw || raw === '🔒') {
-                        const key = this.fileTransfers.arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(32)))
-                        const protectedColor = !!await this.identity.getRoomGate(color)
-                        const snapshot = await this.identity._call('backup_export', { roomHex: color, includeKeys: !protectedColor })
+                    let recovery = null
+                    try { recovery = JSON.parse(raw || 'null') } catch (_) { }
+                    if (!recovery?.keys?.length) {
+                        const key = recovery?.key || this.fileTransfers.arrayBufferToBase64(crypto.getRandomValues(new Uint8Array(32)))
+                        const snapshot = await this.identity._call('backup_export', { roomHex: color, linkId: record.id, includeKeys: true })
                         const keys = snapshot.entries.filter(([name]) => name === 'wrapped_keys' || name === 'password_check')
                         raw = JSON.stringify({ v: 1, color, key, ownerPublicKey: snapshot.ownerPublicKey, keys })
-                        await this.identity._call('db_write_private', { roomHex: color, key: keyName, value: raw })
-                    }
-                    if (await this.identity.getRoomGate(color)) {
-                        const recovery = JSON.parse(raw)
-                        recovery.keys = []
-                        raw = JSON.stringify(recovery)
                         await this.identity._call('db_write_private', { roomHex: color, key: keyName, value: raw })
                     }
                     // Keep this recovery file outside the devices holding the encrypted backup.
@@ -7751,9 +7858,9 @@
                     row.innerHTML = record.device?.type === 'phone' ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="1"/><path d="M8 21h8m-4-4v4"/></svg>'
                     const text = document.createElement('div'), name = document.createElement('strong'), detail = document.createElement('span'), controls = document.createElement('div')
                     const status = record.revoked ? 'BLOCKED' : (this.deviceConnections.get(record.id)?.status || 'offline').toUpperCase()
-                    name.textContent = (record.device?.os || 'Device') + ' · ' + (record.role === 'friend' ? 'FRIEND #' + (record.friendColor || '').toUpperCase() : record.role === 'phone' ? 'DESKTOP VAULT' : 'PAIRED PHONE') + ' · ' + status
+                    name.textContent = (record.device?.os || 'Device') + ' · ' + (record.role === 'friend' ? 'FRIEND #' + (record.friendColor || '').toUpperCase() : 'PAIRED DEVICE') + ' · ' + status
                     const saved = Math.max(record.lastBackup || 0, record.lastReceived || 0)
-                    detail.textContent = (record.fingerprint || '').slice(0, 24) + (saved ? ' · Saved ' + new Date(saved).toLocaleString() : ' · Awaiting first backup') + (record.role === 'friend' ? '' : record.protected && record.remoteProtected ? ' · BOTH DEVICES PROTECTED' : record.protected ? ' · Enable protection on the other device' : ' · Passkey protection not enabled')
+                    detail.textContent = (record.fingerprint || '').slice(0, 24) + (saved ? ' · Saved ' + new Date(saved).toLocaleString() : ' · Awaiting first backup') + (record.role === 'friend' ? '' : record.recoverable ? ' · ' + (record.protected ? 'PASSKEY RECOVERY' : 'COLOR PASSWORD RECOVERY') : record.protected ? ' · UPDATE RECOVERY BEFORE BLOCKING' : ' · VERIFY RECOVERY PASSWORD')
                     if (record.conflicts?.length || typeof record.conflicts === 'number' && record.conflicts > 0) detail.textContent += ' · Concurrent changes retained; review before relying on this backup'
                     const button = (label, callback) => {
                         const el = document.createElement('button')
@@ -7771,11 +7878,12 @@
                                 const envelope = await this.identity._call('backup_opaque_get', { linkId: record.id, roomHex: record.heldColor })
                                 this.fileTransfers.saveBlob(new Blob([JSON.stringify(envelope)], { type: 'application/json' }), { name: 'color-' + record.heldColor + '-encrypted-backup.json' })
                             })
-                        } else if (saved) {
-                            button(record.protected ? 'PASSKEY PROTECTED' : 'ENABLE PASSKEY PROTECTION', () => this.enrollBackupPasskey(record))
+                        } else if (saved || record.needsInitialCopy) {
+                            button(record.protected ? 'REPLACE PASSKEY' : 'ENABLE PASSKEY', () => this.verifyBackupAction(record, record.needsInitialCopy ? 'pair' : 'prepare'))
                         }
                         button('BLOCK', () => this.blockDevice(record))
                     }
+                    if (record.role !== 'friend' && saved) button('RECOVER DATA', () => this.verifyBackupAction(record, 'recover'))
                     text.append(name, detail, controls); row.appendChild(text); list.appendChild(row)
                 }
                 if (this.deviceLinks.some(record => !record.revoked) && !this.pairInvitation) document.getElementById('backup-qr-display').replaceChildren()
@@ -7990,7 +8098,7 @@
                 if (gridId === 'blocks-installed-grid') {
                     const payloads = await this.getLocalBlockPayloads()
                     const ids = this.installedBlockIds(payloads)
-                    const installed = Array.from(ids).map(id => [...payloads].reverse().find(payload => payload.blockId === id)?.definition || this.blockDefs.get(id)).filter(block => block && this.blockCategory(block) === category)
+                    const installed = Array.from(ids).map(id => this.getBlockDefinition(id)).filter(block => block && this.blockCategory(block) === category)
                     grid.innerHTML = this.renderBlockGroups(installed, false, true)
                 } else {
                     const installedPayloads = await this.getLocalBlockPayloads()
@@ -8037,15 +8145,17 @@
                 document.getElementById('block-form-title').textContent = def.name || blockId
                 document.getElementById('block-form-fields').innerHTML = def.setupView?.html || this.renderDefaultBlockForm(def)
                 document.querySelectorAll('#block-form-fields .settings-input').forEach(input => {
-                    input.setAttribute('inputmode', 'none')
-                    input.setAttribute('autocomplete', 'new-password')
-                    input.setAttribute('autocorrect', 'off')
-                    input.setAttribute('autocapitalize', 'off')
-                    input.setAttribute('spellcheck', 'false')
-                    input.setAttribute('aria-autocomplete', 'none')
-                    input.setAttribute('data-lpignore', 'true')
-                    input.setAttribute('data-form-type', 'other')
-                    if (window.__mobileKeyboardBind) window.__mobileKeyboardBind(input)
+                    if (def.id !== 'credit-card') {
+                        input.setAttribute('inputmode', 'none')
+                        input.setAttribute('autocomplete', 'new-password')
+                        input.setAttribute('autocorrect', 'off')
+                        input.setAttribute('autocapitalize', 'off')
+                        input.setAttribute('spellcheck', 'false')
+                        input.setAttribute('aria-autocomplete', 'none')
+                        input.setAttribute('data-lpignore', 'true')
+                        input.setAttribute('data-form-type', 'other')
+                        if (window.__mobileKeyboardBind) window.__mobileKeyboardBind(input)
+                    }
                     const sync = () => input.classList.toggle('has-value', !!input.value.trim())
                     input.addEventListener('input', sync)
                     input.addEventListener('change', sync)
@@ -8058,7 +8168,7 @@
                 })
                 this.updateRequiredBlockFields(def)
                 const submit = document.querySelector('#create-block-panel .create-block-submit')
-                if (submit) submit.textContent = def.setupView?.submitLabel || def.submitLabel || 'SUBMIT'
+                if (submit) { submit.hidden = false; submit.textContent = def.setupView?.submitLabel || def.submitLabel || 'SUBMIT' }
                 const suggestion = document.querySelector('#create-block-panel .create-block-suggestion')
                 const suggestedNextBlock = def.suggestedNextBlock || def.setupView?.suggestedNextBlock
                 if (suggestion && suggestedNextBlock) {
@@ -8122,6 +8232,7 @@
                     alert('Paste full HTML first.')
                     return { stop: true }
                 }
+                if (source.length > 200000) throw new Error('Custom blocks are limited to 200 KB')
                 const doc = new DOMParser().parseFromString(source, 'text/html')
                 const externalScripts = Array.from(doc.querySelectorAll('script[src]')).map(script => script.getAttribute('src')).filter(Boolean)
                 const css = Array.from(doc.querySelectorAll('style')).map(style => style.textContent || '').join('\n')
@@ -8133,7 +8244,7 @@
                     return { stop: true }
                 }
                 if (externalScripts.length) {
-                    const message = 'External scripts will not be added because only JS inside the file is valid:\n' + externalScripts.join('\n')
+                    const message = 'External scripts will run only inside this block\'s isolated sandbox:\n' + externalScripts.join('\n')
                     const warning = root.querySelector('[data-custom-html-warning]')
                     if (warning) {
                         warning.textContent = message
@@ -8143,15 +8254,17 @@
                 }
                 const id = preferredId || 'custom-html-' + Date.now().toString(36)
                 const name = (preferredId || doc.querySelector('title')?.textContent || doc.querySelector('h1')?.textContent || 'CUSTOM HTML').trim().slice(0, 40).toUpperCase() || 'CUSTOM HTML'
-                return { definition: this.customBlockDefinition(id, name, source, html, css, js), data: {} }
+                return { definition: this.customBlockDefinition(id, name, source, html, css, js, externalScripts), data: {} }
             }
 
-            customBlockDefinition(id, name, source, html = DOMPurify.sanitize(source || ''), css = '', js = '') {
+            customBlockDefinition(id, name, source, html = DOMPurify.sanitize(source || ''), css = '', js = '', scripts = []) {
                 const baseCss = `.color-block-widget[data-block-id="${this.escapeAttr(id)}"]{border:0;background:transparent;padding:0}.color-block-widget[data-block-id="${this.escapeAttr(id)}"] .color-block-header{display:none}`
+                const audit = [scripts.length ? 'Loads external code' : '', /\b(fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon)\b/.test(js) ? 'Uses network APIs' : '', /\b(indexedDB|localStorage|sessionStorage|document\.cookie)\b/.test(js) ? 'Requests browser storage' : '', /\b(parent|top|opener|postMessage)\b/.test(js) ? 'Contacts its parent window' : '', /\b(eval|Function)\s*\(/.test(js) ? 'Generates code dynamically' : ''].filter(Boolean)
                 return {
                     id,
                     name,
                     category: 'CUSTOM',
+                    source: String(source || '').slice(0, 200000),
                     svgIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M8 9h8"/><path d="M8 13h5"/></svg>',
                     fields: [],
                     setupView: {
@@ -8159,14 +8272,25 @@
                         html: `<label class="settings-label" for="block-field-sourceHtml">HTML</label><textarea id="block-field-sourceHtml" class="settings-input" data-block-field="sourceHtml" style="min-height:320px">${this.escapeHtml(source || html || '')}</textarea><div class="settings-hint" data-custom-html-warning style="display:none"></div>`,
                         js: 'return app.createCustomBlockFromHtml(fields.sourceHtml, root, def.id);'
                     },
-                    adminView: { html, css: baseCss + css, js },
-                    peerView: { html, css: baseCss + css, js }
+                    adminView: { html, css: baseCss + css, js, scripts },
+                    peerView: { html, css: baseCss + css, js, scripts },
+                    audit
                 }
+            }
+
+            normalizeCustomBlockDefinition(def) {
+                if (!def || !/^[a-z][a-z0-9-]{0,127}$/.test(def.id || '') || String(def.category || '').toUpperCase() !== 'CUSTOM') return null
+                const view = def.adminView || def.peerView || {}, html = DOMPurify.sanitize(String(view.html || '').slice(0, 100000)), css = String(view.css || '').slice(0, 100000), js = String(view.js || '').slice(0, 100000)
+                const scripts = (Array.isArray(view.scripts) ? view.scripts : []).map(value => { try { const url = new URL(value, location.href); return url.protocol === 'https:' && url.href.length <= 2048 ? url.href : '' } catch (_) { return '' } }).filter(Boolean).slice(0, 8)
+                const source = String(def.source || `<style>${css}</style>${html}<script>${js}<\/script>`).slice(0, 200000)
+                return this.customBlockDefinition(def.id, String(def.name || def.id).slice(0, 40), source, html, css, js, scripts)
             }
 
             closeBlockForm() {
                 document.body.classList.remove('create-block-mode')
                 document.getElementById('create-block-panel')?.classList.remove('visible')
+                const submit = document.querySelector('#create-block-panel .create-block-submit')
+                if (submit) submit.hidden = false
                 const suggestion = document.querySelector('#create-block-panel .create-block-suggestion')
                 if (suggestion) {
                     suggestion.dataset.nextBlock = ''
@@ -8194,46 +8318,73 @@
                 return peers.length === 1 ? peers[0] : null
             }
 
+            stripeAgentRequest(action, data = null) {
+                const id = crypto.randomUUID()
+                return new Promise((resolve, reject) => {
+                    const finish = (error, result) => {
+                        clearTimeout(timer)
+                        window.removeEventListener('message', receive)
+                        error ? reject(new Error(error)) : resolve(result)
+                    }
+                    const receive = event => {
+                        if (event.source !== window || event.data?.type !== 'COLOR_STRIPE_AGENT_RESPONSE' || event.data.id !== id) return
+                        finish(event.data.error, event.data.result)
+                    }
+                    const timer = setTimeout(() => finish('Color Stripe Agent not found. Install or enable the Chrome extension, then reload Color.'), 15000)
+                    window.addEventListener('message', receive)
+                    window.postMessage({ type: 'COLOR_STRIPE_AGENT_REQUEST', id, action, data }, '*')
+                })
+            }
+
+            requestStoreStripe(def, message, targetPeer) {
+                const requestId = message.requestId || crypto.randomUUID()
+                return new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => {
+                        this.pendingStripeRequests.delete(requestId)
+                        reject(new Error('The seller Stripe agent did not respond. Make sure the seller page and extension are online.'))
+                    }, 30000)
+                    this.pendingStripeRequests.set(requestId, { resolve, reject, timer, targetPeer })
+                    this.sendBlockMessage(def, { ...message, requestId }, targetPeer)
+                })
+            }
+
             async buyProduct(form) {
-                const paymentType = form.payment?.paymentType || 'stripe'
-                const profile = paymentType === 'stripe' ? await this.loadBuyerPaymentProfile() : null
-                if (profile?.cardNumber) { this.submitSavedPurchase(form, profile); return }
-                this.openPurchaseForm(form)
+                const def = this.blockDefs.get('payment'), script = def?.checkout?.js
+                if (!script) return
+                try {
+                    await this.runBlockScript(script, { app: this, def, form, escapeHtml: value => this.escapeHtml(value), escapeAttr: value => this.escapeAttr(value) })
+                } catch (error) {
+                    console.error('[Blocks] checkout failed', error)
+                    alert(error.message)
+                }
             }
 
-            submitSavedPurchase(form, fields) {
-                const sellerPeerId = this.findRoomOwnerPeerId()
-                if (!sellerPeerId || !this.mesh?.sendBlockAction) return
-                const requestId = 'purchase-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
-                const paymentType = form.payment?.paymentType || 'stripe'
-                const paymentDetails = fields.blockId === 'test-card' ? { ...fields, cardNumber: 'pm_card_visa' } : fields
-                this.pendingPurchases.set(requestId, { status: null, submit: null, paymentType, timer: setTimeout(() => this.pendingPurchases.delete(requestId), 45000) })
-                this.sendBlockMessage(form.def, { type: 'PURCHASE_SUBMIT', requestId, blockInstanceId: form.payload.instanceId, buyerColor: this.user.color, data: { storeName: form.payload.data?.storeName || '', productIndex: form.product.productIndex ?? '', productName: form.product.productName || '', productPrice: form.product.productPrice || '', paymentType }, paymentDetails }, sellerPeerId)
-            }
-
-            openPurchaseForm({ def, payload, product = {}, payment = {} }) {
+            openPurchaseForm({ def, payload, product = {}, payment = {}, paymentProfile = null }) {
                 if (!def || !payload) return
                 if (!document.body.classList.contains('create-block-mode') && !this.blockFormReturn) this.blockFormReturn = this.captureBlockFormReturn()
                 this.activeBlockDefinition = null
                 const requestId = 'purchase-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
                 const paymentType = payment.paymentType || 'stripe'
-                this.purchaseForm = { def, payload, product, payment, requestId }
+                this.purchaseForm = { def, payload, product, payment, paymentProfile, requestId, stripe: null, cvcAttempts: 0 }
                 this.applyBlockFormTheme()
                 document.getElementById('block-form-title').textContent = 'BUY ' + (product.productName || 'PRODUCT')
-                const warning = this.isCurrentPasswordUnsafe() ? `<div class="purchase-disclaimer">PASSWORD WARNING: your current Color password is not secure. The payment details you enter here will be sent to the seller and stored in the seller's ColorDB, encrypted and signed like other blocks.</div>` : ''
-                const stripeFields = `<label class="settings-label" for="purchase-name">NAME ON CARD</label><input id="purchase-name" class="settings-input" data-purchase-field="name" data-purchase-required autocomplete="off"><label class="settings-label" for="purchase-email">EMAIL</label><input id="purchase-email" class="settings-input" data-purchase-field="email" data-purchase-required autocomplete="off"><label class="settings-label" for="purchase-card">CARD NUMBER</label><input id="purchase-card" class="settings-input" data-purchase-field="cardNumber" data-purchase-required autocomplete="off"><div class="purchase-card-row"><div><label class="settings-label" for="purchase-exp-month">EXP MONTH</label><input id="purchase-exp-month" class="settings-input" data-purchase-field="expMonth" data-purchase-required autocomplete="off"></div><div><label class="settings-label" for="purchase-exp-year">EXP YEAR</label><input id="purchase-exp-year" class="settings-input" data-purchase-field="expYear" data-purchase-required autocomplete="off"></div><div><label class="settings-label" for="purchase-cvc">CVC</label><input id="purchase-cvc" class="settings-input" data-purchase-field="cvc" data-purchase-required autocomplete="off"></div></div><label class="settings-label" for="purchase-zip">ZIP</label><input id="purchase-zip" class="settings-input" data-purchase-field="postalCode" autocomplete="off">`
+                const vaultCard = !!paymentProfile?.vaultId
+                const warning = this.isCurrentPasswordUnsafe() ? `<div class="purchase-disclaimer">PASSWORD WARNING: this Color uses a low-security click sequence. The protected desktop vault and CVC are still required to use this card.</div>` : ''
+                const stripeFields = vaultCard ? `<div class="purchase-disclaimer">Your protected desktop vault holds CARD •••• ${this.escapeHtml(paymentProfile?.last4 || '')}. The CVC is never stored and is released only for this checkout.</div><label class="settings-label">CVC</label><input class="settings-input" data-purchase-field="cvc" data-purchase-required type="password" inputmode="numeric" maxlength="4" autocomplete="cc-csc">` : `<div class="purchase-disclaimer">Stripe holds ${(this.escapeHtml(paymentProfile?.brand || 'card')).toUpperCase()} •••• ${this.escapeHtml(paymentProfile?.last4 || '')}. Color stores only its Stripe reference.</div><label class="settings-label">CVC</label><div data-stripe-cvc-element style="padding:14px;border:1px solid rgba(127,127,127,.35);border-radius:8px;background:white"></div>`
                 const bitcoinFields = `<label class="settings-label" for="purchase-bitcoin-address">YOUR BITCOIN ADDRESS</label><input id="purchase-bitcoin-address" class="settings-input" data-purchase-field="bitcoinAddress" data-purchase-required autocomplete="off"><p class="settings-hint">Bitcoin transaction handling will be completed later.</p>`
                 document.getElementById('block-form-fields').innerHTML = `<div class="purchase-summary"><b>${this.escapeHtml(product.productName || 'Product')}</b><span>${this.escapeHtml(product.productPrice || '')}</span></div>${warning}${paymentType === 'bitcoin' ? bitcoinFields : stripeFields}<div class="purchase-status" data-purchase-status></div>`
                 document.querySelectorAll('#block-form-fields .settings-input').forEach(input => {
-                    input.setAttribute('inputmode', 'none')
-                    input.setAttribute('autocomplete', 'new-password')
-                    input.setAttribute('autocorrect', 'off')
-                    input.setAttribute('autocapitalize', 'off')
-                    input.setAttribute('spellcheck', 'false')
-                    input.setAttribute('aria-autocomplete', 'none')
-                    input.setAttribute('data-lpignore', 'true')
-                    input.setAttribute('data-form-type', 'other')
-                    if (window.__mobileKeyboardBind) window.__mobileKeyboardBind(input)
+                    if (!vaultCard) {
+                        input.setAttribute('inputmode', 'none')
+                        input.setAttribute('autocomplete', 'new-password')
+                        input.setAttribute('autocorrect', 'off')
+                        input.setAttribute('autocapitalize', 'off')
+                        input.setAttribute('spellcheck', 'false')
+                        input.setAttribute('aria-autocomplete', 'none')
+                        input.setAttribute('data-lpignore', 'true')
+                        input.setAttribute('data-form-type', 'other')
+                        if (window.__mobileKeyboardBind) window.__mobileKeyboardBind(input)
+                    }
                     const sync = () => input.classList.toggle('has-value', !!input.value.trim())
                     input.addEventListener('input', sync)
                     input.addEventListener('change', sync)
@@ -8242,7 +8393,7 @@
                 const submit = document.querySelector('#create-block-panel .create-block-submit')
                 if (submit) {
                     submit.textContent = paymentType === 'bitcoin' ? 'SEND REQUEST' : 'PAY'
-                    submit.disabled = false
+                    submit.disabled = paymentType === 'stripe' && !vaultCard
                 }
                 const suggestion = document.querySelector('#create-block-panel .create-block-suggestion')
                 if (suggestion) {
@@ -8258,19 +8409,35 @@
                 this.ui.subNavLayer.classList.remove('half-slide', 'peek-slide')
                 this.updatePeekState(0)
                 this.updateTopBackButton()
-                if (paymentType === 'stripe') this.loadBuyerPaymentProfile().then(profile => {
-                    if (!profile || this.purchaseForm?.requestId !== requestId) return
-                    Object.entries(profile).forEach(([key, value]) => {
-                        const input = document.querySelector(`[data-purchase-field="${this.escapeAttr(key)}"]`)
-                        if (input) { input.value = value || ''; input.dispatchEvent(new Event('input', { bubbles: true })) }
-                    })
+                if (paymentType === 'stripe' && !vaultCard) this.prepareStripePurchase(this.purchaseForm).catch(error => {
                     const status = document.querySelector('[data-purchase-status]')
-                    if (status) status.textContent = 'Using saved payment profile...'
-                    setTimeout(() => this.purchaseForm?.requestId === requestId && this.submitPurchaseForm(), 80)
-                }).catch(() => { })
+                    if (status && this.purchaseForm?.requestId === requestId) status.textContent = error.message
+                })
             }
 
-            submitPurchaseForm() {
+            async prepareStripePurchase(form) {
+                if (!window.Stripe) throw new Error('Stripe.js could not load. Check your connection and reload Color.')
+                if (form.paymentProfile.publishableKey !== form.payment.stripePublishableKey) throw new Error('This saved card belongs to a different Stripe platform. Add it again for this platform.')
+                const sellerPeerId = this.findRoomOwnerPeerId()
+                if (!sellerPeerId) throw new Error('Seller peer is not ready.')
+                const prepared = await this.requestStoreStripe(form.def, {
+                    type: 'STRIPE_PREPARE', requestId: form.requestId, blockInstanceId: form.payload.instanceId,
+                    buyerColor: this.user.color, customerId: form.paymentProfile.customerId,
+                    paymentMethodId: form.paymentProfile.paymentMethodId, productIndex: form.product.productIndex ?? ''
+                }, sellerPeerId)
+                if (this.purchaseForm?.requestId !== form.requestId) return
+                if (prepared.publishableKey !== form.payment.stripePublishableKey) throw new Error('The seller returned a different Stripe account key.')
+                const stripe = Stripe(prepared.publishableKey)
+                const cvc = stripe.elements().create('cardCvc')
+                cvc.mount(document.querySelector('[data-stripe-cvc-element]'))
+                form.stripe = { stripe, cvc, clientSecret: prepared.clientSecret, paymentIntentId: prepared.paymentIntentId }
+                const status = document.querySelector('[data-purchase-status]')
+                const submit = document.querySelector('#create-block-panel .create-block-submit')
+                if (status) status.textContent = 'Ready. Enter the CVC to authorize this payment.'
+                if (submit) submit.disabled = false
+            }
+
+            async submitPurchaseForm() {
                 const form = this.purchaseForm
                 if (!form) return
                 const root = document.getElementById('block-form-fields')
@@ -8298,8 +8465,72 @@
                     submit.disabled = true
                     submit.textContent = paymentType === 'bitcoin' ? 'SENDING...' : 'PROCESSING...'
                 }
-                if (paymentType === 'stripe') this.saveBuyerPaymentProfile(fields).then(() => this.renderInstalledBlocks()).catch(() => { })
-                if (status) status.textContent = paymentType === 'bitcoin' ? 'Sending payment request...' : 'Sending payment to seller...'
+                let paymentIntentId = '', paymentDetails = paymentType === 'bitcoin' ? fields : null, paymentEnvelope = null
+                if (paymentType === 'stripe') {
+                    if (form.cvcAttempts >= 5) {
+                        if (status) status.textContent = 'Too many failed CVC attempts. Close this form and start the purchase again.'
+                        return
+                    }
+                    if (form.paymentProfile?.vaultId) {
+                        if (!/^\d{3,4}$/.test(fields.cvc || '')) {
+                            if (status) status.textContent = 'Enter the three- or four-digit CVC.'
+                            if (submit) { submit.disabled = false; submit.textContent = 'PAY' }
+                            return
+                        }
+                        const vault = this.vaultCardDevice(form.paymentProfile.vaultId)
+                        if (!vault) {
+                            if (status) status.textContent = 'The protected desktop vault is offline or locked.'
+                            if (submit) { submit.disabled = false; submit.textContent = 'PAY' }
+                            return
+                        }
+                        if (form.payment.stripeAgentPublicKey?.kty !== 'RSA') {
+                            if (status) status.textContent = 'The merchant must update its PAYMENT block with Color Stripe Agent 0.3 or newer.'
+                            if (submit) { submit.disabled = false; submit.textContent = 'PAY' }
+                            return
+                        }
+                        const price = String(form.product.productPrice || ''), numericPrice = price.replace(/[^\d.,]/g, '')
+                        const amount = Math.round(Number(numericPrice.replace(',', '.')) * 100)
+                        const currency = price.includes('€') ? 'eur' : price.includes('£') ? 'gbp' : (price.match(/\b[a-z]{3}\b/i)?.[0] || 'usd').toLowerCase()
+                        if (!/^\d+(?:[.,]\d{1,2})?$/.test(numericPrice) || !['usd', 'eur', 'gbp'].includes(currency) || !Number.isSafeInteger(amount) || amount < 50) {
+                            if (status) status.textContent = 'The product does not have a valid payment price.'
+                            if (submit) { submit.disabled = false; submit.textContent = 'PAY' }
+                            return
+                        }
+                        const purchase = { orderId: form.requestId, amount, currency, buyerColor: this.user.color, productId: Number(form.product.productIndex), connectedAccount: form.payment.stripeConnectAccount || '' }
+                        if (status) status.textContent = 'Unlocking the card from your protected desktop vault…'
+                        try {
+                            const protectedCard = await this.requestDevice(vault, 'CARD_USE', this.buyerPaymentRoomHex(), { cvc: fields.cvc, agentPublicKey: form.payment.stripeAgentPublicKey, purchase })
+                            paymentEnvelope = protectedCard.envelope
+                        } catch (error) {
+                            const locked = /locked/i.test(error.message)
+                            if (status) status.textContent = locked ? 'Card locked after five failed CVC attempts.' : error.message
+                            if (submit && !locked) { submit.disabled = false; submit.textContent = 'PAY' }
+                            return
+                        }
+                    } else if (!form.stripe) {
+                        if (status) status.textContent = 'Stripe is still connecting.'
+                        if (submit) { submit.disabled = false; submit.textContent = 'PAY' }
+                        return
+                    } else {
+                        if (status) status.textContent = 'Asking Stripe to verify the card and CVC...'
+                        let result
+                        try {
+                            result = await form.stripe.stripe.confirmCardPayment(form.stripe.clientSecret, {
+                                payment_method: form.paymentProfile.paymentMethodId,
+                                payment_method_options: { card: { cvc: form.stripe.cvc } }
+                            })
+                        } catch (error) { result = { error } }
+                        if (result.error || result.paymentIntent?.status !== 'succeeded') {
+                            form.cvcAttempts++
+                            const locked = form.cvcAttempts >= 5
+                            if (status) status.textContent = locked ? 'Too many failed CVC attempts. Close this form and start again.' : (result.error?.message || 'Stripe did not authorize the payment.') + ` (${5 - form.cvcAttempts} attempts left)`
+                            if (submit && !locked) { submit.disabled = false; submit.textContent = 'PAY' }
+                            return
+                        }
+                        paymentIntentId = result.paymentIntent.id
+                    }
+                }
+                if (status) status.textContent = paymentType === 'bitcoin' ? 'Sending payment request...' : paymentEnvelope ? 'Card protected for this merchant. Authorizing this purchase…' : 'Payment authorized. Recording the order with the seller...'
                 this.pendingPurchases.set(form.requestId, {
                     status, submit, paymentType, timer: setTimeout(() => {
                         const pending = this.pendingPurchases.get(form.requestId)
@@ -8324,8 +8555,11 @@
                         productPrice: form.product.productPrice || '',
                         paymentType
                     },
-                    paymentDetails: fields
+                    paymentIntentId,
+                    paymentDetails,
+                    paymentEnvelope
                 }, sellerPeerId)
+                root.querySelectorAll('[data-purchase-field]').forEach(input => input.value = '')
             }
 
             handlePurchaseResult(data) {
@@ -8333,12 +8567,21 @@
                 if (!pending) return
                 clearTimeout(pending.timer)
                 const ok = data.type === 'PAYMENT_CONFIRMED'
-                if (pending.status) pending.status.textContent = ok ? 'Payment confirmed. Receipt added to the shop.' : (data.error || 'Payment failed.')
+                if (!ok && pending.paymentType === 'stripe' && this.purchaseForm?.requestId === data.requestId) {
+                    this.purchaseForm.cvcAttempts++
+                    if (this.purchaseForm.cvcAttempts < 5) this.purchaseForm.requestId = 'purchase-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)
+                }
+                const locked = !ok && pending.paymentType === 'stripe' && this.purchaseForm?.cvcAttempts >= 5
+                if (pending.status) pending.status.textContent = ok ? 'Payment confirmed. Receipt added to the shop.' : locked ? 'Card locked after five failed payment attempts.' : (data.error || 'Payment failed.')
                 if (pending.submit) {
-                    pending.submit.disabled = ok
+                    pending.submit.disabled = ok || locked
                     pending.submit.textContent = ok ? 'CONFIRMED' : (pending.paymentType === 'bitcoin' ? 'SEND REQUEST' : 'PAY')
                 }
                 this.pendingPurchases.delete(data.requestId)
+                if (ok && pending.paymentType === 'stripe') {
+                    const vault = this.vaultCardDevice(this.purchaseForm?.paymentProfile?.vaultId)
+                    if (vault) this.requestDevice(vault, 'CARD_RESULT', this.buyerPaymentRoomHex(), { success: true }).catch(() => {})
+                }
                 if (ok) setTimeout(() => {
                     if (this.purchaseForm?.requestId === data.requestId) this.returnFromBlockForm()
                 }, 1200)
@@ -8409,14 +8652,27 @@
                 return value ? { secret: true, encrypted: this.bufferToBase64(await this.identity._call('encrypt', value)), savedAt: Date.now() } : null
             }
 
+            loadExternalScript(src, ready = () => false) {
+                if (ready()) return Promise.resolve()
+                const existing = Array.from(document.scripts).find(script => script.src === src)
+                if (existing?.dataset.colorLoaded) return Promise.resolve()
+                return new Promise((resolve, reject) => {
+                    const script = existing || document.createElement('script')
+                    script.addEventListener('load', () => { script.dataset.colorLoaded = 'true'; resolve() }, { once: true })
+                    script.addEventListener('error', () => reject(new Error('Could not load ' + src)), { once: true })
+                    if (!existing) { script.src = src; document.head.appendChild(script) }
+                })
+            }
+
             async runBlockScript(script, context) {
                 if (!script) return null
+                if (context?.def && this.blockDefs.get(context.def.id) !== context.def) throw new Error('Untrusted block code cannot run in the Color application context')
                 return new Function('context', `with (context) { return (async () => { ${script}\n })(); }`)(context)
             }
 
             async collectBlockFormData(def) {
                 const fields = this.blockFormFields()
-                const setupResult = await this.runBlockScript(def.setupView?.js, {
+                const scriptContext = {
                     app: this,
                     def,
                     fields,
@@ -8429,7 +8685,8 @@
                     },
                     escapeHtml: value => this.escapeHtml(value),
                     escapeAttr: value => this.escapeAttr(value)
-                })
+                }
+                const setupResult = def.id === 'custom-html' || this.blockCategory(def) === 'CUSTOM' ? this.createCustomBlockFromHtml(fields.sourceHtml, scriptContext.root, def.id === 'custom-html' ? null : def.id) : await this.runBlockScript(def.setupView?.js, scriptContext)
                 if (setupResult?.stop || setupResult?.data) return setupResult
                 const data = {}
                 for (const field of def.fields || []) {
@@ -8443,9 +8700,30 @@
                 return JSON.parse(JSON.stringify(def || {}))
             }
 
+            async loadLocalBlockDefinitions() {
+                this.localBlockDefs.clear()
+                const roomHex = this.roomId?.replace('color-', '')
+                if (!roomHex || this.identity.locked) return
+                const raw = await this.identity._call('db_read_private', { roomHex, key: 'local:block-definitions' }).catch(() => null)
+                let definitions = []
+                try { definitions = JSON.parse(raw || '[]') } catch (_) { }
+                for (const def of definitions) {
+                    const safe = this.normalizeCustomBlockDefinition(def)
+                    if (safe) this.localBlockDefs.set(safe.id, safe)
+                }
+            }
+
+            async trustLocalBlockDefinition(def) {
+                const safe = this.normalizeCustomBlockDefinition(def)
+                if (!safe) return
+                this.localBlockDefs.set(safe.id, safe)
+                const roomHex = this.roomId?.replace('color-', '')
+                if (roomHex && !this.identity.locked) await this.identity._call('db_write_private', { roomHex, key: 'local:block-definitions', value: JSON.stringify([...this.localBlockDefs.values()]) })
+            }
+
             getBlockDefinition(payload) {
                 const blockId = typeof payload === 'string' ? payload : payload?.blockId
-                return payload?.definition || this.blockDefs.get(blockId) || { id: blockId, name: blockId, fields: [] }
+                return this.blockDefs.get(blockId) || this.localBlockDefs.get(blockId) || { id: blockId, name: blockId, fields: [] }
             }
 
             getInstalledBlockPayloads() {
@@ -8483,17 +8761,165 @@
                 this.localBlockPayloadCache = null
             }
 
+            async sensitiveBlockProtected() {
+                const color = this.buyerPaymentRoomHex()
+                return !!(await this.identity.getRoomGate(color))?.passkeyUnlock
+            }
+
+            async requireSensitiveBlockProtection(def) {
+                if (await this.sensitiveBlockProtected()) return true
+                this.pendingSensitiveBlockSetup = { blockId: def.id }
+                await this.showInfoPage('backup')
+                this.backupStatus('This block stores a private API key. Connect a desktop backup and enable a passkey before continuing.')
+                return false
+            }
+
+            async initSensitiveBlockSetup(def, root) {
+                if (await this.sensitiveBlockProtected()) return
+                root.innerHTML = '<p class="settings-hint" style="color:#e53935">A GitHub token can modify your repositories. Secure this color with a passkey before storing it.</p><button type="button" class="action-btn" data-secure-sensitive>CONNECT DESKTOP & ENABLE PASSKEY</button>'
+                const submit = document.querySelector('#create-block-panel .create-block-submit')
+                if (submit) submit.hidden = true
+                root.querySelector('[data-secure-sensitive]').onclick = () => this.requireSensitiveBlockProtection(def)
+            }
+
+            async resumeSensitiveBlockSetup() {
+                const pending = this.pendingSensitiveBlockSetup
+                if (!pending || !await this.sensitiveBlockProtected()) return
+                this.pendingSensitiveBlockSetup = null
+                this.closeInfoPage()
+                this.openBlockForm(pending.blockId)
+            }
+
+            async initStripeCardSetup(def, root, state) {
+                const submit = document.querySelector('#create-block-panel .create-block-submit')
+                if (!await this.sensitiveBlockProtected()) {
+                    root.innerHTML = '<p class="settings-hint" style="color:#e53935">Payment references are sensitive. Secure this Color with a passkey before saving a card.</p><button type="button" class="action-btn" data-secure-sensitive>CONNECT DESKTOP & ENABLE PASSKEY</button>'
+                    if (submit) submit.hidden = true
+                    root.querySelector('[data-secure-sensitive]').onclick = async () => {
+                        this.pendingSensitiveBlockSetup = { blockId: def.id }
+                        await this.showInfoPage('backup')
+                        this.backupStatus('Connect your recovery device and enable a passkey. The card form will return after protection is active.')
+                    }
+                    return
+                }
+                if (!window.Stripe) throw new Error('Stripe.js could not load. Check your connection and reload Color.')
+                const status = root.querySelector('[data-stripe-card-status]')
+                const fields = root.querySelector('[data-stripe-card-fields]')
+                if (submit) submit.hidden = false
+                try {
+                    const setup = await this.buyerStripeAgentRequest('create_setup_intent', { color: this.user.color })
+                    const stripe = Stripe(setup.publishableKey)
+                    const card = stripe.elements().create('card', { hidePostalCode: true })
+                    card.mount(root.querySelector('[data-stripe-card-element]'))
+                    Object.assign(state, { stripe, card, clientSecret: setup.clientSecret, customerId: setup.customerId, publishableKey: setup.publishableKey })
+                    fields.hidden = false
+                    status.textContent = 'Stripe receives the card directly. Color saves only a reusable Stripe reference.'
+                } catch (error) {
+                    if (submit) submit.hidden = true
+                    status.textContent = error.message
+                    if (/Stripe Agent not found|Paired device is unavailable/.test(error.message)) {
+                        const connect = document.createElement('button')
+                        connect.type = 'button'
+                        connect.className = 'action-btn'
+                        connect.textContent = 'SYNC A SECONDARY VAULT DEVICE (DESKTOP)'
+                        connect.onclick = async () => {
+                            this.pendingVaultCardSetup = { blockId: def.id }
+                            await this.showInfoPage('backup', false)
+                            this.backupStatus('On the desktop open #backup and select SHOW QR. Scan it here, then keep the desktop Color page open and unlocked.')
+                            await this.openBackupConnection(false)
+                        }
+                        root.appendChild(connect)
+                    }
+                }
+            }
+
+            async saveStripeCardSetup(def, fields, root, state) {
+                if (!state.stripe || !state.card || !state.clientSecret) throw new Error('The Color Stripe Agent is not ready.')
+                if (!root.querySelector('[data-stripe-card-consent]')?.checked) throw new Error('Confirm that Stripe may save this payment method.')
+                if (!fields.name || !fields.email) throw new Error('Enter the cardholder name and email.')
+                const result = await state.stripe.confirmCardSetup(state.clientSecret, {
+                    payment_method: { card: state.card, billing_details: { name: fields.name, email: fields.email, address: { postal_code: fields.postalCode || '' } } }
+                })
+                if (result.error) throw new Error(result.error.message)
+                const paymentMethodId = result.setupIntent?.payment_method
+                if (!/^pm_/.test(paymentMethodId || '')) throw new Error('Stripe did not return a saved payment method.')
+                const card = await this.buyerStripeAgentRequest('retrieve_payment_method', { paymentMethodId })
+                await this.saveBuyerPaymentProfile({
+                    blockId: 'credit-card', customerId: state.customerId, paymentMethodId,
+                    publishableKey: state.publishableKey, name: fields.name, email: fields.email,
+                    postalCode: fields.postalCode || '', brand: card.brand, last4: card.last4,
+                    expMonth: card.expMonth, expYear: card.expYear
+                })
+                state.card.unmount()
+                this.closeBlockForm()
+                this.activateBlocksTab('installed')
+                return { stop: true }
+            }
+
+            async buyerStripeAgentRequest(action, data = null) {
+                await this.deviceLinksReady
+                const desktop = this.vaultCardDevice()
+                return desktop ? this.requestDevice(desktop, 'STRIPE_AGENT', this.buyerPaymentRoomHex(), { action, data }) : this.stripeAgentRequest(action, data)
+            }
+
+            vaultCardDevice(vaultId = null) {
+                const color = this.buyerPaymentRoomHex()
+                const devices = this.deviceLinks.filter(link => link.role === 'phone' && !link.revoked && link.color === color && link.remoteProtected && this.deviceConnections.get(link.id)?.status === 'connected')
+                return devices.find(link => link.id === vaultId) || devices[0] || null
+            }
+
+            resumeVaultCardSetup() {
+                if (!this.pendingVaultCardSetup || this.infoPage !== 'backup' || !this.vaultCardDevice()) return
+                const blockId = this.pendingVaultCardSetup.blockId
+                this.pendingVaultCardSetup = null
+                this.closeInfoPage()
+                this.openBlockForm(blockId)
+            }
+
+            async initVaultCardSetup(def, root, state) {
+                await this.deviceLinksReady
+                const record = this.vaultCardDevice(), paired = this.deviceLinks.find(link => link.role === 'phone' && !link.revoked && link.color === this.buyerPaymentRoomHex() && this.deviceConnections.get(link.id)?.status === 'connected')
+                const connect = root.querySelector('[data-vault-card-connect]'), fields = root.querySelector('[data-vault-card-fields]'), status = root.querySelector('[data-vault-card-status]'), submit = document.querySelector('#create-block-panel .create-block-submit')
+                state.vaultId = record?.id || ''
+                connect.hidden = !!record
+                fields.hidden = !record
+                if (submit) submit.hidden = !record
+                if (record) status.textContent = 'Card details will be encrypted and stored only inside the connected desktop vault.'
+                else status.textContent = paired ? 'On the desktop, open #backup and enable passkey protection for this color.' : 'On the desktop, open #backup, show its device QR, and finish passkey setup.'
+                connect.textContent = paired ? 'FINISH PASSKEY SETUP ON DESKTOP' : 'SYNC A SECONDARY VAULT DEVICE (DESKTOP)'
+                connect.onclick = async () => {
+                    this.pendingVaultCardSetup = { blockId: def.id }
+                    await this.showInfoPage('backup', false)
+                    this.backupStatus(paired ? 'On the desktop, open #backup and select ENABLE PASSKEY. This card form will return automatically.' : 'On the desktop open #backup and select SHOW QR. Scan it here, copy the color, then enable its passkey. This card form will return automatically.')
+                    if (!paired) await this.openBackupConnection(false)
+                }
+            }
+
+            async saveVaultCardSetup(def, fields, root, state) {
+                const record = this.vaultCardDevice(state.vaultId), digits = String(fields.cardNumber || '').replace(/\D/g, '')
+                if (!record) throw new Error('Connect and unlock the protected desktop vault first')
+                if (!fields.name || !fields.email || digits.length < 12 || digits.length > 19 || !/^(0?[1-9]|1[0-2])$/.test(fields.expMonth || '') || !/^\d{2,4}$/.test(fields.expYear || '')) throw new Error('Check the card, expiration, and billing fields')
+                const saved = await this.requestDevice(record, 'CARD_STORE', this.buyerPaymentRoomHex(), { ...fields, cardNumber: digits })
+                root.querySelectorAll('[data-block-field]').forEach(input => input.value = '')
+                await this.saveBuyerPaymentProfile({ blockId: 'credit-card', vaultId: record.id, brand: 'card', last4: saved.last4, expMonth: saved.expMonth, expYear: saved.expYear })
+                this.closeBlockForm()
+                this.activateBlocksTab('installed')
+                return { stop: true }
+            }
+
             async buyerPaymentProfilePayload() {
                 const profile = await this.loadBuyerPaymentProfile()
-                if (!profile?.cardNumber) return null
+                if (!profile || profile.blockId !== 'credit-card' && !profile.cardNumber) return null
                 const digits = String(profile.cardNumber || '').replace(/\D/g, '')
                 const testCard = profile.blockId === 'test-card'
-                return { type: 'block', blockId: testCard ? 'test-card' : 'buyer-payment-profile', instanceId: 'local-buyer-payment-profile', definition: { id: testCard ? 'test-card' : 'buyer-payment-profile', name: testCard ? 'TEST CARD' : 'PAYMENT PROFILE', category: testCard ? 'DEMO' : 'ECOMMERCE', version: 1, svgIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>' }, data: { name: profile.name || '', email: profile.email || '', card: digits ? '**** ' + digits.slice(-4) : 'saved', savedAt: profile.savedAt || Date.now() }, localOnly: true }
+                const vaultCard = profile.blockId === 'credit-card'
+                const blockId = vaultCard ? 'credit-card' : testCard ? 'test-card' : 'buyer-payment-profile'
+                const savedCard = `${String(profile.brand || 'card').toUpperCase()} •••• ${profile.last4 || ''}`
+                return { type: 'block', blockId, instanceId: 'local-buyer-payment-profile', definition: { id: blockId, name: vaultCard ? 'CREDIT CARD' : testCard ? 'TEST CARD' : 'PAYMENT PROFILE', category: testCard ? 'DEMO' : 'ECOMMERCE', version: 1, svgIcon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>' }, data: { name: vaultCard ? '' : profile.name || '', email: vaultCard ? '' : profile.email || '', card: vaultCard ? savedCard : digits ? '**** ' + digits.slice(-4) : 'saved', savedAt: profile.savedAt || Date.now() }, localOnly: true }
             }
 
             async installTestCardBlock() {
-                await this.saveBuyerPaymentProfile({ blockId: 'test-card', name: 'Stripe Test Buyer', email: 'test@example.com', cardNumber: '4242424242424242', expMonth: '12', expYear: '34', cvc: '567', postalCode: '42424' })
-                this.activateBlocksTab('installed')
+                this.openBlockForm('credit-card')
             }
 
             installedBlockIds(payloads) {
@@ -8593,7 +9019,7 @@
                 grid.classList.remove('blocks-category-view')
                 this.getLocalBlockPayloads().then(payloads => {
                     const ids = this.installedBlockIds(payloads)
-                    const installed = Array.from(ids).map(id => [...payloads].reverse().find(payload => payload.blockId === id)?.definition || this.blockDefs.get(id)).filter(Boolean)
+                    const installed = Array.from(ids).map(id => this.getBlockDefinition(id)).filter(Boolean)
                     const suggested = this.suggestedInstalledBlocks(payloads, ids)
                     const installedHtml = installed.length ? this.renderBlockGroups(installed, false) : '<div class="settings-hint">No installed blocks yet.</div>'
                     const suggestedHtml = this.renderSuggestedBlockLinks(suggested)
@@ -8630,7 +9056,7 @@
                         if (!latest || String(payload.definition?.category || '').toUpperCase() === 'CUSTOM') return
                         if (this.blockVersion(latest) <= this.blockVersion(payload.definition)) return
                         seen.add(payload.blockId)
-                        updates.push({ local: payload.definition, latest })
+                        updates.push({ local: this.getBlockDefinition(payload.blockId), latest })
                     })
                     grid.innerHTML = updates.length ? updates.map(({ local, latest }) => `
                         <div class="block-card block-update-card" data-block-id="${this.escapeAttr(latest.id)}">
@@ -8661,9 +9087,8 @@
             }
 
             async openInstalledCustomBlock(blockId) {
-                const payloads = await this.getLocalBlockPayloads()
-                const payload = [...payloads].reverse().find(item => item.blockId === blockId && String(item.definition?.category || '').toUpperCase() === 'CUSTOM')
-                if (payload?.definition) this.openBlockForm(payload.definition)
+                const definition = this.localBlockDefs.get(blockId)
+                if (definition) this.openBlockForm(definition)
             }
 
             activateBlocksTab(target) {
@@ -8741,6 +9166,7 @@
                 const meta = this.parseId(line?.id)
                 const payload = this.customBlockPayloadFromLine(line)
                 if (!meta || !payload) return
+                await this.trustLocalBlockDefinition(payload.definition)
                 const content = JSON.stringify(payload)
                 line.classList.remove('custom-block-draft')
                 line.classList.add('block-line')
@@ -8753,16 +9179,11 @@
 
             resolveBlockComponent(name) {
                 const raw = String(name || '').toLowerCase()
-                const payloads = [...(this.localBlockPayloadCache || []), ...this.getInstalledBlockPayloads()].reverse()
                 if (raw.endsWith('-block')) {
                     const id = raw.slice(0, -6)
-                    const custom = payloads.find(payload => payload.blockId === id && String(payload.definition?.category || '').toUpperCase() === 'CUSTOM')
-                    const installed = payloads.find(payload => payload.blockId === id)
-                    return custom?.definition || installed?.definition || this.blockDefs.get(id) || null
+                    return this.localBlockDefs.get(id) || this.blockDefs.get(id) || null
                 }
-                const custom = payloads.find(payload => payload.blockId === raw && String(payload.definition?.category || '').toUpperCase() === 'CUSTOM')
-                if (custom) return custom.definition
-                return null
+                return this.localBlockDefs.get(raw) || null
             }
 
             async componentPayloadFromLine(line) {
@@ -8805,6 +9226,7 @@
                     const setup = await this.collectBlockFormData(def)
                     if (setup?.stop) { if (nextBlockId) this.openBlockForm(nextBlockId); return }
                     const payloadDef = setup?.definition || def
+                    await this.trustLocalBlockDefinition(payloadDef)
                     const payload = {
                         type: 'block',
                         blockId: payloadDef.id,
@@ -8913,9 +9335,11 @@
                         products: (Array.isArray(data.products) ? data.products : []).map(item => ({
                             productName: item.productName || '',
                             productPrice: item.productPrice || '',
-                            productImage: item.productImage || ''
+                            productImage: item.productImage || '',
+                            stripePaymentLink: item.stripePaymentLink || '',
+                            stripeBuyButtonId: item.stripeBuyButtonId || ''
                         })),
-                        payment: data.payment ? { paymentType: data.payment.paymentType || '', bitcoinAddress: data.payment.paymentType === 'bitcoin' ? (data.payment.bitcoinAddress || '') : '' } : null,
+                        payment: data.payment ? { paymentType: data.payment.paymentType || '', stripePaymentLink: data.payment.stripePaymentLink || '', stripeBuyButtonId: data.payment.stripeBuyButtonId || '', stripePublishableKey: data.payment.stripePublishableKey || '', stripeConnectAccount: data.payment.stripeConnectAccount || '', stripeAgentPublicKey: data.payment.stripeAgentPublicKey?.kty === 'RSA' ? data.payment.stripeAgentPublicKey : null, bitcoinAddress: data.payment.paymentType === 'bitcoin' ? (data.payment.bitcoinAddress || '') : '' } : null,
                         purchases: (Array.isArray(data.purchases) ? data.purchases : []).map(item => ({ id: item.id || '', buyerColor: item.buyerColor || '', productIndex: item.productIndex ?? '', productName: item.productName || '', productPrice: item.productPrice || '', status: item.status || '', stripe: item.stripe ? { id: item.stripe.id || '', status: item.stripe.status || '', receiptUrl: item.stripe.receiptUrl || '' } : null }))
                     }
                 } else {
@@ -8944,16 +9368,34 @@
                 const myHex = this.user.color.replace('#', '').toLowerCase()
                 const isAdmin = String(ownerHex || '').replace('#', '').toLowerCase() === myHex
                 const view = this.getBlockView(def, isAdmin)
-                const body = view.html ? this.renderTemplate(view.html, { payload, data: payload.data || {}, secrets: this.blockSecretStatuses(payload.data, def) }) : this.renderGenericBlockBody(payload, def, isAdmin)
+                const body = this.blockCategory(def) === 'CUSTOM' ? '<iframe data-custom-block-sandbox sandbox="allow-scripts" referrerpolicy="no-referrer" title="Sandboxed custom block" style="display:block;width:100%;height:420px;border:0"></iframe>' : view.html ? this.renderTemplate(view.html, { payload, data: payload.data || {}, secrets: this.blockSecretStatuses(payload.data, def) }) : this.renderGenericBlockBody(payload, def, isAdmin)
                 return this.renderBlockShell(payload, def, view, body)
             }
 
             renderBlockShell(payload, def, view, body) {
                 const encoded = this.escapeAttr(JSON.stringify(payload))
-                const style = view.css ? `<style>${view.css}</style>` : ''
+                const custom = this.blockCategory(def) === 'CUSTOM'
+                const style = !custom && view.css ? `<style>${view.css}</style>` : ''
                 const tag = this.blockComponentTag(payload.blockId)
                 if (window.customElements && !customElements.get(tag)) customElements.define(tag, class extends HTMLElement { })
-                return `<${tag} class="color-block-widget" contenteditable="false" data-block-id="${this.escapeAttr(payload.blockId)}" data-block-instance="${this.escapeAttr(payload.instanceId)}" data-block-payload="${encoded}">${style}<div class="color-block-header"><span class="block-icon">${def.svgIcon || ''}</span><span>${this.escapeHtml(def.name || payload.blockId)}</span></div>${body}</${tag}>`
+                const audit = custom && Array.isArray(def.audit) && def.audit.length ? ' · ' + this.escapeHtml(def.audit.join(' · ')) : ''
+                return `<${tag} class="color-block-widget" contenteditable="false" data-block-id="${this.escapeAttr(payload.blockId)}" data-block-instance="${this.escapeAttr(payload.instanceId)}" data-block-payload="${encoded}">${style}<div class="color-block-header"><span class="block-icon">${custom ? '' : def.svgIcon || ''}</span><span>${this.escapeHtml(def.name || payload.blockId)}</span></div>${custom ? '<div class="settings-hint" style="color:#b42318">SANDBOXED CUSTOM CODE · DO NOT ENTER PASSWORDS OR API KEYS' + audit + '</div>' : ''}${body}</${tag}>`
+            }
+
+            customBlockSandboxDocument(payload, def, isAdmin) {
+                const view = this.getBlockView(def, isAdmin)
+                const html = DOMPurify.sanitize(this.renderTemplate(view.html || '', { payload, data: payload.data || {}, secrets: this.blockSecretStatuses(payload.data, def) }), { FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base'], FORBID_ATTR: ['srcdoc'] })
+                const css = String(view.css || '').replace(/<\/style/gi, '<\\/style')
+                const js = String(view.js || '').replace(/<\/script/gi, '<\\/script')
+                const safeJson = value => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
+                const scripts = (Array.isArray(view.scripts) ? view.scripts : []).map(value => { try { const url = new URL(value, location.href); return url.protocol === 'https:' ? url.href : '' } catch (_) { return '' } }).filter(Boolean).slice(0, 8)
+                const external = scripts.map(url => `<script src="${this.escapeAttr(url)}"><\/script>`).join('')
+                return `<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline'; img-src https: data: blob:; media-src https: blob:; font-src https: data:; connect-src https: wss:; object-src 'none'; base-uri 'none'; form-action 'none'"><style>html,body{margin:0;min-height:100%;font-family:system-ui,sans-serif}*{box-sizing:border-box}${css}</style><div id="custom-root">${html}</div>${external}<script>const root=document.getElementById('custom-root'),payload=${safeJson(payload)},data=payload.data||{},def=${safeJson({ id: def.id, name: def.name, category: 'CUSTOM' })},isAdmin=${isAdmin ? 'true' : 'false'},userColor='',escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),publicData=value=>value?.data||data,send=()=>{throw new Error('Parent messaging is unavailable in sandboxed blocks')},runtimeCount=()=>0,updateBlock=()=>{throw new Error('Vault updates are unavailable in sandboxed blocks')};(async()=>{try{${js}}catch(error){const message=document.createElement('pre');message.style.color='#b42318';message.textContent='Block error: '+(error?.message||error);document.body.appendChild(message)}})();<\/script>`
+            }
+
+            hydrateCustomBlockSandbox(widget, payload, def, isAdmin) {
+                const frame = widget.querySelector('[data-custom-block-sandbox]')
+                if (frame) frame.srcdoc = this.customBlockSandboxDocument(payload, def, isAdmin)
             }
 
             renderGenericBlockBody(payload, def, isAdmin) {
@@ -8969,6 +9411,22 @@
                 const isAdmin = String(owner || '').replace('#', '').toLowerCase() === this.user.color.replace('#', '').toLowerCase()
                 const widget = line.querySelector('[data-block-instance]')
                 if (!def || !widget) return
+                if (this.blockCategory(def) === 'CUSTOM') {
+                    this.hydrateCustomBlockSandbox(widget, block, def, isAdmin)
+                    this.renderBlockNextActions(widget, def, block, isAdmin)
+                    return
+                }
+                if (def.id === 'bank') {
+                    clearInterval(widget.__bankConnectionTimer)
+                    const auth = widget.querySelector('[data-bank-auth]')
+                    const sync = () => {
+                        if (!widget.isConnected) { clearInterval(widget.__bankConnectionTimer); return }
+                        const connected = Object.values(this.mesh?.getPeers?.() || {}).some(peer => peer?.dc?.readyState === 'open')
+                        auth?.classList.toggle('bank-needs-connection', !connected)
+                    }
+                    sync()
+                    widget.__bankConnectionTimer = setInterval(sync, 1000)
+                }
                 this.runBlockScript(this.getBlockView(def, isAdmin).js, {
                     app: this,
                     root: widget,
@@ -9081,7 +9539,8 @@
                 if (list) {
                     list.innerHTML = products.length ? products.map((item, i) => {
                         const bought = purchases.find(purchase => isMine(purchase) && (String(purchase.productIndex ?? '') === String(i) || purchase.productName === item.productName))
-                        return `<div class='shop-product'>${item.productImage ? `<img src='${this.escapeAttr(item.productImage)}' alt=''>` : `<div class='shop-product-image-placeholder'>PRODUCT IMAGE</div>`}<div class='shop-product-body'><b>${this.escapeHtml(item.productName || 'Product')}</b><span class='shop-product-price'>${this.escapeHtml(item.productPrice || '')}</span></div>${payment.paymentType ? `<button class='shop-buy-btn' type='button' data-buy-product='${i}'>BUY</button>` : ``}${bought ? `<div class='shop-product-receipt'>RECEIPT ${this.escapeHtml(bought.stripe?.id || bought.id || '')}</div>` : ``}</div>`
+                        const canBuy = payment.paymentType === 'stripe-link' ? !!(item.stripePaymentLink || payment.stripePaymentLink) : payment.paymentType === 'stripe-button' ? !!((item.stripeBuyButtonId || payment.stripeBuyButtonId) && payment.stripePublishableKey) : !!payment.paymentType
+                        return `<div class='shop-product'>${item.productImage ? `<img src='${this.escapeAttr(item.productImage)}' alt=''>` : `<div class='shop-product-image-placeholder'>PRODUCT IMAGE</div>`}<div class='shop-product-body'><b>${this.escapeHtml(item.productName || 'Product')}</b><span class='shop-product-price'>${this.escapeHtml(item.productPrice || '')}</span></div>${canBuy ? `<button class='shop-buy-btn' type='button' data-buy-product='${i}'>BUY</button>` : ``}${bought ? `<div class='shop-product-receipt'>RECEIPT ${this.escapeHtml(bought.stripe?.id || bought.id || '')}</div>` : ``}</div>`
                     }).join('') : ''
                     root.querySelectorAll('[data-buy-product]').forEach(btn => {
                         btn.onclick = () => this.buyProduct({ def, payload, product: { ...(products[Number(btn.dataset.buyProduct)] || {}), productIndex: Number(btn.dataset.buyProduct) }, payment })
@@ -9117,68 +9576,17 @@
                 }).join('') : ''
             }
 
-            async createStripePayment(apiKey, purchase, paymentDetails) {
-                if (!/^[sr]k_test_/.test(apiKey || '')) throw new Error('Use a Stripe test secret key for sandbox checkout.')
-                const priceText = String(purchase.productPrice || '')
-                const currency = (priceText.includes('\u20ac') ? 'eur' : priceText.includes('\u00a3') ? 'gbp' : (priceText.match(/\b[a-zA-Z]{3}\b/)?.[0] || 'usd')).toLowerCase()
-                const amountValue = Number((priceText.replace(/,/g, '').match(/\d+(?:\.\d{1,2})?/) || [])[0])
-                if (!Number.isFinite(amountValue) || amountValue <= 0) throw new Error('Product price must include a valid amount.')
-                const amount = Math.round(amountValue * 100)
-                if (amount < 50) throw new Error('Stripe payments must be at least 0.50 in the selected currency.')
-                const body = new URLSearchParams()
-                body.set('amount', String(amount))
-                body.set('currency', currency)
-                body.set('confirm', 'true')
-                body.set('error_on_requires_action', 'true')
-                body.append('payment_method_types[]', 'card')
-                body.set('description', [purchase.storeName, purchase.productName].filter(Boolean).join(' - ').slice(0, 500))
-                body.set('metadata[buyer_color]', String(purchase.buyerColor || '').slice(0, 500))
-                body.set('metadata[product_name]', String(purchase.productName || '').slice(0, 500))
-                body.set('metadata[request_id]', String(purchase.requestId || '').slice(0, 500))
-                if (paymentDetails.email) body.set('receipt_email', paymentDetails.email)
-                const card = String(paymentDetails.cardNumber || '').replace(/\s+/g, '')
-                const existingPaymentMethod = card.startsWith('pm_')
-                if (card.startsWith('pm_')) {
-                    body.set('payment_method', card)
-                } else if (card.startsWith('tok_')) {
-                    body.set('payment_method_data[type]', 'card')
-                    body.set('payment_method_data[card][token]', card)
-                } else {
-                    const year = String(paymentDetails.expYear || '').length === 2 ? '20' + paymentDetails.expYear : paymentDetails.expYear
-                    body.set('payment_method_data[type]', 'card')
-                    body.set('payment_method_data[card][number]', card)
-                    body.set('payment_method_data[card][exp_month]', paymentDetails.expMonth)
-                    body.set('payment_method_data[card][exp_year]', year)
-                    body.set('payment_method_data[card][cvc]', paymentDetails.cvc)
-                }
-                if (!existingPaymentMethod) {
-                    body.set('payment_method_data[billing_details][name]', paymentDetails.name || '')
-                    body.set('payment_method_data[billing_details][email]', paymentDetails.email || '')
-                    body.set('payment_method_data[billing_details][address][postal_code]', paymentDetails.postalCode || '')
-                }
-                body.append('expand[]', 'latest_charge')
-                const res = await fetch('https://api.stripe.com/v1/payment_intents', { method: 'POST', headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/x-www-form-urlencoded' }, body })
-                const json = await res.json().catch(() => ({}))
-                if (!res.ok) throw new Error(json.error?.message || 'Stripe payment failed.')
-                const charge = typeof json.latest_charge === 'object' ? json.latest_charge : null
-                const chargeId = charge?.id || (typeof json.latest_charge === 'string' ? json.latest_charge : '')
-                return {
-                    id: json.id,
-                    status: json.status,
-                    amount: json.amount,
-                    currency: json.currency,
-                    paymentMethod: json.payment_method || '',
-                    latestCharge: chargeId,
-                    chargeStatus: charge?.status || '',
-                    receiptUrl: charge?.receipt_url || '',
-                    dashboardUrl: 'https://dashboard.stripe.com/test/payments/' + encodeURIComponent(chargeId || json.id),
-                    created: json.created || null
-                }
-            }
-
             async handleStoreOpsAction(data, pid) {
                 if (data?.type === 'PAYMENT_CONFIRMED' || data?.type === 'PAYMENT_FAILED') {
                     this.handlePurchaseResult(data)
+                    return
+                }
+                if (data?.type === 'STRIPE_PREPARED' || data?.type === 'STRIPE_AGENT_ERROR') {
+                    const pending = this.pendingStripeRequests.get(data.requestId)
+                    if (!pending || pending.targetPeer !== pid) return
+                    clearTimeout(pending.timer)
+                    this.pendingStripeRequests.delete(data.requestId)
+                    data.type === 'STRIPE_PREPARED' ? pending.resolve(data) : pending.reject(new Error(data.error || 'Seller Stripe agent failed.'))
                     return
                 }
                 const roomHex = this.roomId?.replace('color-', '').toLowerCase()
@@ -9201,8 +9609,87 @@
                     this.sendBlockMessage(this.getBlockDefinition(block), { type: 'CONFIRMED', id: purchase.id }, pid)
                     return
                 }
+                if (data.type === 'STRIPE_PREPARE') {
+                    try {
+                        const payment = block.data?.payment || {}
+                        if (!['stripe', 'stripe-extension'].includes(payment.paymentType) || !/^pk_(test|live)_/.test(payment.stripePublishableKey || '')) throw new Error('This store has not configured the Color Stripe Agent extension.')
+                        const productIndex = Number(data.productIndex)
+                        const product = Number.isInteger(productIndex) && productIndex >= 0 ? block.data?.products?.[productIndex] : null
+                        if (!product) throw new Error('The selected product no longer exists.')
+                        const price = String(product.productPrice || '')
+                        const numericPrice = price.replace(/[^\d.,]/g, '')
+                        if (!/^\d+(?:[.,]\d{1,2})?$/.test(numericPrice)) throw new Error('Use a product price like $10.00, 10.00 USD, €10.00, or £10.00.')
+                        const value = Number(numericPrice.replace(',', '.'))
+                        const amount = Math.round(value * 100)
+                        const currency = price.includes('€') ? 'eur' : price.includes('£') ? 'gbp' : (price.match(/\b[a-z]{3}\b/i)?.[0] || 'usd').toLowerCase()
+                        if (!['usd', 'eur', 'gbp'].includes(currency)) throw new Error('This test supports USD, EUR, and GBP prices.')
+                        if (!Number.isSafeInteger(amount) || amount < 50) throw new Error('Use a valid product price of at least 0.50.')
+                        const intent = await this.stripeAgentRequest('create_payment_intent', {
+                            amount, currency, customerId: data.customerId, paymentMethodId: data.paymentMethodId,
+                            connectedAccount: payment.stripeConnectAccount || '', orderId: data.requestId,
+                            buyerColor: data.buyerColor || '', productId: productIndex
+                        })
+                        if (intent.publishableKey !== payment.stripePublishableKey) throw new Error('The store publishable key does not match its Stripe agent.')
+                        this.stripeOrders.set(data.requestId, { pid, blockInstanceId: block.instanceId, paymentIntentId: intent.paymentIntentId, customerId: data.customerId, paymentMethodId: data.paymentMethodId, amount, currency, productIndex, productName: product.productName || 'Product', productPrice: product.productPrice || '', created: Date.now() })
+                        setTimeout(() => this.stripeOrders.delete(data.requestId), 10 * 60 * 1000)
+                        this.sendBlockMessage(this.getBlockDefinition(block), { type: 'STRIPE_PREPARED', requestId: data.requestId, publishableKey: intent.publishableKey, clientSecret: intent.clientSecret, paymentIntentId: intent.paymentIntentId }, pid)
+                    } catch (error) {
+                        this.sendBlockMessage(this.getBlockDefinition(block), { type: 'STRIPE_AGENT_ERROR', requestId: data.requestId, error: error.message }, pid)
+                    }
+                    return
+                }
                 if (data.type !== 'PURCHASE_SUBMIT') return
                 const paymentType = data.data?.paymentType || block.data?.payment?.paymentType || ''
+                if (paymentType === 'stripe' && data.paymentEnvelope?.v === 1) {
+                    try {
+                        const payment = block.data?.payment || {}
+                        if (!['stripe', 'stripe-extension'].includes(payment.paymentType) || !/^pk_(test|live)_/.test(payment.stripePublishableKey || '')) throw new Error('This store has not configured the Color Stripe Agent extension.')
+                        const productIndex = Number(data.data?.productIndex)
+                        const product = Number.isInteger(productIndex) && productIndex >= 0 ? block.data?.products?.[productIndex] : null
+                        if (!product) throw new Error('The selected product no longer exists.')
+                        const price = String(product.productPrice || ''), numericPrice = price.replace(/[^\d.,]/g, '')
+                        if (!/^\d+(?:[.,]\d{1,2})?$/.test(numericPrice)) throw new Error('Use a product price like $10.00, 10.00 USD, €10.00, or £10.00.')
+                        const amount = Math.round(Number(numericPrice.replace(',', '.')) * 100)
+                        const currency = price.includes('€') ? 'eur' : price.includes('£') ? 'gbp' : (price.match(/\b[a-z]{3}\b/i)?.[0] || 'usd').toLowerCase()
+                        if (!['usd', 'eur', 'gbp'].includes(currency) || !Number.isSafeInteger(amount) || amount < 50) throw new Error('Use a valid USD, EUR, or GBP product price of at least 0.50.')
+                        const intent = await this.stripeAgentRequest('create_raw_payment_intent', {
+                            amount, currency, envelope: data.paymentEnvelope, connectedAccount: payment.stripeConnectAccount || '',
+                            orderId: data.requestId, buyerColor: data.buyerColor || '', productId: productIndex
+                        })
+                        if (intent.status !== 'succeeded' || intent.amount !== amount || intent.currency !== currency) throw new Error('Stripe did not confirm this exact order.')
+                        const purchase = { id: 'purchase-' + Date.now().toString(36), requestId: data.requestId, buyerColor: data.buyerColor || '#ffffff', productIndex, productName: product.productName || 'Product', productPrice: product.productPrice || '', paymentType, status: 'paid', created: Date.now(), stripe: { id: intent.id, status: intent.status, amount: intent.amount, currency: intent.currency, latestCharge: intent.latestCharge, receiptUrl: intent.receiptUrl } }
+                        await this.updateBlockPayload(block.instanceId, next => {
+                            next.data = next.data || {}
+                            next.data.transactions = [purchase, ...((Array.isArray(next.data.transactions) && next.data.transactions) || [])].slice(0, 50)
+                            next.data.purchases = [purchase, ...((Array.isArray(next.data.purchases) && next.data.purchases) || [])].slice(0, 50)
+                            return next
+                        })
+                        this.sendBlockMessage(this.getBlockDefinition(block), { type: 'PAYMENT_CONFIRMED', requestId: data.requestId, purchase }, pid)
+                    } catch (error) {
+                        this.sendBlockMessage(this.getBlockDefinition(block), { type: 'PAYMENT_FAILED', requestId: data.requestId, error: error.message }, pid)
+                    }
+                    return
+                }
+                if (paymentType === 'stripe' && block.data?.payment?.stripePublishableKey) {
+                    const prepared = this.stripeOrders.get(data.requestId)
+                    try {
+                        if (!prepared || prepared.pid !== pid || prepared.blockInstanceId !== block.instanceId || prepared.paymentIntentId !== data.paymentIntentId) throw new Error('This Stripe order was not prepared by the seller.')
+                        const intent = await this.stripeAgentRequest('retrieve_payment_intent', { paymentIntentId: data.paymentIntentId })
+                        if (intent.status !== 'succeeded' || intent.amount !== prepared.amount || intent.currency !== prepared.currency || intent.customer !== prepared.customerId || intent.paymentMethod !== prepared.paymentMethodId) throw new Error('Stripe has not confirmed this exact order.')
+                        const purchase = { id: 'purchase-' + Date.now().toString(36), requestId: data.requestId, buyerColor: data.buyerColor || '#ffffff', productIndex: prepared.productIndex, productName: prepared.productName, productPrice: prepared.productPrice, paymentType, status: 'paid', created: Date.now(), stripe: { id: intent.id, status: intent.status, amount: intent.amount, currency: intent.currency, latestCharge: intent.latestCharge } }
+                        await this.updateBlockPayload(block.instanceId, next => {
+                            next.data = next.data || {}
+                            next.data.transactions = [purchase, ...((Array.isArray(next.data.transactions) && next.data.transactions) || [])].slice(0, 50)
+                            next.data.purchases = [purchase, ...((Array.isArray(next.data.purchases) && next.data.purchases) || [])].slice(0, 50)
+                            return next
+                        })
+                        this.stripeOrders.delete(data.requestId)
+                        this.sendBlockMessage(this.getBlockDefinition(block), { type: 'PAYMENT_CONFIRMED', requestId: data.requestId, purchase }, pid)
+                    } catch (error) {
+                        this.sendBlockMessage(this.getBlockDefinition(block), { type: 'PAYMENT_FAILED', requestId: data.requestId, error: error.message }, pid)
+                    }
+                    return
+                }
                 const paymentDetails = data.paymentDetails || {}
                 const purchase = {
                     id: 'purchase-' + Date.now().toString(36),
@@ -9217,9 +9704,7 @@
                 }
                 try {
                     if (paymentType === 'stripe') {
-                        const apiKey = await this.decryptBlockSecret(block.data?.payment?.stripeApiKey)
-                        purchase.stripe = await this.createStripePayment(apiKey, { ...purchase, storeName: data.data?.storeName || '', requestId: data.requestId }, paymentDetails)
-                        purchase.status = ['succeeded', 'processing', 'requires_capture'].includes(purchase.stripe.status) ? 'paid' : purchase.stripe.status
+                        throw new Error('Legacy browser Stripe payments are disabled. Update this shop PAYMENT block to Stripe Connect.')
                     }
                     await this.updateBlockPayload(block.instanceId, next => {
                         next.data = next.data || {}
@@ -9583,12 +10068,35 @@
 
             async validateRoomLogin(roomHex = this.roomId?.replace('color-', '')) {
                 const cleanHex = String(roomHex || '').replace('#', '').toLowerCase()
-                if (!this.roomNeedsLogin()) return true
-                const attemptedSignature = this.getAttemptedRoomSignature(cleanHex)
+                if (this.pendingBackupAction && (cleanHex !== this.pendingBackupAction.color || !this.roomHasWrappedKeys)) return false
+                if (!this.roomNeedsLogin() && !this.pendingBackupAction) return true
+                const attemptedSignature = this.pendingBackupAction ? this.cloneSignature(window.state?.interactionSignature) : this.getAttemptedRoomSignature(cleanHex)
+                if (this.pendingBackupAction && (attemptedSignature?.type !== 'click' || !(attemptedSignature.clicks?.length >= 2))) { this.ui.roomStatus.textContent = 'Enter your secret color-click sequence'; return false }
                 const attemptedPassword = attemptedSignature ? this.getRoomPassword(cleanHex, attemptedSignature) : ''
                 this.syncDebugPassword(cleanHex)
                 if (this.roomHasWrappedKeys) {
+                    const gate = !this.pendingBackupAction ? await this.identity.getRoomGate(cleanHex) : null
+                    const selectedWithOneClick = attemptedSignature?.type === 'click' && (attemptedSignature.clicks?.length || 0) <= 1
+                    if (gate?.passkeyUnlock && (selectedWithOneClick || !gate.passwordFallback)) {
+                        this.ui.roomStatus.textContent = 'VERIFYING DEVICE…'
+                        if (await this.identity.unlockRoomWithPasskey(cleanHex, true)) {
+                            this.ownerLoginApproved = true
+                            this.wrongPasswordState = false
+                            return true
+                        }
+                        this.ui.roomStatus.textContent = this.identity.lastUnlockError || 'Passkey unlock failed'
+                        this.ui.loginBtn.textContent = 'LOGIN'
+                        return false
+                    }
                     if (attemptedPassword && await this.identity.unlockRoom(cleanHex, attemptedPassword, true)) {
+                        if (this.pendingBackupAction) {
+                            const action = this.pendingBackupAction
+                            try {
+                                await this.identity._call('backup_authorize', { roomHex: cleanHex, password: attemptedPassword, linkId: action.record.id, operation: action.kind })
+                                if (this.pendingBackupAction !== action || this.roomId !== 'color-' + cleanHex) return false
+                                action.verified = true
+                            } catch (error) { this.ui.roomStatus.textContent = error.message; return false }
+                        }
                         this.ownerLoginApproved = true
                         this.wrongPasswordState = false
                         return true
@@ -10116,7 +10624,7 @@
                 const amOwner = (effectiveOwner === myHex)
                 const isEditable = blockPayload ? 'false' : ((isEmpty || amOwner) ? 'true' : 'false')
                 const blockClass = blockPayload ? ' block-line' : ''
-                const lineContent = blockPayload ? this.renderBlockContent(blockPayload, effectiveOwner) : (content || '<br>')
+                const lineContent = blockPayload ? this.renderBlockContent(blockPayload, effectiveOwner) : DOMPurify.sanitize(content || '<br>')
                 return `<div id="${id}" class="editor-line${blockClass}" contenteditable="${isEditable}">${lineContent}</div>`
             }
 
@@ -10372,6 +10880,7 @@
             }
 
             async enterRoomUI() {
+                if (this.pendingBackupAction && (!this.pendingBackupAction.verified || this.roomId !== 'color-' + this.pendingBackupAction.color)) return
                 console.log('[COLOR ui]', 'enterRoomUI start', { roomId: this.roomId, ownerLoginApproved: this.ownerLoginApproved, isGuestScan: this.isGuestScan })
                 if (this.requiresMiningForCurrentConnection() && this.joinApprovedPeers.size === 0) return
                 document.querySelector('.sphere-tooltip')?.style.setProperty('display', 'none')
@@ -10388,12 +10897,6 @@
                 }
                 if (this.ui.dashboardPanel.classList.contains('active')) return
 
-                this.setSessionState('joined')
-                this.setPanelState('home')
-                this.ui.loginBtn.classList.add('hidden')
-                this.ui.loginCard.classList.remove('visible')
-                this.ui.dashboardPanel.classList.add('active', 'decrypting-content')
-
                 const roomHex = this.roomId.replace('color-', '')
                 let roomSignature = this.getRoomSignatureForSave(roomHex)
                 const roomPassword = this.pendingLoginHex === roomHex && this.pendingLoginSignature?.password ? this.pendingLoginSignature.password : roomSignature ? this.getRoomPassword(roomHex, roomSignature) : ''
@@ -10409,15 +10912,19 @@
                     }
                 } catch (e) {
                     console.warn('enterRoomUI background setup failed', e)
-                    if (await this.identity.getRoomGate(roomHex).catch(() => null)) {
-                        this.ui.dashboardPanel.classList.remove('active', 'decrypting-content')
-                        this.ui.loginBtn.classList.remove('hidden')
-                        this.ui.loginCard.classList.add('visible')
-                        this.ui.roomStatus.textContent = e.message
-                        this.ui.loginBtn.textContent = 'RETRY'
-                        return
-                    }
+                    this.ui.dashboardPanel.classList.remove('active', 'decrypting-content')
+                    this.ui.loginBtn.classList.remove('hidden')
+                    this.ui.loginCard.classList.add('visible')
+                    this.ui.roomStatus.textContent = e.message
+                    this.ui.loginBtn.textContent = 'RETRY'
+                    return
                 }
+                this.setSessionState('joined')
+                this.setPanelState('home')
+                this.ui.loginBtn.classList.add('hidden')
+                this.ui.loginCard.classList.remove('visible')
+                this.ui.dashboardPanel.classList.add('active', 'decrypting-content')
+                await this.loadLocalBlockDefinitions()
                 if (!this.identity.locked && !this.cryptoReadyLogged) {
                     console.log('[COLOR identity]', 'WebCrypto successful; content is encrypted', { mainThreadFallback: this.identity.usingMainThreadFallback })
                     this.cryptoReadyLogged = true
@@ -10464,6 +10971,7 @@
 
                 this.renderBackupDevices()
                 window.location.hash = roomHex
+                if (this.pendingBackupAction?.verified) { await this.completeBackupAction(); return }
 
                 if (this.pendingNavPath) {
                     this.ui.topNav.classList.add('visible')
@@ -11974,6 +12482,8 @@
             }
 
             async logout() {
+                this.pendingBackupAction = null
+                document.getElementById('backup-login-note').hidden = true
                 this.closeInfoPage()
                 this.fuzzySearch?.cancel()
                 if (window.resetSphereView) window.resetSphereView(false, false, true)
@@ -12220,6 +12730,7 @@ let _deviceGateRoom = null;
 let _deviceGateExpiresAt = 0;
 let _deviceGateFactorHash = null;
 let _deviceGateLeaseTimer = null;
+const _backupAuthorizations = new Map();
 const WORKER_LOG = "[COLOR worker]";
 
 const DIFFICULTY_PREFIX = "0000"; 
@@ -12309,12 +12820,14 @@ async function createPasswordCheck(roomHex, password) {
 }
 
 async function loadKeysToMemory(sigJWK, aesJWK, pubJWK) {
-    _aesKey = await crypto.subtle.importKey("jwk", aesJWK, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    const aesKey = await crypto.subtle.importKey("jwk", aesJWK, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
     const curve = sigJWK.crv || pubJWK.crv || "P-256";
-    _keyPair = {
+    const keyPair = {
         privateKey: await crypto.subtle.importKey("jwk", sigJWK, { name: "ECDSA", namedCurve: curve }, false, ["sign"]),
         publicKey: await crypto.subtle.importKey("jwk", pubJWK, { name: "ECDSA", namedCurve: curve }, true, ["verify"])
     };
+    _aesKey = aesKey;
+    _keyPair = keyPair;
     _locked = false;
 }
 
@@ -12336,7 +12849,7 @@ async function getWrappedKeys(roomHex) {
 }
 
 async function deviceGateKey(roomHex, gate, prf, remoteFactor) {
-    if (gate.v !== 1 || gate.kdfSalt?.length !== 16) throw new Error("Unsupported device protection");
+    if (![1, 2].includes(gate.v) || gate.kdfSalt?.length !== 16) throw new Error("Unsupported device protection");
     if (!prf || prf.length !== 32 || (gate.requiresVault && (!remoteFactor || remoteFactor.length !== 32))) throw new Error("Device verification required");
     const material = new Uint8Array(gate.requiresVault ? 64 : 32);
     material.set(new Uint8Array(prf));
@@ -12350,8 +12863,13 @@ function deviceGateContext(roomHex, gate) {
     return new TextEncoder().encode(JSON.stringify(["COLOR-DEVICE-GATE-v1", roomHex, gate.credentialId, gate.prfSalt, gate.requiresVault, gate.vaultId || "", Array.from(gate.kdfSalt)]));
 }
 
+function passkeyUnlockContext(roomHex, gate) {
+    return new TextEncoder().encode(JSON.stringify(["COLOR-PASSKEY-UNLOCK-v2", roomHex, gate.credentialId, gate.vaultId || ""]));
+}
+
 async function sealWrappedKeys(roomHex, blob, gate, key) {
     if (!gate) return blob;
+    if (gate.v === 2) return gate.passwordFallback ? { ...blob, gate } : { salt: [], iv: [], data: new ArrayBuffer(0), pubKey: blob.pubKey, gate };
     if (!key) throw new Error("Device verification required");
     const nextGate = { ...gate, iv: Array.from(crypto.getRandomValues(new Uint8Array(12))) };
     const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(nextGate.iv), additionalData: deviceGateContext(roomHex, nextGate) }, key, blob.data);
@@ -12362,8 +12880,18 @@ async function enrollDeviceGate(data) {
     if (_locked || _currentRoomHex !== data.roomHex || !_encryptedBlob) throw new Error("Log into this color before protecting it");
     const originalBlob = _encryptedBlob;
     if (!data.credentialId || !data.prfSalt) throw new Error("Passkey details required");
-    const gate = { v: 1, credentialId: data.credentialId, prfSalt: data.prfSalt, requiresVault: !!data.remoteFactor, vaultId: data.vaultId || "", kdfSalt: Array.from(crypto.getRandomValues(new Uint8Array(16))) };
+    const gate = { v: 2, credentialId: data.credentialId, prfSalt: data.prfSalt, requiresVault: !!data.remoteFactor, vaultId: data.vaultId || "", kdfSalt: Array.from(crypto.getRandomValues(new Uint8Array(16))), passwordFallback: _currentPassword ? _currentPassword !== "FFFFFF" + data.roomHex.toUpperCase() : _deviceGate?.passwordFallback === true };
     const key = await deviceGateKey(data.roomHex, gate, data.prf, data.remoteFactor);
+    let clearKeys;
+    if (_currentPassword) {
+        const passwordKey = await deriveKeyFromPass(_currentPassword, originalBlob.salt);
+        clearKeys = await crypto.subtle.decrypt({ name: "AES-GCM", iv: originalBlob.iv }, passwordKey, originalBlob.data);
+    } else if (_deviceGate?.v === 2 && _deviceGateKey && _deviceGate.directData) {
+        clearKeys = await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(_deviceGate.directIv), additionalData: passkeyUnlockContext(data.roomHex, _deviceGate) }, _deviceGateKey, _deviceGate.directData);
+    } else throw new Error("Unlock with the existing passkey before replacing it");
+    gate.directIv = Array.from(crypto.getRandomValues(new Uint8Array(12)));
+    gate.directData = await crypto.subtle.encrypt({ name: "AES-GCM", iv: new Uint8Array(gate.directIv), additionalData: passkeyUnlockContext(data.roomHex, gate) }, key, clearKeys);
+    new Uint8Array(clearKeys).fill(0);
     const factorHash = gate.requiresVault ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(data.remoteFactor)))).join(',') : null;
     const blob = await sealWrappedKeys(data.roomHex, originalBlob, gate, key);
     if (_locked || _currentRoomHex !== data.roomHex || _encryptedBlob !== originalBlob) throw new Error("Color changed during passkey enrollment");
@@ -12395,19 +12923,21 @@ function copyWrappedKeysForBackup(roomHex) {
 
 async function saveWrappedKeys(roomHex, password, keysJwkObj, pubKeyJwk) {
     const existing = await getWrappedKeys(roomHex);
-    if (existing?.gate && (_deviceGateRoom !== roomHex || !_deviceGateKey)) throw new Error("Device verification required");
+    if (existing?.recovery) requireRecoveryPassword(roomHex, password);
+    if (existing?.gate?.v === 1 && (_deviceGateRoom !== roomHex || !_deviceGateKey)) throw new Error("Device verification required");
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const wrapKey = await deriveKeyFromPass(password, salt);
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encryptedData = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, new TextEncoder().encode(JSON.stringify(keysJwkObj)));
     const passwordCheck = await createPasswordCheck(roomHex, password);
-    _encryptedBlob = { salt, iv, data: encryptedData, pubKey: pubKeyJwk };
+    _encryptedBlob = { salt, iv, data: encryptedData, pubKey: pubKeyJwk, ...(existing?.recovery ? { recovery: 1 } : {}) };
     _currentRoomHex = roomHex;
-    const persistedBlob = await sealWrappedKeys(roomHex, _encryptedBlob, _deviceGateRoom === roomHex ? _deviceGate : null, _deviceGateKey);
+    const persistedBlob = await sealWrappedKeys(roomHex, _encryptedBlob, existing?.gate?.v === 2 ? { ...existing.gate, passwordFallback: password !== "FFFFFF" + roomHex.toUpperCase() } : _deviceGateRoom === roomHex ? _deviceGate : null, _deviceGateKey);
     const db = await openColorDB(roomHex);
     const tx = db.transaction([roomHex], "readwrite");
     tx.objectStore(roomHex).put(persistedBlob, "wrapped_keys");
-    tx.objectStore(roomHex).put(passwordCheck, "password_check");
+    if (existing?.recovery) tx.objectStore(roomHex).delete("password_check");
+    else tx.objectStore(roomHex).put(passwordCheck, "password_check");
     await new Promise(r => tx.oncomplete = r);
     db.close(); 
 }
@@ -12426,6 +12956,7 @@ function lockCurrentRoom() {
     _locked = true;
     _currentPassword = null;
     _currentRoomHex = null;
+    _backupAuthorizations.clear();
 }
 
 function checkDeviceGateLease() {
@@ -12537,23 +13068,37 @@ async function unlock(roomHex, password, proof = {}) {
     checkDeviceGateLease();
     const saved = await getWrappedKeys(roomHex);
     if (!saved) throw new Error("No keys");
-    let blob = saved, gateKey = null;
-    if (saved.gate) {
+    let blob = saved, gateKey = null, decryptedBytes = null;
+    if (saved.gate?.v === 2) blob = { salt: saved.salt, iv: saved.iv, data: saved.data, pubKey: saved.pubKey, ...(saved.recovery ? { recovery: 1 } : {}) };
+    if (saved.gate?.v === 2 && proof.passkeyOnly) {
+        if (!saved.gate.directData || !saved.gate.directIv) throw new Error("Replace this passkey before using fingerprint unlock");
+        gateKey = _deviceGateRoom === roomHex && _deviceGateKey ? _deviceGateKey : await deviceGateKey(roomHex, saved.gate, proof.prf, proof.remoteFactor);
+        decryptedBytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(saved.gate.directIv), additionalData: passkeyUnlockContext(roomHex, saved.gate) }, gateKey, saved.gate.directData);
+    } else if (saved.gate?.v === 2) {
+        if (!saved.gate.passwordFallback) throw new Error("Use your fingerprint or device passkey to unlock this color");
+    } else if (saved.gate) {
         gateKey = _deviceGateRoom === roomHex && _deviceGateKey ? _deviceGateKey : await deviceGateKey(roomHex, saved.gate, proof.prf, proof.remoteFactor);
         const data = await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(saved.gate.iv), additionalData: deviceGateContext(roomHex, saved.gate) }, gateKey, saved.data);
         blob = { salt: saved.salt, iv: saved.iv, data, pubKey: saved.pubKey };
     }
-    const wrapKey = await deriveKeyFromPass(password, blob.salt);
     try {
-        const decryptedBytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: blob.iv }, wrapKey, blob.data);
+        if (!decryptedBytes) {
+            const wrapKey = await deriveKeyFromPass(password, blob.salt);
+            decryptedBytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: blob.iv }, wrapKey, blob.data);
+        }
         const keysObj = JSON.parse(new TextDecoder().decode(decryptedBytes));
+        if (proof.passkeyOnly && !saved.gate.passwordFallback) {
+            const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+            const wrapKey = await deriveKeyFromPass("FFFFFF" + roomHex.toUpperCase(), salt);
+            blob = { salt, iv, data: await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrapKey, decryptedBytes), pubKey: saved.pubKey };
+        }
         const factorHash = saved.gate?.requiresVault && proof.remoteFactor ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(proof.remoteFactor)))).join(',') : null;
         await loadKeysToMemory(keysObj.sig, keysObj.aes, blob.pubKey);
         _encryptedBlob = blob;
-        _deviceGate = saved.gate || null;
+        _deviceGate = gateKey ? saved.gate : null;
         _deviceGateKey = gateKey;
-        _deviceGateRoom = saved.gate ? roomHex : null;
-        if (saved.gate?.requiresVault) {
+        _deviceGateRoom = gateKey ? roomHex : null;
+        if (gateKey && saved.gate?.requiresVault) {
             if (proof.remoteFactor) {
                 _deviceGateFactorHash = factorHash;
                 setDeviceGateLease();
@@ -12562,13 +13107,14 @@ async function unlock(roomHex, password, proof = {}) {
             _deviceGateFactorHash = null;
             setDeviceGateLease();
         }
-        _currentPassword = password;
+        _currentPassword = proof.passkeyOnly ? null : password;
         _currentRoomHex = roomHex;
-    } catch(e) { throw new Error("Wrong Password"); }
+    } catch(e) { throw new Error(proof.passkeyOnly ? "Passkey unlock failed" : "Wrong Password"); }
 }
 
 async function updatePass({ roomHex, newPassword }) {
      if (_locked) throw new Error("Locked");
+     if (!_currentPassword) throw new Error("Enter the Color sequence before changing it");
      const oldWrapKey = await deriveKeyFromPass(_currentPassword, _encryptedBlob.salt);
      const bytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: _encryptedBlob.iv }, oldWrapKey, _encryptedBlob.data);
      const keysObj = JSON.parse(new TextDecoder().decode(bytes));
@@ -12852,7 +13398,7 @@ async function db_device_links(link = null) {
 }
 
 function backupLocalKey(key) {
-    return typeof key === 'string' && (key === 'connected_devices' || key.startsWith('local:device-') || key.startsWith('local:backup-'));
+    return typeof key === 'string' && (key === 'connected_devices' || key.startsWith('local:device-') || key.startsWith('local:backup-') || key.startsWith('local:vault-card:'));
 }
 
 // Tagged values preserve binary encryption records through the existing JSON transport.
@@ -12888,6 +13434,27 @@ function backupUnpack(value) {
     throw new Error('Invalid backup value');
 }
 
+function requireRecoveryPassword(roomHex, password) {
+    if (typeof password !== 'string' || !/^FFFFFF(?:[0-9A-F]{6}){2,}$/.test(password) || password === 'FFFFFF' + roomHex.toUpperCase()) throw new Error('Recovery requires your secret sequence of color clicks. A single color cannot protect a backup.');
+}
+
+async function prepareBackupRecovery(roomHex, password) {
+    requireRecoveryPassword(roomHex, password);
+    if (_locked || _currentRoomHex !== roomHex || !_encryptedBlob) throw new Error('Unlock this color before preparing recovery');
+    const original = _encryptedBlob;
+    const key = await deriveKeyFromPass(password, original.salt);
+    await crypto.subtle.decrypt({ name: 'AES-GCM', iv: original.iv }, key, original.data);
+    if (_locked || _currentRoomHex !== roomHex || _encryptedBlob !== original) throw new Error('Color changed during recovery setup');
+    return true;
+}
+
+async function authorizeBackup({ roomHex, password, linkId, operation }) {
+    if (!['pair', 'recover', 'block', 'prepare'].includes(operation) || typeof linkId !== 'string' || !linkId || linkId.length > 128) throw new Error('Invalid backup authorization');
+    if (!(operation === 'pair' && !_locked && _currentRoomHex === roomHex && (password === _currentPassword || !!_deviceGateKey))) await prepareBackupRecovery(roomHex, password);
+    if (operation === 'pair') _backupAuthorizations.set(linkId, { roomHex, expires: Date.now() + 120000 });
+    return true;
+}
+
 async function db_backup_snapshot({ roomHex, snapshot, linkId, includeKeys = false }) {
     if (!/^[0-9a-f]{6}$/.test(roomHex)) throw new Error('Invalid backup color');
     if (!snapshot && (_locked || _currentRoomHex !== roomHex)) throw new Error('Unlock the source color before backing it up');
@@ -12901,8 +13468,15 @@ async function db_backup_snapshot({ roomHex, snapshot, linkId, includeKeys = fal
         const wrapped = incoming.get('wrapped_keys');
         if (!snapshot.ownerPublicKey?.x || !snapshot.ownerPublicKey.y || (wrapped && (!(wrapped.data instanceof ArrayBuffer) || wrapped.pubKey?.x !== snapshot.ownerPublicKey.x || wrapped.pubKey?.y !== snapshot.ownerPublicKey.y))) throw new Error('Invalid backup color keys');
     }
+    if (!snapshot && includeKeys && linkId) {
+        const authorization = _backupAuthorizations.get(linkId);
+        if (!authorization || authorization.roomHex !== roomHex || authorization.expires <= Date.now()) {
+            if (_locked || _currentRoomHex !== roomHex) throw new Error('Verify your Color click password before sending keys to this device');
+            requireRecoveryPassword(roomHex, _currentPassword);
+        }
+    }
     const recoveryKeys = !snapshot && includeKeys ? await copyWrappedKeysForBackup(roomHex) : null;
-    const recoveryCheck = recoveryKeys ? await createPasswordCheck(roomHex, _currentPassword) : null;
+    const recoveryCheck = null;
     const db = await openColorDB(snapshot && incoming.has('wrapped_keys') ? roomHex : null);
     try {
         if (!db.objectStoreNames.contains(roomHex)) throw new Error('Color data is missing');
@@ -12917,7 +13491,7 @@ async function db_backup_snapshot({ roomHex, snapshot, linkId, includeKeys = fal
                     if (!snapshot) {
                         if (!rows.has('wrapped_keys')) throw new Error('Color data is missing its recovery keys');
                         result = { v: 1, roomHex, ownerPublicKey: rows.get('wrapped_keys').pubKey, exportedAt: Date.now(), entries: [...rows].filter(([key]) => !backupLocalKey(key) && key !== 'wrapped_keys' && key !== 'password_check').map(([key, value]) => [key, backupPack(value)]) };
-                        if (recoveryKeys) result.entries.push(['wrapped_keys', backupPack(recoveryKeys)], ['password_check', backupPack(recoveryCheck)]);
+                        if (recoveryKeys) { result.entries.push(['wrapped_keys', backupPack(recoveryKeys)]); if (recoveryCheck) result.entries.push(['password_check', backupPack(recoveryCheck)]); }
                         return;
                     }
                     const currentKey = rows.get('wrapped_keys')?.pubKey, nextKey = snapshot.ownerPublicKey;
@@ -12962,7 +13536,7 @@ async function db_backup_opaque({ linkId, roomHex, envelope }, write) {
             const key = 'local:backup-opaque:' + linkId + ':' + roomHex;
             let result;
             if (write) { store.put({ envelope, savedAt: Date.now() }, key); result = true; }
-            else store.get(key).onsuccess = e => { result = e.target.result || null; };
+            else store.get(key).onsuccess = e => { result = e.target.result?.envelope || null; };
             tx.oncomplete = () => resolve(result);
             tx.onerror = tx.onabort = () => reject(tx.error || new Error('Friend backup storage failed'));
         });
@@ -12970,6 +13544,7 @@ async function db_backup_opaque({ linkId, roomHex, envelope }, write) {
 }
 
 async function db_backup_confirm_export({ roomHex, linkId, snapshot }) {
+    _backupAuthorizations.delete(linkId);
     if (!/^[0-9a-f]{6}$/.test(roomHex) || typeof linkId !== 'string' || !linkId || linkId.length > 128 || snapshot?.v !== 1 || snapshot.roomHex !== roomHex || !Array.isArray(snapshot.entries)) throw new Error('Invalid backup acknowledgment');
     const db = await openColorDB();
     try {
@@ -12995,7 +13570,7 @@ self.onmessage = async (e) => {
             case 'lock': lockCurrentRoom(); res = true; break;
             case 'ensure_session_identity': res = await ensureSessionIdentity(); break;
             case 'unlock': await unlock(data.roomHex, data.password, data); res = "SUCCESS"; break;
-            case 'db_gate_info': { const wrapped = await getWrappedKeys(data.roomHex); res = wrapped?.gate ? { ...wrapped.gate, unlocked: !_locked && _currentRoomHex === data.roomHex && _deviceGateRoom === data.roomHex, expiresAt: _deviceGateRoom === data.roomHex ? _deviceGateExpiresAt : 0 } : null; break; }
+            case 'db_gate_info': { const wrapped = await getWrappedKeys(data.roomHex), gate = wrapped?.gate; res = gate ? { ...gate, directData: undefined, passkeyUnlock: gate.v === 2 && !!gate.directData, unlocked: !_locked && _currentRoomHex === data.roomHex && _deviceGateRoom === data.roomHex, expiresAt: _deviceGateRoom === data.roomHex ? _deviceGateExpiresAt : 0 } : null; break; }
             case 'gate_enroll': res = await enrollDeviceGate(data); break;
             case 'gate_renew': res = await renewDeviceGateLease(data); break;
             case 'generate': res = await generate(data.roomHex, data.password); break;
@@ -13024,6 +13599,8 @@ self.onmessage = async (e) => {
             case 'db_read_private': res = await db_read_private(data); break;
             case 'db_links_load': res = await db_device_links(); break;
             case 'db_links_save': res = await db_device_links(data.link); break;
+            case 'backup_authorize': res = await authorizeBackup(data); break;
+            case 'backup_prepare_recovery': res = await prepareBackupRecovery(data.roomHex, data.password); break;
             case 'backup_export': res = await db_backup_snapshot(data); break;
             case 'backup_import': res = await db_backup_snapshot(data); break;
             case 'backup_confirm_export': res = await db_backup_confirm_export(data); break;
@@ -13087,6 +13664,7 @@ self.onmessage = async (e) => {
                  break;
             case 'saveSignature':
                 if (_locked) break;
+                if ((await getWrappedKeys(data.roomHex))?.recovery && data.signature?.path?.length) throw new Error('This recoverable backup uses a click password; saving its secret as a drawing would expose it');
                 const sdb = await openColorDB(data.roomHex);
                 const signaturePaths = [data.signature.path, ...(data.signature.practicePaths || [])].filter(path => Array.isArray(path) && path.length > 0);
                 const existingSignaturePaths = await new Promise(resolve => {
@@ -13672,7 +14250,12 @@ self.onmessage = async e => {
 
             async ensureRoomSecurity(roomHex, password) {
                 let status
-                try { const proof = await this.authorizeRoomGate(roomHex); status = await this._call('ensure_room_security', { roomHex, password, ...proof }) }
+                try {
+                    const gate = await this.getRoomGate(roomHex)
+                    if (!this.locked && gate?.unlocked) return true
+                    const proof = gate?.v === 1 ? await this.authorizeRoomGate(roomHex) : {}
+                    status = await this._call('ensure_room_security', { roomHex, password, ...proof })
+                }
                 catch (e) {
                     if (await this.enableMainThreadFallback(e)) return this.ensureRoomSecurity(roomHex, password)
                     throw e
@@ -13681,13 +14264,14 @@ self.onmessage = async e => {
                 return true
             }
 
-            async unlockRoom(roomHex, password, silent = false) {
+            async unlockRoom(roomHex, password, silent = false, passkeyOnly = false) {
                 this.lastUnlockError = null
                 try {
-                    const proof = await this.authorizeRoomGate(roomHex)
-                    const res = await this._call('unlock', { roomHex, password, silent, ...proof })
+                    const gate = await this.getRoomGate(roomHex)
+                    const proof = passkeyOnly || gate?.v === 1 ? await this.authorizeRoomGate(roomHex) : {}
+                    const res = await this._call('unlock', { roomHex, password, silent, passkeyOnly, ...proof })
                     if (res === 'SUCCESS') {
-                        this.updateUI(password === this.DEFAULT_PASS ? 'DEFAULT' : 'SECURE')
+                        this.updateUI(passkeyOnly || password !== this.DEFAULT_PASS ? 'SECURE' : 'DEFAULT')
                         return true
                     }
                     return false
@@ -13696,6 +14280,10 @@ self.onmessage = async e => {
                     if (!silent) alert(this.lastUnlockError || 'Wrong Password')
                     return false
                 }
+            }
+
+            async unlockRoomWithPasskey(roomHex, silent = false) {
+                return this.unlockRoom(roomHex, null, silent, true)
             }
 
             async unlockWithPassword(password, silent = false) {
@@ -15083,7 +15671,7 @@ self.onmessage = async e => {
         }
         init().catch(error => console.error('[Sphere] init failed', error))
         window.updateVisitedFromDB = async function () { const rooms = await (new window.ColorDB()).getAllRooms(); state.historyHandles = []; if (rooms?.length) { rooms.forEach(r => { const p = findPositionFromColor('#' + r.hex); if (p) state.historyHandles.push({ pos: Vec3.normalize(p), color: hexToRgbNormalized('#' + r.hex), hex: '#' + r.hex, peerCount: 0 }) }) } }
-        window.addEventListener('message', e => { if (e.data === 'getSphereColor') e.source.postMessage(storageScope.getItem('lastSphereColor') || '#ffffff', e.origin); if (e.data?.type === 'handle-ready') { const hex = e.data.hex, pos = findPositionFromColor(hex); if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: e.data.count }); const d = document.createElement('div'); d.className = 'debug-room-item ' + (e.data.count > 0 ? 'active' : ''); d.innerHTML = `<span>${hex}</span> <span class="count">${e.data.count} peer(s)</span>`; document.getElementById('debug-rooms').appendChild(d) } } })
+        window.addEventListener('message', e => { if (e.data === 'getSphereColor' && e.source === window.parent) e.source.postMessage(storageScope.getItem('lastSphereColor') || '#ffffff', e.origin); if (e.data?.type === 'handle-ready' && e.source === window && e.origin === location.origin) { const hex = e.data.hex, count = e.data.count, pos = /^#[0-9a-fA-F]{6}$/.test(hex || '') && Number.isSafeInteger(count) && count >= 0 ? findPositionFromColor(hex) : null; if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: count }); const d = document.createElement('div'), color = document.createElement('span'), peers = document.createElement('span'); d.className = 'debug-room-item ' + (count > 0 ? 'active' : ''); color.textContent = hex; peers.className = 'count'; peers.textContent = count + ' peer(s)'; d.append(color, ' ', peers); document.getElementById('debug-rooms').appendChild(d) } } })
         async function initStorageAccess() { if (window.self === window.top) return; const triggerZoomToColor = hexColor => { const matchPos = findPositionFromColor(hexColor); if (matchPos) { if (!document.body.classList.contains('light-mode')) { document.body.classList.add('light-mode') } triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true); const checkLandingComplete = () => { if (state.landing.progress >= 1) { window.parent.postMessage({ type: 'zoom-done', color: hexColor }, '*') } else if (state.landing.active) { requestAnimationFrame(checkLandingComplete) } }; requestAnimationFrame(checkLandingComplete) } }; const access = async h => { try { if (h?.localStorage) storageScope = h.localStorage; const c = storageScope.getItem('lastSphereColor') || '#ffffff'; if (!storageScope.getItem('lastSphereColor')) storageScope.setItem('lastSphereColor', c); window.parent.postMessage(c, '*'); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); document.body.style.backgroundColor = c; triggerZoomToColor(c) } catch (e) { } }; try { if (await document.hasStorageAccess()) try { access(await document.requestStorageAccess({ localStorage: true })) } catch (e) { access(null) } else { const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }); const b = document.createElement('button'); b.innerText = 'LOGIN'; Object.assign(b.style, { padding: '12px 24px', fontSize: '16px', cursor: 'pointer', background: '#000', color: '#fff', border: 'none', borderRadius: '8px' }); o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { access(await document.requestStorageAccess({ localStorage: true })) } catch (e) { o.innerHTML = 'Access Denied' } } } } catch (e) { } }
         initStorageAccess()
 
