@@ -8086,6 +8086,7 @@
                     this.renderInstalledBlocks()
                     this.renderBlockUpdates()
                     this.hydrateBlockLines()
+                    this.refreshSdkEmbed().catch(() => { })
                 } catch (error) {
                     console.error('[Blocks]', error)
                     this.blocksOffline = true
@@ -9895,10 +9896,13 @@
                 if (!confirmed.children.length) { const empty = document.createElement('div'); empty.className = 'settings-hint'; empty.textContent = 'None yet.'; confirmed.appendChild(empty) }
             }
 
-            async startSdkSourceListening() {
-                const panel = document.querySelector('.sdk-settings'), listener = document.getElementById('sdk-source-listener')
-                if (!this.sdkSelectedBlock || !listener) return
-                panel?.classList.add('listening'); listener.hidden = false
+            async startSdkSourceListening(instanceId = this.sdkSelectedBlock) {
+                const host = document.querySelector('.sdk-settings')
+                const listener = document.getElementById('sdk-source-listener')
+                if (!instanceId || !listener || !host) return
+                this.sdkSelectedBlock = instanceId
+                host.classList.add('listening')
+                listener.hidden = false
                 document.getElementById('sdk-source-listening').hidden = false
                 document.getElementById('sdk-source-form').hidden = true
                 await this.renderSdkSourceManager()
@@ -9952,7 +9956,8 @@
 
             initSdkEmbedUI() {
                 const textarea = document.getElementById('sdk-embed-code'), status = document.getElementById('sdk-embed-status')
-                const copy = async () => { await this.copySdkEmbed(textarea, status); await this.startSdkSourceListening() }
+                document.getElementById('sdk-source-listener').onclick = event => event.stopPropagation()
+                const copy = async () => { if (!this.sdkSelectedBlock) await this.refreshSdkEmbed(); await this.copySdkEmbed(textarea, status); await this.startSdkSourceListening() }
                 document.getElementById('sdk-copy-code').onclick = copy
                 textarea.onclick = copy
                 document.getElementById('sdk-select-block').onclick = () => this.openSdkBlockPicker().catch(error => { status.textContent = error.message })
@@ -9978,11 +9983,12 @@
                     title.textContent = 'EMBED ' + entry.label.toUpperCase() + ' · ' + entry.selector
                     textarea.readOnly = true
                     textarea.value = await this.sdkEmbedCode(entry)
-                    textarea.onclick = event => { event.stopPropagation(); this.copySdkEmbed(textarea) }
+                    const copyAndListen = async event => { event.stopPropagation(); this.sdkSelectedBlock = entry.payload.instanceId; await this.copySdkEmbed(textarea); this.openMainSection('settings'); await this.startSdkSourceListening(entry.payload.instanceId) }
+                    textarea.onclick = copyAndListen
                     actions.className = 'block-embed-actions'
                     copy.type = 'button'
                     copy.textContent = 'COPY EMBED CODE'
-                    copy.onclick = event => { event.stopPropagation(); this.copySdkEmbed(textarea); copy.textContent = 'COPIED'; setTimeout(() => { copy.textContent = 'COPY EMBED CODE' }, 1200) }
+                    copy.onclick = async event => { await copyAndListen(event); copy.textContent = 'COPIED'; setTimeout(() => { copy.textContent = 'COPY EMBED CODE' }, 1200) }
                     actions.appendChild(copy)
                     area.append(title, textarea, actions)
                 }
@@ -10005,7 +10011,7 @@
                     const block = forms[Math.max(0, Number(match[1] || 1) - 1)]
                     if (!block) return this.sendSdkResponse({ kind: 'block', requestId: data.requestId, origin: requestOrigin, ownerColor: '#' + roomHex, block: null, error: 'Form not found.' }, pid)
                     const sources = Array.isArray(block.data?.sources) ? block.data.sources : []
-                    const confirmed = this.sdkConfirmedSources?.has(block.instanceId + ':' + requestOrigin) || sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)
+                    const confirmed = !sources.length || this.sdkConfirmedSources?.has(block.instanceId + ':' + requestOrigin) || sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)
                     if (!confirmed) {
                         const key = block.instanceId + ':' + requestOrigin
                         this.sdkSourceCandidates.set(key, { blockInstanceId: block.instanceId, origin: requestOrigin, data, pid, seenAt: Date.now() })
@@ -10020,7 +10026,7 @@
                 const block = (await this.getLocalBlockPayloads()).find(item => item.blockId === 'form' && item.instanceId === data.blockInstanceId)
                 if (!block) return this.sendSdkResponse({ kind: 'submission', requestId: data.requestId, origin: requestOrigin, ok: false, error: 'Form not found.' }, pid)
                 const sources = Array.isArray(block.data?.sources) ? block.data.sources : []
-                if (!this.sdkConfirmedSources?.has(block.instanceId + ':' + requestOrigin) && !sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)) return this.sendSdkResponse({ kind: 'submission', requestId: data.requestId, origin: requestOrigin, ok: false, error: 'Source not confirmed.' }, pid)
+                if (sources.length && !this.sdkConfirmedSources?.has(block.instanceId + ':' + requestOrigin) && !sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === requestOrigin)) return this.sendSdkResponse({ kind: 'submission', requestId: data.requestId, origin: requestOrigin, ok: false, error: 'Source not confirmed.' }, pid)
                 if (data.schemaHash !== await this.sdkHash(block.data?.schema || '[]')) return this.sendSdkResponse({ kind: 'submission', requestId: data.requestId, origin: requestOrigin, ok: false, error: 'This form changed. Reload it and try again.' }, pid)
                 const requestId = String(data.requestId || '')
                 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) return
@@ -10046,7 +10052,7 @@
                     const value = source[name]
                     values[name] = Array.isArray(value) ? value.slice(0, 100).map(item => clean(item).slice(0, 2000)) : clean(value).slice(0, 10000)
                 }
-                const row = { id: crypto.randomUUID(), requestId, submittedAt: Date.now(), visitorColor: /^#[0-9a-f]{6}$/i.test(data.visitorColor || '') ? data.visitorColor.toLowerCase() : '#ffffff', values }
+                const row = { id: crypto.randomUUID(), requestId, submittedAt: Date.now(), origin: requestOrigin, visitorColor: /^#[0-9a-f]{6}$/i.test(data.visitorColor || '') ? data.visitorColor.toLowerCase() : '#ffffff', values }
                 const maxStored = Math.min(10000, Math.max(10, Number(security.maxStored) || 1000))
                 await this.updateBlockPayload(block.instanceId, next => { next.data ||= {}; next.data.submissions = [...(Array.isArray(next.data.submissions) ? next.data.submissions : []), row].slice(-maxStored); return next })
                 const response = { kind: 'submission', requestId, origin: requestOrigin, ok: true, submissionId: row.id, submittedAt: row.submittedAt }
@@ -10059,6 +10065,12 @@
                 if (namespace === 'store_ops') {
                     this.handleStoreOpsAction(data, pid).catch(error => console.error('[Blocks] store action failed', error))
                     return
+                }
+                if (namespace === 'form_ops') {
+                    const origin = this.sdkSourceOrigin(this.mesh?.peerIdentities?.get(pid)?.sdkOrigin)
+                    const block = this.getBlockPayloadByInstance(data?.blockInstanceId) || this.localBlockPayloadCache?.find(item => item.instanceId === data?.blockInstanceId)
+                    const sources = Array.isArray(block?.data?.sources) ? block.data.sources : []
+                    if (origin && sources.length && !this.sdkConfirmedSources?.has(block?.instanceId + ':' + origin) && !sources.some(source => this.sdkSourceOrigin(typeof source === 'string' ? source : source?.origin) === origin)) return
                 }
                 const installed = this.getInstalledBlockPayloads().find(payload => {
                     const def = this.getBlockDefinition(payload)
