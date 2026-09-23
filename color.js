@@ -276,6 +276,10 @@ window.Color = {
         let get = null;
         let pendingGetCallbacks = [];
         let sendSdk = null;
+        let sendIdentity = null;
+        let sendCursor = null;
+        let sendRequest = null;
+        let sendForm = null;
         let visitorColor = '#ffffff';
         let ownerPeer = null;
         let verifiedOwnerKey = null;
@@ -286,6 +290,10 @@ window.Color = {
         let blockRetryTimer = null;
         let blockOfflineTimer = null;
         let submissionTimer = null;
+        let normalSyncStarted = false;
+        let visitorPublicKey = null;
+        let visitorProof = null;
+        const syncedFragments = new Map();
         const uuid = () => crypto.randomUUID?.() || '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
         const blockRequestId = uuid();
 
@@ -342,35 +350,75 @@ window.Color = {
             return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
         };
         const fingerprint = key => digest(keyId(key));
+        const verifyWithKey = async (publicKey, signature, content) => {
+            const key = await crypto.subtle.importKey('jwk', publicKey, { name: 'ECDSA', namedCurve: publicKey.crv || 'P-256' }, false, ['verify']);
+            return crypto.subtle.verify({ name: 'ECDSA', hash: publicKey.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, key, Uint8Array.from(atob(signature), char => char.charCodeAt(0)), new TextEncoder().encode(content));
+        };
+        const trustOwnerIdentity = async (publicKey, peerId) => {
+            const receivedKeyId = keyId(publicKey);
+            const receivedFingerprint = await fingerprint(publicKey);
+            const pinKey = 'color-sdk-owner:' + ownerColor;
+            let pinned = null;
+            try { pinned = localStorage.getItem(pinKey); } catch (_) { }
+            if (ownerKey && typeof ownerKey === 'object' && keyId(ownerKey) !== receivedKeyId) throw new Error('The response is not signed by the configured Color owner.');
+            if (typeof ownerKey === 'string' && ownerKey.trim() && ownerKey.trim().replace(/^sha256[:-]/i, '').toLowerCase() !== receivedFingerprint) throw new Error('The response is not signed by the configured Color owner.');
+            if (!ownerKey && pinned && pinned !== receivedKeyId) throw new Error('The Color owner identity changed.');
+            try { localStorage.setItem(pinKey, receivedKeyId); } catch (_) { }
+            const firstVerification = verifiedOwnerFingerprint !== receivedFingerprint;
+            verifiedOwnerKey = publicKey;
+            verifiedOwnerFingerprint = receivedFingerprint;
+            ownerPeer = peerId;
+            if (firstVerification) {
+                const detail = { color: '#' + ownerColor, publicKey, fingerprint: receivedFingerprint, configured: !!ownerKey };
+                emit('color-owner-verified', detail);
+                if (typeof onOwner === 'function') onOwner(detail);
+            }
+            return true;
+        };
         const verify = async message => {
             try {
-                const receivedKeyId = keyId(message.publicKey);
-                const receivedFingerprint = await fingerprint(message.publicKey);
-                const pinKey = 'color-sdk-owner:' + String(color).replace('#', '').toLowerCase();
-                let pinned = null;
-                try { pinned = localStorage.getItem(pinKey); } catch (_) { }
-                if (ownerKey && typeof ownerKey === 'object' && keyId(ownerKey) !== receivedKeyId) throw new Error('The response is not signed by the configured Color owner.');
-                if (typeof ownerKey === 'string' && ownerKey.trim() && ownerKey.trim().replace(/^sha256[:-]/i, '').toLowerCase() !== receivedFingerprint) throw new Error('The response is not signed by the configured Color owner.');
-                if (!ownerKey && pinned && pinned !== receivedKeyId) throw new Error('The Color owner identity changed.');
-                const key = await crypto.subtle.importKey('jwk', message.publicKey, { name: 'ECDSA', namedCurve: message.publicKey.crv || 'P-256' }, false, ['verify']);
-                const signature = Uint8Array.from(atob(message.signature), char => char.charCodeAt(0));
-                const ok = await crypto.subtle.verify({ name: 'ECDSA', hash: message.publicKey.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, key, signature, new TextEncoder().encode(JSON.stringify(message.payload)));
+                await trustOwnerIdentity(message.publicKey, ownerPeer);
+                const ok = await verifyWithKey(message.publicKey, message.signature, JSON.stringify(message.payload));
                 if (!ok) throw new Error('The Color signature is invalid.');
-                try { localStorage.setItem(pinKey, receivedKeyId); } catch (_) { }
-                const firstVerification = verifiedOwnerFingerprint !== receivedFingerprint;
-                verifiedOwnerKey = message.publicKey;
-                verifiedOwnerFingerprint = receivedFingerprint;
-                const detail = { color: '#' + ownerColor, publicKey: verifiedOwnerKey, fingerprint: verifiedOwnerFingerprint, configured: !!ownerKey };
-                if (firstVerification) {
-                    emit('color-owner-verified', detail);
-                    if (typeof onOwner === 'function') onOwner(detail);
-                }
                 return true;
             } catch (error) {
                 showBlockStatus('COLOR OFFLINE');
                 emit('color-error', { error: error.message });
                 return false;
             }
+        };
+        const mineProof = async () => {
+            const hourStamp = Math.floor(Date.now() / 3600000);
+            for (let nonce = 1; ; nonce++) {
+                if ((await digest(ownerColor + hourStamp + nonce)).startsWith('0000')) return hourStamp + '_' + nonce;
+                if (nonce % 1000 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+            }
+        };
+        const sendVisitorIdentity = async peerId => {
+            if (!visitorPublicKey) {
+                const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+                visitorPublicKey = await crypto.subtle.exportKey('jwk', pair.publicKey);
+            }
+            showBlockStatus('VERIFYING COLOR…');
+            sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId);
+            visitorProof ||= await mineProof();
+            sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId);
+        };
+        const startNormalSync = peerId => {
+            if (normalSyncStarted) return;
+            normalSyncStarted = true;
+            clearInterval(blockRetryTimer);
+            sendVisitorIdentity(peerId).catch(error => { showBlockStatus('COLOR OFFLINE'); emit('color-error', { error: error.message }); });
+        };
+        const renderSyncedForm = () => {
+            const forms = [...syncedFragments.entries()].sort((a, b) => a[0] - b[0]).map(([, item]) => {
+                try { const payload = JSON.parse(item.content || ''); return payload?.type === 'block' && payload.blockId === 'form' ? payload : null; } catch (_) { return null; }
+            }).filter(Boolean);
+            const match = /^form(?:-(\d+))?$/.exec(String(block || 'form').toLowerCase());
+            const payload = forms[Math.max(0, Number(match?.[1] || 1) - 1)];
+            if (!payload) return;
+            activeBlock = payload;
+            digest(payload.data?.schema || '[]').then(hash => { activeSchemaHash = hash; renderForm(payload); });
         };
         const renderForm = payload => {
             let schema = [];
@@ -446,7 +494,7 @@ window.Color = {
             form.append(actions, status);
             form.addEventListener('submit', event => {
                 event.preventDefault();
-                if (!ownerPeer || !sendSdk) { status.textContent = 'FORM OWNER IS OFFLINE'; return; }
+                if (!ownerPeer || !sendForm) { status.textContent = 'FORM OWNER IS OFFLINE'; return; }
                 const values = {};
                 schema.filter(field => field?.name && !['page', 'button', 'output', 'file'].includes(field.type)).forEach(field => {
                     const controls = [...form.elements].filter(input => input.name === field.name);
@@ -456,7 +504,7 @@ window.Color = {
                 form.dataset.requestId = requestId;
                 status.textContent = 'SENDING...';
                 submit.disabled = true;
-                sendSdk({ type: 'SUBMIT_FORM', requestId, origin: location.origin, blockInstanceId: payload.instanceId, schemaHash: activeSchemaHash, visitorColor, values }, ownerPeer);
+                sendForm({ type: 'SUBMIT', requestId, blockInstanceId: payload.instanceId, visitorColor, origin: location.origin, values }, ownerPeer);
                 clearTimeout(submissionTimer);
                 submissionTimer = setTimeout(() => {
                     if (form.dataset.requestId !== requestId) return;
@@ -474,6 +522,38 @@ window.Color = {
             [send, get] = room.makeAction(action);
             pendingGetCallbacks.forEach(cb => get(cb));
             pendingGetCallbacks = [];
+            [sendIdentity] = room.makeAction('identity');
+            [sendCursor] = room.makeAction('sync-cursor');
+            [sendRequest] = room.makeAction('req');
+            [sendForm] = room.makeAction('form_ops');
+            room.makeAction('identity')[1](async (data, peerId) => {
+                if (!data?.pubKey || String(data.color || '').replace('#', '').toLowerCase() !== ownerColor) return;
+                try { await trustOwnerIdentity(data.pubKey, peerId); }
+                catch (error) { showBlockStatus('COLOR OFFLINE'); emit('color-error', { error: error.message }); }
+            });
+            room.makeAction('sync-cursor')[1]((data, peerId) => {
+                if (!normalSyncStarted || peerId !== ownerPeer || data?.type !== 'response' || !data.approved || typeof data.cursor !== 'number') return;
+                const keys = [];
+                for (let index = data.cursor - 50; index <= data.cursor + 50; index++) keys.push(ownerColor + index);
+                sendRequest(keys, peerId);
+            });
+            room.makeAction('fragment')[1](async (fragments, peerId) => {
+                if (!normalSyncStarted || peerId !== ownerPeer || !verifiedOwnerKey || !fragments) return;
+                for (const [index, item] of Object.entries(fragments)) {
+                    const content = String(item?.content || '');
+                    const signed = index + ':' + item?.updated + ':' + item?.owner + ':' + content;
+                    if (item?.signature && await verifyWithKey(verifiedOwnerKey, item.signature, signed)) syncedFragments.set(Number(index), item);
+                }
+                renderSyncedForm();
+            });
+            room.makeAction('form_ops')[1]((message, peerId) => {
+                const form = container.querySelector('.color-sdk-form form');
+                if (message?.type !== 'FORM_SAVED' || peerId !== ownerPeer || form?.dataset.requestId !== message.requestId) return;
+                clearTimeout(submissionTimer);
+                form.querySelector('button[type="submit"]').disabled = false;
+                form.querySelector('.color-sdk-status').textContent = message.ok ? 'FORM RECEIVED' : (message.error || 'NOT SAVED');
+                if (message.ok) form.reset();
+            });
             room.onPeerJoin(peerId => emit('color-connected', { peerId, color: '#' + ownerColor }));
             room.onPeerLeave(peerId => emit('color-disconnected', { peerId, color: '#' + ownerColor }));
             room.onPeerError((peerId, error) => emit('color-error', { peerId, error: error?.message || 'Color connection failed.' }));
@@ -497,7 +577,7 @@ window.Color = {
                     if (isRequestedBlock) {
                         ownerPeer = peerId;
                         if (message.payload.block && await digest(message.payload.block.data?.schema || '[]') !== message.payload.schemaHash) return emit('color-error', { error: 'The signed form schema does not match its fingerprint.' });
-                        if (message.payload.block) { activeBlock = message.payload.block; activeSchemaHash = message.payload.schemaHash; clearInterval(blockRetryTimer); renderForm(activeBlock); }
+                        if (message.payload.block) startNormalSync(peerId);
                         else { showBlockStatus(message.payload.error || 'FORM NOT FOUND'); emit('color-error', { error: message.payload.error || 'Form not found.' }); }
                     } else if (isRequestedSubmission) {
                         clearTimeout(submissionTimer);
@@ -507,7 +587,7 @@ window.Color = {
                     }
                 });
                 const requestBlock = peerId => sendSdk({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor }, peerId);
-                room.onPeerJoin(requestBlock);
+                room.onPeerJoin(peerId => normalSyncStarted ? sendVisitorIdentity(peerId) : requestBlock(peerId));
                 room.onPeerLeave(peerId => { if (peerId === ownerPeer) { ownerPeer = null; showBlockStatus('COLOR OFFLINE'); } });
                 blockRetryTimer = setInterval(() => { if (!activeBlock) requestBlock(); }, 10000);
             }
