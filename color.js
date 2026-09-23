@@ -333,6 +333,20 @@ window.Color = {
                     pointer-events: none;
                 }
                 .color-sdk-notice { padding: 16px; border-radius: 10px; background: #eee; color: #555; font: 800 13px/1.4 system-ui, sans-serif; text-align: center; }
+                .color-sdk-form { box-sizing: border-box; width: 100%; max-width: 680px; padding: 20px; border-radius: 12px; background: #f5f5f5; color: #111; font: 14px/1.4 system-ui, sans-serif; }
+                .color-sdk-form h2 { margin: 0 0 16px; }
+                .color-sdk-form form, .color-sdk-field { display: grid; gap: 7px; }
+                .color-sdk-form form { gap: 14px; }
+                .color-sdk-field > span { font-size: 12px; font-weight: 800; }
+                .color-sdk-field input:not([type='radio']):not([type='checkbox']), .color-sdk-field textarea, .color-sdk-field select { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #bbb; border-radius: 6px; background: #fff; color: #111; font: inherit; }
+                .color-sdk-field textarea { min-height: 110px; resize: vertical; }
+                .color-sdk-options { display: grid; gap: 7px; }
+                .color-sdk-options label { display: flex; align-items: center; gap: 7px; }
+                .color-sdk-actions { display: flex; align-items: center; gap: 9px; margin-top: 4px; }
+                .color-sdk-actions button { border: 0; border-radius: 6px; padding: 10px 14px; background: #111; color: #fff; font: 800 13px system-ui, sans-serif; cursor: pointer; }
+                .color-sdk-actions button:disabled { opacity: .55; cursor: default; }
+                .color-sdk-swatch { width: 18px; height: 18px; box-sizing: border-box; border: 1px solid #aaa; border-radius: 2px; }
+                .color-sdk-status { min-height: 18px; font-size: 12px; font-weight: 800; text-align: center; }
             `;
             document.head.appendChild(style);
         }
