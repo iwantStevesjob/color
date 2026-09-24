@@ -637,7 +637,7 @@ window.Color = {
                     if (isRequestedBlock) {
                         ownerPeer = peerId;
                         if (message.payload.block && await digest(message.payload.block.data?.schema || '[]') !== message.payload.schemaHash) return emit('color-error', { error: 'The signed form schema does not match its fingerprint.' });
-                        if (message.payload.block) { activeBlock = message.payload.block; activeSchemaHash = message.payload.schemaHash; renderForm(activeBlock); startNormalSync(peerId); }
+                        if (message.payload.block) { clearInterval(blockRetryTimer); activeBlock = message.payload.block; activeSchemaHash = message.payload.schemaHash; renderForm(activeBlock); startNormalSync(peerId); }
                         else { showBlockStatus(message.payload.error || 'FORM NOT FOUND'); emit('color-error', { error: message.payload.error || 'Form not found.' }); }
                     } else if (isRequestedSubmission) {
                         clearTimeout(submissionTimer);
@@ -647,7 +647,11 @@ window.Color = {
                     }
                 });
                 const requestBlock = peerId => sendSdk({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor }, peerId);
-                room.onPeerJoin(peerId => normalSyncStarted ? sendVisitorIdentity(peerId) : requestBlock(peerId));
+                room.onPeerJoin(peerId => {
+                    requestBlock(peerId);
+                    normalSyncStarted = true;
+                    sendVisitorIdentity(peerId).catch(error => { showBlockStatus('COLOR OFFLINE'); emit('color-error', { error: error.message }); });
+                });
                 room.onPeerLeave(peerId => { if (peerId === ownerPeer) { ownerPeer = null; showBlockStatus('COLOR OFFLINE'); } });
                 blockRetryTimer = setInterval(() => { if (!activeBlock) requestBlock(); }, 10000);
             }
@@ -681,6 +685,7 @@ window.Color = {
 
         if (block) { showBlockStatus('CONNECTING TO COLOR…'); blockOfflineTimer = setTimeout(() => { if (!activeBlock && !ownerPeer) showBlockStatus('COLOR OFFLINE'); }, 15000); }
         container.appendChild(iframe);
+        connect();
 
         // Return Proxy Interface
         return {
