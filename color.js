@@ -302,7 +302,7 @@ window.Color = {
         // Inject Iframe
         const iframe = document.createElement('iframe');
         iframe.id = 'color-widget';
-        iframe.src = 'https://colorlog.in/?sdk=1';
+        iframe.src = 'https://colorlog.in/' + (block ? '?sdk=1' : '');
         iframe.allow = 'storage-access';
         if (block) iframe.className = 'color-sdk-identity';
 
@@ -360,7 +360,7 @@ window.Color = {
         const colorLink = document.createElement('button');
         colorLink.type = 'button'; colorLink.className = 'color-sdk-color-link'; colorLink.title = visitorColor.toUpperCase();
         colorLink.addEventListener('click', () => window.open('https://colorlog.in/#' + visitorColor.replace('#', ''), '_blank', 'noopener'));
-        document.body.appendChild(colorLink);
+        if (block) document.body.appendChild(colorLink);
 
         const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
         const showBlockStatus = message => {
@@ -663,7 +663,7 @@ window.Color = {
                 // Determine user color (visitor)
                 visitorColor = /^#[0-9a-f]{6}$/i.test(detectedColor) ? detectedColor.toLowerCase() : '#ffffff';
                 if (colorSwatch) { colorSwatch.style.backgroundColor = visitorColor; colorSwatch.title = visitorColor.toUpperCase(); }
-                colorLink.style.backgroundColor = visitorColor; colorLink.title = visitorColor.toUpperCase();
+                if (block) { colorLink.style.backgroundColor = visitorColor; colorLink.title = visitorColor.toUpperCase(); }
                 iframe.contentWindow?.postMessage({ type: 'color-sdk-get-receipts', color: visitorColor, ownerColor: '#' + ownerColor }, 'https://colorlog.in');
                 emit('color-change', { color: visitorColor });
 
