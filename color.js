@@ -550,7 +550,7 @@ window.Color = {
             form.append(actions, status);
             form.addEventListener('submit', event => {
                 event.preventDefault();
-                if (!ownerPeer || !sendForm) { status.textContent = 'FORM OWNER IS OFFLINE'; return; }
+                if (!ownerPeer || !sendSdk) { status.textContent = 'FORM OWNER IS OFFLINE'; return; }
                 const values = {};
                 schema.filter(field => field?.name && !['page', 'button', 'output', 'file'].includes(field.type)).forEach(field => {
                     const controls = [...form.elements].filter(input => input.name === field.name);
@@ -562,7 +562,7 @@ window.Color = {
                 saveReceipts(payload, [{ id: requestId, requestId, submittedAt: Date.now(), pending: true, origin: location.origin, values }]);
                 status.textContent = 'SENDING...';
                 submit.disabled = true;
-                sendForm({ type: 'SUBMIT', requestId, blockInstanceId: payload.instanceId, visitorColor, origin: location.origin, values }, ownerPeer);
+                sendSdk({ type: 'SUBMIT_FORM', requestId, blockInstanceId: payload.instanceId, schemaHash: activeSchemaHash, visitorColor, origin: location.origin, values }, ownerPeer);
                 clearTimeout(submissionTimer);
                 submissionTimer = setTimeout(() => {
                     if (form.dataset.requestId !== requestId) return;
