@@ -378,7 +378,7 @@ window.Color = {
             receipts.forEach(receipt => {
                 const details = document.createElement('details'), summary = document.createElement('summary');
                 details.className = 'color-sdk-receipt';
-                summary.textContent = (receipt.pending ? 'SENDING COPY · ' : 'RECEIPT · ') + new Date(receipt.submittedAt || Date.now()).toLocaleString();
+                summary.textContent = (receipt.pending ? 'SENDING COPY · ' : 'COPY SENT · ') + new Date(receipt.submittedAt || Date.now()).toLocaleString();
                 details.appendChild(summary);
                 (receipt.fields || []).forEach(field => {
                     const row = document.createElement('div'), name = document.createElement('b'), value = document.createElement('span');
@@ -397,7 +397,7 @@ window.Color = {
                 const existing = receipts.findIndex(item => item.id === receipt.id || item.requestId === receipt.requestId);
                 if (existing >= 0) receipts.splice(existing, 1);
                 receipts.unshift(receipt);
-                iframe.contentWindow?.postMessage({ type: 'color-sdk-receipt', color: visitorColor, ownerColor: '#' + ownerColor, blockInstanceId: payload.instanceId, receipt }, 'https://colorlog.in');
+                if (!receipt.pending) iframe.contentWindow?.postMessage({ type: 'color-sdk-receipt', color: visitorColor, ownerColor: '#' + ownerColor, blockInstanceId: payload.instanceId, receipt }, 'https://colorlog.in');
             }
             iframeReceipts = receipts.slice(0, 100);
             renderReceipts(payload);
@@ -549,7 +549,7 @@ window.Color = {
             form.append(actions, status);
             form.addEventListener('submit', event => {
                 event.preventDefault();
-                if (!ownerPeer || !sendForm) { status.textContent = 'FORM OWNER IS OFFLINE'; return; }
+                if (!ownerPeer || !sendSdk) { status.textContent = 'FORM OWNER IS OFFLINE'; return; }
                 const values = {};
                 schema.filter(field => field?.name && !['page', 'button', 'output', 'file'].includes(field.type)).forEach(field => {
                     const controls = [...form.elements].filter(input => input.name === field.name);
@@ -561,7 +561,7 @@ window.Color = {
                 saveReceipts(payload, [{ id: requestId, requestId, submittedAt: Date.now(), pending: true, origin: location.origin, values }]);
                 status.textContent = 'SENDING...';
                 submit.disabled = true;
-                sendForm({ type: 'SUBMIT', requestId, blockInstanceId: payload.instanceId, visitorColor, origin: location.origin, values }, ownerPeer);
+                sendSdk({ type: 'SUBMIT_FORM', requestId, blockInstanceId: payload.instanceId, schemaHash: activeSchemaHash, visitorColor, origin: location.origin, values }, ownerPeer);
                 clearTimeout(submissionTimer);
                 submissionTimer = setTimeout(() => {
                     if (form.dataset.requestId !== requestId) return;
