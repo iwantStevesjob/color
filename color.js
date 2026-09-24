@@ -302,8 +302,9 @@ window.Color = {
         // Inject Iframe
         const iframe = document.createElement('iframe');
         iframe.id = 'color-widget';
-        iframe.src = 'https://colorlog.in/' + (block ? '?sdk=1' : '');
+        iframe.src = 'https://colorlog.in/';
         iframe.allow = 'storage-access';
+        iframe.addEventListener('load', () => iframe.contentWindow?.postMessage('getSphereColor', 'https://colorlog.in'));
         if (block) iframe.className = 'color-sdk-identity';
 
         let container = document.body;
@@ -680,7 +681,6 @@ window.Color = {
 
         if (block) { showBlockStatus('CONNECTING TO COLOR…'); blockOfflineTimer = setTimeout(() => { if (!activeBlock && !ownerPeer) showBlockStatus('COLOR OFFLINE'); }, 15000); }
         container.appendChild(iframe);
-        connect();
 
         // Return Proxy Interface
         return {
