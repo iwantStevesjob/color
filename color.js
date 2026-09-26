@@ -14,7 +14,7 @@ window.Color = {
         // Store Owner Room ID
         const ownerColor = String(color).replace('#', '').toLowerCase();
         if (!/^[0-9a-f]{6}$/.test(ownerColor)) throw new Error('Color.init requires a six-digit target color.');
-        if (block && !/^form(?:-[1-9]\d*)?$/.test(String(block).toLowerCase())) throw new Error('Color.init block must be form, form-2, form-3, and so on.');
+        if (block && !/^(?:page|[a-z0-9][a-z0-9-]*)(?:-[1-9]\d*)?$/.test(String(block).toLowerCase())) throw new Error('Color.init block must be page or an installed block selector.');
         if (typeof ownerKey === 'string' && ownerKey.trim() && !/^(?:sha256[:-])?[0-9a-f]{64}$/i.test(ownerKey.trim())) throw new Error('Color.init ownerKey must be a SHA-256 fingerprint.');
         if (ownerKey && typeof ownerKey === 'object' && (ownerKey.kty !== 'EC' || ownerKey.crv !== 'P-256' || !ownerKey.x || !ownerKey.y)) throw new Error('Color.init ownerKey must be a P-256 public JWK.');
         const storeRoomId = "color-" + ownerColor;
@@ -270,439 +270,248 @@ window.Color = {
             };
         })();
 
-        // SDK State
-        let room = null;
-        let send = null;
-        let get = null;
-        let pendingGetCallbacks = [];
-        let sendSdk = null;
-        let sendIdentity = null;
-        let sendCursor = null;
-        let sendRequest = null;
-        let sendForm = null;
-        let visitorColor = '#ffffff';
-        let ownerPeer = null;
-        let verifiedOwnerKey = null;
-        let verifiedOwnerFingerprint = null;
-        let activeBlock = null;
-        let activeSchemaHash = null;
-        let colorSwatch = null;
-        let pendingSubmission = null;
-        let iframeReceipts = [];
-        let blockRetryTimer = null;
-        let blockOfflineTimer = null;
-        let submissionTimer = null;
-        let normalSyncStarted = false;
-        let visitorPublicKey = null;
-        let visitorProof = null;
-        const syncedFragments = new Map();
-        const uuid = () => crypto.randomUUID?.() || '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
-        const blockRequestId = uuid();
-
-        // Inject Iframe
-        const iframe = document.createElement('iframe');
-        iframe.id = 'color-widget';
-        iframe.src = 'https://colorlog.in/';
-        iframe.allow = 'storage-access';
-        iframe.addEventListener('load', () => iframe.contentWindow?.postMessage('getSphereColor', 'https://colorlog.in'));
-        if (block) iframe.className = 'color-sdk-identity';
-
-        let container = document.body;
-        if (targetDiv) {
-            const el = document.getElementById(targetDiv);
-            if (el) container = el;
-        }
-
-        // Full Screen Styles
+        // Generic SDK bridge. Block UI and behavior arrive from the owner as signed block documents.
+        let room = null
+        let send = null
+        let get = null
+        let sendSdk = null
+        let sendIdentity = null
+        let visitorColor = '#ffffff'
+        let ownerPeer = null
+        let verifiedOwnerKey = null
+        let verifiedOwnerFingerprint = null
+        let activeBlock = null
+        let liveBlockLoaded = false
+        let snapshot = null
+        let retryTimer = null
+        let offlineTimer = null
+        let visitorPublicKey = null
+        let visitorProof = null
+        const storageRequests = new Map()
+        const pendingGetCallbacks = []
+        const uuid = () => crypto.randomUUID?.() || '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, char => (char ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> char / 4).toString(16))
+        const blockRequestId = uuid()
+        const iframe = document.createElement('iframe')
+        iframe.id = 'color-widget'
+        iframe.src = 'https://colorlog.in/'
+        iframe.allow = 'storage-access'
+        iframe.addEventListener('load', () => iframe.contentWindow?.postMessage('getSphereColor', 'https://colorlog.in'))
+        if (block) iframe.className = 'color-sdk-identity'
+        let container = targetDiv ? document.getElementById(targetDiv) || document.body : document.body
         if (!document.getElementById('color-widget-styles')) {
-            const style = document.createElement('style');
-            style.id = 'color-widget-styles';
-            style.textContent = `
-                #color-widget {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100vw;
-                    height: 100vh;
-                    border: none;
-                    z-index: 9999;
-                    background: transparent;
-                }
-                .hidden { display: none !important; }
-                #color-widget.color-sdk-identity {
-                    width: 1px;
-                    height: 1px;
-                    opacity: 0;
-                    pointer-events: none;
-                }
-                .color-sdk-notice { padding: 16px; border-radius: 10px; background: #eee; color: #555; font: 800 13px/1.4 system-ui, sans-serif; text-align: center; }
-                .color-sdk-form { box-sizing: border-box; width: 100%; max-width: 680px; padding: 20px; border-radius: 12px; background: #f5f5f5; color: #111; font: 14px/1.4 system-ui, sans-serif; }
-                .color-sdk-form h2 { margin: 0 0 16px; }
-                .color-sdk-form form, .color-sdk-field { display: grid; gap: 7px; }
-                .color-sdk-form form { gap: 14px; }
-                .color-sdk-field > span { font-size: 12px; font-weight: 800; }
-                .color-sdk-field input:not([type='radio']):not([type='checkbox']), .color-sdk-field textarea, .color-sdk-field select { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #bbb; border-radius: 6px; background: #fff; color: #111; font: inherit; }
-                .color-sdk-field textarea { min-height: 110px; resize: vertical; }
-                .color-sdk-options { display: grid; gap: 7px; }
-                .color-sdk-options label { display: flex; align-items: center; gap: 7px; }
-                .color-sdk-actions { display: flex; align-items: center; gap: 9px; margin-top: 4px; }
-                .color-sdk-actions button { border: 0; border-radius: 6px; padding: 10px 14px; background: #111; color: #fff; font: 800 13px system-ui, sans-serif; cursor: pointer; }
-                .color-sdk-actions button:disabled { opacity: .55; cursor: default; }
-                .color-sdk-swatch { width: 18px; height: 18px; box-sizing: border-box; border: 1px solid #aaa; border-radius: 2px; }
-                .color-sdk-status { min-height: 18px; font-size: 12px; font-weight: 800; text-align: center; }
-                .color-sdk-receipts { display: grid; gap: 8px; margin-top: 16px; }
-                .color-sdk-receipt { padding: 11px 12px; border-radius: 7px; background: #fff; }
-                .color-sdk-receipt summary { cursor: pointer; font-size: 12px; font-weight: 800; }
-                .color-sdk-receipt-row { display: grid; grid-template-columns: minmax(90px, .4fr) 1fr; gap: 12px; padding-top: 8px; font-size: 12px; }
-                .color-sdk-color-link { position: fixed; top: 12px; left: 12px; z-index: 10000; width: 18px; height: 18px; box-sizing: border-box; padding: 0; border: 1px solid #aaa; border-radius: 2px; background: #fff; cursor: pointer; }
-            `;
-            document.head.appendChild(style);
+            const style = document.createElement('style')
+            style.id = 'color-widget-styles'
+            style.textContent = '#color-widget{position:fixed;inset:0;width:100vw;height:100vh;border:0;z-index:9999;background:transparent}#color-widget.color-sdk-identity{width:1px;height:1px;opacity:0;pointer-events:none}.color-sdk-notice{padding:16px;border-radius:10px;background:#eee;color:#555;font:800 13px/1.4 system-ui,sans-serif;text-align:center}.color-sdk-snapshot{display:block;width:100%;min-height:600px;border:0;background:transparent}.color-sdk-color-link{position:fixed;top:12px;left:12px;z-index:10000;width:18px;height:18px;padding:0;border:1px solid #aaa;border-radius:2px;background:#fff;cursor:pointer}'
+            document.head.appendChild(style)
         }
-        const colorLink = document.createElement('button');
-        colorLink.type = 'button'; colorLink.className = 'color-sdk-color-link'; colorLink.title = visitorColor.toUpperCase();
-        colorLink.addEventListener('click', () => window.open('https://colorlog.in/#' + visitorColor.replace('#', ''), '_blank', 'noopener'));
-        if (block) document.body.appendChild(colorLink);
-
-        const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
-        const showBlockStatus = message => {
-            if (!block) return;
-            let notice = container.querySelector('.color-sdk-notice');
-            if (!notice) { notice = document.createElement('div'); notice.className = 'color-sdk-notice'; container.prepend(notice); }
-            notice.textContent = message;
-        };
-        const renderReceipts = payload => {
-            let root = container.querySelector('.color-sdk-form .color-sdk-receipts') || container.querySelector('.color-sdk-receipts-standalone');
-            if (!root && iframeReceipts.length) { root = document.createElement('div'); root.className = 'color-sdk-receipts color-sdk-receipts-standalone'; container.insertBefore(root, iframe); }
-            if (!root) return;
-            const receipts = [...iframeReceipts];
-            root.replaceChildren();
-            receipts.forEach(receipt => {
-                const details = document.createElement('details'), summary = document.createElement('summary');
-                details.className = 'color-sdk-receipt';
-                summary.textContent = (receipt.pending ? 'SENDING COPY · ' : 'COPY SENT · ') + new Date(receipt.submittedAt || Date.now()).toLocaleString();
-                details.appendChild(summary);
-                (receipt.fields || []).forEach(field => {
-                    const row = document.createElement('div'), name = document.createElement('b'), value = document.createElement('span');
-                    row.className = 'color-sdk-receipt-row'; name.textContent = field.label || field.name || 'FIELD'; value.textContent = Array.isArray(field.value) ? field.value.join(', ') : String(field.value ?? '');
-                    row.append(name, value); details.appendChild(row);
-                });
-                root.appendChild(details);
-            });
-        };
-        const saveReceipts = (payload, rows) => {
-            const receipts = [...iframeReceipts];
-            const schema = (() => { try { return JSON.parse(payload.data?.schema || '[]'); } catch (_) { return []; } })();
-            for (const row of rows) {
-                if (!row?.id) continue;
-                const receipt = { id: row.id, requestId: row.requestId || row.id, submittedAt: row.submittedAt || Date.now(), readAt: row.readAt || null, pending: !!row.pending, origin: row.origin || location.origin, fields: schema.filter(field => field?.name && !['page', 'button', 'output', 'hidden'].includes(field.type)).map(field => ({ name: field.name, label: field.label || field.name, value: row.values?.[field.name] ?? '' })) };
-                const existing = receipts.findIndex(item => item.id === receipt.id || item.requestId === receipt.requestId);
-                if (existing >= 0) receipts.splice(existing, 1);
-                receipts.unshift(receipt);
-                iframe.contentWindow?.postMessage({ type: 'color-sdk-receipt', color: visitorColor, ownerColor: '#' + ownerColor, blockInstanceId: payload.instanceId, receipt }, 'https://colorlog.in');
+        const colorLink = document.createElement('button')
+        colorLink.type = 'button'
+        colorLink.className = 'color-sdk-color-link'
+        colorLink.addEventListener('click', () => window.open('https://colorlog.in/#' + visitorColor.slice(1), '_blank', 'noopener'))
+        if (block) document.body.appendChild(colorLink)
+        const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }))
+        const showStatus = message => {
+            if (!block) return
+            let notice = container.querySelector('.color-sdk-notice')
+            if (!notice) {
+                notice = document.createElement('div')
+                notice.className = 'color-sdk-notice'
+                container.prepend(notice)
             }
-            iframeReceipts = receipts.slice(0, 100);
-            renderReceipts(payload);
-        };
-        const keyId = key => JSON.stringify([key?.kty, key?.crv, key?.x, key?.y]);
+            notice.textContent = message
+        }
+        const storageRequest = (action, records) => new Promise((resolve, reject) => {
+            const id = uuid()
+            storageRequests.set(id, { resolve, reject })
+            iframe.contentWindow?.postMessage({ type: 'color-sdk-record-request', id, action, color: visitorColor, ownerColor: '#' + ownerColor, blockInstanceId: 'sdk-cache', collection: 'documents', records }, 'https://colorlog.in')
+            setTimeout(() => { if (storageRequests.delete(id)) reject(new Error('Color storage unavailable.')) }, 10000)
+        })
+        const keyId = key => JSON.stringify([key?.kty, key?.crv, key?.x, key?.y])
         const digest = async value => {
-            const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value))));
-            return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
-        };
-        const fingerprint = key => digest(keyId(key));
+            const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value))))
+            return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+        }
+        const fingerprint = key => digest(keyId(key))
         const verifyWithKey = async (publicKey, signature, content) => {
-            const key = await crypto.subtle.importKey('jwk', publicKey, { name: 'ECDSA', namedCurve: publicKey.crv || 'P-256' }, false, ['verify']);
-            return crypto.subtle.verify({ name: 'ECDSA', hash: publicKey.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, key, Uint8Array.from(atob(signature), char => char.charCodeAt(0)), new TextEncoder().encode(content));
-        };
-        const trustOwnerIdentity = async (publicKey, peerId) => {
-            const receivedKeyId = keyId(publicKey);
-            const receivedFingerprint = await fingerprint(publicKey);
-            if (ownerKey && typeof ownerKey === 'object' && keyId(ownerKey) !== receivedKeyId) throw new Error('The response is not signed by the configured Color owner.');
-            if (typeof ownerKey === 'string' && ownerKey.trim() && ownerKey.trim().replace(/^sha256[:-]/i, '').toLowerCase() !== receivedFingerprint) throw new Error('The response is not signed by the configured Color owner.');
-            const firstVerification = verifiedOwnerFingerprint !== receivedFingerprint;
-            verifiedOwnerKey = publicKey;
-            verifiedOwnerFingerprint = receivedFingerprint;
-            ownerPeer = peerId;
-            if (firstVerification) {
-                const detail = { color: '#' + ownerColor, publicKey, fingerprint: receivedFingerprint, configured: !!ownerKey };
-                emit('color-owner-verified', detail);
-                if (typeof onOwner === 'function') onOwner(detail);
+            const key = await crypto.subtle.importKey('jwk', publicKey, { name: 'ECDSA', namedCurve: publicKey.crv || 'P-256' }, false, ['verify'])
+            return crypto.subtle.verify({ name: 'ECDSA', hash: publicKey.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, key, Uint8Array.from(atob(signature), char => char.charCodeAt(0)), new TextEncoder().encode(content))
+        }
+        const trustOwner = async (publicKey, peerId) => {
+            const receivedFingerprint = await fingerprint(publicKey)
+            if (ownerKey && typeof ownerKey === 'object' && keyId(ownerKey) !== keyId(publicKey)) throw new Error('The response is not signed by the configured Color owner.')
+            if (typeof ownerKey === 'string' && ownerKey.trim().replace(/^sha256[:-]/i, '').toLowerCase() !== receivedFingerprint) throw new Error('The response is not signed by the configured Color owner.')
+            const first = verifiedOwnerFingerprint !== receivedFingerprint
+            verifiedOwnerKey = publicKey
+            verifiedOwnerFingerprint = receivedFingerprint
+            if (peerId) ownerPeer = peerId
+            if (first) {
+                const detail = { color: '#' + ownerColor, publicKey, fingerprint: receivedFingerprint, configured: !!ownerKey }
+                emit('color-owner-verified', detail)
+                if (typeof onOwner === 'function') onOwner(detail)
             }
-            return true;
-        };
-        const verify = async message => {
+        }
+        const verify = async (message, peerId) => {
             try {
-                await trustOwnerIdentity(message.publicKey, ownerPeer);
-                const ok = await verifyWithKey(message.publicKey, message.signature, JSON.stringify(message.payload));
-                if (!ok) throw new Error('The Color signature is invalid.');
-                return true;
+                await trustOwner(message.publicKey, peerId)
+                if (!await verifyWithKey(message.publicKey, message.signature, JSON.stringify(message.payload))) throw new Error('The Color signature is invalid.')
+                return true
             } catch (error) {
-                showBlockStatus('COLOR OFFLINE');
-                emit('color-error', { error: error.message });
-                return false;
+                showStatus('COLOR OFFLINE')
+                emit('color-error', { error: error.message })
+                return false
             }
-        };
+        }
         const mineProof = async () => {
-            const hourStamp = Math.floor(Date.now() / 3600000);
+            const hourStamp = Math.floor(Date.now() / 3600000)
             for (let nonce = 1; ; nonce++) {
-                if ((await digest(ownerColor + hourStamp + nonce)).startsWith('0000')) return hourStamp + '_' + nonce;
-                if (nonce % 1000 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+                if ((await digest(ownerColor + hourStamp + nonce)).startsWith('0000')) return hourStamp + '_' + nonce
+                if (nonce % 1000 === 0) await new Promise(resolve => setTimeout(resolve, 0))
             }
-        };
+        }
         const sendVisitorIdentity = async peerId => {
             if (!visitorPublicKey) {
-                const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
-                visitorPublicKey = await crypto.subtle.exportKey('jwk', pair.publicKey);
+                const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+                visitorPublicKey = await crypto.subtle.exportKey('jwk', pair.publicKey)
             }
-            showBlockStatus('VERIFYING COLOR…');
-            sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId);
-            visitorProof ||= await mineProof();
-            sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId);
-        };
-        const startNormalSync = peerId => {
-            if (normalSyncStarted) return;
-            normalSyncStarted = true;
-            clearInterval(blockRetryTimer);
-            sendVisitorIdentity(peerId).catch(error => { showBlockStatus('COLOR OFFLINE'); emit('color-error', { error: error.message }); });
-        };
-        const renderSyncedForm = () => {
-            const forms = [...syncedFragments.entries()].sort((a, b) => a[0] - b[0]).map(([, item]) => {
-                try { const payload = JSON.parse(item.content || ''); return payload?.type === 'block' && payload.blockId === 'form' ? payload : null; } catch (_) { return null; }
-            }).filter(Boolean);
-            const match = /^form(?:-(\d+))?$/.exec(String(block || 'form').toLowerCase());
-            const payload = forms[Math.max(0, Number(match?.[1] || 1) - 1)];
-            if (!payload) return;
-            activeBlock = payload;
-            digest(payload.data?.schema || '[]').then(hash => { activeSchemaHash = hash; renderForm(payload); });
-        };
-        const renderForm = payload => {
-            let schema = [];
-            try { schema = JSON.parse(payload.data?.schema || '[]'); } catch (_) { }
-            clearTimeout(blockOfflineTimer);
-            container.querySelector('.color-sdk-notice')?.remove();
-            container.querySelectorAll('.color-sdk-form').forEach(el => el.remove());
-            const wrapper = document.createElement('section');
-            wrapper.className = 'color-sdk-form';
-            const title = document.createElement('h2');
-            title.textContent = payload.data?.formTitle || 'FORM';
-            const form = document.createElement('form');
-            const status = document.createElement('div');
-            status.className = 'color-sdk-status';
-            const receipts = document.createElement('div');
-            receipts.className = 'color-sdk-receipts';
-            const addControl = (field, index) => {
-                if (!field?.type || ['page', 'button', 'output'].includes(field.type)) return;
-                const label = document.createElement('label');
-                label.className = 'color-sdk-field';
-                const caption = document.createElement('span');
-                caption.textContent = field.label || field.name || 'FIELD';
-                label.appendChild(caption);
-                let input, datalist;
-                if (field.type === 'textarea') input = document.createElement('textarea');
-                else if (field.type === 'select') {
-                    input = document.createElement('select');
-                    input.appendChild(new Option('SELECT', ''));
-                    (field.options || []).forEach(option => input.appendChild(new Option(String(option), String(option))));
-                } else if (field.type === 'datalist') {
-                    input = document.createElement('input');
-                    datalist = document.createElement('datalist');
-                    datalist.id = 'color-sdk-list-' + index;
-                    input.setAttribute('list', datalist.id);
-                    (field.options || []).forEach(option => datalist.appendChild(new Option(String(option), String(option))));
-                } else if (field.type === 'radio' || field.type === 'checkbox') {
-                    const choices = document.createElement('div');
-                    choices.className = 'color-sdk-options';
-                    (field.options || []).forEach((option, optionIndex) => {
-                        const choice = document.createElement('label');
-                        input = document.createElement('input');
-                        input.type = field.type;
-                        input.name = field.name || 'field_' + index;
-                        input.value = String(option);
-                        input.required = !!field.required && optionIndex === 0;
-                        choice.append(input, document.createTextNode(String(option)));
-                        choices.appendChild(choice);
-                    });
-                    label.appendChild(choices);
-                    form.appendChild(label);
-                    return;
-                } else {
-                    input = document.createElement('input');
-                    input.type = field.type === 'file' ? 'file' : (field.type || 'text');
-                    if (field.type === 'file') input.disabled = true;
-                }
-                input.name = field.name || 'field_' + index;
-                input.placeholder = field.placeholder || '';
-                input.required = !!field.required;
-                label.appendChild(input);
-                if (datalist) label.appendChild(datalist);
-                form.appendChild(label);
-            };
-            schema.forEach(addControl);
-            const actions = document.createElement('div');
-            actions.className = 'color-sdk-actions';
-            const submit = document.createElement('button');
-            submit.type = 'submit';
-            submit.textContent = payload.data?.formAction || 'SUBMIT';
-            colorSwatch = document.createElement('span');
-            colorSwatch.className = 'color-sdk-swatch';
-            colorSwatch.title = visitorColor.toUpperCase();
-            colorSwatch.style.backgroundColor = visitorColor;
-            actions.append(submit, colorSwatch);
-            form.append(actions, status);
-            form.addEventListener('submit', event => {
-                event.preventDefault();
-                if (!ownerPeer || !sendSdk) { status.textContent = 'FORM OWNER IS OFFLINE'; return; }
-                const values = {};
-                schema.filter(field => field?.name && !['page', 'button', 'output', 'file'].includes(field.type)).forEach(field => {
-                    const controls = [...form.elements].filter(input => input.name === field.name);
-                    values[field.name] = field.type === 'checkbox' ? controls.filter(input => input.checked).map(input => input.value) : field.type === 'radio' ? controls.find(input => input.checked)?.value || '' : controls[0]?.value || '';
-                });
-                const requestId = uuid();
-                form.dataset.requestId = requestId;
-                pendingSubmission = { requestId, values };
-                saveReceipts(payload, [{ id: requestId, requestId, submittedAt: Date.now(), pending: true, origin: location.origin, values }]);
-                status.textContent = 'SENDING...';
-                submit.disabled = true;
-                sendSdk({ type: 'SUBMIT_FORM', requestId, blockInstanceId: payload.instanceId, schemaHash: activeSchemaHash, visitorColor, origin: location.origin, values }, ownerPeer);
-                clearTimeout(submissionTimer);
-                submissionTimer = setTimeout(() => {
-                    if (form.dataset.requestId !== requestId) return;
-                    submit.disabled = false;
-                    status.textContent = 'FORM OWNER IS OFFLINE';
-                }, 15000);
-            });
-            wrapper.append(title, form, receipts);
-            container.querySelector('.color-sdk-receipts-standalone')?.remove();
-            container.insertBefore(wrapper, iframe);
-            renderReceipts(payload);
-            emit('color-block-ready', { block: payload, verified: true });
-        };
+            sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
+            visitorProof ||= await mineProof()
+            sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
+        }
+        const renderSnapshot = documentHtml => {
+            clearTimeout(offlineTimer)
+            container.querySelector('.color-sdk-notice')?.remove()
+            snapshot?.remove()
+            snapshot = document.createElement('iframe')
+            snapshot.className = 'color-sdk-snapshot'
+            snapshot.title = 'Color content'
+            snapshot.sandbox = 'allow-scripts allow-forms allow-popups allow-modals allow-downloads'
+            snapshot.srcdoc = documentHtml
+            container.insertBefore(snapshot, iframe)
+        }
+        const cacheBlock = async message => {
+            const records = await storageRequest('read')
+            const next = (Array.isArray(records) ? records : []).filter(item => item?.selector !== String(block).toLowerCase())
+            next.unshift({ selector: String(block).toLowerCase(), message, savedAt: Date.now() })
+            await storageRequest('write', next.slice(0, 20))
+        }
+        const loadCachedBlock = async () => {
+            const records = await storageRequest('read'), cached = (Array.isArray(records) ? records : []).find(item => item?.selector === String(block).toLowerCase())
+            const message = cached?.message, payload = message?.payload
+            if (!message || payload?.kind !== 'block' || !payload.document || !await verify(message, null) || await digest(payload.document) !== payload.documentHash) return
+            activeBlock = payload.block
+            renderSnapshot(payload.document)
+            snapshot?.addEventListener('load', () => snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*'), { once: true })
+            emit('color-block-ready', { block: payload.block, verified: true, cached: true })
+        }
+        const requestBlock = peerId => sendSdk?.({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor }, peerId)
         const connect = () => {
-            if (room) return;
-            room = Spectrum.joinRoom({ appId: planet }, storeRoomId);
-            [send, get] = room.makeAction(action);
-            pendingGetCallbacks.forEach(cb => get(cb));
-            pendingGetCallbacks = [];
-            [sendIdentity] = room.makeAction('identity');
-            [sendCursor] = room.makeAction('sync-cursor');
-            [sendRequest] = room.makeAction('req');
-            [sendForm] = room.makeAction('form_ops');
-            room.makeAction('identity')[1](async (data, peerId) => {
-                if (!data?.pubKey || String(data.color || '').replace('#', '').toLowerCase() !== ownerColor) return;
-                try { await trustOwnerIdentity(data.pubKey, peerId); }
-                catch (error) { showBlockStatus('COLOR OFFLINE'); emit('color-error', { error: error.message }); }
-            });
-            room.makeAction('sync-cursor')[1]((data, peerId) => {
-                if (!normalSyncStarted || peerId !== ownerPeer || data?.type !== 'response' || !data.approved || typeof data.cursor !== 'number') return;
-                const keys = [];
-                for (let index = data.cursor - 50; index <= data.cursor + 50; index++) keys.push(ownerColor + index);
-                sendRequest(keys, peerId);
-            });
-            room.makeAction('fragment')[1](async (fragments, peerId) => {
-                if (!normalSyncStarted || peerId !== ownerPeer || !verifiedOwnerKey || !fragments) return;
-                for (const [index, item] of Object.entries(fragments)) {
-                    const content = String(item?.content || '');
-                    const signed = index + ':' + item?.updated + ':' + item?.owner + ':' + content;
-                    if (item?.signature && await verifyWithKey(verifiedOwnerKey, item.signature, signed)) syncedFragments.set(Number(index), item);
-                }
-                renderSyncedForm();
-            });
-            room.makeAction('form_ops')[1]((message, peerId) => {
-                const form = container.querySelector('.color-sdk-form form');
-                if (message?.type !== 'FORM_SAVED' || peerId !== ownerPeer || form?.dataset.requestId !== message.requestId) return;
-                clearTimeout(submissionTimer);
-                form.querySelector('button[type="submit"]').disabled = false;
-                form.querySelector('.color-sdk-status').textContent = message.ok ? 'FORM RECEIVED' : (message.error || 'NOT SAVED');
-                if (message.ok) { saveReceipts(activeBlock, [{ id: message.submissionId, requestId: message.requestId, submittedAt: message.submittedAt, origin: location.origin, values: pendingSubmission?.values || {} }]); form.reset(); }
-            });
-            room.onPeerJoin(peerId => emit('color-connected', { peerId, color: '#' + ownerColor }));
-            room.onPeerLeave(peerId => emit('color-disconnected', { peerId, color: '#' + ownerColor }));
-            room.onPeerError((peerId, error) => emit('color-error', { peerId, error: error?.message || 'Color connection failed.' }));
+            if (room) return
+            room = Spectrum.joinRoom({ appId: planet }, storeRoomId)
+            ;[send, get] = room.makeAction(action)
+            pendingGetCallbacks.splice(0).forEach(callback => get(callback))
+            ;[sendIdentity] = room.makeAction('identity')
+            room.makeAction('identity')[1]((data, peerId) => {
+                if (!data?.pubKey || String(data.color || '').replace('#', '').toLowerCase() !== ownerColor) return
+                trustOwner(data.pubKey, peerId).catch(error => emit('color-error', { error: error.message }))
+            })
             if (block) {
-                const sdk = room.makeAction('sdk_ops');
-                sendSdk = sdk[0];
-                sdk[1](async (message, peerId) => {
-                    if (message?.type !== 'SDK_RESPONSE') return;
-                    const isRequestedBlock = message.payload?.kind === 'block' && message.payload.requestId === blockRequestId && message.payload.origin === location.origin && message.payload.ownerColor?.replace('#', '').toLowerCase() === ownerColor;
-                    const isPendingSource = message.payload?.kind === 'source' && message.payload.requestId === blockRequestId && message.payload.origin === location.origin && message.payload.ownerColor?.replace('#', '').toLowerCase() === ownerColor;
-                    const form = container.querySelector('.color-sdk-form form');
-                    const isRequestedSubmission = message.payload?.kind === 'submission' && message.payload.origin === location.origin && form?.dataset.requestId === message.payload.requestId && peerId === ownerPeer;
-                    if ((!isRequestedBlock && !isPendingSource && !isRequestedSubmission) || !await verify(message)) return;
-                    if (isPendingSource) {
-                        ownerPeer = peerId;
-                        clearTimeout(blockOfflineTimer);
-                        showBlockStatus('WAITING FOR OWNER CONFIRMATION');
-                        emit('color-source-pending', { origin: location.origin, color: '#' + ownerColor });
-                        return;
+                ;[sendSdk] = room.makeAction('sdk_ops')
+                room.makeAction('sdk_ops')[1](async (message, peerId) => {
+                    if (message?.type !== 'SDK_RESPONSE' || !await verify(message, peerId)) return
+                    const payload = message.payload || {}
+                    if (payload.origin !== location.origin) return
+                    if (payload.kind === 'source' && payload.requestId === blockRequestId) {
+                        showStatus('WAITING FOR OWNER CONFIRMATION')
+                        emit('color-source-pending', { origin: location.origin, color: '#' + ownerColor })
+                    } else if (payload.kind === 'block' && payload.requestId === blockRequestId) {
+                        if (!payload.block) return showStatus(payload.error || 'BLOCK NOT FOUND')
+                        if (!payload.document || await digest(payload.document) !== payload.documentHash) return emit('color-error', { error: 'The signed block document does not match its fingerprint.' })
+                        clearInterval(retryTimer)
+                        liveBlockLoaded = true
+                        activeBlock = payload.block
+                        renderSnapshot(payload.document)
+                        cacheBlock(message).catch(() => {})
+                        emit('color-block-ready', { block: payload.block, verified: true })
+                    } else if (payload.kind === 'action' && (activeBlock?.blockId === 'page' || payload.blockInstanceId === activeBlock?.instanceId) && payload.namespace) {
+                        snapshot?.contentWindow?.postMessage({ type: 'color-sdk-block-message', namespace: payload.namespace, message: payload.message }, '*')
                     }
-                    if (isRequestedBlock) {
-                        ownerPeer = peerId;
-                        if (message.payload.block && await digest(message.payload.block.data?.schema || '[]') !== message.payload.schemaHash) return emit('color-error', { error: 'The signed form schema does not match its fingerprint.' });
-                        if (message.payload.block) { clearInterval(blockRetryTimer); activeBlock = message.payload.block; activeSchemaHash = message.payload.schemaHash; renderForm(activeBlock); startNormalSync(peerId); }
-                        else { showBlockStatus(message.payload.error || 'FORM NOT FOUND'); emit('color-error', { error: message.payload.error || 'Form not found.' }); }
-                    } else if (isRequestedSubmission) {
-                        clearTimeout(submissionTimer);
-                        form.querySelector('button[type="submit"]').disabled = false;
-                        form.querySelector('.color-sdk-status').textContent = message.payload.ok ? 'FORM RECEIVED' : (message.payload.error || 'NOT SAVED');
-                        if (message.payload.ok) { saveReceipts(activeBlock, [{ id: message.payload.submissionId, requestId: message.payload.requestId, submittedAt: message.payload.submittedAt, origin: location.origin, values: pendingSubmission?.values || {} }]); form.reset(); }
+                })
+            }
+            room.onPeerJoin(peerId => {
+                emit('color-connected', { peerId, color: '#' + ownerColor })
+                sendVisitorIdentity(peerId).then(() => block && requestBlock(peerId)).catch(error => emit('color-error', { error: error.message }))
+            })
+            room.onPeerLeave(peerId => {
+                emit('color-disconnected', { peerId, color: '#' + ownerColor })
+                if (peerId === ownerPeer) {
+                    ownerPeer = null
+                    snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*')
+                    showStatus('COLOR OFFLINE')
+                }
+            })
+            room.onPeerError((peerId, error) => emit('color-error', { peerId, error: error?.message || 'Color connection failed.' }))
+            if (block) retryTimer = setInterval(() => { if (!liveBlockLoaded) requestBlock() }, 10000)
+        }
+        const handleMessage = event => {
+            if (event.source === iframe.contentWindow && event.origin === 'https://colorlog.in') {
+                if (event.data?.type === 'color-sdk-record-response') {
+                    const task = storageRequests.get(event.data.id)
+                    if (task) {
+                        storageRequests.delete(event.data.id)
+                        event.data.error ? task.reject(new Error(event.data.error)) : task.resolve(event.data.records)
+                        return
                     }
-                });
-                const requestBlock = peerId => sendSdk({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor }, peerId);
-                room.onPeerJoin(peerId => {
-                    requestBlock(peerId);
-                    normalSyncStarted = true;
-                    sendVisitorIdentity(peerId).catch(error => { showBlockStatus('COLOR OFFLINE'); emit('color-error', { error: error.message }); });
-                });
-                room.onPeerLeave(peerId => { if (peerId === ownerPeer) { ownerPeer = null; showBlockStatus('COLOR OFFLINE'); } });
-                blockRetryTimer = setInterval(() => { if (!activeBlock) requestBlock(); }, 10000);
+                    snapshot?.contentWindow?.postMessage(event.data, '*')
+                    return
+                }
+                const detected = typeof event.data === 'string' ? event.data : event.data?.color
+                if (typeof detected === 'string' && /^#[0-9a-f]{6}$/i.test(detected)) {
+                    visitorColor = detected.toLowerCase()
+                    colorLink.style.backgroundColor = visitorColor
+                    colorLink.title = visitorColor.toUpperCase()
+                    emit('color-change', { color: visitorColor })
+                    if (block && !activeBlock) loadCachedBlock().catch(() => {})
+                    connect()
+                }
+                if (event.data && ['zoom-complete', 'zoom-finished', 'zoom-done'].includes(event.data.type)) window.dispatchEvent(new Event('color-zoom-finished'))
+                return
             }
-        };
-
-        // Listen for Color Messages from Iframe
-        const handleColorMessage = event => {
-            if (event.origin !== "https://colorlog.in" || event.source !== iframe.contentWindow) return;
-            if (event.data?.type === 'color-sdk-receipts' && event.data.ownerColor?.replace('#', '').toLowerCase() === ownerColor) { iframeReceipts = Array.isArray(event.data.receipts) ? event.data.receipts : []; renderReceipts(activeBlock); return; }
-
-            // Handle Color Detection (User has a color)
-            const detectedColor = typeof event.data === 'string' ? event.data : event.data?.color;
-            if (typeof detectedColor === 'string' && detectedColor.startsWith('#')) {
-                // Determine user color (visitor)
-                visitorColor = /^#[0-9a-f]{6}$/i.test(detectedColor) ? detectedColor.toLowerCase() : '#ffffff';
-                if (colorSwatch) { colorSwatch.style.backgroundColor = visitorColor; colorSwatch.title = visitorColor.toUpperCase(); }
-                if (block) { colorLink.style.backgroundColor = visitorColor; colorLink.title = visitorColor.toUpperCase(); }
-                iframe.contentWindow?.postMessage({ type: 'color-sdk-get-receipts', color: visitorColor, ownerColor: '#' + ownerColor }, 'https://colorlog.in');
-                emit('color-change', { color: visitorColor });
-
-                // Trigger P2P Connection to Store Owner's Room
-                connect();
+            if (event.source !== snapshot?.contentWindow) return
+            if (event.data?.type === 'color-sdk-block-action' && ownerPeer) {
+                const message = event.data.message && typeof event.data.message === 'object' ? { ...event.data.message, origin: location.origin, visitorColor } : event.data.message
+                sendSdk?.({ type: 'BLOCK_ACTION', origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message }, ownerPeer)
+            } else if (event.data?.type === 'color-sdk-record-request') {
+                iframe.contentWindow?.postMessage({ ...event.data, color: visitorColor, ownerColor: '#' + ownerColor }, 'https://colorlog.in')
             }
-
-            // Handle Zoom Finished
-            if (event.data && ['zoom-complete', 'zoom-finished', 'zoom-done'].includes(event.data.type)) {
-                window.dispatchEvent(new Event('color-zoom-finished'));
-            }
-        };
-        window.addEventListener('message', handleColorMessage);
-
-        if (block) { showBlockStatus('CONNECTING TO COLOR…'); blockOfflineTimer = setTimeout(() => { if (!activeBlock && !ownerPeer) showBlockStatus('COLOR OFFLINE'); }, 15000); }
-        container.appendChild(iframe);
-        connect();
-
-        // Return Proxy Interface
+        }
+        window.addEventListener('message', handleMessage)
+        if (block) {
+            showStatus('CONNECTING TO COLOR…')
+            offlineTimer = setTimeout(() => { if (!activeBlock && !ownerPeer) showStatus('COLOR OFFLINE') }, 15000)
+        }
+        container.appendChild(iframe)
+        connect()
         return {
             iframe,
-            send: (data, target) => { if (send) send(data, target); },
-            get: (cb) => {
-                if (get) get(cb);
-                else pendingGetCallbacks.push(cb);
+            send: (data, target) => send?.(data, target),
+            get: callback => get ? get(callback) : pendingGetCallbacks.push(callback),
+            destroy: () => {
+                clearInterval(retryTimer)
+                clearTimeout(offlineTimer)
+                window.removeEventListener('message', handleMessage)
+                room?.leave()
+                snapshot?.remove()
+                iframe.remove()
+                colorLink.remove()
+                container.querySelector('.color-sdk-notice')?.remove()
             },
-            destroy: () => { clearInterval(blockRetryTimer); clearTimeout(blockOfflineTimer); clearTimeout(submissionTimer); window.removeEventListener('message', handleColorMessage); room?.leave(); iframe.remove(); colorLink.remove(); container.querySelector('.color-sdk-notice')?.remove(); },
-            resetTrust: () => { verifiedOwnerKey = null; verifiedOwnerFingerprint = null; },
-            get connected() { return Object.values(room?.getPeers?.() || {}).some(peer => peer.dc?.readyState === 'open'); },
-            get color() { return visitorColor; },
-            get ownerKey() { return verifiedOwnerKey; },
-            get ownerFingerprint() { return verifiedOwnerFingerprint; },
-            get block() { return activeBlock; },
-            get room() { return room; }
-        };
+            resetTrust: () => { verifiedOwnerKey = null; verifiedOwnerFingerprint = null },
+            get connected() { return Object.values(room?.getPeers?.() || {}).some(peer => peer.dc?.readyState === 'open') },
+            get color() { return visitorColor },
+            get ownerKey() { return verifiedOwnerKey },
+            get ownerFingerprint() { return verifiedOwnerFingerprint },
+            get block() { return activeBlock },
+            get room() { return room }
+        }
     }
-};
+}
