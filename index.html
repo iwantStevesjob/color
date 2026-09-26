@@ -772,7 +772,7 @@
             cursor: pointer;
             backdrop-filter: blur(10px);
             transition: all 0.2s;
-            z-index: 180;
+            z-index: 182;
         }
 
         #debug-btn {
@@ -2991,6 +2991,20 @@
         #backup-qr-display:empty { display:none }
         #backup-qr-display canvas,#backup-qr-display img { width:250px!important;height:250px!important }
         #backup-reader { max-width:400px;margin:24px auto }
+        #backup-learn-more { margin:24px 0;color:#aaa }
+        #backup-learn-more summary { color:#888;cursor:pointer;text-align:center;text-transform:uppercase;font-size:.75rem;letter-spacing:1px;list-style:none }
+        #backup-learn-more summary::-webkit-details-marker { display:none }
+        @media (max-width: 700px) {
+            body.backup-scanning #info-panel { overflow:hidden;padding:0;background:#000 }
+            body.backup-scanning #info-nav, body.backup-scanning #info-backup > :not(#backup-reader):not(#backup-learn-more), body.backup-scanning #backup-learn-more > :not(summary) { display:none }
+            body.backup-scanning #info-close { position:fixed;top:16px;right:16px;z-index:184 }
+            body.backup-scanning #backup-reader { position:fixed;inset:0;z-index:182;width:100vw;max-width:none;height:100dvh;margin:0;background:#000 }
+            body.backup-scanning #backup-reader > div { width:100%!important;height:100%!important;border:0!important }
+            body.backup-scanning #backup-reader video { width:100vw!important;height:100dvh!important;object-fit:cover!important }
+            body.backup-scanning #backup-learn-more { position:fixed;left:50%;top:calc(50% + min(38vw, 180px));z-index:183;width:min(88vw,520px);max-height:32dvh;margin:20px 0 0;transform:translateX(-50%);overflow:auto }
+            body.backup-scanning #backup-learn-more[open] { padding:14px;border-radius:10px;background:rgba(0,0,0,.82) }
+            body.backup-scanning #backup-learn-more[open] > :not(summary) { display:block }
+        }
         .backup-device { display:flex;align-items:center;gap:16px;padding:18px 0;border-bottom:1px solid #333 }
         .backup-device svg { width:30px;height:30px;stroke:currentColor;stroke-width:1.5;fill:none;flex:none }
         .backup-device span { display:block;font-size:.875rem;color:#aaa;line-height:1.6;overflow-wrap:anywhere }
@@ -3252,12 +3266,15 @@
         </section>
         <section id="info-backup" hidden>
             <h1>Backup</h1>
-            <p>On the receiving device, select SHOW QR. On the device holding your color, select SCAN QR and verify your secret color-click password. Either device can be a phone or computer; an empty device starts as #FFFFFF.</p>
-            <p>Paired devices remember each other and reconnect when Color is open. Changes are saved to the other device before a backup is marked complete. An offline device catches up when it returns.</p>
-            <p>Your own devices keep independently encrypted copies. Enable a passkey on both devices. If the phone is lost, unlock the desktop backup with its passkey, select BLOCK, then pair the replacement phone and create its new passkey. A fingerprint never leaves the device and cannot recover data without a surviving encrypted backup. Friends can separately hold encrypted backups; keep their recovery files somewhere safe.</p>
             <div id="backup-device-list"></div>
             <div id="backup-qr-display"></div>
             <div id="backup-reader"></div>
+            <details id="backup-learn-more">
+                <summary>Learn more</summary>
+                <p>On the receiving device, select SHOW QR. On the device holding your color, select SCAN QR and verify your secret color-click password. Either device can be a phone or computer; an empty device starts as #FFFFFF.</p>
+                <p>Paired devices remember each other and reconnect when Color is open. Changes are saved to the other device before a backup is marked complete. An offline device catches up when it returns.</p>
+                <p>Your own devices keep independently encrypted copies. Enable a passkey on both devices. If the phone is lost, unlock the desktop backup with its passkey, select BLOCK, then pair the replacement phone and create its new passkey. A fingerprint never leaves the device and cannot recover data without a surviving encrypted backup. Friends can separately hold encrypted backups; keep their recovery files somewhere safe.</p>
+            </details>
             <p id="backup-note" role="status"></p>
             <label>PAIR AS <select id="backup-pair-mode"><option value="device">MY DEVICE</option><option value="friend">FRIEND</option></select></label>
             <button id="backup-connect-device" type="button">CONNECT ANOTHER DEVICE</button>
@@ -7515,18 +7532,27 @@
                     if (hash !== incoming.hash) throw new Error('Backup checksum mismatch')
                     let payload = JSON.parse(new TextDecoder().decode(bytes))
                     if (incoming.purpose === 'block-pwa') {
-                        if (record.role !== 'block-admin' || payload?.v !== 1 || payload.kind !== 'block-pwa' || payload.color !== incoming.color || payload.instanceId !== record.blockInstanceId || payload.selector !== record.selector || !/^[a-z0-9_-]+\.html$/i.test(payload.pageName || '') || typeof payload.html !== 'string' || !payload.html.startsWith('<!doctype html>')) throw new Error('Invalid block app transfer')
-                        if (!('serviceWorker' in navigator) || !('caches' in window)) throw new Error('This browser cannot install offline PWAs')
-                        await navigator.storage?.persist?.()
-                        await navigator.serviceWorker.register('sw.js')
-                        await navigator.serviceWorker.ready
-                        const url = new URL(payload.pageName, location.href)
-                        await (await caches.open('color-backups-v1')).put(url, new Response(payload.html, { headers: { 'Content-Type': 'text/html;charset=utf-8' } }))
+                        if (record.role !== 'block-admin' || payload?.v !== 1 || payload.kind !== 'block-pwa' || payload.color !== incoming.color || payload.instanceId !== record.blockInstanceId || payload.selector !== record.selector || !/^[a-z0-9_-]+\.html$/i.test(payload.pageName || '') || typeof payload.html !== 'string' || !payload.html.startsWith('<!doctype html>') || payload.snapshot?.roomHex !== incoming.color || typeof payload.password !== 'string') throw new Error('Invalid block app transfer')
+                        await this.identity._call('backup_import', { roomHex: incoming.color, snapshot: payload.snapshot, linkId: 'block-pwa-' + payload.instanceId })
+                        if (!await this.identity.unlockRoom(incoming.color, payload.password, true)) throw new Error('Transferred Color could not be unlocked')
+                        if (Number.isSafeInteger(payload.index)) await this.db.saveCursor(incoming.color, payload.index)
+                        if (!this.visitedRooms.includes('color-' + incoming.color)) this.visitedRooms.push('color-' + incoming.color)
+                        window.updateVisitedFromDB?.()
+                        let url = null
+                        if (window.isSecureContext && 'serviceWorker' in navigator && 'caches' in window) try {
+                            await navigator.storage?.persist?.()
+                            await navigator.serviceWorker.register('sw.js', { scope: './' })
+                            await navigator.serviceWorker.ready
+                            url = new URL(payload.pageName, location.href)
+                            await (await caches.open('color-backups-v1')).put(url, new Response(payload.html, { headers: { 'Content-Type': 'text/html;charset=utf-8' } }))
+                        } catch (error) { console.warn('Block PWA preparation failed; the Color remains available locally.', error) }
                         record.lastReceived = Date.now()
                         await this.saveDeviceLink(record)
                         await connection.send({ type: 'SNAPSHOT_ACK', id: incoming.id, hash, conflicts: [] })
-                        await new Promise(resolve => setTimeout(resolve, 150))
-                        location.href = url.href
+                        this.closeInfoPage()
+                        await this.connectAndPreview('#' + incoming.color, { source: 'simple-qr' })
+                        await window.enterRoomUI?.()
+                        if (url) setTimeout(() => { location.href = url.href }, 500)
                         return
                     }
                     let result
@@ -8068,7 +8094,7 @@
                     const status = record.revoked ? 'BLOCKED' : (this.deviceConnections.get(record.id)?.status || 'offline').toUpperCase()
                     name.textContent = (record.device?.os || 'Device') + ' · ' + (record.role === 'friend' ? 'FRIEND #' + (record.friendColor || '').toUpperCase() : record.role?.startsWith('block-') ? 'BLOCK ADMIN · ' + String(record.selector || '').toUpperCase() : 'PAIRED DEVICE') + ' · ' + status
                     const saved = Math.max(record.lastBackup || 0, record.lastReceived || 0)
-                    detail.textContent = (record.fingerprint || '').slice(0, 24) + (saved ? ' · Saved ' + new Date(saved).toLocaleString() : ' · Awaiting first backup') + (record.role === 'friend' ? '' : record.recoverable ? ' · ' + (record.protected ? 'PASSKEY RECOVERY' : 'COLOR PASSWORD RECOVERY') : record.protected ? ' · UPDATE RECOVERY BEFORE BLOCKING' : ' · VERIFY RECOVERY PASSWORD')
+                    detail.textContent = (record.fingerprint || '').slice(0, 24) + (saved ? ' · Saved ' + new Date(saved).toLocaleString() : ' · Awaiting first backup') + (record.role === 'friend' || record.role?.startsWith('block-') ? '' : record.recoverable ? ' · ' + (record.protected ? 'PASSKEY RECOVERY' : 'COLOR PASSWORD RECOVERY') : record.protected ? ' · UPDATE RECOVERY BEFORE BLOCKING' : ' · VERIFY RECOVERY PASSWORD')
                     if (record.conflicts?.length || typeof record.conflicts === 'number' && record.conflicts > 0) detail.textContent += ' · Concurrent changes retained; review before relying on this backup'
                     const button = (label, callback) => {
                         const el = document.createElement('button')
@@ -9643,7 +9669,7 @@
                 const linkId = 'block-pwa-' + entry.payload.instanceId, password = this.getRoomPassword(color, this.getRoomSignatureForSave(color)), singleClick = password === 'FFFFFF' + color.toUpperCase()
                 await this.identity._call('backup_authorize', { roomHex: color, password, linkId, operation: 'pair' })
                 const replica = { keys: await this.identity._call('export_owner_replica', { roomHex: color }), snapshot: await this.identity._call('backup_export', { roomHex: color, linkId, includeKeys: true }) }
-                const transfer = { v: 1, kind: 'block-pwa', color, pageName, instanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, html: this.installedBlockPwaDocument({ ...entry, index: entry.payload._localIndex }, pageName, replica) }
+                const transfer = { v: 1, kind: 'block-pwa', color, pageName, instanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, index: entry.payload._localIndex, password, snapshot: replica.snapshot, html: this.installedBlockPwaDocument({ ...entry, index: entry.payload._localIndex }, pageName, replica) }
                 const secret = Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, '0')).join(''), record = { id: crypto.randomUUID(), secret, role: 'block-source', color, ownColor: color, blockInstanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, created: Date.now() }
                 this.blockPwaTransfers.set(record.id, transfer)
                 this.connectDeviceLink(record)
@@ -10762,6 +10788,7 @@
                 }
             }
             async stopScanner() {
+                document.body.classList.remove('backup-scanning')
                 if (!this.qrScanner) return
                 const scanner = this.qrScanner
                 this.qrScanner = null
@@ -12514,6 +12541,7 @@
             }
 
             startScanning(readerId = 'qr-reader') {
+                document.body.classList.toggle('backup-scanning', readerId === 'backup-reader')
                 if (readerId === 'qr-reader') {
                 document.querySelectorAll('.connect-view').forEach(el => el.classList.remove('active'))
                 document.getElementById('view-scanner').classList.add('active')
@@ -12537,9 +12565,10 @@
                         const camera = cameras.find(cam => /back|rear|environment/i.test(cam.label || ''))?.id || cameras[cameras.length - 1]?.id || { facingMode: 'environment' }
                         if (readerId === 'backup-reader' && this.infoPage !== 'backup') return
                         this.qrScanner = new Html5Qrcode(readerId)
+                        const scanSize = readerId === 'backup-reader' ? Math.round(Math.min(window.innerWidth * .72, window.innerHeight * .5, 360)) : 250
                         await this.qrScanner.start(
                             camera,
-                            { fps: 10, qrbox: { width: 250, height: 250 } },
+                            { fps: 10, qrbox: { width: scanSize, height: scanSize } },
                             decodedText => {
                                 const activeScanner = this.qrScanner
                                 if (!activeScanner) return
@@ -12551,6 +12580,7 @@
                             }
                         )
                     } catch (err) {
+                        document.body.classList.remove('backup-scanning')
                         console.error('Camera failed', err)
                         alert(window.isSecureContext ? 'Camera access is required to scan QR codes.' : 'Camera scanning requires HTTPS.')
                     }
