@@ -2990,7 +2990,10 @@
         #backup-qr-display { width:max-content;margin:28px auto;background:white;padding:16px }
         #backup-qr-display:empty { display:none }
         #backup-qr-display canvas,#backup-qr-display img { width:250px!important;height:250px!important }
+        #backup-reader,#qr-reader { position:relative }
         #backup-reader { max-width:400px;margin:24px auto }
+        .qr-scan-target { position:absolute!important;left:50%!important;top:50%!important;z-index:20!important;width:var(--scan-size,250px)!important;height:var(--scan-size,250px)!important;transform:translate(-50%,-50%)!important;pointer-events:none;box-shadow:0 0 0 100vmax rgba(0,0,0,.55);background:linear-gradient(#fff,#fff) left top/38px 5px no-repeat,linear-gradient(#fff,#fff) left top/5px 38px no-repeat,linear-gradient(#fff,#fff) right top/38px 5px no-repeat,linear-gradient(#fff,#fff) right top/5px 38px no-repeat,linear-gradient(#fff,#fff) left bottom/38px 5px no-repeat,linear-gradient(#fff,#fff) left bottom/5px 38px no-repeat,linear-gradient(#fff,#fff) right bottom/38px 5px no-repeat,linear-gradient(#fff,#fff) right bottom/5px 38px no-repeat }
+        #btn-scan-mode svg { width:18px;height:18px;vertical-align:-4px;margin-right:7px;fill:none;stroke:currentColor;stroke-width:2 }
         #backup-learn-more { margin:24px 0;color:#aaa }
         #backup-learn-more summary { color:#888;cursor:pointer;text-align:center;text-transform:uppercase;font-size:.75rem;letter-spacing:1px;list-style:none }
         #backup-learn-more summary::-webkit-details-marker { display:none }
@@ -2999,7 +3002,7 @@
             body.backup-scanning #info-nav, body.backup-scanning #info-backup > :not(#backup-reader):not(#backup-learn-more), body.backup-scanning #backup-learn-more > :not(summary) { display:none }
             body.backup-scanning #info-close { position:fixed;top:16px;right:16px;z-index:184 }
             body.backup-scanning #backup-reader { position:fixed;inset:0;z-index:182;width:100vw;max-width:none;height:100dvh;margin:0;background:#000 }
-            body.backup-scanning #backup-reader > div { width:100%!important;height:100%!important;border:0!important }
+            body.backup-scanning #backup-reader > div:not(.qr-scan-target) { width:100%!important;height:100%!important;border:0!important }
             body.backup-scanning #backup-reader video { width:100vw!important;height:100dvh!important;object-fit:cover!important }
             body.backup-scanning #backup-learn-more { position:fixed;left:50%;top:calc(50% + min(38vw, 180px));z-index:183;width:min(88vw,520px);max-height:32dvh;margin:20px 0 0;transform:translateX(-50%);overflow:auto }
             body.backup-scanning #backup-learn-more[open] { padding:14px;border-radius:10px;background:rgba(0,0,0,.82) }
@@ -3207,8 +3210,7 @@
     <div id="connect-content-layer">
         <div id="view-qr" class="connect-view">
             <div id="qr-display-container"></div>
-            <button id="btn-scan-mode" class="action-btn">SCAN QR</button>
-            <button type="button" class="action-btn" data-info-page="backup">BACKUP / FRIENDS</button>
+            <button id="btn-scan-mode" class="action-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-3h6l2 3h3v13H4z"/><circle cx="12" cy="13" r="4"/></svg>SCAN QR</button>
             <p id="btn-toggle-secure" style="cursor: pointer;">view more secure option</p>
         </div>
         <div id="view-scanner" class="connect-view">
@@ -3216,7 +3218,6 @@
                 style="width: 250px; height: 250px; background: #000; border-radius: 10px; overflow: hidden; margin-bottom: 20px; border: 2px solid rgba(255,255,255,0.3);">
             </div>
             <button id="btn-cancel-scan" class="action-btn">CANCEL</button>
-            <button type="button" class="action-btn" data-info-page="backup">BACKUP / FRIENDS</button>
         </div>
         <div id="view-search" class="connect-view">
             <div class="connect-search-form">
@@ -7049,7 +7050,8 @@
             document.body.appendChild(host)
             setTimeout(() => document.getElementById('block-pwa-loading').classList.add('done'), 250)
             let installPrompt
-            window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; const button = document.getElementById('block-pwa-install'); button.hidden = false; button.onclick = async () => { await installPrompt.prompt(); installPrompt = null; button.hidden = true }; button.click() })
+            window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; const button = document.getElementById('block-pwa-install'); button.hidden = false; button.onclick = async () => { if (!installPrompt) return; try { await installPrompt.prompt(); installPrompt = null; button.hidden = true } catch (_) { button.hidden = false } } })
+            window.addEventListener('appinstalled', () => { installPrompt = null; document.getElementById('block-pwa-install').hidden = true })
             navigator.storage?.persist?.().catch(() => {})
             navigator.serviceWorker?.register('sw.js').catch(() => {})
         }
@@ -9583,7 +9585,7 @@
                 }).join('')
                 const safeJson = value => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
                 const styles = Array.from(document.querySelectorAll('style')).map(style => style.textContent).join('\n').replace(/<\/style/gi, '<\\/style')
-                const iconUrl = new URL('backup-icon.svg?color=' + color, location.href).href, manifest = new URL('backup.webmanifest?color=' + color, location.href).href
+                const iconUrl = new URL('backup-icon-192.png?color=' + color, location.href).href, manifest = new URL('backup.webmanifest?color=' + color, location.href).href
                 const qr = String(qrSource || '').replace(/<\/script/gi, '<\\/script')
                 return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#${color}"><meta name="mobile-web-app-capable" content="yes"><link rel="icon" href="${this.escapeAttr(iconUrl)}"><link rel="apple-touch-icon" href="${this.escapeAttr(iconUrl)}"><link rel="manifest" href="${this.escapeAttr(manifest)}"><title>${this.escapeHtml(label || 'Color #' + color.toUpperCase())}</title><style>${styles}\nhtml,body{margin:0;min-height:100%;background:#fff;color:#111}body{overflow:auto}.backup-sliver{position:sticky;top:0;z-index:1000;width:100%;height:10px;border:0;padding:0;background:#${color};cursor:pointer}.backup-nav{position:sticky;top:10px;z-index:999;display:flex;justify-content:center;max-height:0;overflow:hidden;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,.12);transition:max-height .35s ease}.backup-nav.open{max-height:74px}.backup-nav button{border:0;padding:24px;background:transparent;color:#111;font:900 13px system-ui,sans-serif;letter-spacing:.06em;cursor:pointer}#color-backup-page{box-sizing:border-box;max-width:1100px;min-height:calc(100vh - 10px);margin:auto;padding:24px}.editor-line{min-height:1.4em}.backup-restore{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:24px;background:rgba(255,255,255,.96)}.backup-restore-card{display:grid;justify-items:center;gap:14px;max-width:360px;text-align:center}.backup-restore-card button{border:0;border-radius:7px;padding:10px 18px;background:#111;color:#fff;font-weight:900}.backup-loading{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;background:#fff;color:#111;font:900 18px system-ui,sans-serif;transition:opacity .25s}.backup-loading::before{content:'';position:absolute;top:0;width:100%;height:10px;background:#${color}}.backup-loading.done{opacity:0;pointer-events:none}.backup-install{position:fixed;right:18px;bottom:18px;z-index:2500;border:0;border-radius:20px;padding:11px 17px;background:#${color};color:#111;font-weight:900}[hidden]{display:none!important}</style></head><body><div id="backup-loading" class="backup-loading">#${color.toUpperCase()}</div><button id="backup-sliver" class="backup-sliver" aria-label="Open backup navigation"></button><nav id="backup-nav" class="backup-nav"><button id="restore-backup" type="button">RESTORE BACKUP</button></nav><main id="color-backup-page">${content || '<p>This Color has no saved content.</p>'}</main><section id="backup-restore" class="backup-restore" hidden><div class="backup-restore-card"><div id="backup-qr"></div><b>SCAN TO RESTORE #${color.toUpperCase()}</b><small>Keep the scanner open while the QR transfers every part of this backup.</small><button id="close-restore" type="button">CLOSE</button></div></section><button id="backup-install" class="backup-install" hidden>INSTALL BACKUP</button><script id="color-backup-data" type="application/json">${safeJson({ color: '#' + color, cursor, rows: savedRows, blocks, snapshot })}<\/script><script>${qr}<\/script><script>(()=>{const backup=JSON.parse(document.getElementById('color-backup-data').textContent),app={mesh:null},escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));for(const item of backup.blocks){const root=[...document.querySelectorAll('[data-block-instance]')].find(node=>node.dataset.blockInstance===item.instanceId);if(!root)continue;if(item.customDocument){const frame=root.querySelector('[data-custom-block-sandbox]');if(frame)frame.srcdoc=item.customDocument;continue}try{const payload=item.payload,data=payload.data||{},def=payload.definition||{},isAdmin=true,userColor=backup.color,publicData=value=>value?.data||data,send=()=>{},runtimeCount=()=>0,updateBlock=updater=>Promise.resolve(updater(payload));Promise.resolve(new Function('app','root','payload','data','def','isAdmin','userColor','escapeHtml','publicData','send','runtimeCount','updateBlock',item.js)(app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,runtimeCount,updateBlock)).catch(console.error)}catch(error){console.error(error)}}document.querySelector('[data-index="'+backup.cursor+'"]')?.scrollIntoView({block:'center'});setTimeout(()=>document.getElementById('backup-loading').classList.add('done'),250);const nav=document.getElementById('backup-nav'),panel=document.getElementById('backup-restore'),qr=document.getElementById('backup-qr');document.getElementById('backup-sliver').onclick=()=>nav.classList.toggle('open');document.getElementById('close-restore').onclick=()=>panel.hidden=true;document.getElementById('restore-backup').onclick=()=>{};let installPrompt;window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;const button=document.getElementById('backup-install');button.hidden=false;button.onclick=async()=>{try{await installPrompt.prompt();installPrompt=null;button.hidden=true}catch(_){button.hidden=false}};button.click()});navigator.serviceWorker?.register('sw.js').catch(()=>{})})();<\/script></body></html>`
             }
@@ -9645,7 +9647,7 @@
                 const color = this.user.color.replace('#', '').toLowerCase(), payload = entry.payload, def = this.getBlockDefinition(payload), view = this.getBlockView(def, true)
                 const safeJson = value => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
                 const styles = Array.from(document.querySelectorAll('style')).map(style => style.textContent).join('\n').replace(/<\/style/gi, '<\\/style')
-                const icon = new URL('backup-icon.svg?color=' + color, location.href).href, manifest = new URL('block.webmanifest?color=' + color + '&page=' + encodeURIComponent(pageName) + '&name=' + encodeURIComponent(entry.label), location.href).href
+                const icon = new URL('backup-icon-192.png?color=' + color, location.href).href, manifest = new URL('block.webmanifest?color=' + color + '&page=' + encodeURIComponent(pageName) + '&name=' + encodeURIComponent(entry.label), location.href).href
                 const dependencies = def.checkoutBlock ? [this.blockDefs.get(def.checkoutBlock)].filter(Boolean) : []
                 const runtime = { payload, def, dependencies, js: view.js || '', actionJs: def.actions?.js || '', namespace: def.actions?.namespace || def.action || '', index: entry.index, selector: entry.selector, color, keys: replica.keys, snapshot: replica.snapshot, customDocument: this.blockCategory(def) === 'CUSTOM' ? this.customBlockSandboxDocument(payload, def, true) : '' }
                 const pwaRuntime = '(' + standaloneBlockPwaRuntime.toString().replace(/<\/script/gi, '<\\/script') + ')()'
@@ -12594,6 +12596,8 @@
                             errorMessage => {
                             }
                         )
+                        const reader = document.getElementById(readerId), target = document.createElement('div')
+                        reader.style.setProperty('--scan-size', scanSize + 'px'); target.className = 'qr-scan-target'; reader.appendChild(target)
                     } catch (err) {
                         document.body.classList.remove('backup-scanning')
                         console.error('Camera failed', err)
