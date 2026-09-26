@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -687,7 +688,15 @@
         #blocks-installed-grid .block-card.expanded { width: calc(100% - 24px); flex-basis: calc(100% - 24px); max-width: calc(100% - 24px); min-height: calc(100vh - 250px); }
         .block-embed-area { display: grid; gap: 12px; margin-top: 24px; cursor: default; }
         .block-embed-area textarea { min-height: 210px; }
+        .block-embed-heading { display: flex; align-items: center; gap: 8px; font-size: .76rem; font-weight: 900; color: #555; }
+        .block-pwa-actions { display: grid; gap: 5px; }
+        .block-embed-area .block-pwa-add, .block-embed-area .block-pwa-qr { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; padding: 0; font-size: 18px; line-height: 24px; }
+        .block-embed-area .block-pwa-qr svg { width: 14px; height: 14px; }
         .block-embed-title { font-size: .76rem; font-weight: 900; color: #555; }
+        .block-pwa-picker { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; padding: 24px; background: rgba(255,255,255,.94); }
+        .block-pwa-picker > div { display: grid; gap: 12px; width: min(420px, 100%); }
+        .block-pwa-picker select { width: 100%; max-height: 50vh; border: 1px solid #bbb; border-radius: 10px; padding: 8px; background: #fff; color: #111; font: inherit; }
+        .block-pwa-picker button { justify-self: end; border: 0; border-radius: 8px; padding: 10px 15px; background: #111; color: #fff; font: inherit; font-weight: 900; }
         .hardcoded-backup { display: grid; gap: 12px; max-width: 760px; margin: 0 0 30px; }
         .hardcoded-backup button { justify-self: start; border: 0; border-radius: 8px; padding: 10px 15px; background: #111; color: #fff; font: inherit; font-weight: 900; cursor: pointer; }
 
@@ -5057,9 +5066,13 @@
                     let isVerified = false
                     const wasVerified = this.verifiedPeers.has(pid)
                     if (wasVerified) { if (data.pubKey) await this.identity.storePeerKey(pid, data.pubKey); this.peerIdentities.set(pid, data); return }
+                    const ownKey = await this.identity.getPublicKeyData()
 
                     if (this.expectedQrSecret && data.qrSecret === this.expectedQrSecret) {
                         console.log(`%c[P2P] 🎟️ VIP Ticket Accepted for ${pid}`, 'color: gold; font-weight: bold;')
+                        isVerified = true
+                    } else if (data.pubKey?.x === ownKey?.x && data.pubKey?.y === ownKey?.y) {
+                        console.log(`%c[P2P] 🔑 Owner replica verified: ${pid}`, 'color: #00e676; font-weight: bold;')
                         isVerified = true
                     } else if (data.color && data.color.replace('#', '').toLowerCase() === this.roomHex.toLowerCase() && window.app.user.color.replace('#', '').toLowerCase() !== this.roomHex.toLowerCase()) {
                         console.log(`%c[P2P] 👑 Room Owner verified automatically: ${pid}`, 'color: #00e676; font-weight: bold;')
@@ -6941,6 +6954,89 @@
                 return (value / 1024 / 1024).toFixed(1) + ' MB'
             }
         }
+        async function standaloneBlockPwaRuntime() {
+            const runtimeNode = document.getElementById('block-pwa-data'), runtime = JSON.parse(runtimeNode.textContent), payload = runtime.payload, data = payload.data ||= {}, def = runtime.def || {}, root = document.querySelector('[data-block-instance]'), isAdmin = true, userColor = '#' + runtime.color
+            const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]))
+            const publicData = value => value?.data || data, execute = (script, context) => new Function('context', 'with(context){return(async()=>{' + script + '})()}')(context), callbacks = [], hostNonce = crypto.randomUUID(), hostOrigin = location.origin, host = document.createElement('iframe')
+            const DOMPurify = { sanitize: value => { const node = document.createElement('div'); node.textContent = String(value ?? ''); return node.textContent } }
+            const mesh = { blockActionSenders: {}, verifiedPeers: new Set(), peerIdentities: new Map(), room: { makeAction: () => [() => {}, callback => callbacks.push(callback)] }, on() {}, emit() {} }
+            const records = { read: async () => [], write: async () => [] }
+            const saveBlob = (blob, meta) => { const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = meta?.name || 'download'; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0) }
+            const post = message => host.contentWindow?.postMessage({ type: 'color-block-host-message', nonce: hostNonce, message }, hostOrigin)
+            const stripeAgentRequest = (action, value = null) => new Promise((resolve, reject) => { const id = crypto.randomUUID(), finish = (error, result) => { clearTimeout(timer); window.removeEventListener('message', receive); error ? reject(new Error(error)) : resolve(result) }, receive = event => { if (event.source === window && event.data?.type === 'COLOR_STRIPE_AGENT_RESPONSE' && event.data.id === id) finish(event.data.error, event.data.result) }, timer = setTimeout(() => finish('Color Stripe Agent not found. Install or enable the extension.'), 15000); window.addEventListener('message', receive); window.postMessage({ type: 'COLOR_STRIPE_AGENT_REQUEST', id, action, data: value }, '*') })
+            const fileTransfers = { completed: new Map(), outgoing: new Map(), makeFileId: () => crypto.randomUUID(), safeColor: value => /^#[0-9a-f]{6}$/i.test(value || '') ? value.toLowerCase() : '#ffffff', hashBuffer: async buffer => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer))).map(byte => byte.toString(16).padStart(2, '0')).join(''), saveBlob, requestDownload: meta => post({ type: 'file-request', meta }) }
+            const app = { mesh, roomId: 'color-' + runtime.color, user: { color: userColor }, ui: { roomStatus: { textContent: '' } }, appState: { session: 'standalone-block' }, pendingStripeRequests: new Map(), stripeOrders: new Map(), blockDefs: new Map([[payload.blockId, def], ...(runtime.dependencies || []).map(item => [item.id, item])]), escapeHtml, escapeAttr: escapeHtml, findFirstBlockPayload: id => id === payload.blockId ? payload : null, getBlockPayloadByInstance: id => id === payload.instanceId ? payload : null, findRoomOwnerPeerId: () => null, sendBlockMessage: () => {}, stripeAgentRequest, loadExternalScript: (src, test) => test?.() ? Promise.resolve() : new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = src; script.onload = resolve; script.onerror = reject; document.head.appendChild(script) }), fileTransfers, runBlockScript: execute, runBlockCheckout: form => { const checkoutDef = app.blockDefs.get(form.def?.checkoutBlock); return checkoutDef?.checkout?.js ? execute(checkoutDef.checkout.js, { app, def: checkoutDef, form, escapeHtml, escapeAttr: escapeHtml }) : Promise.resolve() } }
+            const runtimeCount = () => 0, send = () => {}
+            let hydrating = false, hostSynced = false, recoveryPrompted = false
+            const saveHardcoded = async () => {
+                runtime.payload = payload
+                runtimeNode.textContent = JSON.stringify(runtime).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
+                const clone = document.documentElement.cloneNode(true)
+                clone.querySelectorAll('iframe[src*="blockHost="]').forEach(frame => frame.remove())
+                await (await caches.open('color-backups-v1')).put(location.href, new Response('<!doctype html>' + clone.outerHTML, { headers: { 'Content-Type': 'text/html;charset=utf-8' } }))
+            }
+            const hydrate = () => {
+                if (hydrating) return
+                hydrating = true
+                if (runtime.customDocument) { const sandbox = root?.querySelector('[data-custom-block-sandbox]'); if (sandbox) sandbox.srcdoc = runtime.customDocument }
+                else Promise.resolve(execute(runtime.js, { app, root, payload, data, def, isAdmin, userColor, escapeHtml, publicData, send, records, runtimeCount, updateBlock })).catch(console.error)
+                queueMicrotask(() => { hydrating = false })
+            }
+            const updateBlock = (instanceOrUpdater, maybeUpdater, broadcast = true) => {
+                const updater = typeof instanceOrUpdater === 'function' ? instanceOrUpdater : maybeUpdater, updated = updater?.(payload) || payload
+                if (updated !== payload) { Object.assign(payload, updated); Object.assign(data, updated.data || {}) }
+                post({ type: 'persist', payload, broadcast })
+                queueMicrotask(() => { hydrate(); saveHardcoded().catch(console.error) })
+                return Promise.resolve(payload)
+            }
+            const upsertBlock = (blockId, match, updater) => blockId === payload.blockId && (!match || match(payload)) ? updateBlock(payload.instanceId, updater) : Promise.resolve(null)
+            const runAction = message => {
+                mesh.verifiedPeers.add(message.pid)
+                if (message.identity) mesh.peerIdentities.set(message.pid, message.identity)
+                const reply = value => post({ type: 'reply', channel: message.channel, pid: message.pid, origin: message.origin, data: value })
+                return execute(runtime.actionJs, { app, def, data: message.data, pid: message.pid, userColor, escapeHtml, publicData, send: reply, findFirstBlock: id => id === payload.blockId ? payload : null, getBlock: id => id === payload.instanceId ? payload : null, updateBlock, upsertBlock, setRuntimePeer: () => {} })
+            }
+            window.DOMPurify = DOMPurify
+            try {
+                const aes = await crypto.subtle.importKey('jwk', runtime.keys.aes, { name: 'AES-GCM', length: 256 }, false, ['decrypt'])
+                const db = await new Promise((resolve, reject) => { const open = indexedDB.open('color'); open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error) })
+                if (db.objectStoreNames.contains(runtime.color)) {
+                    const row = await new Promise(resolve => { const request = db.transaction(runtime.color, 'readonly').objectStore(runtime.color).get(runtime.index); request.onsuccess = () => resolve(request.result); request.onerror = () => resolve(null) })
+                    if (row?.content instanceof ArrayBuffer) { const packed = new Uint8Array(row.content), plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: packed.slice(0, 12) }, aes, packed.slice(12)); const latest = JSON.parse(new TextDecoder().decode(plain)); if (latest.instanceId === payload.instanceId) Object.assign(data, latest.data || {}) }
+                }
+                db.close()
+            } catch (_) {}
+            hydrate()
+            window.addEventListener('message', event => {
+                const message = event.data
+                if (event.source !== host.contentWindow || event.origin !== hostOrigin || message?.type !== 'color-block-host-status' || message.nonce !== hostNonce) return
+                if (message.error) { document.getElementById('block-pwa-status').textContent = 'OFFLINE'; console.error(message.error) }
+                else if (message.event === 'action') Promise.resolve(runAction(message)).catch(console.error)
+                else if (message.event === 'file' && message.blob) fileTransfers.completed.set(message.fileId, { blob: message.blob, meta: message.meta })
+                else if (message.event === 'restored') {
+                    localStorage.setItem('lastSphereColor', '#' + runtime.color)
+                    document.getElementById('block-pwa-status').textContent = 'COLOR RESTORED'
+                    if (!recoveryPrompted && confirm('This Color had been wiped. Its encrypted database was restored from this PWA, and the incoming block data will be added next. Open Color now to review the restored account and secure this device again?')) { recoveryPrompted = true; window.open(new URL('index.html#' + runtime.color, location.href), '_blank', 'noopener') }
+                }
+                else if (message.event === 'fragment') {
+                    const value = message.fragments?.[runtime.index]
+                    if (value) try { const next = JSON.parse(value.content); if (next.instanceId === payload.instanceId) { Object.assign(data, next.data || {}); updateBlock(payload.instanceId, item => item, false) } } catch (error) { console.error(error) }
+                } else {
+                    document.getElementById('block-pwa-status').textContent = message.status === 'connected' ? 'CONNECTED' : 'LISTENING'
+                    if (!hostSynced && message.status === 'listening') { hostSynced = true; post({ type: 'persist', payload, broadcast: false }) }
+                }
+            })
+            host.hidden = true
+            host.src = new URL('index.html?blockHost=' + encodeURIComponent(hostNonce), location.href)
+            host.onload = () => host.contentWindow.postMessage({ type: 'color-block-host-start', nonce: hostNonce, runtime }, hostOrigin)
+            document.body.appendChild(host)
+            setTimeout(() => document.getElementById('block-pwa-loading').classList.add('done'), 250)
+            let installPrompt
+            window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; const button = document.getElementById('block-pwa-install'); button.hidden = false; button.onclick = async () => { await installPrompt.prompt(); installPrompt = null; button.hidden = true }; button.click() })
+            navigator.storage?.persist?.().catch(() => {})
+            navigator.serviceWorker?.register('sw.js').catch(() => {})
+        }
+
         class EditorApp {
             constructor() {
                 this.identity = new SecureIdentity()
@@ -6984,6 +7080,7 @@
                 this.backupSending = new Map()
                 this.backupReceiving = new Map()
                 this.backupHashes = new Map()
+                this.blockPwaTransfers = new Map()
                 this.friendBackupHashes = new Map()
                 this.friendRestores = new Map()
                 this.pendingVaultCardSetup = null
@@ -7035,6 +7132,8 @@
                 this.pendingStripeRequests = new Map()
                 this.stripeOrders = new Map()
                 this.blockRuntime = new Map()
+                this.standbyOwnerRooms = new Map()
+                this.standbyCandidate = null
                 this.selectedConnectType = null
                 this.nearbyRoom = null
                 this.nearbyPeers = new Map()
@@ -7175,6 +7274,7 @@
                             record.lastSeen = Date.now()
                             this.saveDeviceLink(record).catch(console.error)
                             connection.send({ type: 'PROFILE', color: record.role === 'phone' ? record.color : record.ownColor || this.user.color.replace('#', ''), role: record.role, protected: record.protected === true }).catch(console.error)
+                            if (record.role === 'block-source' && this.blockPwaTransfers.has(record.id)) this.sendBackupPayload(record, this.blockPwaTransfers.get(record.id), record.color, 'block-pwa').catch(error => alert(error.message))
                             this.syncDeviceBackups().catch(error => this.backupStatus(error.message))
                             if (this.pairInvitation?.record.id === record.id) {
                                 this.pairInvitation = null
@@ -7229,7 +7329,7 @@
 
             async acceptDeviceQr(data) {
                 await this.deviceLinksReady
-                if (data.v !== 1 || !/^[0-9a-f]{64}$/.test(data.secret || '') || !['device', 'friend'].includes(data.mode) || !Number.isFinite(data.expires) || data.expires < Date.now() || data.expires > Date.now() + 6 * 60 * 1000) throw new Error('Invalid or expired pairing QR')
+                if (data.v !== 1 || !/^[0-9a-f]{64}$/.test(data.secret || '') || !['device', 'friend', 'restore', 'block'].includes(data.mode) || !Number.isFinite(data.expires) || data.expires < Date.now() || data.expires > Date.now() + 6 * 60 * 1000) throw new Error('Invalid or expired pairing QR')
                 if (data.publicKey?.x === this.deviceIdentity.publicKey.x && data.publicKey?.y === this.deviceIdentity.publicKey.y) throw new Error('Scan this QR from another device')
                 const existing = this.deviceLinks.find(link => link.secret === data.secret)
                 if (existing) {
@@ -7245,6 +7345,20 @@
                 if (data.mode === 'device' && (this.identity.locked || this.roomId !== 'color-' + color || !this.ui.dashboardPanel.classList.contains('active'))) throw new Error('Open the color you want to back up, then scan the receiving device QR')
                 await this.stopScanner()
                 await this.showInfoPage('backup', false)
+                if (data.mode === 'block') {
+                    if (!/^[0-9a-f]{6}$/.test(data.color || '') || typeof data.instanceId !== 'string' || !data.instanceId || typeof data.selector !== 'string' || !data.selector) throw new Error('Invalid block transfer QR')
+                    const record = { id: crypto.randomUUID(), secret: data.secret, publicKey: data.publicKey, role: 'block-admin', color: data.color, ownColor: data.color, blockInstanceId: data.instanceId, selector: data.selector, created: Date.now() }
+                    this.connectDeviceLink(record)
+                    this.backupStatus('SECURE CONNECTION ESTABLISHING · WAITING FOR ' + String(data.label || data.selector).toUpperCase())
+                    return
+                }
+                if (data.mode === 'restore') {
+                    if (!/^[0-9a-f]{6}$/.test(data.color || '')) throw new Error('Invalid backup Color')
+                    const record = { id: crypto.randomUUID(), secret: data.secret, publicKey: data.publicKey, role: 'restore', color: data.color, ownColor: data.color, created: Date.now() }
+                    this.connectDeviceLink(record)
+                    this.backupStatus('SECURE CONNECTION ESTABLISHING · WAITING FOR BACKUP')
+                    return
+                }
                 const record = { id: crypto.randomUUID(), secret: data.secret, publicKey: data.publicKey, role: data.mode === 'friend' ? 'friend' : 'phone', color, ownColor: color, created: Date.now(), needsInitialCopy: data.mode === 'device' }
                 if (data.mode === 'friend' && /^[0-9a-f]{6}$/.test(data.restoreColor || '')) record.restoreColor = data.restoreColor
                 if (data.mode === 'device') {
@@ -7369,7 +7483,8 @@
                 }
                 if (message.type === 'SNAPSHOT_START') {
                     const restoring = message.purpose === 'restore' && this.friendRestores.get(record.id)?.color === message.color
-                    if (record.role === 'friend' ? !restoring && !record.acceptsBackup : message.color !== record.color) throw new Error('Backup permission denied')
+                    const blockTransfer = message.purpose === 'block-pwa' && record.role === 'block-admin' && message.color === record.color
+                    if (record.role === 'block-source' || record.role === 'block-admin' ? !blockTransfer : record.role === 'friend' ? !restoring && !record.acceptsBackup : message.color !== record.color) throw new Error('Backup permission denied')
                     if (!/^[0-9a-f]{6}$/.test(message.color || '') || !Number.isSafeInteger(message.bytes) || message.bytes < 1 || message.bytes > 128 * 1024 * 1024 || !/^[0-9a-f]{64}$/.test(message.hash || '')) throw new Error('Invalid backup size or checksum')
                     this.backupReceiving.set(record.id, { ...message, chunks: [], received: 0, updated: Date.now() })
                     return
@@ -7396,6 +7511,21 @@
                     const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
                     if (hash !== incoming.hash) throw new Error('Backup checksum mismatch')
                     let payload = JSON.parse(new TextDecoder().decode(bytes))
+                    if (incoming.purpose === 'block-pwa') {
+                        if (record.role !== 'block-admin' || payload?.v !== 1 || payload.kind !== 'block-pwa' || payload.color !== incoming.color || payload.instanceId !== record.blockInstanceId || payload.selector !== record.selector || !/^[a-z0-9_-]+\.html$/i.test(payload.pageName || '') || typeof payload.html !== 'string' || !payload.html.startsWith('<!doctype html>')) throw new Error('Invalid block app transfer')
+                        if (!('serviceWorker' in navigator) || !('caches' in window)) throw new Error('This browser cannot install offline PWAs')
+                        await navigator.storage?.persist?.()
+                        await navigator.serviceWorker.register('sw.js')
+                        await navigator.serviceWorker.ready
+                        const url = new URL(payload.pageName, location.href)
+                        await (await caches.open('color-backups-v1')).put(url, new Response(payload.html, { headers: { 'Content-Type': 'text/html;charset=utf-8' } }))
+                        record.lastReceived = Date.now()
+                        await this.saveDeviceLink(record)
+                        await connection.send({ type: 'SNAPSHOT_ACK', id: incoming.id, hash, conflicts: [] })
+                        await new Promise(resolve => setTimeout(resolve, 150))
+                        location.href = url.href
+                        return
+                    }
                     let result
                     if (restore) {
                         this.friendRestores.delete(record.id)
@@ -7434,6 +7564,11 @@
                     if (!outgoing || outgoing.id !== message.id || outgoing.hash !== message.hash) return
                     this.backupSending.delete(record.id)
                     this.backupHashes.set(record.id, outgoing.hash)
+                    if (outgoing.purpose === 'block-pwa') {
+                        this.blockPwaTransfers.delete(record.id)
+                        const container = document.getElementById('qr-display-container')
+                        if (container) container.textContent = 'BLOCK APP TRANSFERRED'
+                    }
                     if (outgoing.snapshot && record.needsInitialCopy) await this.identity._call('backup_confirm_export', { roomHex: record.color, linkId: record.id, snapshot: outgoing.snapshot })
                     if (record.pendingFriendDigest) this.friendBackupHashes.set(record.id, record.pendingFriendDigest)
                     record.lastBackup = Date.now()
@@ -7608,7 +7743,7 @@
                     if (this.identity.locked || this.roomId !== 'color-' + color || !this.ui.dashboardPanel.classList.contains('active')) return
                     for (const record of this.deviceLinks) {
                         const connection = this.deviceConnections.get(record.id)
-                        if (record.revoked || connection?.status !== 'connected' || this.backupSending.has(record.id)) continue
+                    if (record.revoked || record.role === 'restore' || record.role?.startsWith('block-') || connection?.status !== 'connected' || this.backupSending.has(record.id)) continue
                         if (record.role === 'friend' ? !record.sendsBackup || !record.remoteAcceptsBackup || record.ownColor !== color : record.color !== color) continue
                         try {
                             const snapshot = await this.identity._call('backup_export', { roomHex: color, linkId: record.id, includeKeys: record.role === 'friend' || record.needsInitialCopy === true })
@@ -7642,12 +7777,212 @@
                 const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
                 if (purpose === 'backup' && this.backupHashes.get(record.id) === hash) return
                 const id = crypto.randomUUID()
-                this.backupSending.set(record.id, { id, hash, snapshot, sentAt: Date.now() })
+                this.backupSending.set(record.id, { id, hash, snapshot, purpose, sentAt: Date.now() })
                 try {
                     await connection.send({ type: 'SNAPSHOT_START', id, color, purpose, bytes: bytes.length, hash })
                     for (let offset = 0, index = 0; offset < bytes.length; offset += 16384, index++) await connection.send({ type: 'SNAPSHOT_CHUNK', id, index, data: this.fileTransfers.arrayBufferToBase64(bytes.subarray(offset, offset + 16384)) })
                     await connection.send({ type: 'SNAPSHOT_END', id })
                 } catch (error) { this.backupSending.delete(record.id); throw error }
+            }
+
+            async hostStandaloneBackup(request, notify) {
+                const { snapshot, secret, identity } = request || {}, color = snapshot?.roomHex
+                if (snapshot?.v !== 1 || !/^[0-9a-f]{6}$/.test(color || '') || !Array.isArray(snapshot.entries) || !/^[0-9a-f]{64}$/.test(secret || '') || identity?.privateJwk?.kty !== 'EC' || identity.privateJwk.crv !== 'P-256' || identity?.publicKey?.x !== identity.privateJwk.x || identity?.publicKey?.y !== identity.privateJwk.y) throw new Error('Invalid standalone backup')
+                const bytes = new TextEncoder().encode(JSON.stringify(snapshot))
+                if (!bytes.length || bytes.length > 128 * 1024 * 1024) throw new Error('Invalid backup size')
+                this.standaloneBackupHost?.close()
+                const privateKey = await crypto.subtle.importKey('jwk', identity.privateJwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign'])
+                const record = { id: 'standalone-' + secret.slice(0, 16), secret, role: 'vault', ownColor: color, created: Date.now() }
+                let sending = false, expectedHash = ''
+                const connection = new PersistentPeerLink(record, { privateKey, publicKey: identity.publicKey, device: { type: 'desktop', os: 'Color backup', name: '#' + color.toUpperCase() } }, {
+                    onStatus: status => {
+                        notify({ status })
+                        if (status === 'connected' && !sending) {
+                            sending = true
+                            ;(async () => {
+                                expectedHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('')
+                                const id = crypto.randomUUID()
+                                await connection.send({ type: 'SNAPSHOT_START', id, color, purpose: 'restore', bytes: bytes.length, hash: expectedHash })
+                                for (let offset = 0, index = 0; offset < bytes.length; offset += 16384, index++) await connection.send({ type: 'SNAPSHOT_CHUNK', id, index, data: this.fileTransfers.arrayBufferToBase64(bytes.subarray(offset, offset + 16384)) })
+                                await connection.send({ type: 'SNAPSHOT_END', id })
+                                notify({ status: 'transferring' })
+                            })().catch(error => { sending = false; notify({ error: error.message }) })
+                        }
+                    },
+                    onMessage: message => {
+                        if (message?.type === 'SNAPSHOT_ACK' && message.hash === expectedHash) notify({ status: 'complete' })
+                    },
+                    onError: error => notify({ error: error.message })
+                })
+                this.standaloneBackupHost = connection
+                notify({ payload: { v: 1, b: true, mode: 'restore', secret, publicKey: identity.publicKey, color, expires: Date.now() + 5 * 60 * 1000 } })
+            }
+
+            async hostStandaloneBlock(request, notify) {
+                const { color, selector, index, payload, keys } = request || {}, def = payload?.definition
+                if (!/^[0-9a-f]{6}$/.test(color || '') || !Number.isSafeInteger(index) || payload?.type !== 'block' || !payload.instanceId || !def?.id || keys?.sig?.kty !== 'EC' || keys?.aes?.kty !== 'oct' || keys?.pub?.x !== keys.sig.x || keys?.pub?.y !== keys.sig.y) throw new Error('Invalid owner block PWA')
+                let replicaRecovery = null
+                const ensureReplica = this.ensureStandaloneBlockReplica = async () => {
+                    if (replicaRecovery) return replicaRecovery
+                    if (await this.identity.roomHasWrappedKeys(color)) return false
+                    if (!request.snapshot) throw new Error('This Color was wiped and the PWA has no recovery snapshot')
+                    replicaRecovery = this.identity._call('backup_import', { roomHex: color, snapshot: request.snapshot, linkId: 'block-pwa-' + payload.instanceId }).then(() => { notify({ event: 'restored', color }); return true }).finally(() => { replicaRecovery = null })
+                    return replicaRecovery
+                }
+                await ensureReplica()
+                this.standaloneBlockHost?.leave()
+                const privateKey = await crypto.subtle.importKey('jwk', keys.sig, { name: 'ECDSA', namedCurve: keys.sig.crv || 'P-256' }, false, ['sign'])
+                const agreementKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: keys.sig.x, y: keys.sig.y, d: keys.sig.d }, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey'])
+                const publicKey = await crypto.subtle.importKey('jwk', keys.pub, { name: 'ECDSA', namedCurve: keys.pub.crv || 'P-256' }, false, ['verify'])
+                const aesKey = await crypto.subtle.importKey('jwk', keys.aes, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']), peerKeys = new Map()
+                const signature = async value => btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: keys.sig.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, privateKey, new TextEncoder().encode(value)))))
+                const identity = {
+                    getPublicKeyData: async () => keys.pub,
+                    storePeerKey: async (pid, jwk) => peerKeys.set(pid, await crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: jwk.crv || 'P-256' }, false, ['verify'])),
+                    _call: async (action, data) => {
+                        if (action === 'sign') return signature(data)
+                        if (action === 'validate_peer') return this.identity._call(action, data)
+                        if (action === 'db_verify_remote') {
+                            const key = peerKeys.get(data.peerId), valid = {}
+                            if (!key) return valid
+                            for (const [row, value] of Object.entries(data.fragments || {})) {
+                                const bytes = Uint8Array.from(atob(value.signature || ''), char => char.charCodeAt(0)), text = row + ':' + value.updated + ':' + value.owner + ':' + value.content
+                                if (await crypto.subtle.verify({ name: 'ECDSA', hash: key.algorithm.namedCurve === 'P-521' ? 'SHA-512' : 'SHA-256' }, key, bytes, new TextEncoder().encode(text))) valid[row] = value
+                            }
+                            return valid
+                        }
+                        throw new Error('Unsupported owner replica operation')
+                    }
+                }
+                this.user.color = '#' + color
+                this.roomId = 'color-' + color
+                const mesh = this.standaloneBlockHost = new TrustedMesh(this.roomId, identity), namespace = def.actions?.namespace || def.action || ''
+                this.fileTransfers.attachMesh(mesh)
+                if (namespace) mesh.registerBlockAction(namespace)
+                const sendSdk = async (body, pid) => mesh.sendBlockAction('sdk_ops', { type: 'SDK_RESPONSE', payload: body, publicKey: keys.pub, signature: await signature(JSON.stringify(body)) }, pid)
+                mesh.on('sdk-action', async (data, pid) => {
+                    let origin
+                    try { const url = new URL(data?.origin); if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) return; origin = url.origin } catch (_) { return }
+                    const sourcesField = def.embed?.sourcesField, sources = sourcesField && Array.isArray(payload.data?.[sourcesField]) ? payload.data[sourcesField] : [], allowed = !sources.length || sources.some(source => { try { return new URL(typeof source === 'string' ? source : source?.origin).origin === origin } catch (_) { return false } })
+                    if (data.type === 'GET_BLOCK' && String(data.block || '').toLowerCase() === String(selector).toLowerCase()) {
+                        if (!allowed) return sendSdk({ kind: 'source', status: 'pending', requestId: data.requestId, origin, ownerColor: '#' + color }, pid)
+                        const publicBlock = this.parseBlockPayload(this.getPublicSyncContent(JSON.stringify(payload))), document = this.embeddedBlockDocument(publicBlock, /^#[0-9a-f]{6}$/i.test(data.visitorColor || '') ? data.visitorColor.toLowerCase() : '#ffffff', keys.pub)
+                        return sendSdk({ kind: 'block', requestId: data.requestId, origin, ownerColor: '#' + color, block: { instanceId: payload.instanceId, blockId: payload.blockId }, document, documentHash: await this.sdkHash(document) }, pid)
+                    }
+                    if (data.type === 'BLOCK_ACTION' && data.blockInstanceId === payload.instanceId && data.namespace === namespace && allowed) { await ensureReplica(); notify({ event: 'action', channel: 'sdk', data: data.message, pid, origin, namespace, identity: mesh.peerIdentities.get(pid) }) }
+                })
+                mesh.on('block-action', async (receivedNamespace, data, pid) => { if (receivedNamespace === namespace) { await ensureReplica(); notify({ event: 'action', channel: 'block', data, pid, namespace, identity: mesh.peerIdentities.get(pid) }) } })
+                mesh.on('fragment', fragments => notify({ event: 'fragment', fragments }))
+                mesh.on('peer-join', () => notify({ status: 'connected' }))
+                mesh.on('peer-leave', () => notify({ status: 'listening' }))
+                this.standaloneBlockMessage = async message => {
+                    if (message?.type === 'file-request' && message.meta?.id) {
+                        this.fileTransfers.requestDownload(message.meta)
+                        for (let tries = 0; tries < 240; tries++) {
+                            const ready = this.fileTransfers.completed.get(message.meta.id)
+                            if (ready) { notify({ event: 'file', fileId: message.meta.id, blob: ready.blob, meta: ready.meta }); return }
+                            await new Promise(resolve => setTimeout(resolve, 500))
+                        }
+                        throw new Error('File transfer timed out')
+                    }
+                    if (message?.type === 'reply') {
+                        if (message.channel === 'sdk') return sendSdk({ kind: 'action', origin: message.origin, blockInstanceId: payload.instanceId, namespace, message: message.data }, message.pid)
+                        return mesh.sendBlockAction(namespace, message.data, message.pid)
+                    }
+                    if (message?.type !== 'persist' || message.payload?.instanceId !== payload.instanceId) return
+                    await ensureReplica()
+                    Object.assign(payload, message.payload)
+                    const content = JSON.stringify(payload), owner = color, updated = Date.now(), iv = crypto.getRandomValues(new Uint8Array(12)), encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, new TextEncoder().encode(content))), packed = new Uint8Array(12 + encrypted.length)
+                    packed.set(iv); packed.set(encrypted, 12)
+                    const db = await new Promise((resolve, reject) => { const open = indexedDB.open('color'); open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error) })
+                    const localSignature = await signature(index + ':' + updated + ':' + owner + ':' + content)
+                    await new Promise((resolve, reject) => { const tx = db.transaction(color, 'readwrite'); tx.objectStore(color).put({ content: packed.buffer, owner, updated, signature: localSignature }, index); tx.oncomplete = resolve; tx.onerror = tx.onabort = () => reject(tx.error) })
+                    db.close()
+                    const publicContent = this.getPublicSyncContent(content), signed = await signature(index + ':' + updated + ':' + owner + ':' + publicContent)
+                    if (message.broadcast !== false) mesh.broadcastFragment({ [index]: { content: publicContent, owner, updated, signature: signed } })
+                }
+                mesh.enableSync()
+                const decryptStandby = async envelope => { const remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: envelope.ephemeral.x, y: envelope.ephemeral.y }, { name: 'ECDH', namedCurve: 'P-256' }, false, []), key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, agreementKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']), plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(envelope.iv) }, key, new Uint8Array(envelope.data)); return JSON.parse(new TextDecoder().decode(plain)) }
+                await this.startStandbyOwner({ selector, label: def.name || selector, payload }, { color, publicKey: keys.pub, sign: signature, decrypt: decryptStandby, apply: async message => { await ensureReplica(); notify({ event: 'action', channel: 'standby', data: message.message, pid: 'standby-' + message.id, namespace: message.namespace }) } })
+                notify({ status: 'listening' })
+            }
+
+            async startStandbyOwner(entry, options = {}) {
+                const color = String(options.color || this.user.color).replace('#', '').toLowerCase(), selector = String(entry.selector).toLowerCase(), roomKey = color + ':' + selector
+                if (!/^[0-9a-f]{6}$/.test(color) || this.standbyOwnerRooms.has(roomKey)) return
+                const room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49' }, 'color-standby-' + color + '-' + selector), [send, receive] = room.makeAction('standby')
+                const applicants = new Set()
+                const publicKey = options.publicKey || await this.identity.getPublicKeyData(), sign = options.sign || (value => this.identity._call('sign', value)), decrypt = options.decrypt || (envelope => this.identity._call('decrypt_owner_envelope', { roomHex: color, envelope })), apply = options.apply || (message => this.handleBlockAction(message.namespace, message.message, 'standby-' + message.id))
+                if (!publicKey) { room.leave(); return }
+                const verifyCapability = async message => {
+                    const capability = message?.capability
+                    if (!capability || capability.ownerColor !== color || capability.block !== selector || capability.expires < Date.now() || message.ownerPublicKey?.x !== publicKey.x || message.ownerPublicKey?.y !== publicKey.y) return false
+                    const key = await crypto.subtle.importKey('jwk', publicKey, { name: 'ECDSA', namedCurve: publicKey.crv || 'P-256' }, false, ['verify'])
+                    return crypto.subtle.verify({ name: 'ECDSA', hash: publicKey.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, key, Uint8Array.from(atob(message.signature || ''), char => char.charCodeAt(0)), new TextEncoder().encode(JSON.stringify(capability)))
+                }
+                receive(async (message, pid) => {
+                    if (message?.type === 'APPLICATION' && message.ownerColor === color && message.block === selector && message.candidatePublicKey?.kty === 'EC') {
+                        const applicant = message.candidatePublicKey.x + ':' + message.candidatePublicKey.y
+                        if (applicants.has(applicant)) return
+                        applicants.add(applicant)
+                        const label = entry.label || entry.payload?.definition?.name || selector, candidate = message.candidateColor || 'ANONYMOUS'
+                        if (!confirm(candidate + ' wants to stand with ' + label + '. Approve this backup candidate?')) return send({ type: 'DENIED' }, pid)
+                        const requested = prompt('Type CONDUIT to store encrypted interactions without reading them, or ADMIN to also read incoming interactions. Commerce administrators may see sensitive order information.', 'CONDUIT')
+                        const role = String(requested || '').trim().toLowerCase()
+                        if (!['conduit', 'admin'].includes(role)) return send({ type: 'DENIED' }, pid)
+                        const capability = { v: 1, ownerColor: color, block: selector, blockInstanceId: entry.payload.instanceId, candidatePublicKey: message.candidatePublicKey, role, issued: Date.now(), expires: Date.now() + 30 * 86400000, nonce: crypto.randomUUID() }
+                        send({ type: 'CAPABILITY', capability, signature: await sign(JSON.stringify(capability)), ownerPublicKey: publicKey }, pid)
+                        return
+                    }
+                    if (message?.type === 'QUEUED' && await verifyCapability(message)) {
+                        try { const envelope = await decrypt(message.ownerEnvelope), action = { ...envelope, id: message.id }; await apply(action); send({ type: 'ACK', id: message.id }, pid) } catch (error) { console.error('[Standby] queued interaction failed', error) }
+                    }
+                })
+                room.onPeerJoin(pid => send({ type: 'DRAIN', ownerColor: color, block: selector }, pid))
+                this.standbyOwnerRooms.set(roomKey, room)
+            }
+
+            async startStandbyOwnerRooms() {
+                const color = this.user.color.replace('#', '').toLowerCase()
+                if (this.identity.locked || this.roomId !== 'color-' + color) return
+                for (const entry of this.sdkEmbeddableBlocks(await this.getLocalBlockPayloads())) await this.startStandbyOwner(entry)
+            }
+
+            async startStandbyCandidate(ownerColor, selector, expectedOwnerKey = '') {
+                const color = String(ownerColor || '').replace('#', '').toLowerCase(), block = String(selector || '').toLowerCase()
+                if (!/^[0-9a-f]{6}$/.test(color) || !/^(?:[a-z0-9][a-z0-9-]*)(?:-[1-9]\d*)?$/.test(block)) throw new Error('Invalid standby room')
+                const storageKey = 'local:standby:' + color + ':' + block, saved = await this.identity._call('db_local_read', { roomHex: 'ffffff', key: storageKey }).catch(() => null)
+                const pair = saved?.privateKey ? { privateKey: await crypto.subtle.importKey('jwk', saved.privateKey, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']), publicKey: await crypto.subtle.importKey('jwk', saved.publicKey, { name: 'ECDH', namedCurve: 'P-256' }, true, []) } : await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']), publicJwk = saved?.publicKey || await crypto.subtle.exportKey('jwk', pair.publicKey), privateJwk = saved?.privateKey || await crypto.subtle.exportKey('jwk', pair.privateKey)
+                const state = { privateKey: privateJwk, publicKey: publicJwk, capability: saved?.capability || null, signature: saved?.signature || '', ownerPublicKey: saved?.ownerPublicKey || null, queue: Array.isArray(saved?.queue) ? saved.queue : [] }
+                if (state.capability?.expires < Date.now()) { state.capability = null; state.signature = ''; state.ownerPublicKey = null }
+                const persist = () => this.identity._call('db_local_write', { roomHex: 'ffffff', key: storageKey, value: state })
+                const panel = document.createElement('section')
+                panel.style.cssText = 'position:fixed;inset:0;z-index:99999;display:grid;place-items:center;padding:24px;background:#fff;color:#111;font:16px/1.5 system-ui,sans-serif'
+                panel.innerHTML = `<div style="max-width:560px"><div style="height:10px;background:#${color};margin-bottom:24px"></div><h1>STAND WITH ${this.escapeHtml(block.toUpperCase())}</h1><p data-standby-status>${state.capability ? 'APPROVED · CONNECTING' : 'WAITING FOR THE OWNER TO APPROVE YOU'}</p><p>Keep this page open. CONDUIT stores encrypted interactions it cannot read. ADMIN can also read incoming interaction contents.</p><div data-standby-log style="max-height:40vh;overflow:auto"></div></div>`
+                document.body.appendChild(panel)
+                const status = panel.querySelector('[data-standby-status]'), log = panel.querySelector('[data-standby-log]'), room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49' }, 'color-standby-' + color + '-' + block), [send, receive] = room.makeAction('standby')
+                const advertise = pid => state.capability && send({ type: 'CAPABILITY', capability: state.capability, signature: state.signature, ownerPublicKey: state.ownerPublicKey }, pid)
+                const decryptAdmin = async envelope => { const remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: envelope.ephemeral.x, y: envelope.ephemeral.y }, { name: 'ECDH', namedCurve: 'P-256' }, false, []), privateKey = await crypto.subtle.importKey('jwk', privateJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']), key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, privateKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']), plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(envelope.iv) }, key, new Uint8Array(envelope.data)); return JSON.parse(new TextDecoder().decode(plain)) }
+                receive(async (message, pid) => {
+                    if (message?.type === 'CAPABILITY' && message.capability?.candidatePublicKey?.x === publicJwk.x && message.capability?.ownerColor === color && message.capability?.block === block) {
+                        const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([message.ownerPublicKey?.kty, message.ownerPublicKey?.crv, message.ownerPublicKey?.x, message.ownerPublicKey?.y])))), byte => byte.toString(16).padStart(2, '0')).join('')
+                        if (expectedOwnerKey && fingerprint !== String(expectedOwnerKey).replace(/^sha256[:-]/i, '').toLowerCase()) return
+                        const key = await crypto.subtle.importKey('jwk', message.ownerPublicKey, { name: 'ECDSA', namedCurve: message.ownerPublicKey.crv || 'P-256' }, false, ['verify']), valid = await crypto.subtle.verify({ name: 'ECDSA', hash: message.ownerPublicKey.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, key, Uint8Array.from(atob(message.signature), char => char.charCodeAt(0)), new TextEncoder().encode(JSON.stringify(message.capability)))
+                        if (!valid) return
+                        Object.assign(state, { capability: message.capability, signature: message.signature, ownerPublicKey: message.ownerPublicKey }); await persist(); status.textContent = 'APPROVED AS ' + message.capability.role.toUpperCase(); advertise()
+                    } else if (message?.type === 'DENIED') { state.denied = true; status.textContent = 'THE OWNER DECLINED THIS REQUEST' }
+                    else if (message?.type === 'WHO_STANDS') advertise(pid)
+                    else if (message?.type === 'ENVELOPE' && state.capability && message.capability?.nonce === state.capability.nonce) {
+                        if (state.queue.some(item => item.id === message.id)) return
+                        const queued = { ...message, adminEnvelope: state.capability.role === 'admin' ? message.adminEnvelope : null }
+                        state.queue.push(queued); await persist(); status.textContent = state.queue.length + ' INTERACTION' + (state.queue.length === 1 ? '' : 'S') + ' HELD'
+                        if (queued.adminEnvelope) { const visible = await decryptAdmin(queued.adminEnvelope); const row = document.createElement('pre'); row.style.whiteSpace = 'pre-wrap'; row.textContent = JSON.stringify(visible, null, 2); log.prepend(row) }
+                    } else if (message?.type === 'DRAIN' && state.capability) state.queue.forEach(item => send({ ...item, type: 'QUEUED' }, pid))
+                    else if (message?.type === 'ACK') { state.queue = state.queue.filter(item => item.id !== message.id); await persist(); status.textContent = state.queue.length ? state.queue.length + ' INTERACTIONS HELD' : 'SYNCED · STANDING BY' }
+                })
+                room.onPeerJoin(pid => { if (state.capability) advertise(pid); else if (!state.denied) send({ type: 'APPLICATION', ownerColor: color, block, candidateColor: this.user.color || '#ffffff', candidatePublicKey: publicJwk }, pid) })
+                if (!state.capability) setInterval(() => { if (!state.denied) send({ type: 'APPLICATION', ownerColor: color, block, candidateColor: this.user.color || '#ffffff', candidatePublicKey: publicJwk }) }, 10000)
+                this.standbyCandidate = { room, state }
             }
 
             async restoreFriendBackup(record) {
@@ -7728,7 +8063,7 @@
                     row.innerHTML = record.device?.type === 'phone' ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 18h4"/></svg>' : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="1"/><path d="M8 21h8m-4-4v4"/></svg>'
                     const text = document.createElement('div'), name = document.createElement('strong'), detail = document.createElement('span'), controls = document.createElement('div')
                     const status = record.revoked ? 'BLOCKED' : (this.deviceConnections.get(record.id)?.status || 'offline').toUpperCase()
-                    name.textContent = (record.device?.os || 'Device') + ' · ' + (record.role === 'friend' ? 'FRIEND #' + (record.friendColor || '').toUpperCase() : 'PAIRED DEVICE') + ' · ' + status
+                    name.textContent = (record.device?.os || 'Device') + ' · ' + (record.role === 'friend' ? 'FRIEND #' + (record.friendColor || '').toUpperCase() : record.role?.startsWith('block-') ? 'BLOCK ADMIN · ' + String(record.selector || '').toUpperCase() : 'PAIRED DEVICE') + ' · ' + status
                     const saved = Math.max(record.lastBackup || 0, record.lastReceived || 0)
                     detail.textContent = (record.fingerprint || '').slice(0, 24) + (saved ? ' · Saved ' + new Date(saved).toLocaleString() : ' · Awaiting first backup') + (record.role === 'friend' ? '' : record.recoverable ? ' · ' + (record.protected ? 'PASSKEY RECOVERY' : 'COLOR PASSWORD RECOVERY') : record.protected ? ' · UPDATE RECOVERY BEFORE BLOCKING' : ' · VERIFY RECOVERY PASSWORD')
                     if (record.conflicts?.length || typeof record.conflicts === 'number' && record.conflicts > 0) detail.textContent += ' · Concurrent changes retained; review before relying on this backup'
@@ -7748,12 +8083,12 @@
                                 const envelope = await this.identity._call('backup_opaque_get', { linkId: record.id, roomHex: record.heldColor })
                                 this.fileTransfers.saveBlob(new Blob([JSON.stringify(envelope)], { type: 'application/json' }), { name: 'color-' + record.heldColor + '-encrypted-backup.json' })
                             })
-                        } else if (saved || record.needsInitialCopy) {
+                        } else if (!record.role?.startsWith('block-') && (saved || record.needsInitialCopy)) {
                             button(record.protected ? 'REPLACE PASSKEY' : 'ENABLE PASSKEY', () => this.verifyBackupAction(record, record.needsInitialCopy ? 'pair' : 'prepare'))
                         }
                         button('BLOCK', () => this.blockDevice(record))
                     }
-                    if (record.role !== 'friend' && saved) button('RECOVER DATA', () => this.verifyBackupAction(record, 'recover'))
+                    if (record.role !== 'friend' && !record.role?.startsWith('block-') && saved) button('RECOVER DATA', () => this.verifyBackupAction(record, 'recover'))
                     text.append(name, detail, controls); row.appendChild(text); list.appendChild(row)
                 }
                 if (this.deviceLinks.some(record => !record.revoked) && !this.pairInvitation) document.getElementById('backup-qr-display').replaceChildren()
@@ -9119,6 +9454,26 @@
                 this.renderInstalledBlocks()
             }
 
+            async upsertOwnedBlock(blockId, match, updater) {
+                const payloads = await this.getLocalBlockPayloads()
+                const existing = payloads.find(payload => payload.blockId === blockId && (!match || match(payload)))
+                if (existing) return this.updateBlockPayload(existing.instanceId, updater)
+                const def = this.getBlockDefinition(blockId)
+                if (!def?.id || !this.store) return
+                const payload = updater({ type: 'block', blockId, instanceId: this.makeBlockInstanceId(blockId), definition: this.snapshotBlockDefinition(def), data: {}, created: Date.now() })
+                const line = this.findBlockInsertLine(), meta = this.parseId(line?.id)
+                if (!line || !meta || !payload) return
+                line.classList.add('block-line')
+                line.contentEditable = 'false'
+                line.innerHTML = this.renderBlockContent(payload, this.user.color.replace('#', ''))
+                this.hydrateBlockLine(line, payload, this.user.color.replace('#', ''))
+                this.currentLineId = line.id
+                await this.store.handleLocalUpdate(meta.index, JSON.stringify(payload), this.user.color)
+                this.localBlockPayloadCache = null
+                this.renderBlockDiscovery()
+                this.renderInstalledBlocks()
+            }
+
             renderBlockRuntime(instanceId) {
                 this.ui.display.querySelectorAll(`[data-block-instance="${this.escapeAttr(instanceId)}"]`).forEach(widget => {
                     const line = widget.closest('.editor-line')
@@ -9169,26 +9524,33 @@
                 return owner
             }
 
-            hardcodedColorDocument(rows, cursor, label = '', isAdmin = true) {
+            hardcodedBackupDocument(rows, cursor, snapshot, qrSource, label = '') {
                 const color = this.user.color.replace('#', '').toLowerCase(), blocks = []
-                const savedRows = rows.filter(row => Number.isInteger(row.key)).map(row => { const content = String(row.value?.content || ''); return { ...row, value: { ...row.value, content: isAdmin ? content : this.getPublicSyncContent(content) } } })
+                const savedRows = rows.filter(row => Number.isInteger(row.key)).map(row => ({ ...row, value: { ...row.value, content: String(row.value?.content || '') } }))
                 const content = savedRows.sort((a, b) => a.key - b.key).map(row => {
-                    const source = String(row.value?.content || ''), payload = this.parseBlockPayload(source)
+                    const source = row.value.content, payload = this.parseBlockPayload(source)
                     let html
                     if (payload) {
-                        const def = this.getBlockDefinition(payload), view = this.getBlockView(def, isAdmin)
-                        html = this.renderBlockContent(payload, isAdmin ? color : '')
-                        blocks.push({ instanceId: payload.instanceId, payload, js: view.js || '', customDocument: this.blockCategory(def) === 'CUSTOM' ? this.customBlockSandboxDocument(payload, def, isAdmin) : '' })
+                        const def = this.getBlockDefinition(payload), view = this.getBlockView(def, true)
+                        html = this.renderBlockContent(payload, color)
+                        blocks.push({ instanceId: payload.instanceId, payload, js: view.js || '', customDocument: this.blockCategory(def) === 'CUSTOM' ? this.customBlockSandboxDocument(payload, def, true) : '' })
                     } else html = DOMPurify.sanitize(source || '<br>')
                     return `<div class="editor-line${payload ? ' block-line' : ''}" data-index="${row.key}">${html}</div>`
                 }).join('')
                 const safeJson = value => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
                 const styles = Array.from(document.querySelectorAll('style')).map(style => style.textContent).join('\n').replace(/<\/style/gi, '<\\/style')
-                const iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="#${color}"/></svg>`
-                const icon = 'data:image/svg+xml,' + encodeURIComponent(iconSvg)
-                const manifest = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify({ name: label || 'Color #' + color.toUpperCase(), short_name: '#' + color.toUpperCase(), start_url: '.', display: 'standalone', background_color: '#' + color, theme_color: '#' + color, icons: [{ src: icon, sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }] }))
-                const foreground = (parseInt(color.slice(0, 2), 16) * .299 + parseInt(color.slice(2, 4), 16) * .587 + parseInt(color.slice(4), 16) * .114) > 150 ? '#111' : '#fff'
-                return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#${color}"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="icon" href="${this.escapeAttr(icon)}"><link rel="apple-touch-icon" href="${this.escapeAttr(icon)}"><link rel="manifest" href="${this.escapeAttr(manifest)}"><title>${this.escapeHtml(label || 'Color #' + color.toUpperCase())}</title><style>${styles}\nhtml,body{margin:0;min-height:100%;overflow:auto;background:#${color};color:${foreground}}#color-backup-page{box-sizing:border-box;max-width:1100px;min-height:100vh;margin:auto;padding:24px}.editor-line{min-height:1.4em}.backup-loading{position:fixed;inset:0;z-index:999999;display:grid;place-items:center;background:#${color};color:${foreground};font:900 18px system-ui,sans-serif;transition:opacity .3s}.backup-loading.done{opacity:0;pointer-events:none}.backup-install{position:fixed;right:18px;bottom:18px;z-index:99999;border:0;border-radius:20px;padding:10px 16px;background:${foreground};color:#${color};font-weight:900}[hidden]{display:none!important}</style></head><body><div id="backup-loading" class="backup-loading">#${color.toUpperCase()}</div><button id="backup-install" class="backup-install" hidden>INSTALL</button><main id="color-backup-page">${content || '<p>This Color has no saved content.</p>'}</main><script id="color-backup-data" type="application/json">${safeJson({ color: '#' + color, cursor, rows: savedRows, blocks, isAdmin })}<\/script><script>(()=>{const backup=JSON.parse(document.getElementById('color-backup-data').textContent),app={mesh:null},escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));for(const item of backup.blocks){const root=[...document.querySelectorAll('[data-block-instance]')].find(node=>node.dataset.blockInstance===item.instanceId);if(!root)continue;if(item.customDocument){const frame=root.querySelector('[data-custom-block-sandbox]');if(frame)frame.srcdoc=item.customDocument;continue}try{const payload=item.payload,data=payload.data||{},def=payload.definition||{},isAdmin=backup.isAdmin,userColor=backup.color,publicData=value=>value?.data||data,send=()=>{},runtimeCount=()=>0,updateBlock=updater=>Promise.resolve(updater(payload));Promise.resolve(new Function('app','root','payload','data','def','isAdmin','userColor','escapeHtml','publicData','send','runtimeCount','updateBlock',item.js)(app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,runtimeCount,updateBlock)).catch(console.error)}catch(error){console.error(error)}}document.querySelector('[data-index="'+backup.cursor+'"]')?.scrollIntoView({block:'center'});setTimeout(()=>document.getElementById('backup-loading').classList.add('done'),250);let installPrompt;window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;document.getElementById('backup-install').hidden=false});document.getElementById('backup-install').onclick=async()=>{if(installPrompt){await installPrompt.prompt();installPrompt=null;document.getElementById('backup-install').hidden=true}}})();<\/script></body></html>`
+                const iconUrl = new URL('backup-icon.svg?color=' + color, location.href).href, manifest = new URL('backup.webmanifest?color=' + color, location.href).href
+                const qr = String(qrSource || '').replace(/<\/script/gi, '<\\/script')
+                return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#${color}"><meta name="mobile-web-app-capable" content="yes"><link rel="icon" href="${this.escapeAttr(iconUrl)}"><link rel="apple-touch-icon" href="${this.escapeAttr(iconUrl)}"><link rel="manifest" href="${this.escapeAttr(manifest)}"><title>${this.escapeHtml(label || 'Color #' + color.toUpperCase())}</title><style>${styles}\nhtml,body{margin:0;min-height:100%;background:#fff;color:#111}body{overflow:auto}.backup-sliver{position:sticky;top:0;z-index:1000;width:100%;height:10px;border:0;padding:0;background:#${color};cursor:pointer}.backup-nav{position:sticky;top:10px;z-index:999;display:flex;justify-content:center;max-height:0;overflow:hidden;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,.12);transition:max-height .35s ease}.backup-nav.open{max-height:74px}.backup-nav button{border:0;padding:24px;background:transparent;color:#111;font:900 13px system-ui,sans-serif;letter-spacing:.06em;cursor:pointer}#color-backup-page{box-sizing:border-box;max-width:1100px;min-height:calc(100vh - 10px);margin:auto;padding:24px}.editor-line{min-height:1.4em}.backup-restore{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:24px;background:rgba(255,255,255,.96)}.backup-restore-card{display:grid;justify-items:center;gap:14px;max-width:360px;text-align:center}.backup-restore-card button{border:0;border-radius:7px;padding:10px 18px;background:#111;color:#fff;font-weight:900}.backup-loading{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;background:#fff;color:#111;font:900 18px system-ui,sans-serif;transition:opacity .25s}.backup-loading::before{content:'';position:absolute;top:0;width:100%;height:10px;background:#${color}}.backup-loading.done{opacity:0;pointer-events:none}.backup-install{position:fixed;right:18px;bottom:18px;z-index:2500;border:0;border-radius:20px;padding:11px 17px;background:#${color};color:#111;font-weight:900}[hidden]{display:none!important}</style></head><body><div id="backup-loading" class="backup-loading">#${color.toUpperCase()}</div><button id="backup-sliver" class="backup-sliver" aria-label="Open backup navigation"></button><nav id="backup-nav" class="backup-nav"><button id="restore-backup" type="button">RESTORE BACKUP</button></nav><main id="color-backup-page">${content || '<p>This Color has no saved content.</p>'}</main><section id="backup-restore" class="backup-restore" hidden><div class="backup-restore-card"><div id="backup-qr"></div><b>SCAN TO RESTORE #${color.toUpperCase()}</b><small>Keep the scanner open while the QR transfers every part of this backup.</small><button id="close-restore" type="button">CLOSE</button></div></section><button id="backup-install" class="backup-install" hidden>INSTALL BACKUP</button><script id="color-backup-data" type="application/json">${safeJson({ color: '#' + color, cursor, rows: savedRows, blocks, snapshot })}<\/script><script>${qr}<\/script><script>(()=>{const backup=JSON.parse(document.getElementById('color-backup-data').textContent),app={mesh:null},escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));for(const item of backup.blocks){const root=[...document.querySelectorAll('[data-block-instance]')].find(node=>node.dataset.blockInstance===item.instanceId);if(!root)continue;if(item.customDocument){const frame=root.querySelector('[data-custom-block-sandbox]');if(frame)frame.srcdoc=item.customDocument;continue}try{const payload=item.payload,data=payload.data||{},def=payload.definition||{},isAdmin=true,userColor=backup.color,publicData=value=>value?.data||data,send=()=>{},runtimeCount=()=>0,updateBlock=updater=>Promise.resolve(updater(payload));Promise.resolve(new Function('app','root','payload','data','def','isAdmin','userColor','escapeHtml','publicData','send','runtimeCount','updateBlock',item.js)(app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,runtimeCount,updateBlock)).catch(console.error)}catch(error){console.error(error)}}document.querySelector('[data-index="'+backup.cursor+'"]')?.scrollIntoView({block:'center'});setTimeout(()=>document.getElementById('backup-loading').classList.add('done'),250);const nav=document.getElementById('backup-nav'),panel=document.getElementById('backup-restore'),qr=document.getElementById('backup-qr');document.getElementById('backup-sliver').onclick=()=>nav.classList.toggle('open');document.getElementById('close-restore').onclick=()=>panel.hidden=true;document.getElementById('restore-backup').onclick=()=>{};let installPrompt;window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;const button=document.getElementById('backup-install');button.hidden=false;button.onclick=async()=>{try{await installPrompt.prompt();installPrompt=null;button.hidden=true}catch(_){button.hidden=false}};button.click()});navigator.serviceWorker?.register('sw.js').catch(()=>{})})();<\/script></body></html>`
+            }
+
+            secureBackupDocument(html, transport) {
+                html = html.replace('Keep the scanner open while the QR transfers every part of this backup.', 'Scan once to establish a secure connection. The backup transfers over WebRTC.')
+                const marker = "document.getElementById('restore-backup').onclick=()=>{}"
+                if (!html.includes(marker)) throw new Error('Backup restore runtime is missing')
+                const value = JSON.stringify(transport).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
+                const replacement = `document.getElementById('restore-backup').onclick=()=>{panel.hidden=false;qr.textContent='CREATING SECURE CONNECTION…';const transport=${value},frame=document.createElement('iframe'),note=panel.querySelector('small');frame.hidden=true;frame.src=transport.hostUrl+(transport.hostUrl.includes('?')?'&':'?')+'backupHost='+encodeURIComponent(transport.nonce);document.body.appendChild(frame);window.addEventListener('message',event=>{const message=event.data;if(event.source!==frame.contentWindow||message?.type!=='color-backup-host-status'||message.nonce!==transport.nonce)return;if(message.error){note.textContent=message.error;return}if(message.payload){qr.replaceChildren();new QRCode(qr,{text:JSON.stringify(message.payload),width:250,height:250,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.L});note.textContent='Scan once. The encrypted backup will transfer over WebRTC.'}else if(message.status==='connected')note.textContent='SECURE CONNECTION ESTABLISHED';else if(message.status==='transferring')note.textContent='TRANSFERRING AND VERIFYING BACKUP…';else if(message.status==='complete')note.textContent='BACKUP RESTORED AND VERIFIED'});frame.onload=()=>frame.contentWindow.postMessage({type:'color-backup-host-start',nonce:transport.nonce,snapshot:backup.snapshot,secret:transport.secret,identity:transport.identity},transport.hostOrigin)}`
+                return html.replace(marker, replacement)
             }
 
             embeddedBlockDocument(payload, visitorColor, ownerPublicKey = null) {
@@ -9197,7 +9559,7 @@
                 const html = this.renderBlockContent(payload, '')
                 const dependencies = def.checkoutBlock ? [this.blockDefs.get(def.checkoutBlock)].filter(Boolean) : []
                 const runtime = { payload, def, dependencies, viewJs: view.js || '', actionJs: def.actions?.js || '', namespace: def.actions?.namespace || def.action || '', visitorColor, owner, ownerPublicKey }
-                return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;font-family:system-ui,sans-serif}*{box-sizing:border-box}.editor-line{min-height:1px}[hidden]{display:none!important}</style></head><body><div class="editor-line block-line">${html}</div><script id="color-block-runtime" type="application/json">${safeJson(runtime)}<\/script><script>(()=>{const runtime=JSON.parse(document.getElementById('color-block-runtime').textContent),payload=runtime.payload,data=payload.data||{},def=runtime.def||{},root=document.querySelector('[data-block-instance]'),isAdmin=false,userColor=runtime.visitorColor,escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),publicData=value=>value?.data||data,execute=(script,context)=>new Function('context','with(context){return(async()=>{'+script+'})()}')(context),callbacks=[],pending=new Map(),ownerPid='sdk-owner',DOMPurify={sanitize:value=>{const node=document.createElement('div');node.textContent=String(value??'');return node.textContent}},records={request:(action,collection,records)=>new Promise((resolve,reject)=>{const id=crypto.randomUUID();pending.set(id,{resolve,reject});parent.postMessage({type:'color-sdk-record-request',id,action,blockInstanceId:payload.instanceId,collection,records},'*');setTimeout(()=>{if(pending.delete(id))reject(new Error('Storage unavailable'))},10000)}),read(collection){return this.request('read',collection)},write(collection,records){return this.request('write',collection,records)}},mesh={blockActionSenders:{},verifiedPeers:new Set([ownerPid]),peerIdentities:new Map([[ownerPid,{color:'#'+runtime.owner,pubKey:runtime.ownerPublicKey}]]),room:{makeAction:()=>[(message)=>parent.postMessage({type:'color-sdk-block-action',namespace:runtime.namespace,blockInstanceId:payload.instanceId,message},'*'),callback=>callbacks.push(callback)]},on(){},emit(type,namespace,message,pid){if(type==='block-action')runAction(message,pid)}},app={mesh,roomId:'color-'+runtime.owner,user:{color:userColor},ui:{roomStatus:{textContent:''}},appState:{session:'embed'},blockDefs:new Map([[payload.blockId,def],...(runtime.dependencies||[]).map(item=>[item.id,item])]),escapeHtml,escapeAttr:escapeHtml,findFirstBlockPayload:id=>id===payload.blockId?payload:null,findRoomOwnerPeerId:()=>ownerPid,sendBlockMessage:(definition,message)=>send(message),loadExternalScript:(src,test)=>test?.()?Promise.resolve():new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.head.appendChild(script)}),fileTransfers:{outgoing:new Map(),makeFileId:()=>crypto.randomUUID(),hashBuffer:async buffer=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))).map(byte=>byte.toString(16).padStart(2,'0')).join('')},runBlockScript:execute,runBlockCheckout:form=>{const checkoutDef=app.blockDefs.get(form.def?.checkoutBlock);return checkoutDef?.checkout?.js?execute(checkoutDef.checkout.js,{app,def:checkoutDef,form,escapeHtml,escapeAttr:escapeHtml}):Promise.resolve()}},send=(message)=>parent.postMessage({type:'color-sdk-block-action',namespace:runtime.namespace,blockInstanceId:payload.instanceId,message},'*'),runtimeCount=()=>0,updateBlock=()=>Promise.reject(new Error('Embedded visitors cannot edit owner blocks')),getBlock=()=>payload,findFirstBlock=()=>payload,setRuntimePeer=()=>{};window.DOMPurify=DOMPurify;window.context={app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,records,runtimeCount,updateBlock};function runAction(message,pid=ownerPid){if(!runtime.actionJs)return;Promise.resolve(execute(runtime.actionJs,{app,def,data:message,pid,userColor,escapeHtml,publicData,send,findFirstBlock,getBlock,updateBlock,setRuntimePeer})).catch(console.error)}window.addEventListener('message',event=>{if(event.source!==parent)return;if(event.data?.type==='color-sdk-record-response'){const task=pending.get(event.data.id);if(task){pending.delete(event.data.id);event.data.error?task.reject(new Error(event.data.error)):task.resolve(event.data.records)}}else if(event.data?.type==='color-sdk-owner-status'){if(event.data.online){mesh.verifiedPeers.add(ownerPid);mesh.peerIdentities.set(ownerPid,{color:'#'+runtime.owner,pubKey:runtime.ownerPublicKey})}else{mesh.verifiedPeers.delete(ownerPid);mesh.peerIdentities.delete(ownerPid)}}else if(event.data?.type==='color-sdk-block-message'){callbacks.forEach(callback=>callback(event.data.message,ownerPid))}});Promise.resolve(execute(runtime.viewJs,{app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,records,runtimeCount,updateBlock})).catch(console.error);parent.postMessage({type:'color-sdk-block-ready'},'*')})();<\/script></body></html>`
+                return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;font-family:system-ui,sans-serif}*{box-sizing:border-box}.editor-line{min-height:1px}[hidden]{display:none!important}</style></head><body><div class="editor-line block-line">${html}</div><script id="color-block-runtime" type="application/json">${safeJson(runtime)}<\/script><script>(()=>{const runtime=JSON.parse(document.getElementById('color-block-runtime').textContent),payload=runtime.payload,data=payload.data||{},def=runtime.def||{},root=document.querySelector('[data-block-instance]'),isAdmin=false,userColor=runtime.visitorColor,escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),publicData=value=>value?.data||data,execute=(script,context)=>new Function('context','with(context){return(async()=>{'+script+'})()}')(context),callbacks=[],pending=new Map(),ownerPid='sdk-owner',DOMPurify={sanitize:value=>{const node=document.createElement('div');node.textContent=String(value??'');return node.textContent}},records={request:(action,collection,records)=>new Promise((resolve,reject)=>{const id=crypto.randomUUID();pending.set(id,{resolve,reject});parent.postMessage({type:'color-sdk-record-request',id,action,blockInstanceId:payload.instanceId,collection,records},'*');setTimeout(()=>{if(pending.delete(id))reject(new Error('Storage unavailable'))},10000)}),read(collection){return this.request('read',collection)},write(collection,records){return this.request('write',collection,records)}},mesh={blockActionSenders:{},verifiedPeers:new Set([ownerPid]),peerIdentities:new Map([[ownerPid,{color:'#'+runtime.owner,pubKey:runtime.ownerPublicKey}]]),room:{makeAction:()=>[(message)=>parent.postMessage({type:'color-sdk-block-action',namespace:runtime.namespace,blockInstanceId:payload.instanceId,message},'*'),callback=>callbacks.push(callback)]},on(){},emit(type,namespace,message,pid){if(type==='block-action')runAction(message,pid)}},app={mesh,roomId:'color-'+runtime.owner,user:{color:userColor},ui:{roomStatus:{textContent:''}},appState:{session:'embed'},blockDefs:new Map([[payload.blockId,def],...(runtime.dependencies||[]).map(item=>[item.id,item])]),escapeHtml,escapeAttr:escapeHtml,findFirstBlockPayload:id=>id===payload.blockId?payload:null,findRoomOwnerPeerId:()=>ownerPid,sendBlockMessage:(definition,message)=>send(message),sendToColor:(targetColor,namespace,message)=>parent.postMessage({type:'color-sdk-color-action',targetColor,namespace,message},'*'),loadExternalScript:(src,test)=>test?.()?Promise.resolve():new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.head.appendChild(script)}),fileTransfers:{outgoing:new(class extends Map{set(id,entry){super.set(id,entry);entry?.file?.arrayBuffer().then(bytes=>parent.postMessage({type:'color-sdk-file-upload',meta:entry.meta,bytes},'*'));return this}}),makeFileId:()=>crypto.randomUUID(),hashBuffer:async buffer=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))).map(byte=>byte.toString(16).padStart(2,'0')).join('')},runBlockScript:execute,runBlockCheckout:form=>{const checkoutDef=app.blockDefs.get(form.def?.checkoutBlock);return checkoutDef?.checkout?.js?execute(checkoutDef.checkout.js,{app,def:checkoutDef,form,escapeHtml,escapeAttr:escapeHtml}):Promise.resolve()}},send=(message)=>parent.postMessage({type:'color-sdk-block-action',namespace:runtime.namespace,blockInstanceId:payload.instanceId,message},'*'),runtimeCount=()=>0,updateBlock=()=>Promise.reject(new Error('Embedded visitors cannot edit owner blocks')),getBlock=()=>payload,findFirstBlock=()=>payload,setRuntimePeer=()=>{};window.DOMPurify=DOMPurify;window.context={app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,records,runtimeCount,updateBlock};function runAction(message,pid=ownerPid){if(!runtime.actionJs)return;Promise.resolve(execute(runtime.actionJs,{app,def,data:message,pid,userColor,escapeHtml,publicData,send,findFirstBlock,getBlock,updateBlock,setRuntimePeer})).catch(console.error)}window.addEventListener('message',event=>{if(event.source!==parent)return;if(event.data?.type==='color-sdk-record-response'){const task=pending.get(event.data.id);if(task){pending.delete(event.data.id);event.data.error?task.reject(new Error(event.data.error)):task.resolve(event.data.records)}}else if(event.data?.type==='color-sdk-owner-status'){if(event.data.online){mesh.verifiedPeers.add(ownerPid);mesh.peerIdentities.set(ownerPid,{color:'#'+runtime.owner,pubKey:runtime.ownerPublicKey})}else{mesh.verifiedPeers.delete(ownerPid);mesh.peerIdentities.delete(ownerPid)}}else if(event.data?.type==='color-sdk-block-message'){callbacks.forEach(callback=>callback(event.data.message,ownerPid))}});Promise.resolve(execute(runtime.viewJs,{app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,records,runtimeCount,updateBlock})).catch(console.error);parent.postMessage({type:'color-sdk-block-ready'},'*')})();<\/script></body></html>`
             }
 
             embeddedPageDocument(rows, cursor, visitorColor, ownerPublicKey = null) {
@@ -9215,9 +9577,78 @@
                 status.textContent = 'BUILDING #' + color.toUpperCase() + '...'
                 const rows = await this.identity._call('db_raw_dump', { roomHex: color }), current = this.parseId(this.currentLineId)?.index
                 const cursor = Number.isInteger(current) ? current : await this.syncCursorIndex(color)
-                const html = this.hardcodedColorDocument(rows, cursor, 'Color #' + color.toUpperCase())
+                const linkId = 'html-' + crypto.randomUUID(), snapshot = await this.identity._call('backup_export', { roomHex: color, linkId, includeKeys: true })
+                const qrSource = await fetch('libs/qrcode.min.js').then(response => { if (!response.ok) throw new Error('QR library unavailable'); return response.text() })
+                const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']), hostUrl = new URL('index.html', location.href)
+                const transport = { nonce: crypto.randomUUID(), secret: Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join(''), hostUrl: hostUrl.href, hostOrigin: hostUrl.origin, identity: { privateJwk: await crypto.subtle.exportKey('jwk', pair.privateKey), publicKey: await crypto.subtle.exportKey('jwk', pair.publicKey) } }
+                const html = this.secureBackupDocument(this.hardcodedBackupDocument(rows, cursor, snapshot, qrSource, 'Color #' + color.toUpperCase()), transport)
+                if (/Android/i.test(navigator.userAgent)) {
+                    if (!('serviceWorker' in navigator) || !('caches' in window)) throw new Error('This browser cannot install offline PWAs.')
+                    await navigator.storage?.persist?.()
+                    await navigator.serviceWorker.register('sw.js')
+                    await navigator.serviceWorker.ready
+                    const url = new URL('color-' + color + '-backup.html', location.href)
+                    await (await caches.open('color-backups-v1')).put(url, new Response(html, { headers: { 'Content-Type': 'text/html;charset=utf-8' } }))
+                    status.textContent = 'OPENING INSTALLABLE BACKUP...'
+                    location.href = url.href
+                    return
+                }
                 this.fileTransfers.saveBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), { name: 'color-' + color + '-backup.html' })
                 status.textContent = 'SAVED #' + color.toUpperCase() + ' · SELF-CONTAINED OFFLINE HTML'
+            }
+
+            installedBlockPwaDocument(entry, pageName, replica) {
+                const color = this.user.color.replace('#', '').toLowerCase(), payload = entry.payload, def = this.getBlockDefinition(payload), view = this.getBlockView(def, true)
+                const safeJson = value => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
+                const styles = Array.from(document.querySelectorAll('style')).map(style => style.textContent).join('\n').replace(/<\/style/gi, '<\\/style')
+                const icon = new URL('backup-icon.svg?color=' + color, location.href).href, manifest = new URL('block.webmanifest?color=' + color + '&page=' + encodeURIComponent(pageName) + '&name=' + encodeURIComponent(entry.label), location.href).href
+                const dependencies = def.checkoutBlock ? [this.blockDefs.get(def.checkoutBlock)].filter(Boolean) : []
+                const runtime = { payload, def, dependencies, js: view.js || '', actionJs: def.actions?.js || '', namespace: def.actions?.namespace || def.action || '', index: entry.index, selector: entry.selector, color, keys: replica.keys, snapshot: replica.snapshot, customDocument: this.blockCategory(def) === 'CUSTOM' ? this.customBlockSandboxDocument(payload, def, true) : '' }
+                const pwaRuntime = '(' + standaloneBlockPwaRuntime.toString().replace(/<\/script/gi, '<\\/script') + ')()'
+                return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#${color}"><meta name="mobile-web-app-capable" content="yes"><link rel="icon" href="${this.escapeAttr(icon)}"><link rel="apple-touch-icon" href="${this.escapeAttr(icon)}"><link rel="manifest" href="${this.escapeAttr(manifest)}"><title>${this.escapeHtml(entry.label)}</title><style>${styles}\nhtml,body{margin:0;min-height:100%;background:#fff;color:#111}body{overflow:auto}.block-pwa-sliver{position:sticky;top:0;z-index:1000;width:100%;height:10px;background:#${color}}.block-pwa-page{box-sizing:border-box;max-width:1100px;min-height:calc(100vh - 10px);margin:auto;padding:24px}.block-pwa-status{position:fixed;top:14px;right:14px;z-index:1200;padding:6px 9px;border-radius:12px;background:#fff;color:#555;font:900 10px system-ui,sans-serif;box-shadow:0 2px 9px #0002}.block-pwa-loading{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;background:#fff;color:#111;font:900 18px system-ui,sans-serif;transition:opacity .25s}.block-pwa-loading::before{content:'';position:absolute;top:0;width:100%;height:10px;background:#${color}}.block-pwa-loading.done{opacity:0;pointer-events:none}.block-pwa-install{position:fixed;right:18px;bottom:18px;z-index:2500;border:0;border-radius:20px;padding:11px 17px;background:#${color};color:#111;font-weight:900}[hidden]{display:none!important}</style></head><body><div id="block-pwa-loading" class="block-pwa-loading">${this.escapeHtml(entry.label.toUpperCase())}</div><div class="block-pwa-sliver"></div><div id="block-pwa-status" class="block-pwa-status">CONNECTING</div><main class="block-pwa-page"><div class="editor-line block-line">${this.renderBlockContent(payload, color)}</div></main><button id="block-pwa-install" class="block-pwa-install" hidden>INSTALL</button><script id="block-pwa-data" type="application/json">${safeJson(runtime)}<\/script><script>${pwaRuntime}<\/script></body></html>`
+            }
+
+            async installBlockPwa(entry) {
+                if (!('serviceWorker' in navigator) || !('caches' in window)) throw new Error('This browser cannot install offline PWAs.')
+                if (['shop', 'payment'].includes(entry.payload.blockId) && !confirm('This owner PWA contains the Color owner key and can receive or process this block\'s commerce messages while open. Install it only on a device you fully trust.')) return
+                await navigator.storage?.persist?.()
+                await navigator.serviceWorker.register('sw.js')
+                await navigator.serviceWorker.ready
+                const color = this.user.color.replace('#', '').toLowerCase(), instance = String(entry.payload.instanceId || entry.selector).replace(/[^a-z0-9_-]/gi, '-').toLowerCase(), pageName = 'color-' + color + '-block-' + instance + '.html'
+                const replica = { keys: await this.identity._call('export_owner_replica', { roomHex: color }), snapshot: await this.identity._call('backup_export', { roomHex: color, linkId: 'block-pwa-' + entry.payload.instanceId, includeKeys: true }) }
+                const url = new URL(pageName, location.href), html = this.installedBlockPwaDocument({ ...entry, index: entry.payload._localIndex }, pageName, replica)
+                await (await caches.open('color-backups-v1')).put(url, new Response(html, { headers: { 'Content-Type': 'text/html;charset=utf-8' } }))
+                location.href = url.href
+            }
+
+            chooseBlockPwa(entries, action = entry => this.installBlockPwa(entry), titleText = 'INSTALL ONE BLOCK') {
+                if (entries.length === 1) return action(entries[0])
+                document.querySelector('.block-pwa-picker')?.remove()
+                const picker = document.createElement('div'), panel = document.createElement('div'), title = document.createElement('b'), select = document.createElement('select'), cancel = document.createElement('button')
+                picker.className = 'block-pwa-picker'; title.textContent = titleText; select.size = Math.min(entries.length, 8); select.selectedIndex = -1; cancel.type = 'button'; cancel.textContent = 'CANCEL'
+                entries.forEach((entry, index) => { const option = document.createElement('option'); option.value = index; option.textContent = entry.label + ' · ' + entry.selector; select.appendChild(option) })
+                select.onchange = () => { const entry = entries[Number(select.value)]; picker.remove(); Promise.resolve(action(entry)).catch(error => alert(error.message)) }
+                cancel.onclick = () => picker.remove(); picker.onclick = event => { if (event.target === picker) picker.remove() }
+                panel.append(title, select, cancel); picker.appendChild(panel); document.body.appendChild(picker); select.focus()
+            }
+
+            async showBlockPwaQr(entry) {
+                await this.deviceLinksReady
+                const color = this.user.color.replace('#', '').toLowerCase(), instance = String(entry.payload.instanceId || entry.selector).replace(/[^a-z0-9_-]/gi, '-').toLowerCase(), pageName = 'color-' + color + '-block-' + instance + '.html'
+                if (this.identity.locked || this.roomId !== 'color-' + color) throw new Error('Open and unlock this Color first')
+                if (['shop', 'payment'].includes(entry.payload.blockId) && !confirm('This QR grants the receiving device the owner key for this commerce block. Continue only if you trust that device as an administrator.')) return
+                const replica = { keys: await this.identity._call('export_owner_replica', { roomHex: color }), snapshot: await this.identity._call('backup_export', { roomHex: color, linkId: 'block-pwa-' + entry.payload.instanceId, includeKeys: true }) }
+                const transfer = { v: 1, kind: 'block-pwa', color, pageName, instanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, html: this.installedBlockPwaDocument({ ...entry, index: entry.payload._localIndex }, pageName, replica) }
+                const secret = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join(''), record = { id: crypto.randomUUID(), secret, role: 'block-source', color, ownColor: color, blockInstanceId: entry.payload.instanceId, selector: entry.selector, created: Date.now() }
+                this.blockPwaTransfers.set(record.id, transfer)
+                this.connectDeviceLink(record)
+                this.openConnectSection(document.querySelector('.nav-item[data-target="connect"]'))
+                this.enterFullPeek('qr')
+                const container = document.getElementById('qr-display-container')
+                container.replaceChildren()
+                new QRCode(container, { text: JSON.stringify({ v: 1, b: true, mode: 'block', secret, publicKey: this.deviceIdentity.publicKey, color, instanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, expires: Date.now() + 5 * 60 * 1000 }), width: 250, height: 250, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L })
+                clearTimeout(this.pairExpiry)
+                this.pairExpiry = setTimeout(() => { if (!record.publicKey) { this.blockPwaTransfers.delete(record.id); this.deviceConnections.get(record.id)?.close(); container.textContent = 'QR EXPIRED' } }, 5 * 60 * 1000)
             }
 
             sdkEmbeddableBlocks(payloads) {
@@ -9378,10 +9809,16 @@
                 if (!entries.length) return
                 const area = document.createElement('div')
                 area.className = 'block-embed-area'
+                const heading = document.createElement('div'), headingText = document.createElement('span'), controls = document.createElement('div'), add = document.createElement('button'), qr = document.createElement('button')
+                heading.className = 'block-embed-heading'; headingText.textContent = 'EMBED'; add.className = 'block-pwa-add'; add.type = 'button'; add.textContent = '+'; add.title = 'Install this block as an app'
+                add.onclick = event => { event.stopPropagation(); Promise.resolve(this.chooseBlockPwa(entries)).catch(error => alert(error.message)) }
+                controls.className = 'block-pwa-actions'; qr.className = 'block-pwa-qr'; qr.type = 'button'; qr.title = 'Transfer this block app to a trusted device'; qr.innerHTML = this.connectIcon('qr')
+                qr.onclick = event => { event.stopPropagation(); Promise.resolve(this.chooseBlockPwa(entries, entry => this.showBlockPwaQr(entry), 'TRANSFER ONE BLOCK')).catch(error => alert(error.message)) }
+                controls.append(add, qr); heading.append(headingText, controls); area.appendChild(heading)
                 for (const entry of entries) {
                     const title = document.createElement('div'), textarea = document.createElement('textarea'), actions = document.createElement('div'), copy = document.createElement('button')
                     title.className = 'block-embed-title'
-                    title.textContent = 'EMBED ' + entry.label.toUpperCase() + ' · ' + entry.selector
+                    title.textContent = entry.label.toUpperCase() + ' · ' + entry.selector
                     textarea.readOnly = true
                     textarea.value = await this.sdkEmbedCode(entry)
                     const copyAndListen = async event => { event.stopPropagation(); this.sdkSelectedBlock = entry.payload.instanceId; await this.copySdkEmbed(textarea); this.openMainSection('settings'); await this.startSdkSourceListening(entry.payload.instanceId) }
@@ -9448,6 +9885,7 @@
                     findFirstBlock: blockId => this.findFirstBlockPayload(blockId),
                     getBlock: instanceId => this.getBlockPayloadByInstance(instanceId) || this.localBlockPayloadCache?.find(item => item.instanceId === instanceId),
                     updateBlock: (instanceId, updater) => this.updateBlockPayload(instanceId, updater),
+                    upsertBlock: (blockId, match, updater) => this.upsertOwnedBlock(blockId, match, updater),
                     setRuntimePeer: (instanceId, key, peerId, value) => this.setRuntimePeer(instanceId, key, peerId, value)
                 })
             }
@@ -9458,7 +9896,7 @@
                     return def.actions?.namespace === namespace || def.action === namespace
                 })
                 const def = installed ? this.getBlockDefinition(installed) : this.blocks.find(block => block.actions?.namespace === namespace || block.action === namespace)
-                this.runBlockAction(def, data, pid)?.catch(error => console.error('[Blocks] action script failed', error))
+                return this.runBlockAction(def, data, pid)?.catch(error => console.error('[Blocks] action script failed', error))
             }
 
             cloneSignature(signature) {
@@ -9903,6 +10341,7 @@
                     }
                     const text = String(value ?? 'null')
                     if (text.length > 160 || text.includes('\n')) { const details = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre'); summary.textContent = text.slice(0, 120) + (text.length > 120 ? '…' : ''); pre.className = 'raw-data-long'; pre.textContent = text; details.append(summary, pre); return details }
+                    if (/^https?:\/\//i.test(text)) { const link = document.createElement('a'); link.href = text; link.target = '_blank'; link.rel = 'noopener'; link.textContent = text; return link }
                     const span = document.createElement('span'); span.textContent = text; return span
                 }
                 rows.sort((a, b) => String(a.key).localeCompare(String(b.key), undefined, { numeric: true })).forEach(item => { const row = document.createElement('div'), key = document.createElement('div'), value = document.createElement('div'); row.className = 'raw-data-row'; key.className = 'raw-data-key'; value.className = 'raw-data-value'; key.textContent = typeof item.key === 'number' ? 'LINE ' + item.key : String(item.key); value.appendChild(valueNode(item.value)); row.append(key, value); list.appendChild(row) })
@@ -10831,6 +11270,7 @@
                 this.connectionMode = this.pendingSecureSession ? 'secure-direct' : 'tracked'
 
                 if (this.mesh) { this.mesh.leave(); this.mesh = null }
+                this.standbyOwnerRooms.forEach(room => room.leave()); this.standbyOwnerRooms.clear()
                 this.fileTransfers.reset()
 
                 this.ui.display.innerHTML = ''
@@ -11058,6 +11498,7 @@
                         alert('Could not complete secure QR connection.')
                     })
                 }
+                this.startStandbyOwnerRooms().catch(error => console.error('[Standby] owner rooms failed', error))
             }
 
             renderUpdate(index, newContent, newOwner) {
@@ -12468,6 +12909,7 @@
 const DEFAULT_PASS = "FFFFFF";
 let _keyPair = null;
 let _aesKey = null;
+let _exportableKeys = null;
 let _peerKeys = {};
 let _encryptedBlob = null;
 let _locked = true;
@@ -12577,6 +13019,7 @@ async function loadKeysToMemory(sigJWK, aesJWK, pubJWK) {
     };
     _aesKey = aesKey;
     _keyPair = keyPair;
+    _exportableKeys = { sig: sigJWK, aes: aesJWK, pub: pubJWK };
     _locked = false;
 }
 
@@ -12701,6 +13144,7 @@ function lockCurrentRoom() {
     _deviceGateRoom = null;
     _keyPair = null;
     _aesKey = null;
+    _exportableKeys = null;
     _encryptedBlob = null;
     _locked = true;
     _currentPassword = null;
@@ -12859,6 +13303,16 @@ async function unlock(roomHex, password, proof = {}) {
         _currentPassword = proof.passkeyOnly ? null : password;
         _currentRoomHex = roomHex;
     } catch(e) { throw new Error(proof.passkeyOnly ? "Passkey unlock failed" : "Wrong Password"); }
+}
+
+async function decryptOwnerEnvelope({ roomHex, envelope }) {
+    checkDeviceGateLease();
+    if (_locked || _currentRoomHex !== roomHex || !_exportableKeys?.sig || envelope?.ephemeral?.kty !== 'EC' || !Array.isArray(envelope.iv) || !Array.isArray(envelope.data)) throw new Error('Owner key is unavailable');
+    const privateKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: _exportableKeys.sig.x, y: _exportableKeys.sig.y, d: _exportableKeys.sig.d }, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']);
+    const publicKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: envelope.ephemeral.x, y: envelope.ephemeral.y }, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+    const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: publicKey }, privateKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(envelope.iv) }, key, new Uint8Array(envelope.data));
+    return JSON.parse(new TextDecoder().decode(plain));
 }
 
 async function updatePass({ roomHex, newPassword }) {
@@ -13393,6 +13847,11 @@ self.onmessage = async (e) => {
             case 'updatePassword': await updatePass(data); res = "SUCCESS"; break;
             case 'ensure_room_security': res = await ensureRoomSecurity(data.roomHex, data.password, data); break;
             case 'getPublicKey': res = _locked ? null : await crypto.subtle.exportKey("jwk", _keyPair.publicKey); break;
+            case 'export_owner_replica':
+                if (_locked || _currentRoomHex !== data.roomHex || !_exportableKeys) throw new Error('Unlock this Color before installing its owner PWA');
+                res = JSON.parse(JSON.stringify(_exportableKeys));
+                break;
+            case 'decrypt_owner_envelope': res = await decryptOwnerEnvelope(data); break;
             case 'storePeerKey': 
                 try {
                     _peerKeys[data.peerId] = await crypto.subtle.importKey("jwk", data.jwk, { name: "ECDSA", namedCurve: data.jwk.crv || "P-256" }, true, ["verify"]);
@@ -14209,6 +14668,27 @@ self.onmessage = async e => {
         }
 
         window.app = new EditorApp()
+        const standaloneBackupNonce = new URLSearchParams(location.search).get('backupHost')
+        if (standaloneBackupNonce) window.addEventListener('message', async event => {
+            if (event.source !== window.parent || event.data?.type !== 'color-backup-host-start' || event.data.nonce !== standaloneBackupNonce) return
+            const reply = detail => event.source.postMessage({ type: 'color-backup-host-status', nonce: standaloneBackupNonce, ...detail }, '*')
+            try {
+                await window.app.deviceLinksReady
+                await window.app.hostStandaloneBackup(event.data, reply)
+            } catch (error) { reply({ error: error.message || String(error) }) }
+        })
+        const standaloneBlockNonce = new URLSearchParams(location.search).get('blockHost')
+        if (standaloneBlockNonce) window.addEventListener('message', async event => {
+            if (event.source !== window.parent || event.origin !== location.origin || event.data?.nonce !== standaloneBlockNonce) return
+            const reply = detail => event.source.postMessage({ type: 'color-block-host-status', nonce: standaloneBlockNonce, ...detail }, event.origin)
+            try {
+                if (event.data.type === 'color-block-host-start') {
+                    await window.app.hostStandaloneBlock(event.data.runtime, reply)
+                } else if (event.data.type === 'color-block-host-message') await window.app.standaloneBlockMessage?.(event.data.message)
+            } catch (error) { reply({ error: error.message || String(error) }) }
+        })
+        const standbyParams = new URLSearchParams(location.search)
+        if (standbyParams.get('standby') && standbyParams.get('block')) window.app.deviceLinksReady.then(() => window.app.startStandbyCandidate(standbyParams.get('standby'), standbyParams.get('block'), standbyParams.get('ownerKey'))).catch(error => alert(error.message))
         document.getElementById('btn-security-apply').addEventListener('click', () => window.app?.syncDebugPassword())
     </script>
 
@@ -15513,6 +15993,17 @@ self.onmessage = async e => {
             }
             open()
         })
+        const recordConnectedSite = async (color, origin, title) => {
+            const roomHex = String(color).replace('#', '').toLowerCase(), url = new URL(origin)
+            if (!/^[0-9a-f]{6}$/.test(roomHex) || !['http:', 'https:'].includes(url.protocol)) return
+            const key = 'local:connected-sites', storageKey = 'colorConnectedSites:' + roomHex, now = Date.now()
+            const db = await openSdkRecordDB(roomHex)
+            let sites = await new Promise(resolve => { const request = db.transaction(roomHex, 'readonly').objectStore(roomHex).get(key); request.onsuccess = () => resolve(request.result?.value || []); request.onerror = () => resolve([]) })
+            if (!Array.isArray(sites) || !sites.length) try { sites = JSON.parse(storageScope.getItem(storageKey) || '[]') } catch (_) { sites = [] }
+            const previous = sites.find(site => site.origin === url.origin), record = { origin: url.origin, title: String(title || previous?.title || url.hostname).slice(0, 200), color: '#' + roomHex, firstConnected: previous?.firstConnected || now, lastConnected: now }
+            sites = [record, ...sites.filter(site => site.origin !== url.origin)].slice(0, 100); try { storageScope.setItem(storageKey, JSON.stringify(sites)) } catch (_) {}
+            const tx = db.transaction(roomHex, 'readwrite'); tx.objectStore(roomHex).put({ value: sites, updated: now, localOnly: true }, key); await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error) }); db.close()
+        }
         const sdkRecordKey = (ownerHex, blockInstanceId, collection) => 'local:block-records:' + ownerHex + ':' + blockInstanceId + ':' + collection
         const readSdkRecords = async (roomHex, ownerHex, blockInstanceId, collection, factory = indexedDBScope) => {
             const db = await openSdkRecordDB(roomHex, factory), store = db.transaction(roomHex, 'readonly').objectStore(roomHex), key = sdkRecordKey(ownerHex, blockInstanceId, collection)
@@ -15543,8 +16034,16 @@ self.onmessage = async e => {
         }
         let sdkRecordQueue = Promise.resolve()
         window.addEventListener('message', async e => {
-            if (window.self === window.top || e.source !== window.parent || e.data?.type !== 'color-sdk-record-request') return
+            if (window.self === window.top || e.source !== window.parent || !['color-sdk-record-request', 'color-sdk-color-action'].includes(e.data?.type)) return
             const color = String(e.data.color || '').replace('#', '').toLowerCase(), owner = String(e.data.ownerColor || '').replace('#', '').toLowerCase()
+            if (e.data.type === 'color-sdk-color-action') {
+                const targetColor = String(e.data.targetColor || '').replace('#', '').toLowerCase()
+                await storageAccessReady
+                if (!/^[0-9a-f]{6}$/.test(targetColor) || targetColor !== String(storageScope.getItem('lastSphereColor') || '').replace('#', '').toLowerCase() || !/^[a-z0-9_-]{1,64}$/.test(e.data.namespace || '')) return
+                for (let attempt = 0; attempt < 50 && (!window.app?.store || !window.app?.blockDefs?.size); attempt++) await new Promise(resolve => setTimeout(resolve, 100))
+                await window.app?.handleBlockAction(e.data.namespace, e.data.message, 'sdk-iframe')
+                return
+            }
             if (!/^[0-9a-f]{6}$/.test(color) || !/^[0-9a-f]{6}$/.test(owner)) return
             await storageAccessReady
             await window.app?.deviceLinksReady?.catch(() => {})
@@ -15565,8 +16064,8 @@ self.onmessage = async e => {
                 e.source.postMessage({ type: 'color-sdk-record-response', id, error: error.message || String(error) }, e.origin)
             }
         })
-        window.addEventListener('message', e => { if (e.data === 'getSphereColor' && e.source === window.parent) { let color = '#ffffff'; try { color = storageScope.getItem('lastSphereColor') || color } catch (_) { } e.source.postMessage(color, e.origin) } if (e.data?.type === 'handle-ready' && e.source === window && e.origin === location.origin) { const hex = e.data.hex, count = e.data.count, pos = /^#[0-9a-fA-F]{6}$/.test(hex || '') && Number.isSafeInteger(count) && count >= 0 ? findPositionFromColor(hex) : null; if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: count }); const d = document.createElement('div'), color = document.createElement('span'), peers = document.createElement('span'); d.className = 'debug-room-item ' + (count > 0 ? 'active' : ''); color.textContent = hex; peers.className = 'count'; peers.textContent = count + ' peer(s)'; d.append(color, ' ', peers); document.getElementById('debug-rooms').appendChild(d) } } })
-        async function initStorageAccess() { if (window.self === window.top) return; const triggerZoomToColor = hexColor => { const matchPos = findPositionFromColor(hexColor); if (matchPos) { if (!document.body.classList.contains('light-mode')) { document.body.classList.add('light-mode') } triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true); const checkLandingComplete = () => { if (state.landing.progress >= 1) { window.parent.postMessage({ type: 'zoom-done', color: hexColor }, '*') } else if (state.landing.active) { requestAnimationFrame(checkLandingComplete) } }; requestAnimationFrame(checkLandingComplete) } }; const access = async h => { try { if (h?.localStorage) storageScope = h.localStorage; if (h?.indexedDB) indexedDBScope = h.indexedDB; const c = storageScope.getItem('lastSphereColor') || '#ffffff'; if (!storageScope.getItem('lastSphereColor')) storageScope.setItem('lastSphereColor', c); window.parent.postMessage(c, '*'); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); document.body.style.backgroundColor = c; triggerZoomToColor(c) } catch (e) { } }; try { if (await document.hasStorageAccess()) try { await access(await document.requestStorageAccess({ localStorage: true, indexedDB: true })) } catch (e) { await access(null) } else { const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }); const b = document.createElement('button'); b.innerText = 'LOGIN'; Object.assign(b.style, { padding: '12px 24px', fontSize: '16px', cursor: 'pointer', background: '#000', color: '#fff', border: 'none', borderRadius: '8px' }); o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { await access(await document.requestStorageAccess({ localStorage: true, indexedDB: true })) } catch (e) { o.innerHTML = 'Access Denied' } } } } catch (e) { await access(null) } }
+        window.addEventListener('message', async e => { if ((e.data === 'getSphereColor' || e.data?.type === 'getSphereColor') && e.source === window.parent) { await storageAccessReady; let color = '#ffffff'; try { color = storageScope.getItem('lastSphereColor') || color; await recordConnectedSite(color, e.origin, e.data?.title) } catch (_) { } e.source.postMessage(color, e.origin) } if (e.data?.type === 'handle-ready' && e.source === window && e.origin === location.origin) { const hex = e.data.hex, count = e.data.count, pos = /^#[0-9a-fA-F]{6}$/.test(hex || '') && Number.isSafeInteger(count) && count >= 0 ? findPositionFromColor(hex) : null; if (pos && !state.historyHandles.some(h => h.hex === hex)) { state.historyHandles.push({ pos: Vec3.normalize(pos), color: hexToRgbNormalized(hex), hex, peerCount: count }); const d = document.createElement('div'), color = document.createElement('span'), peers = document.createElement('span'); d.className = 'debug-room-item ' + (count > 0 ? 'active' : ''); color.textContent = hex; peers.className = 'count'; peers.textContent = count + ' peer(s)'; d.append(color, ' ', peers); document.getElementById('debug-rooms').appendChild(d) } } })
+        async function initStorageAccess() { if (window.self === window.top) return; const triggerZoomToColor = hexColor => { const matchPos = findPositionFromColor(hexColor); if (matchPos) { if (!document.body.classList.contains('light-mode')) { document.body.classList.add('light-mode') } triggerLanding(Vec3.normalize(matchPos), matchPos, hexToRgbNormalized(hexColor), true); const checkLandingComplete = () => { if (state.landing.progress >= 1) { window.parent.postMessage({ type: 'zoom-done', color: hexColor }, '*') } else if (state.landing.active) { requestAnimationFrame(checkLandingComplete) } }; requestAnimationFrame(checkLandingComplete) } }; const access = async h => { try { if (h?.localStorage) storageScope = h.localStorage; if (h?.indexedDB) indexedDBScope = h.indexedDB; const c = storageScope.getItem('lastSphereColor') || '#ffffff'; if (!storageScope.getItem('lastSphereColor')) storageScope.setItem('lastSphereColor', c); if (document.referrer) await recordConnectedSite(c, new URL(document.referrer).origin).catch(() => {}); window.parent.postMessage(c, '*'); if (document.getElementById('saa-overlay')) document.getElementById('saa-overlay').remove(); document.body.style.backgroundColor = c; triggerZoomToColor(c) } catch (e) { } }; try { if (await document.hasStorageAccess()) try { await access(await document.requestStorageAccess({ localStorage: true, indexedDB: true })) } catch (e) { await access(null) } else { const o = document.createElement('div'); o.id = 'saa-overlay'; Object.assign(o.style, { position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: '#fff', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center' }); const b = document.createElement('button'); b.innerText = 'LOGIN'; Object.assign(b.style, { padding: '12px 24px', fontSize: '16px', cursor: 'pointer', background: '#000', color: '#fff', border: 'none', borderRadius: '8px' }); o.appendChild(b); document.body.appendChild(o); b.onclick = async () => { try { await access(await document.requestStorageAccess({ localStorage: true, indexedDB: true })) } catch (e) { o.innerHTML = 'Access Denied' } } } } catch (e) { await access(null) } }
         storageAccessReady = initStorageAccess()
 
         const turnAppNameEl = document.getElementById('turn-app-name')
