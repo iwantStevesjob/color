@@ -686,13 +686,12 @@
         #sdk-block-picker-action { position: fixed; right: 24px; bottom: 24px; z-index: 270; display: none; border: 0; border-radius: 22px; padding: 11px 22px; background: #aaa; color: #fff; font: inherit; font-size: .78rem; font-weight: 900; cursor: pointer; }
         body.sdk-block-select-mode #sdk-block-picker-action { display: block; }
         #blocks-installed-grid .block-card.expanded { width: calc(100% - 24px); flex-basis: calc(100% - 24px); max-width: calc(100% - 24px); min-height: calc(100vh - 250px); }
-        .block-embed-area { display: grid; gap: 12px; margin-top: 24px; cursor: default; }
-        .block-embed-area textarea { min-height: 210px; }
-        .block-embed-heading { display: flex; align-items: center; gap: 8px; font-size: .76rem; font-weight: 900; color: #555; }
-        .block-pwa-actions { display: grid; gap: 5px; }
-        .block-embed-area .block-pwa-add, .block-embed-area .block-pwa-qr { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; padding: 0; font-size: 18px; line-height: 24px; }
-        .block-embed-area .block-pwa-qr svg { width: 14px; height: 14px; }
-        .block-embed-title { font-size: .76rem; font-weight: 900; color: #555; }
+        .block-embed-area { display: grid; gap: 12px; max-width: 520px; margin-top: 24px; cursor: default; }
+        .block-embed-row { display: flex; align-items: stretch; gap: 10px; }
+        .block-embed-area textarea { flex: 1; width: auto; min-width: 0; min-height: 116px; resize: none; }
+        .block-pwa-actions { display: flex; flex-direction: column; gap: 7px; }
+        .block-embed-area .block-embed-copy, .block-embed-area .block-pwa-add, .block-embed-area .block-pwa-qr { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 9px; padding: 0; background: #c9c9c9; color: #fff; font-size: 22px; line-height: 38px; }
+        .block-embed-area .block-embed-copy svg, .block-embed-area .block-pwa-qr svg { width: 19px; height: 19px; }
         .block-pwa-picker { position: fixed; inset: 0; z-index: 3000; display: grid; place-items: center; padding: 24px; background: rgba(255,255,255,.94); }
         .block-pwa-picker > div { display: grid; gap: 12px; width: min(420px, 100%); }
         .block-pwa-picker select { width: 100%; max-height: 50vh; border: 1px solid #bbb; border-radius: 10px; padding: 8px; background: #fff; color: #111; font: inherit; }
@@ -9637,7 +9636,9 @@
                 const color = this.user.color.replace('#', '').toLowerCase(), instance = String(entry.payload.instanceId || entry.selector).replace(/[^a-z0-9_-]/gi, '-').toLowerCase(), pageName = 'color-' + color + '-block-' + instance + '.html'
                 if (this.identity.locked || this.roomId !== 'color-' + color) throw new Error('Open and unlock this Color first')
                 if (['shop', 'payment'].includes(entry.payload.blockId) && !confirm('This QR grants the receiving device the owner key for this commerce block. Continue only if you trust that device as an administrator.')) return
-                const replica = { keys: await this.identity._call('export_owner_replica', { roomHex: color }), snapshot: await this.identity._call('backup_export', { roomHex: color, linkId: 'block-pwa-' + entry.payload.instanceId, includeKeys: true }) }
+                const linkId = 'block-pwa-' + entry.payload.instanceId, password = this.getRoomPassword(color, this.getRoomSignatureForSave(color)), singleClick = password === 'FFFFFF' + color.toUpperCase()
+                await this.identity._call('backup_authorize', { roomHex: color, password, linkId, operation: 'pair' })
+                const replica = { keys: await this.identity._call('export_owner_replica', { roomHex: color }), snapshot: await this.identity._call('backup_export', { roomHex: color, linkId, includeKeys: true }) }
                 const transfer = { v: 1, kind: 'block-pwa', color, pageName, instanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, html: this.installedBlockPwaDocument({ ...entry, index: entry.payload._localIndex }, pageName, replica) }
                 const secret = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join(''), record = { id: crypto.randomUUID(), secret, role: 'block-source', color, ownColor: color, blockInstanceId: entry.payload.instanceId, selector: entry.selector, created: Date.now() }
                 this.blockPwaTransfers.set(record.id, transfer)
@@ -9647,6 +9648,8 @@
                 const container = document.getElementById('qr-display-container')
                 container.replaceChildren()
                 new QRCode(container, { text: JSON.stringify({ v: 1, b: true, mode: 'block', secret, publicKey: this.deviceIdentity.publicKey, color, instanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, expires: Date.now() + 5 * 60 * 1000 }), width: 250, height: 250, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L })
+                document.getElementById('block-pwa-security-note')?.remove()
+                if (singleClick) { const note = document.createElement('p'); note.id = 'block-pwa-security-note'; note.textContent = 'This Color uses one click. Add a secret color sequence later for stronger protection.'; note.style.cssText = 'max-width:280px;margin:0 0 14px;color:#aaa;font-size:.75rem;text-align:center;text-shadow:none'; container.after(note) }
                 clearTimeout(this.pairExpiry)
                 this.pairExpiry = setTimeout(() => { if (!record.publicKey) { this.blockPwaTransfers.delete(record.id); this.deviceConnections.get(record.id)?.close(); container.textContent = 'QR EXPIRED' } }, 5 * 60 * 1000)
             }
@@ -9809,26 +9812,19 @@
                 if (!entries.length) return
                 const area = document.createElement('div')
                 area.className = 'block-embed-area'
-                const heading = document.createElement('div'), headingText = document.createElement('span'), controls = document.createElement('div'), add = document.createElement('button'), qr = document.createElement('button')
-                heading.className = 'block-embed-heading'; headingText.textContent = 'EMBED'; add.className = 'block-pwa-add'; add.type = 'button'; add.textContent = '+'; add.title = 'Install this block as an app'
-                add.onclick = event => { event.stopPropagation(); Promise.resolve(this.chooseBlockPwa(entries)).catch(error => alert(error.message)) }
-                controls.className = 'block-pwa-actions'; qr.className = 'block-pwa-qr'; qr.type = 'button'; qr.title = 'Transfer this block app to a trusted device'; qr.innerHTML = this.connectIcon('qr')
-                qr.onclick = event => { event.stopPropagation(); Promise.resolve(this.chooseBlockPwa(entries, entry => this.showBlockPwaQr(entry), 'TRANSFER ONE BLOCK')).catch(error => alert(error.message)) }
-                controls.append(add, qr); heading.append(headingText, controls); area.appendChild(heading)
                 for (const entry of entries) {
-                    const title = document.createElement('div'), textarea = document.createElement('textarea'), actions = document.createElement('div'), copy = document.createElement('button')
-                    title.className = 'block-embed-title'
-                    title.textContent = entry.label.toUpperCase() + ' · ' + entry.selector
+                    const row = document.createElement('div'), textarea = document.createElement('textarea'), actions = document.createElement('div'), copy = document.createElement('button'), add = document.createElement('button'), qr = document.createElement('button')
+                    row.className = 'block-embed-row'
                     textarea.readOnly = true
                     textarea.value = await this.sdkEmbedCode(entry)
                     const copyAndListen = async event => { event.stopPropagation(); this.sdkSelectedBlock = entry.payload.instanceId; await this.copySdkEmbed(textarea); this.openMainSection('settings'); await this.startSdkSourceListening(entry.payload.instanceId) }
                     textarea.onclick = copyAndListen
-                    actions.className = 'block-embed-actions'
-                    copy.type = 'button'
-                    copy.textContent = 'COPY EMBED CODE'
-                    copy.onclick = async event => { await copyAndListen(event); copy.textContent = 'COPIED'; setTimeout(() => { copy.textContent = 'COPY EMBED CODE' }, 1200) }
-                    actions.appendChild(copy)
-                    area.append(title, textarea, actions)
+                    actions.className = 'block-pwa-actions'
+                    copy.className = 'block-embed-copy'; copy.type = 'button'; copy.title = 'Copy embed code'; copy.setAttribute('aria-label', copy.title); copy.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg>'
+                    copy.onclick = copyAndListen
+                    add.className = 'block-pwa-add'; add.type = 'button'; add.textContent = '+'; add.title = 'Install this block as an app'; add.setAttribute('aria-label', add.title); add.onclick = event => { event.stopPropagation(); this.installBlockPwa(entry).catch(error => alert(error.message)) }
+                    qr.className = 'block-pwa-qr'; qr.type = 'button'; qr.title = 'Transfer this block app to a trusted device'; qr.setAttribute('aria-label', qr.title); qr.innerHTML = this.connectIcon('qr'); qr.onclick = event => { event.stopPropagation(); this.showBlockPwaQr(entry).catch(error => alert(error.message)) }
+                    actions.append(copy, add, qr); row.append(textarea, actions); area.appendChild(row)
                 }
                 card.appendChild(area)
             }
