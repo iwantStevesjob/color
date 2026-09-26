@@ -4823,7 +4823,7 @@
         // but authenticates the saved device key before exchanging backup records.
         class PersistentPeerLink {
             constructor(record, identity, callbacks = {}) {
-                if (!/^[a-f0-9]{64}$/.test(record?.secret)) throw new Error('Invalid remembered connection secret')
+                if (!/^(?:[a-f0-9]{16}|[a-f0-9]{32}|[a-f0-9]{64})$/.test(record?.secret)) throw new Error('Invalid remembered connection secret')
                 PersistentPeerLink.keyId(identity.publicKey)
                 this.record = record
                 this.identity = identity
@@ -7272,7 +7272,7 @@
                         if (status === 'connected') {
                             record.lastSeen = Date.now()
                             this.saveDeviceLink(record).catch(console.error)
-                            connection.send({ type: 'PROFILE', color: record.role === 'phone' ? record.color : record.ownColor || this.user.color.replace('#', ''), role: record.role, protected: record.protected === true }).catch(console.error)
+                            connection.send({ type: 'PROFILE', color: record.role === 'phone' ? record.color : record.ownColor || this.user.color.replace('#', ''), role: record.role, protected: record.protected === true, ...(record.role === 'block-source' ? { blockInstanceId: record.blockInstanceId, selector: record.selector, label: record.label } : {}) }).catch(console.error)
                             if (record.role === 'block-source' && this.blockPwaTransfers.has(record.id)) this.sendBackupPayload(record, this.blockPwaTransfers.get(record.id), record.color, 'block-pwa').catch(error => alert(error.message))
                             this.syncDeviceBackups().catch(error => this.backupStatus(error.message))
                             if (this.pairInvitation?.record.id === record.id) {
@@ -7328,7 +7328,7 @@
 
             async acceptDeviceQr(data) {
                 await this.deviceLinksReady
-                if (data.v !== 1 || !/^[0-9a-f]{64}$/.test(data.secret || '') || !['device', 'friend', 'restore', 'block'].includes(data.mode) || !Number.isFinite(data.expires) || data.expires < Date.now() || data.expires > Date.now() + 6 * 60 * 1000) throw new Error('Invalid or expired pairing QR')
+                if (data.v !== 1 || !(data.mode === 'block' ? /^(?:[0-9a-f]{16}|[0-9a-f]{32}|[0-9a-f]{64})$/ : /^[0-9a-f]{64}$/).test(data.secret || '') || !['device', 'friend', 'restore', 'block'].includes(data.mode) || !Number.isFinite(data.expires) || data.expires < Date.now() || data.expires > Date.now() + 6 * 60 * 1000) throw new Error('Invalid or expired pairing QR')
                 if (data.publicKey?.x === this.deviceIdentity.publicKey.x && data.publicKey?.y === this.deviceIdentity.publicKey.y) throw new Error('Scan this QR from another device')
                 const existing = this.deviceLinks.find(link => link.secret === data.secret)
                 if (existing) {
@@ -7345,10 +7345,9 @@
                 await this.stopScanner()
                 await this.showInfoPage('backup', false)
                 if (data.mode === 'block') {
-                    if (!/^[0-9a-f]{6}$/.test(data.color || '') || typeof data.instanceId !== 'string' || !data.instanceId || typeof data.selector !== 'string' || !data.selector) throw new Error('Invalid block transfer QR')
-                    const record = { id: crypto.randomUUID(), secret: data.secret, publicKey: data.publicKey, role: 'block-admin', color: data.color, ownColor: data.color, blockInstanceId: data.instanceId, selector: data.selector, created: Date.now() }
+                    const record = { id: crypto.randomUUID(), secret: data.secret, role: 'block-admin', color: null, ownColor: color, blockInstanceId: null, selector: null, created: Date.now() }
                     this.connectDeviceLink(record)
-                    this.backupStatus('SECURE CONNECTION ESTABLISHING · WAITING FOR ' + String(data.label || data.selector).toUpperCase())
+                    this.backupStatus('SECURE CONNECTION ESTABLISHING · WAITING FOR BLOCK')
                     return
                 }
                 if (data.mode === 'restore') {
@@ -7381,6 +7380,11 @@
                 if (record.revoked || !message || typeof message.type !== 'string') return
                 if (message.type === 'PROFILE') {
                     if (!/^[0-9a-f]{6}$/.test(message.color || '')) return
+                    if (record.role === 'block-admin') {
+                        if (message.role !== 'block-source' || typeof message.blockInstanceId !== 'string' || !message.blockInstanceId || typeof message.selector !== 'string' || !message.selector) throw new Error('Invalid block transfer details')
+                        record.color = message.color; record.ownColor = message.color; record.blockInstanceId = message.blockInstanceId; record.selector = message.selector
+                        this.backupStatus('CONNECTED · RECEIVING ' + String(message.label || message.selector).toUpperCase())
+                    }
                     if (record.role === 'vault' && !record.color && message.role === 'phone') record.color = message.color
                     if (record.role !== 'friend') record.remoteProtected = message.protected === true
                     if (record.role === 'friend') {
@@ -9640,14 +9644,14 @@
                 await this.identity._call('backup_authorize', { roomHex: color, password, linkId, operation: 'pair' })
                 const replica = { keys: await this.identity._call('export_owner_replica', { roomHex: color }), snapshot: await this.identity._call('backup_export', { roomHex: color, linkId, includeKeys: true }) }
                 const transfer = { v: 1, kind: 'block-pwa', color, pageName, instanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, html: this.installedBlockPwaDocument({ ...entry, index: entry.payload._localIndex }, pageName, replica) }
-                const secret = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join(''), record = { id: crypto.randomUUID(), secret, role: 'block-source', color, ownColor: color, blockInstanceId: entry.payload.instanceId, selector: entry.selector, created: Date.now() }
+                const secret = Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, '0')).join(''), record = { id: crypto.randomUUID(), secret, role: 'block-source', color, ownColor: color, blockInstanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, created: Date.now() }
                 this.blockPwaTransfers.set(record.id, transfer)
                 this.connectDeviceLink(record)
                 this.openConnectSection(document.querySelector('.nav-item[data-target="connect"]'))
                 this.enterFullPeek('qr')
                 const container = document.getElementById('qr-display-container')
                 container.replaceChildren()
-                new QRCode(container, { text: JSON.stringify({ v: 1, b: true, mode: 'block', secret, publicKey: this.deviceIdentity.publicKey, color, instanceId: entry.payload.instanceId, selector: entry.selector, label: entry.label, expires: Date.now() + 5 * 60 * 1000 }), width: 250, height: 250, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L })
+                new QRCode(container, { text: JSON.stringify({ b: 1, s: secret }), width: 250, height: 250, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L })
                 document.getElementById('block-pwa-security-note')?.remove()
                 if (singleClick) { const note = document.createElement('p'); note.id = 'block-pwa-security-note'; note.textContent = 'This Color uses one click. Add a secret color sequence later for stronger protection.'; note.style.cssText = 'max-width:280px;margin:0 0 14px;color:#aaa;font-size:.75rem;text-align:center;text-shadow:none'; container.after(note) }
                 clearTimeout(this.pairExpiry)
@@ -12606,6 +12610,10 @@
                         return
                     }
 
+                    if (data.b === 1 && data.s) {
+                        await this.acceptDeviceQr({ v: 1, b: true, mode: 'block', secret: data.s, expires: Date.now() + 5 * 60 * 1000 })
+                        return
+                    }
                     if (data.b === true && data.secret) {
                         await this.acceptDeviceQr(data)
                         return
