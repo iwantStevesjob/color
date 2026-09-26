@@ -275,6 +275,7 @@ window.Color = {
         let send = null
         let get = null
         let sendSdk = null
+        let sendFile = null
         let sendIdentity = null
         let visitorColor = '#ffffff'
         let ownerPeer = null
@@ -287,6 +288,10 @@ window.Color = {
         let offlineTimer = null
         let visitorPublicKey = null
         let visitorProof = null
+        let standbyRoom = null
+        let sendStandby = null
+        const standbyCandidates = new Map()
+        const colorConnections = new Map()
         const storageRequests = new Map()
         const pendingGetCallbacks = []
         const uuid = () => crypto.randomUUID?.() || '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, char => (char ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> char / 4).toString(16))
@@ -295,7 +300,7 @@ window.Color = {
         iframe.id = 'color-widget'
         iframe.src = 'https://colorlog.in/'
         iframe.allow = 'storage-access'
-        iframe.addEventListener('load', () => iframe.contentWindow?.postMessage('getSphereColor', 'https://colorlog.in'))
+        iframe.addEventListener('load', () => iframe.contentWindow?.postMessage({ type: 'getSphereColor', title: document.title }, 'https://colorlog.in'))
         if (block) iframe.className = 'color-sdk-identity'
         let container = targetDiv ? document.getElementById(targetDiv) || document.body : document.body
         if (!document.getElementById('color-widget-styles')) {
@@ -319,6 +324,14 @@ window.Color = {
                 container.prepend(notice)
             }
             notice.textContent = message
+            if (message === 'COLOR OFFLINE' && block) {
+                const standbyKey = verifiedOwnerFingerprint || (typeof ownerKey === 'string' ? ownerKey.trim().replace(/^sha256[:-]/i, '').toLowerCase() : '')
+                const link = document.createElement('a')
+                link.href = 'https://colorlog.in/?standby=' + ownerColor + '&block=' + encodeURIComponent(String(block).toLowerCase()) + (standbyKey ? '&ownerKey=' + standbyKey : '')
+                link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'STAND WITH THIS ' + String(block).replace(/-\d+$/, '').replaceAll('-', ' ').toUpperCase()
+                link.style.cssText = 'display:block;margin-top:8px;color:inherit;text-decoration:underline'
+                notice.appendChild(link)
+            }
         }
         const storageRequest = (action, records) => new Promise((resolve, reject) => {
             const id = uuid()
@@ -361,10 +374,36 @@ window.Color = {
                 return false
             }
         }
-        const mineProof = async () => {
+        const encryptFor = async (publicJwk, value) => {
+            const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']), remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: publicJwk.x, y: publicJwk.y }, { name: 'ECDH', namedCurve: 'P-256' }, false, []), key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, pair.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']), iv = crypto.getRandomValues(new Uint8Array(12)), data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value)))
+            return { ephemeral: await crypto.subtle.exportKey('jwk', pair.publicKey), iv: Array.from(iv), data: Array.from(new Uint8Array(data)) }
+        }
+        const ensureStandby = () => {
+            if (standbyRoom || !block) return
+            standbyRoom = Spectrum.joinRoom({ appId: planet }, 'color-standby-' + ownerColor + '-' + String(block).toLowerCase())
+            ;[sendStandby] = standbyRoom.makeAction('standby')
+            standbyRoom.makeAction('standby')[1](async (message, pid) => {
+                if (message?.type !== 'CAPABILITY' || !message.capability || !message.signature || !message.ownerPublicKey) return
+                const body = JSON.stringify(message.capability)
+                if (message.capability.ownerColor !== ownerColor || message.capability.block !== String(block).toLowerCase() || message.capability.expires < Date.now() || !await verifyWithKey(message.ownerPublicKey, message.signature, body)) return
+                try { await trustOwner(message.ownerPublicKey) } catch (_) { return }
+                standbyCandidates.set(pid, message)
+            })
+            standbyRoom.onPeerJoin(pid => sendStandby({ type: 'WHO_STANDS', ownerColor, block: String(block).toLowerCase() }, pid))
+        }
+        const sendStandbyAction = async envelope => {
+            ensureStandby()
+            sendStandby?.({ type: 'WHO_STANDS', ownerColor, block: String(block).toLowerCase() })
+            await new Promise(resolve => setTimeout(resolve, 700))
+            const candidate = [...standbyCandidates.entries()][0]
+            if (!candidate || !verifiedOwnerKey) throw new Error('No approved standby is online.')
+            const [pid, grant] = candidate, ownerEnvelope = await encryptFor(verifiedOwnerKey, envelope), adminEnvelope = grant.capability.role === 'admin' ? await encryptFor(grant.capability.candidatePublicKey, envelope) : null
+            sendStandby({ type: 'ENVELOPE', id: uuid(), capability: grant.capability, signature: grant.signature, ownerPublicKey: grant.ownerPublicKey, ownerEnvelope, adminEnvelope, savedAt: Date.now() }, pid)
+        }
+        const mineProof = async (targetColor = ownerColor) => {
             const hourStamp = Math.floor(Date.now() / 3600000)
             for (let nonce = 1; ; nonce++) {
-                if ((await digest(ownerColor + hourStamp + nonce)).startsWith('0000')) return hourStamp + '_' + nonce
+                if ((await digest(targetColor + hourStamp + nonce)).startsWith('0000')) return hourStamp + '_' + nonce
                 if (nonce % 1000 === 0) await new Promise(resolve => setTimeout(resolve, 0))
             }
         }
@@ -376,6 +415,40 @@ window.Color = {
             sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
             visitorProof ||= await mineProof()
             sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
+        }
+        const sendToColor = async (target, namespace, message) => {
+            const targetColor = String(target || '').replace('#', '').toLowerCase()
+            if (!/^[0-9a-f]{6}$/.test(targetColor) || !/^[a-z0-9_-]{1,64}$/.test(namespace || '')) return
+            iframe.contentWindow?.postMessage({ type: 'color-sdk-color-action', targetColor: '#' + targetColor, namespace, message }, 'https://colorlog.in')
+            let connection = colorConnections.get(targetColor)
+            if (!connection) {
+                const targetRoom = Spectrum.joinRoom({ appId: planet }, 'color-' + targetColor)
+                const [sendTargetIdentity] = targetRoom.makeAction('identity')
+                const senders = new Map()
+                connection = { room: targetRoom, peers: new Set(), senders, pending: [] }
+                colorConnections.set(targetColor, connection)
+                targetRoom.onPeerJoin(async peerId => {
+                    connection.peers.add(peerId)
+                    if (!visitorPublicKey) {
+                        const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+                        visitorPublicKey = await crypto.subtle.exportKey('jwk', pair.publicKey)
+                    }
+                    sendTargetIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
+                    const proof = await mineProof(targetColor)
+                    sendTargetIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: proof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
+                    const deliverPending = () => connection.pending.filter(item => Date.now() - item.savedAt < 30000).forEach(item => connection.senders.get(item.namespace)?.(item.message, peerId))
+                    setTimeout(deliverPending, 300)
+                    setTimeout(deliverPending, 1400)
+                })
+                targetRoom.onPeerLeave(peerId => connection.peers.delete(peerId))
+            }
+            let sender = connection.senders.get(namespace)
+            if (!sender) { sender = connection.room.makeAction(namespace)[0]; connection.senders.set(namespace, sender) }
+            connection.pending = [...connection.pending.filter(item => Date.now() - item.savedAt < 30000), { namespace, message, savedAt: Date.now() }].slice(-20)
+            const deliver = () => connection.peers.forEach(peerId => sender(message, peerId))
+            deliver()
+            setTimeout(deliver, 800)
+            setTimeout(deliver, 2500)
         }
         const renderSnapshot = documentHtml => {
             clearTimeout(offlineTimer)
@@ -410,6 +483,7 @@ window.Color = {
             ;[send, get] = room.makeAction(action)
             pendingGetCallbacks.splice(0).forEach(callback => get(callback))
             ;[sendIdentity] = room.makeAction('identity')
+            ;[sendFile] = room.makeAction('file')
             room.makeAction('identity')[1]((data, peerId) => {
                 if (!data?.pubKey || String(data.color || '').replace('#', '').toLowerCase() !== ownerColor) return
                 trustOwner(data.pubKey, peerId).catch(error => emit('color-error', { error: error.message }))
@@ -441,77 +515,3 @@ window.Color = {
                 emit('color-connected', { peerId, color: '#' + ownerColor })
                 sendVisitorIdentity(peerId).then(() => block && requestBlock(peerId)).catch(error => emit('color-error', { error: error.message }))
             })
-            room.onPeerLeave(peerId => {
-                emit('color-disconnected', { peerId, color: '#' + ownerColor })
-                if (peerId === ownerPeer) {
-                    ownerPeer = null
-                    snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*')
-                    showStatus('COLOR OFFLINE')
-                }
-            })
-            room.onPeerError((peerId, error) => emit('color-error', { peerId, error: error?.message || 'Color connection failed.' }))
-            if (block) retryTimer = setInterval(() => { if (!liveBlockLoaded) requestBlock() }, 10000)
-        }
-        const handleMessage = event => {
-            if (event.source === iframe.contentWindow && event.origin === 'https://colorlog.in') {
-                if (event.data?.type === 'color-sdk-record-response') {
-                    const task = storageRequests.get(event.data.id)
-                    if (task) {
-                        storageRequests.delete(event.data.id)
-                        event.data.error ? task.reject(new Error(event.data.error)) : task.resolve(event.data.records)
-                        return
-                    }
-                    snapshot?.contentWindow?.postMessage(event.data, '*')
-                    return
-                }
-                const detected = typeof event.data === 'string' ? event.data : event.data?.color
-                if (typeof detected === 'string' && /^#[0-9a-f]{6}$/i.test(detected)) {
-                    visitorColor = detected.toLowerCase()
-                    colorLink.style.backgroundColor = visitorColor
-                    colorLink.title = visitorColor.toUpperCase()
-                    emit('color-change', { color: visitorColor })
-                    if (block && !activeBlock) loadCachedBlock().catch(() => {})
-                    connect()
-                }
-                if (event.data && ['zoom-complete', 'zoom-finished', 'zoom-done'].includes(event.data.type)) window.dispatchEvent(new Event('color-zoom-finished'))
-                return
-            }
-            if (event.source !== snapshot?.contentWindow) return
-            if (event.data?.type === 'color-sdk-block-action' && ownerPeer) {
-                const message = event.data.message && typeof event.data.message === 'object' ? { ...event.data.message, origin: location.origin, visitorColor } : event.data.message
-                sendSdk?.({ type: 'BLOCK_ACTION', origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message }, ownerPeer)
-            } else if (event.data?.type === 'color-sdk-record-request') {
-                iframe.contentWindow?.postMessage({ ...event.data, color: visitorColor, ownerColor: '#' + ownerColor }, 'https://colorlog.in')
-            }
-        }
-        window.addEventListener('message', handleMessage)
-        if (block) {
-            showStatus('CONNECTING TO COLOR…')
-            offlineTimer = setTimeout(() => { if (!activeBlock && !ownerPeer) showStatus('COLOR OFFLINE') }, 15000)
-        }
-        container.appendChild(iframe)
-        connect()
-        return {
-            iframe,
-            send: (data, target) => send?.(data, target),
-            get: callback => get ? get(callback) : pendingGetCallbacks.push(callback),
-            destroy: () => {
-                clearInterval(retryTimer)
-                clearTimeout(offlineTimer)
-                window.removeEventListener('message', handleMessage)
-                room?.leave()
-                snapshot?.remove()
-                iframe.remove()
-                colorLink.remove()
-                container.querySelector('.color-sdk-notice')?.remove()
-            },
-            resetTrust: () => { verifiedOwnerKey = null; verifiedOwnerFingerprint = null },
-            get connected() { return Object.values(room?.getPeers?.() || {}).some(peer => peer.dc?.readyState === 'open') },
-            get color() { return visitorColor },
-            get ownerKey() { return verifiedOwnerKey },
-            get ownerFingerprint() { return verifiedOwnerFingerprint },
-            get block() { return activeBlock },
-            get room() { return room }
-        }
-    }
-}
