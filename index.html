@@ -3010,6 +3010,7 @@
         .backup-device span { display:block;font-size:.875rem;color:#aaa;line-height:1.6;overflow-wrap:anywhere }
         .backup-device > div { flex:1;min-width:0 }
         .backup-device button { margin:8px 12px 0 0 }
+        .backup-device .backup-remove { align-self:flex-start;margin:0 0 0 auto;padding:0 4px;border:0;background:none;color:#888;font-size:20px;line-height:1;cursor:pointer }
         #info-backup select { color:inherit;background:#171717;border:1px solid #555;padding:8px;margin:12px }
         body.info-open #top-nav { opacity:0;pointer-events:none }
     </style>
@@ -8050,6 +8051,17 @@
                 this.renderBackupDevices()
             }
 
+            async removeDevice(record) {
+                await this.deviceConnections.get(record.id)?.send({ type: 'BLOCK' }).catch(() => {})
+                this.deviceConnections.get(record.id)?.close()
+                this.deviceConnections.delete(record.id)
+                this.backupSending.delete(record.id)
+                this.backupReceiving.delete(record.id)
+                await this.identity._call('db_links_delete', { id: record.id })
+                this.deviceLinks = this.deviceLinks.filter(link => link.id !== record.id)
+                this.renderBackupDevices()
+            }
+
             async toggleFriendBackup(record, receiving) {
                 if (receiving) {
                     record.acceptsBackup = !record.acceptsBackup
@@ -8118,7 +8130,10 @@
                         button('BLOCK', () => this.blockDevice(record))
                     }
                     if (record.role !== 'friend' && !record.role?.startsWith('block-') && saved) button('RECOVER DATA', () => this.verifyBackupAction(record, 'recover'))
-                    text.append(name, detail, controls); row.appendChild(text); list.appendChild(row)
+                    const remove = document.createElement('button')
+                    remove.type = 'button'; remove.className = 'backup-remove'; remove.title = 'Remove connection'; remove.setAttribute('aria-label', 'Remove connection'); remove.textContent = '×'
+                    remove.onclick = () => { remove.disabled = true; this.removeDevice(record).catch(error => { remove.disabled = false; this.backupStatus(error.message) }) }
+                    text.append(name, detail, controls); row.append(text, remove); list.appendChild(row)
                 }
                 if (this.deviceLinks.some(record => !record.revoked) && !this.pairInvitation) document.getElementById('backup-qr-display').replaceChildren()
             }
@@ -13669,10 +13684,10 @@ async function db_raw_dump({ roomHex }) {
 }
 
 // Device trust is local to this installation, independent of the selected color.
-async function db_device_links(link = null) {
+async function db_device_links(link = null, removeId = '') {
     const db = await openColorDB('ffffff');
     let generated;
-    if (!link) {
+    if (!link && !removeId) {
         const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
         generated = { privateJwk: await crypto.subtle.exportKey('jwk', pair.privateKey), publicKey: await crypto.subtle.exportKey('jwk', pair.publicKey) };
     }
@@ -13687,7 +13702,8 @@ async function db_device_links(link = null) {
                         if (!generated) throw new Error('Initialize this device first');
                         record = { identity: generated, links: [] };
                     }
-                    if (link) {
+                    if (removeId) record.links = record.links.filter(item => item.id !== removeId);
+                    else if (link) {
                         if (typeof link.id !== 'string' || !link.id || link.id.length > 128) throw new Error('Invalid device link');
                         record.links = record.links.filter(item => item.id !== link.id);
                         record.links.push(link);
@@ -13913,6 +13929,7 @@ self.onmessage = async (e) => {
             case 'db_raw_dump': res = await db_raw_dump(data); break;
             case 'db_links_load': res = await db_device_links(); break;
             case 'db_links_save': res = await db_device_links(data.link); break;
+            case 'db_links_delete': res = await db_device_links(null, data.id); break;
             case 'backup_authorize': res = await authorizeBackup(data); break;
             case 'backup_prepare_recovery': res = await prepareBackupRecovery(data.roomHex, data.password); break;
             case 'backup_export': res = await db_backup_snapshot(data); break;
