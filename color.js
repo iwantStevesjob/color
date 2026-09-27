@@ -513,8 +513,7 @@ window.Color = {
             }
             room.onPeerJoin(peerId => {
                 emit('color-connected', { peerId, color: '#' + ownerColor })
-                if (block) requestBlock(peerId)
-                sendVisitorIdentity(peerId).catch(error => emit('color-error', { error: error.message }))
+                sendVisitorIdentity(peerId).then(() => { if (block) requestBlock(peerId) }).catch(error => emit('color-error', { error: error.message }))
             })
             room.onPeerLeave(peerId => {
                 emit('color-disconnected', { peerId, color: '#' + ownerColor })
