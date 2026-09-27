@@ -513,5 +513,94 @@ window.Color = {
             }
             room.onPeerJoin(peerId => {
                 emit('color-connected', { peerId, color: '#' + ownerColor })
-                sendVisitorIdentity(peerId).then(() => block && requestBlock(peerId)).catch(error => emit('color-error', { error: error.message }))
+                if (block) requestBlock(peerId)
+                sendVisitorIdentity(peerId).catch(error => emit('color-error', { error: error.message }))
             })
+            room.onPeerLeave(peerId => {
+                emit('color-disconnected', { peerId, color: '#' + ownerColor })
+                if (peerId === ownerPeer) {
+                    ownerPeer = null
+                    snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*')
+                    showStatus('COLOR OFFLINE')
+                }
+            })
+            room.onPeerError((peerId, error) => emit('color-error', { peerId, error: error?.message || 'Color connection failed.' }))
+            if (block) retryTimer = setInterval(() => { if (!liveBlockLoaded) requestBlock() }, 10000)
+        }
+        const handleMessage = event => {
+            if (event.source === iframe.contentWindow && event.origin === 'https://colorlog.in') {
+                if (event.data?.type === 'color-sdk-record-response') {
+                    const task = storageRequests.get(event.data.id)
+                    if (task) {
+                        storageRequests.delete(event.data.id)
+                        event.data.error ? task.reject(new Error(event.data.error)) : task.resolve(event.data.records)
+                        return
+                    }
+                    snapshot?.contentWindow?.postMessage(event.data, '*')
+                    return
+                }
+                const detected = typeof event.data === 'string' ? event.data : event.data?.color
+                if (typeof detected === 'string' && /^#[0-9a-f]{6}$/i.test(detected)) {
+                    visitorColor = detected.toLowerCase()
+                    colorLink.style.backgroundColor = visitorColor
+                    colorLink.title = visitorColor.toUpperCase()
+                    emit('color-change', { color: visitorColor })
+                    if (block && !activeBlock) loadCachedBlock().catch(() => {})
+                    connect()
+                }
+                if (event.data && ['zoom-complete', 'zoom-finished', 'zoom-done'].includes(event.data.type)) window.dispatchEvent(new Event('color-zoom-finished'))
+                return
+            }
+            if (event.source !== snapshot?.contentWindow) return
+            if (event.data?.type === 'color-sdk-file-upload' && ownerPeer) {
+                const meta = event.data.meta, bytes = event.data.bytes instanceof ArrayBuffer ? new Uint8Array(event.data.bytes) : null
+                if (!meta?.id || !bytes || bytes.length !== Number(meta.size) || bytes.length > 64 * 1024 * 1024) return
+                sendFile?.({ type: 'start', fileId: meta.id, name: meta.name, size: bytes.length, mime: meta.type, ownerColor: visitorColor, hash: meta.hash, chunks: Math.ceil(bytes.length / 32768) }, ownerPeer)
+                for (let offset = 0, index = 0; offset < bytes.length; offset += 32768, index++) sendFile?.({ type: 'chunk', fileId: meta.id, index, bytes: bytes.slice(offset, offset + 32768) }, ownerPeer)
+                sendFile?.({ type: 'end', fileId: meta.id }, ownerPeer)
+            } else if (event.data?.type === 'color-sdk-block-action' && ownerPeer) {
+                const message = event.data.message && typeof event.data.message === 'object' ? { ...event.data.message, origin: location.origin, visitorColor } : event.data.message
+                sendSdk?.({ type: 'BLOCK_ACTION', origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message }, ownerPeer)
+            } else if (event.data?.type === 'color-sdk-block-action') {
+                const message = event.data.message && typeof event.data.message === 'object' ? { ...event.data.message, origin: location.origin, visitorColor } : event.data.message
+                sendStandbyAction({ origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message }).then(() => snapshot?.contentWindow?.postMessage({ type: 'color-sdk-block-message', message: { type: 'QUEUED', ok: true } }, '*')).catch(error => emit('color-error', { error: error.message }))
+            } else if (event.data?.type === 'color-sdk-color-action') {
+                sendToColor(event.data.targetColor || visitorColor, event.data.namespace, event.data.message).catch(error => emit('color-error', { error: error.message }))
+            } else if (event.data?.type === 'color-sdk-record-request') {
+                iframe.contentWindow?.postMessage({ ...event.data, color: visitorColor, ownerColor: '#' + ownerColor }, 'https://colorlog.in')
+            }
+        }
+        window.addEventListener('message', handleMessage)
+        if (block) {
+            showStatus('CONNECTING TO COLOR…')
+            offlineTimer = setTimeout(() => { if (!activeBlock && !ownerPeer) showStatus('COLOR OFFLINE') }, 15000)
+        }
+        container.appendChild(iframe)
+        connect()
+        return {
+            iframe,
+            send: (data, target) => send?.(data, target),
+            get: callback => get ? get(callback) : pendingGetCallbacks.push(callback),
+            destroy: () => {
+                clearInterval(retryTimer)
+                clearTimeout(offlineTimer)
+                window.removeEventListener('message', handleMessage)
+                room?.leave()
+                colorConnections.forEach(connection => connection.room.leave())
+                colorConnections.clear()
+                standbyRoom?.leave()
+                snapshot?.remove()
+                iframe.remove()
+                colorLink.remove()
+                container.querySelector('.color-sdk-notice')?.remove()
+            },
+            resetTrust: () => { verifiedOwnerKey = null; verifiedOwnerFingerprint = null },
+            get connected() { return Object.values(room?.getPeers?.() || {}).some(peer => peer.dc?.readyState === 'open') },
+            get color() { return visitorColor },
+            get ownerKey() { return verifiedOwnerKey },
+            get ownerFingerprint() { return verifiedOwnerFingerprint },
+            get block() { return activeBlock },
+            get room() { return room }
+        }
+    }
+}

@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 
@@ -7048,10 +7047,11 @@
             host.src = new URL('index.html?blockHost=' + encodeURIComponent(hostNonce), location.href)
             host.onload = () => host.contentWindow.postMessage({ type: 'color-block-host-start', nonce: hostNonce, runtime }, hostOrigin)
             document.body.appendChild(host)
-            setTimeout(() => document.getElementById('block-pwa-loading').classList.add('done'), 250)
             let installPrompt
-            window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; const button = document.getElementById('block-pwa-install'); button.hidden = false; button.onclick = async () => { if (!installPrompt) return; try { await installPrompt.prompt(); installPrompt = null; button.hidden = true } catch (_) { button.hidden = false } } })
-            window.addEventListener('appinstalled', () => { installPrompt = null; document.getElementById('block-pwa-install').hidden = true })
+            const installButton = document.getElementById('block-pwa-install'), success = document.getElementById('block-pwa-loading')
+            if (matchMedia('(display-mode: standalone)').matches) success.classList.add('done')
+            window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; installButton.disabled = false; installButton.textContent = 'SAVE'; installButton.onclick = async () => { if (!installPrompt) return; try { const choice = await installPrompt.prompt(); if (choice.outcome === 'accepted') success.classList.add('done'); installPrompt = null } catch (_) {} } })
+            window.addEventListener('appinstalled', () => { installPrompt = null; success.classList.add('done') })
             navigator.storage?.persist?.().catch(() => {})
             navigator.serviceWorker?.register('sw.js').catch(() => {})
         }
@@ -9651,7 +9651,7 @@
                 const dependencies = def.checkoutBlock ? [this.blockDefs.get(def.checkoutBlock)].filter(Boolean) : []
                 const runtime = { payload, def, dependencies, js: view.js || '', actionJs: def.actions?.js || '', namespace: def.actions?.namespace || def.action || '', index: entry.index, selector: entry.selector, color, keys: replica.keys, snapshot: replica.snapshot, customDocument: this.blockCategory(def) === 'CUSTOM' ? this.customBlockSandboxDocument(payload, def, true) : '' }
                 const pwaRuntime = '(' + standaloneBlockPwaRuntime.toString().replace(/<\/script/gi, '<\\/script') + ')()'
-                return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#${color}"><meta name="mobile-web-app-capable" content="yes"><link rel="icon" href="${this.escapeAttr(icon)}"><link rel="apple-touch-icon" href="${this.escapeAttr(icon)}"><link rel="manifest" href="${this.escapeAttr(manifest)}"><title>${this.escapeHtml(entry.label)}</title><style>${styles}\nhtml,body{margin:0;min-height:100%;background:#fff;color:#111}body{overflow:auto}.block-pwa-sliver{position:sticky;top:0;z-index:1000;width:100%;height:10px;background:#${color}}.block-pwa-page{box-sizing:border-box;max-width:1100px;min-height:calc(100vh - 10px);margin:auto;padding:24px}.block-pwa-status{position:fixed;top:14px;right:14px;z-index:1200;padding:6px 9px;border-radius:12px;background:#fff;color:#555;font:900 10px system-ui,sans-serif;box-shadow:0 2px 9px #0002}.block-pwa-loading{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;background:#fff;color:#111;font:900 18px system-ui,sans-serif;transition:opacity .25s}.block-pwa-loading::before{content:'';position:absolute;top:0;width:100%;height:10px;background:#${color}}.block-pwa-loading.done{opacity:0;pointer-events:none}.block-pwa-install{position:fixed;right:18px;bottom:18px;z-index:2500;border:0;border-radius:20px;padding:11px 17px;background:#${color};color:#111;font-weight:900}[hidden]{display:none!important}</style></head><body><div id="block-pwa-loading" class="block-pwa-loading">${this.escapeHtml(entry.label.toUpperCase())}</div><div class="block-pwa-sliver"></div><div id="block-pwa-status" class="block-pwa-status">CONNECTING</div><main class="block-pwa-page"><div class="editor-line block-line">${this.renderBlockContent(payload, color)}</div></main><button id="block-pwa-install" class="block-pwa-install" hidden>INSTALL</button><script id="block-pwa-data" type="application/json">${safeJson(runtime)}<\/script><script>${pwaRuntime}<\/script></body></html>`
+                return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#${color}"><meta name="mobile-web-app-capable" content="yes"><link rel="icon" href="${this.escapeAttr(icon)}"><link rel="apple-touch-icon" href="${this.escapeAttr(icon)}"><link rel="manifest" href="${this.escapeAttr(manifest)}"><title>${this.escapeHtml(entry.label)}</title><style>${styles}\nhtml,body{margin:0;min-height:100%;background:#fff;color:#111}body{overflow:auto}.block-pwa-sliver{position:sticky;top:0;z-index:1000;width:100%;height:10px;background:#${color}}.block-pwa-page{box-sizing:border-box;max-width:1100px;min-height:calc(100vh - 10px);margin:auto;padding:24px}.block-pwa-status{position:fixed;top:14px;right:14px;z-index:1200;padding:6px 9px;border-radius:12px;background:#fff;color:#555;font:900 10px system-ui,sans-serif;box-shadow:0 2px 9px #0002}.block-pwa-loading{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;background:#fff;color:#111;transition:opacity .25s}.block-pwa-loading::before{content:'';position:absolute;top:0;width:100%;height:10px;background:#${color}}.block-pwa-loading.done{opacity:0;pointer-events:none}.block-pwa-success{display:grid;justify-items:center;gap:16px}.block-pwa-success b{font:900 18px system-ui,sans-serif}.block-pwa-install{min-width:150px;border:0;border-radius:8px;padding:13px 22px;background:#1976d2;color:#fff;font:900 14px system-ui,sans-serif}.block-pwa-install:disabled{opacity:.45}.block-pwa-online{color:#999;font:500 12px system-ui,sans-serif;text-decoration:none}</style></head><body><div id="block-pwa-loading" class="block-pwa-loading"><div class="block-pwa-success"><b>BACKUP SUCCESSFUL</b><button id="block-pwa-install" class="block-pwa-install" disabled>PREPARING…</button><a class="block-pwa-online" href="index.html#${color}">just use online</a></div></div><div class="block-pwa-sliver"></div><div id="block-pwa-status" class="block-pwa-status">CONNECTING</div><main class="block-pwa-page"><div class="editor-line block-line">${this.renderBlockContent(payload, color)}</div></main><script id="block-pwa-data" type="application/json">${safeJson(runtime)}<\/script><script>${pwaRuntime}<\/script></body></html>`
             }
 
             async installBlockPwa(entry) {
@@ -13452,7 +13452,17 @@ async function db_verify_remote_batch({ fragments, roomHex, peerId }) {
         try {
             const isValid = await verify(_peerKeys[peerId], payload, item.signature);
             if (!isValid) continue;
-            prepared.push({ index, item, encrypted: item.content && item.content.trim() !== '' ? await encrypt(item.content) : null });
+            const existing = await new Promise(resolve => { const request = db.transaction(roomHex, 'readonly').objectStore(roomHex).get(index); request.onsuccess = () => resolve(request.result); request.onerror = () => resolve(null); });
+            let content = safeContent;
+            if (existing?.content instanceof ArrayBuffer && content) try {
+                const local = JSON.parse(await decrypt(existing.content)), remote = JSON.parse(content);
+                if (local?.type === 'block' && remote?.type === 'block' && local.instanceId === remote.instanceId) {
+                    remote.data ||= {};
+                    for (const [key, value] of Object.entries(local.data || {})) if (!(key in remote.data)) remote.data[key] = value;
+                    content = JSON.stringify(remote);
+                }
+            } catch (_) {}
+            prepared.push({ index, item: { ...item, content }, encrypted: content.trim() !== '' ? await encrypt(content) : null });
         } catch(e) { }
     }
     if (prepared.length === 0) { db.close(); return verified; }
