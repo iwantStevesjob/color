@@ -213,9 +213,9 @@ window.Color = {
                                 const peerEntry = { pc: null, dc: null };
                                 connectedPeers[data.peer_id] = peerEntry;
                                 const { pc } = createPeerConnection(false, channel => {
-                                    setupDataChannel(channel, data.peer_id);
                                     if (connectedPeers[data.peer_id]) connectedPeers[data.peer_id].dc = channel;
                                     else connectedPeers[data.peer_id] = { pc, dc: channel };
+                                    setupDataChannel(channel, data.peer_id);
                                 });
                                 peerEntry.pc = pc;
                                 await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
