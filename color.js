@@ -283,6 +283,7 @@ window.Color = {
         let verifiedOwnerKey = null
         let verifiedOwnerFingerprint = null
         let activeBlock = null
+        let activeDocumentHash = null
         let liveBlockLoaded = false
         let snapshot = null
         let retryTimer = null
@@ -319,6 +320,7 @@ window.Color = {
         const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }))
         const showStatus = message => {
             if (!block) return
+            if (liveBlockLoaded) { container.querySelector('.color-sdk-notice')?.remove(); return }
             let notice = container.querySelector('.color-sdk-notice')
             if (!notice) {
                 notice = document.createElement('div')
@@ -338,10 +340,11 @@ window.Color = {
         }
         const checkConnection = () => {
             clearTimeout(offlineTimer); clearInterval(statusTimer)
+            if (liveBlockLoaded || ownerPeer) { container.querySelector('.color-sdk-notice')?.remove(); return }
             const messages = ['CHECKING CONNECTION…', 'OPENING SECURE TUNNEL…', 'VERIFYING FORM OWNER…']; let index = 0
             showStatus(messages[0])
             statusTimer = setInterval(() => showStatus(messages[++index % messages.length]), 1400)
-            offlineTimer = setTimeout(() => { clearInterval(statusTimer); if (ownerPeer) return; snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*'); showStatus('COLOR OFFLINE'); ensureStandby() }, 5000)
+            offlineTimer = setTimeout(() => { clearInterval(statusTimer); if (liveBlockLoaded || ownerPeer) return; showStatus('COLOR OFFLINE'); ensureStandby() }, 5000)
         }
         const storageRequest = (action, records) => new Promise((resolve, reject) => {
             const id = uuid()
@@ -483,9 +486,11 @@ window.Color = {
             const records = await storageRequest('read'), cached = (Array.isArray(records) ? records : []).find(item => item?.selector === String(block).toLowerCase())
             const message = cached?.message, payload = message?.payload
             if (!message || payload?.kind !== 'block' || !payload.document || !await verify(message, null) || await digest(payload.document) !== payload.documentHash) return
+            if (liveBlockLoaded) return
             activeBlock = payload.block
+            activeDocumentHash = payload.documentHash
             renderSnapshot(payload.document)
-            snapshot?.addEventListener('load', checkConnection, { once: true })
+            snapshot?.addEventListener('load', () => { if (!liveBlockLoaded && !ownerPeer) checkConnection() }, { once: true })
             emit('color-block-ready', { block: payload.block, verified: true, cached: true })
         }
         const requestBlock = peerId => sendSdk?.({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor, ownerView: visitorColor.slice(1) === ownerColor }, peerId)
@@ -514,7 +519,9 @@ window.Color = {
                         if (!payload.document || await digest(payload.document) !== payload.documentHash) return emit('color-error', { error: 'The signed block document does not match its fingerprint.' })
                         clearInterval(retryTimer)
                         liveBlockLoaded = true
+                        if (activeDocumentHash === payload.documentHash && activeBlock?.instanceId === payload.block.instanceId) { clearTimeout(offlineTimer); clearInterval(statusTimer); container.querySelector('.color-sdk-notice')?.remove(); return }
                         activeBlock = payload.block
+                        activeDocumentHash = payload.documentHash
                         renderSnapshot(payload.document)
                         if (!payload.ownerView) cacheBlock(message).catch(() => {})
                         emit('color-block-ready', { block: payload.block, verified: true })
