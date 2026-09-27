@@ -7120,6 +7120,7 @@
                 this.pendingLoginSignature = null
                 this.fuzzySearch = null
                 this.sdkSourceCandidates = new Map()
+                this.sdkAdminViewApprovals = new Set()
                 this.sdkSubmissionRate = new Map()
                 this.debugRoomPasswords = {}
                 this.ownerLoginApproved = false
@@ -9473,16 +9474,18 @@
                 return this.parseBlockPayload(widget?.dataset.blockPayload || '') || this.localBlockPayloadCache?.find(payload => payload.blockId === blockId) || null
             }
 
-            async updateBlockPayload(instanceId, updater) {
+            async updateBlockPayload(instanceId, updater, locked = false) {
+                if (!locked && navigator.locks && this.roomId) return navigator.locks.request('color-block:' + this.roomId + ':' + instanceId, () => this.updateBlockPayload(instanceId, updater, true))
                 const widget = Array.from(this.ui.display.querySelectorAll('[data-block-instance]')).find(el => el.dataset.blockInstance === instanceId)
                 const line = widget?.closest('.editor-line')
                 const meta = this.parseId(line?.id)
-                const payload = this.parseBlockPayload(widget?.dataset.blockPayload || '')
+                const roomHex = this.roomId?.replace('color-', ''), latest = meta && roomHex ? await this.db.getSpecific(roomHex, [roomHex + meta.index]).catch(() => ({})) : {}, payload = this.parseBlockPayload(latest[meta?.index]?.content || widget?.dataset.blockPayload || '')
                 if ((!line || !meta || !payload) && this.store) {
                     const cached = this.localBlockPayloadCache?.find(item => item.instanceId === instanceId)
                     if (!cached || !Number.isFinite(cached._localIndex)) return
                     const updated = updater(cached) || cached
                     await this.store.handleLocalUpdate(cached._localIndex, JSON.stringify(updated), this.user.color)
+                    this.localBlockPayloadCache = null
                     this.renderBlockDiscovery()
                     this.renderInstalledBlocks()
                     return
@@ -9497,6 +9500,7 @@
                 this.currentLineId = line.id
                 this.scheduleCursorSave()
                 await this.store.handleLocalUpdate(meta.index, content, this.user.color)
+                this.localBlockPayloadCache = null
                 this.renderBlockDiscovery()
                 this.renderInstalledBlocks()
             }
@@ -9600,12 +9604,12 @@
                 return html.replace(marker, replacement)
             }
 
-            embeddedBlockDocument(payload, visitorColor, ownerPublicKey = null) {
-                const def = this.getBlockDefinition(payload), view = this.getBlockView(def, false), owner = this.user.color.replace('#', '').toLowerCase()
+            embeddedBlockDocument(payload, visitorColor, ownerPublicKey = null, isAdmin = false) {
+                const def = this.getBlockDefinition(payload), view = this.getBlockView(def, isAdmin), owner = this.user.color.replace('#', '').toLowerCase()
                 const safeJson = value => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
-                const html = this.renderBlockContent(payload, '')
+                const html = this.renderBlockContent(payload, isAdmin ? owner : '')
                 const dependencies = def.checkoutBlock ? [this.blockDefs.get(def.checkoutBlock)].filter(Boolean) : []
-                const runtime = { payload, def, dependencies, viewJs: view.js || '', actionJs: def.actions?.js || '', namespace: def.actions?.namespace || def.action || '', visitorColor, owner, ownerPublicKey }
+                const runtime = { payload, def, dependencies, viewJs: view.js || '', actionJs: def.actions?.js || '', namespace: def.actions?.namespace || def.action || '', visitorColor, owner, ownerPublicKey, isAdmin }
                 return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100%;font-family:system-ui,sans-serif}*{box-sizing:border-box}.editor-line{min-height:1px}[hidden]{display:none!important}</style></head><body><div class="editor-line block-line">${html}</div><script id="color-block-runtime" type="application/json">${safeJson(runtime)}<\/script><script>(()=>{const runtime=JSON.parse(document.getElementById('color-block-runtime').textContent),payload=runtime.payload,data=payload.data||{},def=runtime.def||{},root=document.querySelector('[data-block-instance]'),isAdmin=false,userColor=runtime.visitorColor,escapeHtml=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])),publicData=value=>value?.data||data,execute=(script,context)=>new Function('context','with(context){return(async()=>{'+script+'})()}')(context),callbacks=[],pending=new Map(),ownerPid='sdk-owner',DOMPurify={sanitize:value=>{const node=document.createElement('div');node.textContent=String(value??'');return node.textContent}},records={request:(action,collection,records)=>new Promise((resolve,reject)=>{const id=crypto.randomUUID();pending.set(id,{resolve,reject});parent.postMessage({type:'color-sdk-record-request',id,action,blockInstanceId:payload.instanceId,collection,records},'*');setTimeout(()=>{if(pending.delete(id))reject(new Error('Storage unavailable'))},10000)}),read(collection){return this.request('read',collection)},write(collection,records){return this.request('write',collection,records)}},mesh={blockActionSenders:{},verifiedPeers:new Set([ownerPid]),peerIdentities:new Map([[ownerPid,{color:'#'+runtime.owner,pubKey:runtime.ownerPublicKey}]]),room:{makeAction:()=>[(message)=>parent.postMessage({type:'color-sdk-block-action',namespace:runtime.namespace,blockInstanceId:payload.instanceId,message},'*'),callback=>callbacks.push(callback)]},on(){},emit(type,namespace,message,pid){if(type==='block-action')runAction(message,pid)}},app={mesh,roomId:'color-'+runtime.owner,user:{color:userColor},ui:{roomStatus:{textContent:''}},appState:{session:'embed'},blockDefs:new Map([[payload.blockId,def],...(runtime.dependencies||[]).map(item=>[item.id,item])]),escapeHtml,escapeAttr:escapeHtml,findFirstBlockPayload:id=>id===payload.blockId?payload:null,findRoomOwnerPeerId:()=>ownerPid,sendBlockMessage:(definition,message)=>send(message),sendToColor:(targetColor,namespace,message)=>parent.postMessage({type:'color-sdk-color-action',targetColor,namespace,message},'*'),loadExternalScript:(src,test)=>test?.()?Promise.resolve():new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.head.appendChild(script)}),fileTransfers:{outgoing:new(class extends Map{set(id,entry){super.set(id,entry);entry?.file?.arrayBuffer().then(bytes=>parent.postMessage({type:'color-sdk-file-upload',meta:entry.meta,bytes},'*'));return this}}),makeFileId:()=>crypto.randomUUID(),hashBuffer:async buffer=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))).map(byte=>byte.toString(16).padStart(2,'0')).join('')},runBlockScript:execute,runBlockCheckout:form=>{const checkoutDef=app.blockDefs.get(form.def?.checkoutBlock);return checkoutDef?.checkout?.js?execute(checkoutDef.checkout.js,{app,def:checkoutDef,form,escapeHtml,escapeAttr:escapeHtml}):Promise.resolve()}},send=(message)=>parent.postMessage({type:'color-sdk-block-action',namespace:runtime.namespace,blockInstanceId:payload.instanceId,message},'*'),runtimeCount=()=>0,updateBlock=()=>Promise.reject(new Error('Embedded visitors cannot edit owner blocks')),getBlock=()=>payload,findFirstBlock=()=>payload,setRuntimePeer=()=>{};window.DOMPurify=DOMPurify;window.context={app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,records,runtimeCount,updateBlock};function runAction(message,pid=ownerPid){if(!runtime.actionJs)return;Promise.resolve(execute(runtime.actionJs,{app,def,data:message,pid,userColor,escapeHtml,publicData,send,findFirstBlock,getBlock,updateBlock,setRuntimePeer})).catch(console.error)}window.addEventListener('message',event=>{if(event.source!==parent)return;if(event.data?.type==='color-sdk-record-response'){const task=pending.get(event.data.id);if(task){pending.delete(event.data.id);event.data.error?task.reject(new Error(event.data.error)):task.resolve(event.data.records)}}else if(event.data?.type==='color-sdk-owner-status'){if(event.data.online){mesh.verifiedPeers.add(ownerPid);mesh.peerIdentities.set(ownerPid,{color:'#'+runtime.owner,pubKey:runtime.ownerPublicKey})}else{mesh.verifiedPeers.delete(ownerPid);mesh.peerIdentities.delete(ownerPid)}}else if(event.data?.type==='color-sdk-block-message'){callbacks.forEach(callback=>callback(event.data.message,ownerPid))}});Promise.resolve(execute(runtime.viewJs,{app,root,payload,data,def,isAdmin,userColor,escapeHtml,publicData,send,records,runtimeCount,updateBlock})).catch(console.error);parent.postMessage({type:'color-sdk-block-ready'},'*')})();<\/script></body></html>`
             }
 
@@ -9904,8 +9908,10 @@
                         await this.renderSdkSourceManager()
                         return this.sendSdkResponse({ kind: 'source', status: 'pending', requestId: data.requestId, origin: requestOrigin, ownerColor: '#' + roomHex }, pid)
                     }
-                    const publicBlock = this.parseBlockPayload(this.getPublicSyncContent(JSON.stringify(block))), ownerPublicKey = await this.identity.getPublicKeyData(), document = this.embeddedBlockDocument(publicBlock, /^#[0-9a-f]{6}$/i.test(data.visitorColor || '') ? data.visitorColor.toLowerCase() : '#ffffff', ownerPublicKey)
-                    return this.sendSdkResponse({ kind: 'block', requestId: data.requestId, origin: requestOrigin, ownerColor: '#' + roomHex, block: { instanceId: block.instanceId, blockId: block.blockId }, document, documentHash: await this.sdkHash(document) }, pid)
+                    const visitorColor = /^#[0-9a-f]{6}$/i.test(data.visitorColor || '') ? data.visitorColor.toLowerCase() : '#ffffff', approvalKey = block.instanceId + ':' + requestOrigin
+                    if (data.ownerView && visitorColor === '#' + roomHex && !this.sdkAdminViewApprovals.has(approvalKey) && confirm(requestOrigin + ' is requesting the private owner view for ' + (def.name || block.blockId) + '. Allow this browser session?')) this.sdkAdminViewApprovals.add(approvalKey)
+                    const ownerView = data.ownerView && visitorColor === '#' + roomHex && this.sdkAdminViewApprovals.has(approvalKey), embeddedBlock = ownerView ? block : this.parseBlockPayload(this.getPublicSyncContent(JSON.stringify(block))), ownerPublicKey = await this.identity.getPublicKeyData(), document = this.embeddedBlockDocument(embeddedBlock, visitorColor, ownerPublicKey, ownerView)
+                    return this.sendSdkResponse({ kind: 'block', requestId: data.requestId, origin: requestOrigin, ownerColor: '#' + roomHex, block: { instanceId: block.instanceId, blockId: block.blockId }, document, documentHash: await this.sdkHash(document), ownerView }, pid)
                 }
                 if (data.type !== 'BLOCK_ACTION' || !data.blockInstanceId) return
                 const block = payloads.find(item => item.instanceId === data.blockInstanceId), def = block && this.getBlockDefinition(block)

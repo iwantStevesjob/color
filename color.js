@@ -287,6 +287,7 @@ window.Color = {
         let snapshot = null
         let retryTimer = null
         let offlineTimer = null
+        let statusTimer = null
         let visitorPublicKey = null
         let visitorProof = null
         let standbyRoom = null
@@ -307,7 +308,7 @@ window.Color = {
         if (!document.getElementById('color-widget-styles')) {
             const style = document.createElement('style')
             style.id = 'color-widget-styles'
-            style.textContent = '#color-widget{position:fixed;inset:0;width:100vw;height:100vh;border:0;z-index:9999;background:transparent}#color-widget.color-sdk-identity{width:1px;height:1px;opacity:0;pointer-events:none}.color-sdk-notice{padding:16px;border-radius:10px;background:#eee;color:#555;font:800 13px/1.4 system-ui,sans-serif;text-align:center}.color-sdk-snapshot{display:block;width:100%;min-height:600px;border:0;background:transparent}.color-sdk-color-link{position:fixed;top:12px;left:12px;z-index:10000;width:18px;height:18px;padding:0;border:1px solid #aaa;border-radius:2px;background:#fff;cursor:pointer}'
+            style.textContent = '#color-widget{position:fixed;inset:0;width:100vw;height:100vh;border:0;z-index:9999;background:transparent}#color-widget.color-sdk-identity{width:1px;height:1px;opacity:0;pointer-events:none}.color-sdk-notice{display:grid;justify-items:center;gap:12px;padding:22px;border-radius:12px;background:#f3f3f3;color:#555;font:800 13px/1.4 system-ui,sans-serif;text-align:center}.color-sdk-notice.loading::before{content:"";width:22px;height:22px;border:3px solid #d7d7d7;border-top-color:#555;border-radius:50%;animation:color-sdk-spin .75s linear infinite}.color-sdk-notice a{display:inline-block;padding:10px 16px;border-radius:999px;background:#111;color:#fff!important;text-decoration:none!important}@keyframes color-sdk-spin{to{transform:rotate(360deg)}}.color-sdk-snapshot{display:block;width:100%;min-height:600px;border:0;background:transparent}.color-sdk-color-link{position:fixed;top:12px;left:12px;z-index:10000;width:18px;height:18px;padding:0;border:1px solid #aaa;border-radius:2px;background:#fff;cursor:pointer}'
             document.head.appendChild(style)
         }
         const colorLink = document.createElement('button')
@@ -325,14 +326,22 @@ window.Color = {
                 container.prepend(notice)
             }
             notice.textContent = message
+            notice.classList.toggle('loading', message !== 'COLOR OFFLINE')
             if (message === 'COLOR OFFLINE' && block) {
                 const standbyKey = verifiedOwnerFingerprint || (typeof ownerKey === 'string' ? ownerKey.trim().replace(/^sha256[:-]/i, '').toLowerCase() : '')
                 const link = document.createElement('a')
                 link.href = 'https://colorlog.in/?standby=' + ownerColor + '&block=' + encodeURIComponent(String(block).toLowerCase()) + (standbyKey ? '&ownerKey=' + standbyKey : '')
                 link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'STAND WITH THIS ' + String(block).replace(/-\d+$/, '').replaceAll('-', ' ').toUpperCase()
-                link.style.cssText = 'display:block;margin-top:8px;color:inherit;text-decoration:underline'
+                link.style.backgroundColor = '#' + ownerColor
                 notice.appendChild(link)
             }
+        }
+        const checkConnection = () => {
+            clearTimeout(offlineTimer); clearInterval(statusTimer)
+            const messages = ['CHECKING CONNECTION…', 'OPENING SECURE TUNNEL…', 'VERIFYING FORM OWNER…']; let index = 0
+            showStatus(messages[0])
+            statusTimer = setInterval(() => showStatus(messages[++index % messages.length]), 1400)
+            offlineTimer = setTimeout(() => { clearInterval(statusTimer); if (ownerPeer) return; snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*'); showStatus('COLOR OFFLINE'); ensureStandby() }, 5000)
         }
         const storageRequest = (action, records) => new Promise((resolve, reject) => {
             const id = uuid()
@@ -358,6 +367,7 @@ window.Color = {
             verifiedOwnerKey = publicKey
             verifiedOwnerFingerprint = receivedFingerprint
             if (peerId) { ownerPeers.add(peerId); ownerPeer = peerId }
+            clearTimeout(offlineTimer); clearInterval(statusTimer)
             if (first) {
                 const detail = { color: '#' + ownerColor, publicKey, fingerprint: receivedFingerprint, configured: !!ownerKey }
                 emit('color-owner-verified', detail)
@@ -453,6 +463,7 @@ window.Color = {
         }
         const renderSnapshot = documentHtml => {
             clearTimeout(offlineTimer)
+            clearInterval(statusTimer)
             container.querySelector('.color-sdk-notice')?.remove()
             snapshot?.remove()
             snapshot = document.createElement('iframe')
@@ -474,10 +485,10 @@ window.Color = {
             if (!message || payload?.kind !== 'block' || !payload.document || !await verify(message, null) || await digest(payload.document) !== payload.documentHash) return
             activeBlock = payload.block
             renderSnapshot(payload.document)
-            snapshot?.addEventListener('load', () => { snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*'); showStatus('COLOR OFFLINE') }, { once: true })
+            snapshot?.addEventListener('load', checkConnection, { once: true })
             emit('color-block-ready', { block: payload.block, verified: true, cached: true })
         }
-        const requestBlock = peerId => sendSdk?.({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor }, peerId)
+        const requestBlock = peerId => sendSdk?.({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor, ownerView: visitorColor.slice(1) === ownerColor }, peerId)
         const connect = () => {
             if (room) return
             room = Spectrum.joinRoom({ appId: planet }, storeRoomId)
@@ -505,7 +516,7 @@ window.Color = {
                         liveBlockLoaded = true
                         activeBlock = payload.block
                         renderSnapshot(payload.document)
-                        cacheBlock(message).catch(() => {})
+                        if (!payload.ownerView) cacheBlock(message).catch(() => {})
                         emit('color-block-ready', { block: payload.block, verified: true })
                     } else if (payload.kind === 'action' && (activeBlock?.blockId === 'page' || payload.blockInstanceId === activeBlock?.instanceId) && payload.namespace) {
                         snapshot?.contentWindow?.postMessage({ type: 'color-sdk-block-message', namespace: payload.namespace, message: payload.message }, '*')
@@ -524,8 +535,7 @@ window.Color = {
                 if (peerId === ownerPeer) {
                     ownerPeer = [...ownerPeers].find(pid => room?.getPeers?.()[pid]?.dc?.readyState === 'open') || null
                     if (!ownerPeer) {
-                        snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*')
-                        showStatus('COLOR OFFLINE')
+                        checkConnection()
                     }
                 }
             })
@@ -552,6 +562,7 @@ window.Color = {
                     emit('color-change', { color: visitorColor })
                     if (block && !activeBlock) loadCachedBlock().catch(() => {})
                     connect()
+                    if (block && room) requestBlock()
                 }
                 if (event.data && ['zoom-complete', 'zoom-finished', 'zoom-done'].includes(event.data.type)) window.dispatchEvent(new Event('color-zoom-finished'))
                 return
@@ -577,8 +588,7 @@ window.Color = {
         }
         window.addEventListener('message', handleMessage)
         if (block) {
-            showStatus('CONNECTING TO COLOR…')
-            offlineTimer = setTimeout(() => { if (!activeBlock && !ownerPeer) showStatus('COLOR OFFLINE') }, 15000)
+            checkConnection()
         }
         container.appendChild(iframe)
         connect()
@@ -589,6 +599,7 @@ window.Color = {
             destroy: () => {
                 clearInterval(retryTimer)
                 clearTimeout(offlineTimer)
+                clearInterval(statusTimer)
                 window.removeEventListener('message', handleMessage)
                 room?.leave()
                 colorConnections.forEach(connection => connection.room.leave())
