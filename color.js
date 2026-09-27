@@ -187,7 +187,7 @@ window.Color = {
                         return taken;
                     }
                     function setupDataChannel(dc, peerId) {
-                        const opened = () => listeners.peerJoin.forEach(cb => cb(peerId));
+                        const opened = () => setTimeout(() => listeners.peerJoin.forEach(cb => cb(peerId)), 0);
                         if (dc.readyState === 'open') opened(); else dc.onopen = opened;
                         dc.onclose = () => { delete connectedPeers[peerId]; listeners.peerLeave.forEach(cb => cb(peerId)); };
                         dc.onmessage = e => {
@@ -213,9 +213,9 @@ window.Color = {
                                 const peerEntry = { pc: null, dc: null };
                                 connectedPeers[data.peer_id] = peerEntry;
                                 const { pc } = createPeerConnection(false, channel => {
+                                    setupDataChannel(channel, data.peer_id);
                                     if (connectedPeers[data.peer_id]) connectedPeers[data.peer_id].dc = channel;
                                     else connectedPeers[data.peer_id] = { pc, dc: channel };
-                                    setupDataChannel(channel, data.peer_id);
                                 });
                                 peerEntry.pc = pc;
                                 await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
@@ -279,6 +279,7 @@ window.Color = {
         let sendIdentity = null
         let visitorColor = '#ffffff'
         let ownerPeer = null
+        const ownerPeers = new Set()
         let verifiedOwnerKey = null
         let verifiedOwnerFingerprint = null
         let activeBlock = null
@@ -356,7 +357,7 @@ window.Color = {
             const first = verifiedOwnerFingerprint !== receivedFingerprint
             verifiedOwnerKey = publicKey
             verifiedOwnerFingerprint = receivedFingerprint
-            if (peerId) ownerPeer = peerId
+            if (peerId) { ownerPeers.add(peerId); ownerPeer = peerId }
             if (first) {
                 const detail = { color: '#' + ownerColor, publicKey, fingerprint: receivedFingerprint, configured: !!ownerKey }
                 emit('color-owner-verified', detail)
@@ -473,7 +474,7 @@ window.Color = {
             if (!message || payload?.kind !== 'block' || !payload.document || !await verify(message, null) || await digest(payload.document) !== payload.documentHash) return
             activeBlock = payload.block
             renderSnapshot(payload.document)
-            snapshot?.addEventListener('load', () => snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*'), { once: true })
+            snapshot?.addEventListener('load', () => { snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*'); showStatus('COLOR OFFLINE') }, { once: true })
             emit('color-block-ready', { block: payload.block, verified: true, cached: true })
         }
         const requestBlock = peerId => sendSdk?.({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor }, peerId)
@@ -513,14 +514,19 @@ window.Color = {
             }
             room.onPeerJoin(peerId => {
                 emit('color-connected', { peerId, color: '#' + ownerColor })
+                if (block) requestBlock(peerId)
                 sendVisitorIdentity(peerId).then(() => { if (block) requestBlock(peerId) }).catch(error => emit('color-error', { error: error.message }))
+                if (block) { setTimeout(() => requestBlock(peerId), 750); setTimeout(() => requestBlock(peerId), 2500) }
             })
             room.onPeerLeave(peerId => {
                 emit('color-disconnected', { peerId, color: '#' + ownerColor })
+                ownerPeers.delete(peerId)
                 if (peerId === ownerPeer) {
-                    ownerPeer = null
-                    snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*')
-                    showStatus('COLOR OFFLINE')
+                    ownerPeer = [...ownerPeers].find(pid => room?.getPeers?.()[pid]?.dc?.readyState === 'open') || null
+                    if (!ownerPeer) {
+                        snapshot?.contentWindow?.postMessage({ type: 'color-sdk-owner-status', online: false }, '*')
+                        showStatus('COLOR OFFLINE')
+                    }
                 }
             })
             room.onPeerError((peerId, error) => emit('color-error', { peerId, error: error?.message || 'Color connection failed.' }))
@@ -557,7 +563,7 @@ window.Color = {
                 sendFile?.({ type: 'start', fileId: meta.id, name: meta.name, size: bytes.length, mime: meta.type, ownerColor: visitorColor, hash: meta.hash, chunks: Math.ceil(bytes.length / 32768) }, ownerPeer)
                 for (let offset = 0, index = 0; offset < bytes.length; offset += 32768, index++) sendFile?.({ type: 'chunk', fileId: meta.id, index, bytes: bytes.slice(offset, offset + 32768) }, ownerPeer)
                 sendFile?.({ type: 'end', fileId: meta.id }, ownerPeer)
-            } else if (event.data?.type === 'color-sdk-block-action' && ownerPeer) {
+            } else if (event.data?.type === 'color-sdk-block-action' && ownerPeer && room?.getPeers?.()[ownerPeer]?.dc?.readyState === 'open') {
                 const message = event.data.message && typeof event.data.message === 'object' ? { ...event.data.message, origin: location.origin, visitorColor } : event.data.message
                 sendSdk?.({ type: 'BLOCK_ACTION', origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message }, ownerPeer)
             } else if (event.data?.type === 'color-sdk-block-action') {
