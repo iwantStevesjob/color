@@ -49,14 +49,16 @@ self.addEventListener('fetch', event => {
         return
     }
     const scope = new URL(self.registration.scope).pathname
+    const blockHost = url.pathname === scope + 'index.html' && url.searchParams.has('blockHost') && [...url.searchParams.keys()].every(key => key === 'blockHost')
     const staticAsset = url.pathname === scope || /\/(index\.html|color\.js|blocks\.json)$/.test(url.pathname) || url.pathname.startsWith(scope + 'libs/')
-    if (event.request.method === 'GET' && url.origin === location.origin && url.pathname.startsWith(scope) && staticAsset && !url.search && event.request.cache !== 'no-store') {
+    if (event.request.method === 'GET' && url.origin === location.origin && url.pathname.startsWith(scope) && staticAsset && (!url.search || blockHost) && event.request.cache !== 'no-store') {
+        const cacheKey = blockHost ? new URL(url.pathname, url.origin).href : event.request
         event.respondWith(caches.open(BACKUP_CACHE).then(async cache => {
             try {
                 const response = await fetch(event.request)
-                if (response.ok && !/no-store|private/i.test(response.headers.get('Cache-Control') || '')) await cache.put(event.request, response.clone())
+                if (response.ok && !/no-store|private/i.test(response.headers.get('Cache-Control') || '')) await cache.put(cacheKey, response.clone())
                 return response
-            } catch (error) { const saved = await cache.match(event.request); if (saved) return saved; throw error }
+            } catch (error) { const saved = await cache.match(cacheKey); if (saved) return saved; throw error }
         }))
     }
 })

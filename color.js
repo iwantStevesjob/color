@@ -16,7 +16,7 @@ window.Color = {
         if (!/^[0-9a-f]{6}$/.test(ownerColor)) throw new Error('Color.init requires a six-digit target color.');
         if (block && !/^(?:page|[a-z0-9][a-z0-9-]*)(?:-[1-9]\d*)?$/.test(String(block).toLowerCase())) throw new Error('Color.init block must be page or an installed block selector.');
         if (typeof ownerKey === 'string' && ownerKey.trim() && !/^(?:sha256[:-])?[0-9a-f]{64}$/i.test(ownerKey.trim())) throw new Error('Color.init ownerKey must be a SHA-256 fingerprint.');
-        if (ownerKey && typeof ownerKey === 'object' && (ownerKey.kty !== 'EC' || ownerKey.crv !== 'P-256' || !ownerKey.x || !ownerKey.y)) throw new Error('Color.init ownerKey must be a P-256 public JWK.');
+        if (ownerKey && typeof ownerKey === 'object' && (ownerKey.kty !== 'EC' || !['P-256', 'P-521'].includes(ownerKey.crv) || !ownerKey.x || !ownerKey.y)) throw new Error('Color.init ownerKey must be a P-256 or P-521 public JWK.');
         const storeRoomId = "color-" + ownerColor;
 
 
@@ -459,7 +459,7 @@ window.Color = {
             }
         }
         const encryptFor = async (publicJwk, value) => {
-            const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey', 'deriveBits']), remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: publicJwk.x, y: publicJwk.y }, { name: 'ECDH', namedCurve: 'P-256' }, false, []), key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, pair.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']), iv = crypto.getRandomValues(new Uint8Array(12)), data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value)))
+            const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: publicJwk.crv }, true, ['deriveKey', 'deriveBits']), remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: publicJwk.crv, x: publicJwk.x, y: publicJwk.y }, { name: 'ECDH', namedCurve: publicJwk.crv }, false, []), key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, pair.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']), iv = crypto.getRandomValues(new Uint8Array(12)), data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value)))
             return { ephemeral: await crypto.subtle.exportKey('jwk', pair.publicKey), iv: Array.from(iv), data: Array.from(new Uint8Array(data)) }
         }
         const ensureStandby = () => {
@@ -525,7 +525,6 @@ window.Color = {
             const pair = await visitorKeys
             visitorPublicKey ||= await crypto.subtle.exportKey('jwk', pair.publicKey)
             if (!visitorProof || Number(visitorProof.split('_')[0]) !== Math.floor(Date.now() / 3600000)) visitorProofTask ||= mineProof().then(proof => { visitorProof = proof; return proof }).finally(() => { visitorProofTask = null })
-            if (nonce && visitorProofTask) await visitorProofTask
             const claim = { color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof || 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }
             if (nonce) {
                 const pc = room?.getPeers()[peerId]?.pc, fingerprint = description => description?.sdp?.match(/a=fingerprint:sha-256 ([^\r\n]+)/i)?.[1]?.toUpperCase()

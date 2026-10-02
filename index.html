@@ -5091,7 +5091,7 @@
                 this.verifiedPeers = new Set()
                 this.peerIdentities = new Map()
                 this.identityChallenges = new Map()
-                this.authenticatedPeers = new Set()
+                this.authenticatedPeers = new Map()
                 this.blockActionSenders = {}
                 this.outgoingQrSecret = null
                 this.expectedQrSecret = null
@@ -5130,21 +5130,24 @@
                             if (/^[a-f0-9]{64}$/.test(data.nonce || '')) await this.sendIdentity(pid, data.nonce)
                             return
                         }
-                        const previous = this.peerIdentities.get(pid)
-                        const sameIdentity = previous && JSON.stringify([previous.pubKey?.x, previous.pubKey?.y, previous.color]) === JSON.stringify([data.pubKey?.x, data.pubKey?.y, data.color])
-                        if (!(this.verifiedPeers.has(pid) && sameIdentity)) {
+                        const authenticated = this.authenticatedPeers.get(pid), previous = authenticated?.claim
+                        const sameIdentity = authenticated?.pc === pc && previous && JSON.stringify([previous.pubKey?.kty, previous.pubKey?.crv, previous.pubKey?.x, previous.pubKey?.y, previous.color]) === JSON.stringify([data.pubKey?.kty, data.pubKey?.crv, data.pubKey?.x, data.pubKey?.y, data.color])
+                        if (!sameIdentity) {
                             const pending = this.identityChallenges.get(pid), { proof, ...claim } = data
                             if (!proof || !pending || pending.pc !== pc || Date.now() - pending.created > 30000 || proof.nonce !== pending.nonce || !await window.colorDelivery.verify(data.pubKey, proof.signature, this.identityTranscript(pc, proof.nonce, claim, true))) {
                                 if (!pending || pending.pc !== pc || Date.now() - pending.created > 30000) {
                                     const nonce = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join('')
-                                    this.identityChallenges.set(pid, { nonce, pc, created: Date.now() })
+                                    this.identityChallenges.set(pid, { nonce, pc, created: Date.now(), claim: data })
                                     this.rawSendId({ type: 'IDENTITY_CHALLENGE', nonce }, pid)
-                                }
+                                } else if (!proof && data.minedToken && data.minedToken !== 'PENDING') pending.claim = data
                                 return
                             }
+                            if (this.room.getPeers()[pid]?.pc !== pc || this.identityChallenges.get(pid) !== pending) return
                             this.identityChallenges.delete(pid)
-                            if (this.room.getPeers()[pid]?.pc !== pc) return
-                            this.authenticatedPeers.add(pid)
+                            // Mining may finish while the signed challenge response is in flight.
+                            const latest = pending.claim
+                            if (latest?.minedToken && latest.minedToken !== 'PENDING' && latest.color === claim.color && latest.pubKey?.x === claim.pubKey?.x && latest.pubKey?.y === claim.pubKey?.y) claim.minedToken = latest.minedToken
+                            this.authenticatedPeers.set(pid, { pc, claim })
                             this.verifiedPeers.delete(pid)
                             data = claim
                         }
@@ -5195,7 +5198,7 @@
 
                     if (!this.roomHex) return
                     // Public projections cannot replace an administrator's private block state.
-                    if (window.app.user.color === '#' + this.roomHex && (!this.identity.locked || window.app.standaloneOwnerColor === this.roomHex)) fragMap = Object.fromEntries(Object.entries(fragMap).filter(([, row]) => { try { return !window.app.getBlockDefinition(JSON.parse(row.content))?.replica?.mergeJs } catch (_) { return true } }))
+                    if (window.app.user.color === '#' + this.roomHex && ((!this.identity.locked && window.app.ownerLoginApproved && window.app.roomHasWrappedKeys) || window.app.standaloneOwnerColor === this.roomHex)) fragMap = Object.fromEntries(Object.entries(fragMap).filter(([, row]) => { try { return !window.app.getBlockDefinition(JSON.parse(row.content))?.replica?.mergeJs } catch (_) { return true } }))
                     const verifiedData = await this.identity._call('db_verify_remote', {
                         fragments: fragMap,
                         roomHex: this.roomHex,
@@ -7288,8 +7291,10 @@
                     const rooms = await this.db.getAllRooms()
                     this.visitedRooms = rooms.map(r => 'color-' + r.hex)
                     this.setSessionState('ready')
-                    if (!window.location.hash || window.location.hash.length < 2) this.runSequencedScan()
-                    else this.tryAutoConnectFromHash()
+                    if (!new URLSearchParams(location.search).has('blockHost')) {
+                        if (!window.location.hash || window.location.hash.length < 2) this.runSequencedScan()
+                        else this.tryAutoConnectFromHash()
+                    }
                     this.initDone = true
                     this.syncDebugPassword()
                 })
@@ -7650,6 +7655,7 @@
                             await navigator.storage?.persist?.()
                             await navigator.serviceWorker.register('sw.js', { scope: './' })
                             await navigator.serviceWorker.ready
+                            await (await caches.open('color-backups-v1')).add(new Request(new URL('index.html', location.href), { cache: 'reload' }))
                             url = new URL(payload.pageName, location.href)
                             await (await caches.open('color-backups-v1')).put(url, new Response(payload.html, { headers: { 'Content-Type': 'text/html;charset=utf-8' } }))
                         } catch (error) { console.warn('Block PWA preparation failed; the Color remains available locally.', error) }
@@ -7967,6 +7973,10 @@
                 }
                 await ensureReplica()
                 await this.loadBlockDefinitions()
+                for (const item of [def, ...(request.dependencies || [])]) {
+                    this.blockDefs.set(item.id, item)
+                    this.blocks = [...this.blocks.filter(block => block.id !== item.id), item]
+                }
                 this.standaloneOwnerColor = color
                 this.standaloneBlockHost?.leave()
                 const actionTasks = new Map()
@@ -7975,7 +7985,7 @@
                     actionTasks.set(actionId, { resolve, reject, timer }); notify({ ...event, actionId })
                 })
                 const privateKey = await crypto.subtle.importKey('jwk', keys.sig, { name: 'ECDSA', namedCurve: keys.sig.crv || 'P-256' }, false, ['sign'])
-                const agreementKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: keys.sig.x, y: keys.sig.y, d: keys.sig.d }, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey'])
+                const agreementKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: keys.sig.crv, x: keys.sig.x, y: keys.sig.y, d: keys.sig.d }, { name: 'ECDH', namedCurve: keys.sig.crv }, false, ['deriveKey'])
                 const publicKey = await crypto.subtle.importKey('jwk', keys.pub, { name: 'ECDSA', namedCurve: keys.pub.crv || 'P-256' }, false, ['verify'])
                 const aesKey = await crypto.subtle.importKey('jwk', keys.aes, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']), peerKeys = new Map()
                 const signature = async value => btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: keys.sig.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, privateKey, new TextEncoder().encode(value)))))
@@ -8076,7 +8086,7 @@
                     if (message.broadcast !== false) mesh.broadcastFragment({ [index]: { content: publicContent, owner, updated, signature: signed } })
                 }
                 mesh.enableSync()
-                const decryptStandby = async envelope => { const remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: envelope.ephemeral.x, y: envelope.ephemeral.y }, { name: 'ECDH', namedCurve: 'P-256' }, false, []), key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, agreementKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']), plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(envelope.iv) }, key, new Uint8Array(envelope.data)); return JSON.parse(new TextDecoder().decode(plain)) }
+                const decryptStandby = async envelope => { const remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: keys.sig.crv, x: envelope.ephemeral.x, y: envelope.ephemeral.y }, { name: 'ECDH', namedCurve: keys.sig.crv }, false, []), key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, agreementKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']), plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(envelope.iv) }, key, new Uint8Array(envelope.data)); return JSON.parse(new TextDecoder().decode(plain)) }
                 await this.startStandbyOwner({ selector, label: def.name || selector, payload }, { color, publicKey: keys.pub, sign: signature, decrypt: decryptStandby, getPayload: async () => payload, apply: request => sdkAction(request, 'standby-' + (request.message?.requestId || request.visitId || crypto.randomUUID()), true), merge: incoming => dispatchAction({ event: 'replica', payload: incoming }) })
                 notify({ status: 'listening' })
             }
@@ -9938,7 +9948,7 @@
                 const safeJson = value => JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`)
                 const styles = Array.from(document.querySelectorAll('style')).map(style => style.textContent).join('\n').replace(/<\/style/gi, '<\\/style')
                 const icon = new URL('backup-icon-192.png?color=' + color, location.href).href, manifest = new URL('block.webmanifest?color=' + color + '&page=' + encodeURIComponent(pageName) + '&name=' + encodeURIComponent(entry.label), location.href).href
-                const dependencies = def.checkoutBlock ? [this.blockDefs.get(def.checkoutBlock)].filter(Boolean) : []
+                const dependencies = this.blocks.filter(item => item.id === def.checkoutBlock || item.events?.sdkVisit)
                 const runtime = { payload, def, dependencies, js: view.js || '', actionJs: def.actions?.js || '', namespace: def.actions?.namespace || def.action || '', index: entry.index, selector: entry.selector, color, keys: replica.keys, snapshot: replica.snapshot, customDocument: this.blockCategory(def) === 'CUSTOM' ? this.customBlockSandboxDocument(payload, def, true) : '' }
                 const pwaRuntime = '(' + standaloneBlockPwaRuntime.toString().replace(/<\/script/gi, '<\\/script') + ')()'
                 return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#${color}"><meta name="mobile-web-app-capable" content="yes"><link rel="icon" href="${this.escapeAttr(icon)}"><link rel="apple-touch-icon" href="${this.escapeAttr(icon)}"><link rel="manifest" href="${this.escapeAttr(manifest)}"><title>${this.escapeHtml(entry.label)}</title><style>${styles}\nhtml,body{margin:0;min-height:100%;background:#fff;color:#111}body{overflow:auto}.block-pwa-sliver{position:sticky;top:0;z-index:1000;width:100%;height:10px;background:#${color}}.block-pwa-page{box-sizing:border-box;max-width:1100px;min-height:calc(100vh - 10px);margin:auto;padding:24px}.block-pwa-status{position:fixed;top:14px;right:14px;z-index:1200;padding:6px 9px;border-radius:12px;background:#fff;color:#555;font:900 10px system-ui,sans-serif;box-shadow:0 2px 9px #0002}.block-pwa-loading{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;background:#fff;color:#111;transition:opacity .25s}.block-pwa-loading::before{content:'';position:absolute;top:0;width:100%;height:10px;background:#${color}}.block-pwa-loading.done{opacity:0;pointer-events:none}.block-pwa-success{display:grid;justify-items:center;gap:16px}.block-pwa-success b{font:900 18px system-ui,sans-serif}.block-pwa-install{min-width:150px;border:0;border-radius:8px;padding:13px 22px;background:#1976d2;color:#fff;font:900 14px system-ui,sans-serif}.block-pwa-install:disabled{opacity:.45}.block-pwa-online{color:#999;font:500 12px system-ui,sans-serif;text-decoration:none}</style></head><body><div id="block-pwa-loading" class="block-pwa-loading"><div class="block-pwa-success"><b>BACKUP SUCCESSFUL</b><button id="block-pwa-install" class="block-pwa-install" disabled>PREPARING…</button><a class="block-pwa-online" href="index.html#${color}">just use online</a></div></div><div class="block-pwa-sliver"></div><div id="block-pwa-status" class="block-pwa-status">CONNECTING</div><main class="block-pwa-page"><div class="editor-line block-line">${this.renderBlockContent(payload, color)}</div></main><script id="block-pwa-data" type="application/json">${safeJson(runtime)}<\/script><script>${pwaRuntime}<\/script></body></html>`
@@ -9950,6 +9960,7 @@
                 await navigator.storage?.persist?.()
                 await navigator.serviceWorker.register('sw.js')
                 await navigator.serviceWorker.ready
+                await (await caches.open('color-backups-v1')).add(new Request(new URL('index.html', location.href), { cache: 'reload' }))
                 const color = this.user.color.replace('#', '').toLowerCase(), instance = String(entry.payload.instanceId || entry.selector).replace(/[^a-z0-9_-]/gi, '-').toLowerCase(), pageName = 'color-' + color + '-block-' + instance + '.html'
                 const replica = { keys: await this.identity._call('export_owner_replica', { roomHex: color }), snapshot: await this.identity._call('backup_export', { roomHex: color, linkId: 'block-pwa-' + entry.payload.instanceId, includeKeys: true }) }
                 const url = new URL(pageName, location.href), html = this.installedBlockPwaDocument({ ...entry, index: entry.payload._localIndex }, pageName, replica)
@@ -13691,8 +13702,10 @@ async function unlock(roomHex, password, proof = {}) {
 async function decryptOwnerEnvelope({ roomHex, envelope }) {
     checkDeviceGateLease();
     if (_locked || _currentRoomHex !== roomHex || !_exportableKeys?.sig || envelope?.ephemeral?.kty !== 'EC' || !Array.isArray(envelope.iv) || !Array.isArray(envelope.data)) throw new Error('Owner key is unavailable');
-    const privateKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: _exportableKeys.sig.x, y: _exportableKeys.sig.y, d: _exportableKeys.sig.d }, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveKey']);
-    const publicKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: envelope.ephemeral.x, y: envelope.ephemeral.y }, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+    const curve = _exportableKeys.sig.crv;
+    if (envelope.ephemeral.crv !== curve) throw new Error('Owner envelope curve does not match this Color');
+    const privateKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: curve, x: _exportableKeys.sig.x, y: _exportableKeys.sig.y, d: _exportableKeys.sig.d }, { name: 'ECDH', namedCurve: curve }, false, ['deriveKey']);
+    const publicKey = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: curve, x: envelope.ephemeral.x, y: envelope.ephemeral.y }, { name: 'ECDH', namedCurve: curve }, false, []);
     const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: publicKey }, privateKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(envelope.iv) }, key, new Uint8Array(envelope.data));
     return JSON.parse(new TextDecoder().decode(plain));
@@ -15078,9 +15091,9 @@ self.onmessage = async e => {
             encode(value) { return btoa(Array.from(new Uint8Array(value), byte => String.fromCharCode(byte)).join('')) }
 
             async verify(key, signature, value) {
-                if (key?.kty !== 'EC' || key.crv !== 'P-256' || typeof signature !== 'string' || signature.length > 128) return false
-                const imported = await crypto.subtle.importKey('jwk', key, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
-                return crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, imported, this.bytes(signature), this.encoder.encode(value))
+                if (key?.kty !== 'EC' || !['P-256', 'P-521'].includes(key.crv) || typeof signature !== 'string' || signature.length > 176) return false
+                const imported = await crypto.subtle.importKey('jwk', { kty: key.kty, crv: key.crv, x: key.x, y: key.y }, { name: 'ECDSA', namedCurve: key.crv }, false, ['verify'])
+                return crypto.subtle.verify({ name: 'ECDSA', hash: key.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, imported, this.bytes(signature), this.encoder.encode(value))
             }
 
             async storage(color, operation, write = false, factory = window.colorStorageContext?.().indexedDB) {
@@ -15118,7 +15131,7 @@ self.onmessage = async e => {
                 if (!context?.indexedDB) throw new Error('This browser has not granted access to the first-party Color database.')
                 if (!/^[0-9a-f]{6}$/.test(ownerColor) || !/^[a-zA-Z0-9_-]{1,160}$/.test(blockInstanceId)) throw new Error('Invalid block address.')
                 const ownerFingerprint = typeof ownerPublicKey === 'string' ? ownerPublicKey.trim().replace(/^sha256[:-]/i, '').toLowerCase() : await this.fingerprint(ownerPublicKey)
-                if (!/^[a-f0-9]{64}$/.test(ownerFingerprint) || typeof ownerPublicKey !== 'string' && (ownerPublicKey?.kty !== 'EC' || ownerPublicKey.crv !== 'P-256')) throw new Error('A verified owner key is required.')
+                if (!/^[a-f0-9]{64}$/.test(ownerFingerprint) || typeof ownerPublicKey !== 'string' && (ownerPublicKey?.kty !== 'EC' || !['P-256', 'P-521'].includes(ownerPublicKey.crv))) throw new Error('A verified owner key is required.')
                 const color = context.color, key = 'local:delivery-grant:' + await this.hash(JSON.stringify([origin, ownerColor, blockInstanceId, ownerFingerprint]))
                 const create = async () => {
                     const previous = await this.storage(color, store => store.get(key))
@@ -15141,7 +15154,7 @@ self.onmessage = async e => {
             }
 
             async encryptFor(publicKey, value) {
-                const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveKey']), remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: publicKey.x, y: publicKey.y }, { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+                const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: publicKey.crv }, true, ['deriveKey']), remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: publicKey.crv, x: publicKey.x, y: publicKey.y }, { name: 'ECDH', namedCurve: publicKey.crv }, false, [])
                 const key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, pair.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']), iv = crypto.getRandomValues(new Uint8Array(12)), data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, this.encoder.encode(JSON.stringify(value)))
                 return { ephemeral: await crypto.subtle.exportKey('jwk', pair.publicKey), iv: Array.from(iv), data: Array.from(new Uint8Array(data)) }
             }
@@ -15305,6 +15318,7 @@ self.onmessage = async e => {
             const reply = detail => event.source.postMessage({ type: 'color-block-host-status', nonce: standaloneBlockNonce, ...detail }, event.origin)
             try {
                 if (event.data.type === 'color-block-host-start') {
+                    await window.app.deviceLinksReady
                     await window.app.hostStandaloneBlock(event.data.runtime, reply)
                 } else if (event.data.type === 'color-block-host-message') { const result = await window.app.standaloneBlockMessage?.(event.data.message); if (event.data.message?.id) reply({ replyId: event.data.message.id, result }) }
             } catch (error) { reply({ replyId: event.data.message?.id, error: error.message || String(error) }) }
