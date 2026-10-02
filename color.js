@@ -39,32 +39,67 @@ window.Color = {
                     { urls: 'stun:stun.cloudflare.com:3478' }
                 ]
             };
+        function sendChannelMessage(peer, message, onError) {
+            peer.sendQueue = (peer.sendQueue || Promise.resolve()).then(async () => {
+                if (peer.dc?.readyState !== 'open') return false
+                const limit = Math.min(peer.pc?.sctp?.maxMessageSize || 65536, 48000), deadline = Date.now() + 60000
+                let frames = [message]
+                if (typeof message === 'string' && new TextEncoder().encode(message).length > limit) {
+                    if (message.length > 2097152) throw new Error('Color message exceeds 2 MB.')
+                    const width = Math.max(256, Math.min(12000, Math.floor((limit - 512) / 6))), id = crypto.randomUUID(), total = Math.ceil(message.length / width)
+                    if (total > 512) throw new Error('The negotiated channel message size is too small.')
+                    frames = Array.from({ length: total }, (_, part) => JSON.stringify({ __colorFrame: 1, id, part, total, text: message.slice(part * width, (part + 1) * width) }))
+                }
+                for (const frame of frames) {
+                    while (peer.dc.readyState === 'open' && peer.dc.bufferedAmount > 262144 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25))
+                    if (peer.dc.readyState !== 'open' || Date.now() >= deadline) throw new Error('Color channel closed or remained congested.')
+                    peer.dc.send(frame)
+                }
+                return true
+            }).catch(error => { onError?.(error); return false })
+            return peer.sendQueue
+        }
+
+        function readChannelMessage(dc, text) {
+            if (typeof text !== 'string' || text.length > 2097152) return null
+            const message = JSON.parse(text)
+            if (message?.__colorFrame !== 1) return message
+            if (typeof message.id !== 'string' || message.id.length > 64 || !Number.isInteger(message.part) || !Number.isInteger(message.total) || message.total < 1 || message.total > 512 || message.part < 0 || message.part >= message.total || typeof message.text !== 'string' || message.text.length > 12000) return null
+            const frames = dc.colorFrames ||= new Map(), now = Date.now()
+            for (const [id, item] of frames) if (now - item.updated > 30000) frames.delete(id)
+            if (!frames.has(message.id) && frames.size >= 8) return null
+            const item = frames.get(message.id) || { total: message.total, pieces: new Map(), size: 0 }
+            if (item.total !== message.total) return null
+            item.size += message.text.length - (item.pieces.get(message.part)?.length || 0)
+            if (item.size > 2097152) { frames.delete(message.id); return null }
+            item.updated = now; item.pieces.set(message.part, message.text); frames.set(message.id, item)
+            if (item.pieces.size !== item.total) return null
+            frames.delete(message.id)
+            return JSON.parse(Array.from({ length: item.total }, (_, part) => item.pieces.get(part)).join(''))
+        }
+
             const charSet = '0123456789AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz';
-            const genId = n => Array(n).fill().map(() => charSet[Math.floor(Math.random() * charSet.length)]).join('');
+            const genId = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), byte => charSet[byte % charSet.length]).join('');
             const encoder = new TextEncoder();
             async function sha1Hash(str) {
                 const hashBuffer = await crypto.subtle.digest('SHA-1', encoder.encode(str));
                 return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(36)).join('').slice(0, 20);
             }
-            function waitForIce(pc, fallbackDescription) {
-                return Promise.race([
-                    new Promise(resolve => {
-                        const checkState = () => {
-                            if (pc.iceGatheringState === 'complete') {
-                                pc.removeEventListener('icegatheringstatechange', checkState);
-                                resolve();
-                            }
-                        };
-                        pc.addEventListener('icegatheringstatechange', checkState);
-                        checkState();
-                    }),
-                    new Promise(resolve => setTimeout(resolve, ICE_TIMEOUT))
-                ]).then(() => {
-                    const description = pc.localDescription || fallbackDescription;
-                    if (!description?.sdp) throw new Error('WebRTC could not create a local session description.');
-                    return { type: description.type, sdp: description.sdp.replace(/a=ice-options:trickle\s\n/g, '') };
-                });
-            }
+        function waitForIce(pc) {
+            return new Promise((resolve, reject) => {
+                const finish = () => {
+                    clearTimeout(timer)
+                    pc.removeEventListener('icegatheringstatechange', check)
+                    const description = pc.localDescription
+                    if (pc.signalingState === 'closed' || !description?.sdp) reject(new Error('WebRTC negotiation closed before ICE completed.'))
+                    else resolve({ type: description.type, sdp: description.sdp.replace(/a=ice-options:trickle[^\r\n]*\r?\n/g, '') })
+                }
+                const check = () => { if (pc.iceGatheringState === 'complete') finish() }, timer = setTimeout(finish, ICE_TIMEOUT)
+                pc.addEventListener('icegatheringstatechange', check)
+                check()
+            })
+        }
+
             return {
                 joinRoom: (config, roomId) => {
                     const selfId = genId(20);
@@ -125,7 +160,8 @@ window.Color = {
                             ws.send(JSON.stringify(msg));
                         };
                         await announce();
-                        ws.__colorAnnounceInterval = setInterval(announce, ANNOUNCE_INTERVAL);
+                        if (isLeaving || ws.readyState !== WebSocket.OPEN) return;
+                        ws.__colorAnnounceInterval = setInterval(() => announce().catch(error => listeners.peerError.forEach(cb => cb(null, error))), ANNOUNCE_INTERVAL);
                         announceIntervals.push(ws.__colorAnnounceInterval);
                     }
                     function createPeerConnection(isInitiator, onDataChannel) {
@@ -158,10 +194,12 @@ window.Color = {
                     async function createOffer() {
                         const { pc, dc } = createPeerConnection(true);
                         const offerId = genId(20);
-                        const localOffer = await pc.createOffer();
-                        await pc.setLocalDescription(localOffer);
-                        const offer = await waitForIce(pc, localOffer);
-                        return { pc, dc, offer, offerId, created: Date.now() };
+                        try {
+                            const localOffer = await pc.createOffer();
+                            await pc.setLocalDescription(localOffer);
+                            const offer = await waitForIce(pc);
+                            return { pc, dc, offer, offerId, created: Date.now() };
+                        } catch (error) { pc.close(); throw error }
                     }
                     async function fillOfferPool() {
                         if (isLeaving || offerPoolFill) return offerPoolFill;
@@ -189,11 +227,11 @@ window.Color = {
                     function setupDataChannel(dc, peerId) {
                         const opened = () => setTimeout(() => listeners.peerJoin.forEach(cb => cb(peerId)), 0);
                         if (dc.readyState === 'open') opened(); else dc.onopen = opened;
-                        dc.onclose = () => { delete connectedPeers[peerId]; listeners.peerLeave.forEach(cb => cb(peerId)); };
+                        dc.onclose = () => { if (connectedPeers[peerId]?.dc !== dc) return; delete connectedPeers[peerId]; listeners.peerLeave.forEach(cb => cb(peerId)); };
                         dc.onmessage = e => {
                             try {
-                                const payload = JSON.parse(e.data);
-                                const handlers = messageHandlers[payload.action || payload.ns];
+                                const payload = readChannelMessage(dc, e.data);
+                                const handlers = messageHandlers[payload?.action || payload?.ns];
                                 if (handlers) handlers.forEach(cb => cb(payload.data, peerId));
                             } catch (err) { }
                         };
@@ -204,36 +242,41 @@ window.Color = {
                             for (const offer of data.offers) await handleTrackerMessage(ws, { ...data, offers: null, offer_id: offer.offer_id, offer: offer.offer });
                             return;
                         }
+                        if (isLeaving || !data.peer_id) return
                         if (data.offer && data.offer_id) {
-                            if (handledOffers.has(data.offer_id) || connectedPeers[data.peer_id]) return;
-                            handledOffers.add(data.offer_id);
-                            const hasPending = Object.values(pendingOffers).some(p => p.peerId === data.peer_id);
-                            if (hasPending && selfId > data.peer_id) return;
+                            const offerKey = data.peer_id + ':' + data.offer_id
+                            if (handledOffers.has(offerKey) || connectedPeers[data.peer_id]) return
+                            handledOffers.add(offerKey); setTimeout(() => handledOffers.delete(offerKey), OFFER_TTL)
+                            const peerEntry = { pc: null, dc: null, direction: 'incoming' }
+                            connectedPeers[data.peer_id] = peerEntry
                             try {
-                                const peerEntry = { pc: null, dc: null };
-                                connectedPeers[data.peer_id] = peerEntry;
                                 const { pc } = createPeerConnection(false, channel => {
-                                    setupDataChannel(channel, data.peer_id);
-                                    if (connectedPeers[data.peer_id]) connectedPeers[data.peer_id].dc = channel;
-                                    else connectedPeers[data.peer_id] = { pc, dc: channel };
-                                });
-                                peerEntry.pc = pc;
-                                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                                const localAnswer = await pc.createAnswer();
-                                await pc.setLocalDescription(localAnswer);
-                                const answer = await waitForIce(pc, localAnswer);
-                                ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer: { type: answer.type, sdp: answer.sdp } }));
-                            } catch (err) { delete connectedPeers[data.peer_id]; }
+                                    if (isLeaving || connectedPeers[data.peer_id] !== peerEntry) { channel.close(); return }
+                                    peerEntry.dc = channel; setupDataChannel(channel, data.peer_id)
+                                })
+                                peerEntry.pc = pc
+                                setTimeout(() => { if (connectedPeers[data.peer_id] === peerEntry && peerEntry.dc?.readyState !== 'open') pc.close() }, 30000)
+                                await pc.setRemoteDescription(new RTCSessionDescription(data.offer))
+                                await pc.setLocalDescription(await pc.createAnswer())
+                                const answer = await waitForIce(pc)
+                                if (isLeaving || connectedPeers[data.peer_id] !== peerEntry || ws.readyState !== WebSocket.OPEN) { pc.close(); return }
+                                ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer }))
+                            } catch (err) { if (connectedPeers[data.peer_id] === peerEntry) delete connectedPeers[data.peer_id]; peerEntry.pc?.close() }
                         }
                         if (data.answer && data.offer_id) {
-                            const pending = pendingOffers[data.offer_id];
-                            if (!pending || connectedPeers[data.peer_id]) { if (pending) { pending.pc.close(); delete pendingOffers[data.offer_id]; } return; }
+                            const pending = pendingOffers[data.offer_id]
+                            if (!pending) return
+                            const existing = connectedPeers[data.peer_id]
+                            if (existing && (existing.dc?.readyState === 'open' || existing.direction === 'outgoing' || selfId > data.peer_id)) { pending.pc.close(); delete pendingOffers[data.offer_id]; return }
+                            if (existing) { delete connectedPeers[data.peer_id]; existing.pc?.close() }
+                            const entry = { pc: pending.pc, dc: pending.dc, direction: 'outgoing' }
+                            connectedPeers[data.peer_id] = entry; delete pendingOffers[data.offer_id]
                             try {
-                                await pending.pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                                connectedPeers[data.peer_id] = { pc: pending.pc, dc: pending.dc };
-                                setupDataChannel(pending.dc, data.peer_id);
-                                delete pendingOffers[data.offer_id];
-                            } catch (err) { pending.pc.close(); delete pendingOffers[data.offer_id]; }
+                                setupDataChannel(pending.dc, data.peer_id)
+                                await pending.pc.setRemoteDescription(new RTCSessionDescription(data.answer))
+                                if (isLeaving || connectedPeers[data.peer_id] !== entry) { pending.pc.close(); return }
+                                setTimeout(() => { if (connectedPeers[data.peer_id] === entry && entry.dc?.readyState !== 'open') pending.pc.close() }, 30000)
+                            } catch (err) { if (connectedPeers[data.peer_id] === entry) delete connectedPeers[data.peer_id]; pending.pc.close() }
                         }
                     }
                     return {
@@ -241,13 +284,12 @@ window.Color = {
                             if (!messageHandlers[namespace]) messageHandlers[namespace] = [];
                             return [
                                 (data, targetPeer) => {
-                                    const msg = JSON.stringify({ action: namespace, ns: namespace, data });
-                                    if (targetPeer) {
-                                        const p = connectedPeers[targetPeer];
-                                        if (p && p.dc && p.dc.readyState === 'open') try { p.dc.send(msg); } catch (_) { }
-                                    } else {
-                                        Object.values(connectedPeers).forEach(p => { if (p.dc && p.dc.readyState === 'open') try { p.dc.send(msg); } catch (_) { } });
-                                    }
+                                    let msg
+                                    if (namespace === 'file' && data?.type === 'chunk' && data.bytes) {
+                                        const id = new TextEncoder().encode(data.fileId), bytes = data.bytes instanceof Uint8Array ? data.bytes : new Uint8Array(data.bytes), packet = new Uint8Array(10 + id.length + bytes.length), view = new DataView(packet.buffer)
+                                        packet.set([0x51, 0x46, 0x43, 0x31]); view.setUint32(4, data.index); view.setUint16(8, id.length); packet.set(id, 10); packet.set(bytes, 10 + id.length); msg = packet.buffer
+                                    } else msg = JSON.stringify({ action: namespace, ns: namespace, data })
+                                    return Promise.all(Object.entries(connectedPeers).filter(([pid]) => !targetPeer || pid === targetPeer).map(([pid, peer]) => sendChannelMessage(peer, msg, error => listeners.peerError.forEach(callback => callback(pid, error)))))
                                 },
                                 (cb) => messageHandlers[namespace].push(cb)
                             ];
@@ -261,7 +303,7 @@ window.Color = {
                             announceIntervals.forEach(clearInterval);
                             clearInterval(offerPoolTimer);
                             Object.values(trackerSockets).forEach(ws => ws.close());
-                            Object.values(connectedPeers).forEach(peer => peer.pc.close());
+                            Object.values(connectedPeers).forEach(peer => peer.pc?.close());
                             Object.values(pendingOffers).forEach(peer => peer.pc.close());
                             offerPool.forEach(offer => offer.pc.close());
                         }
@@ -290,20 +332,30 @@ window.Color = {
         let offlineTimer = null
         let statusTimer = null
         let visitorPublicKey = null
+        let visitorKeys = null
         let visitorProof = null
+        let visitorProofTask = null
         let standbyRoom = null
         let sendStandby = null
         const standbyCandidates = new Map()
-        const colorConnections = new Map()
+        let standbyVisitPending = false
+        const standbyWrites = new Map()
+        const deliveryAddresses = new Map()
+        const deliveryResponses = new Map()
         const storageRequests = new Map()
         const pendingGetCallbacks = []
         const uuid = () => crypto.randomUUID?.() || '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, char => (char ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> char / 4).toString(16))
         const blockRequestId = uuid()
+        const visitId = uuid()
+        const bridgeNonce = uuid()
+        let storagePort = null, storagePopup = null
+        const postStorage = message => storagePort ? storagePort.postMessage(message) : iframe.contentWindow?.postMessage(message, 'https://colorlog.in')
+        let visitConfirmed = false
         const iframe = document.createElement('iframe')
         iframe.id = 'color-widget'
         iframe.src = 'https://colorlog.in/'
         iframe.allow = 'storage-access'
-        iframe.addEventListener('load', () => iframe.contentWindow?.postMessage({ type: 'getSphereColor', title: document.title }, 'https://colorlog.in'))
+        iframe.addEventListener('load', () => postStorage({ type: 'getSphereColor', title: document.title }))
         if (block) iframe.className = 'color-sdk-identity'
         let container = targetDiv ? document.getElementById(targetDiv) || document.body : document.body
         if (!document.getElementById('color-widget-styles')) {
@@ -315,7 +367,7 @@ window.Color = {
         const colorLink = document.createElement('button')
         colorLink.type = 'button'
         colorLink.className = 'color-sdk-color-link'
-        colorLink.addEventListener('click', () => window.open('https://colorlog.in/#' + visitorColor.slice(1), '_blank', 'noopener'))
+        colorLink.addEventListener('click', () => { storagePopup = window.open('https://colorlog.in/?color-bridge=' + encodeURIComponent(bridgeNonce) + '&bridge-origin=' + encodeURIComponent(location.origin) + '#' + visitorColor.slice(1), '_blank') })
         if (block) document.body.appendChild(colorLink)
         const emit = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }))
         const showStatus = message => {
@@ -340,18 +392,35 @@ window.Color = {
         }
         const checkConnection = () => {
             clearTimeout(offlineTimer); clearInterval(statusTimer)
-            if (liveBlockLoaded || ownerPeer) { container.querySelector('.color-sdk-notice')?.remove(); return }
+            if (liveBlockLoaded || ownerPeer || standbyCandidates.size) { container.querySelector('.color-sdk-notice')?.remove(); return }
             const messages = ['CHECKING CONNECTION…', 'OPENING SECURE TUNNEL…', 'VERIFYING FORM OWNER…']; let index = 0
             showStatus(messages[0])
             statusTimer = setInterval(() => showStatus(messages[++index % messages.length]), 1400)
             offlineTimer = setTimeout(() => { clearInterval(statusTimer); if (liveBlockLoaded || ownerPeer) return; showStatus('COLOR OFFLINE'); ensureStandby() }, 5000)
         }
-        const storageRequest = (action, records) => new Promise((resolve, reject) => {
+        const getReturnAddress = instanceId => {
+            if (!deliveryAddresses.has(instanceId)) {
+                const promise = new Promise((resolve, reject) => {
+                    const publicKey = verifiedOwnerKey || ownerKey
+                    if (!publicKey) { reject(new Error('Verify the Color owner before opening block storage.')); return }
+                    const id = uuid()
+                    storageRequests.set(id, { resolve, reject })
+                    postStorage({ type: 'color-sdk-context-request', id, ownerColor: '#' + ownerColor, blockInstanceId: instanceId, ownerPublicKey: publicKey })
+                    setTimeout(() => { if (storageRequests.delete(id)) reject(new Error('First-party Color storage is unavailable.')) }, 10000)
+                }).catch(error => { deliveryAddresses.delete(instanceId); emit('color-storage-required', { error: error.message, color: visitorColor }); throw error })
+                deliveryAddresses.set(instanceId, promise)
+            }
+            return deliveryAddresses.get(instanceId)
+        }
+        const storageRequest = async (action, records) => {
+            await getReturnAddress('sdk-cache')
+            return new Promise((resolve, reject) => {
             const id = uuid()
             storageRequests.set(id, { resolve, reject })
-            iframe.contentWindow?.postMessage({ type: 'color-sdk-record-request', id, action, color: visitorColor, ownerColor: '#' + ownerColor, blockInstanceId: 'sdk-cache', collection: 'documents', records }, 'https://colorlog.in')
+            postStorage({ type: 'color-sdk-record-request', id, action, color: visitorColor, ownerColor: '#' + ownerColor, blockInstanceId: 'sdk-cache', collection: 'documents', records })
             setTimeout(() => { if (storageRequests.delete(id)) reject(new Error('Color storage unavailable.')) }, 10000)
-        })
+            })
+        }
         const keyId = key => JSON.stringify([key?.kty, key?.crv, key?.x, key?.y])
         const digest = async value => {
             const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value))))
@@ -359,17 +428,18 @@ window.Color = {
         }
         const fingerprint = key => digest(keyId(key))
         const verifyWithKey = async (publicKey, signature, content) => {
-            const key = await crypto.subtle.importKey('jwk', publicKey, { name: 'ECDSA', namedCurve: publicKey.crv || 'P-256' }, false, ['verify'])
+            const key = await crypto.subtle.importKey('jwk', { kty: publicKey.kty, crv: publicKey.crv, x: publicKey.x, y: publicKey.y }, { name: 'ECDSA', namedCurve: publicKey.crv || 'P-256' }, false, ['verify'])
             return crypto.subtle.verify({ name: 'ECDSA', hash: publicKey.crv === 'P-521' ? 'SHA-512' : 'SHA-256' }, key, Uint8Array.from(atob(signature), char => char.charCodeAt(0)), new TextEncoder().encode(content))
         }
         const trustOwner = async (publicKey, peerId) => {
             const receivedFingerprint = await fingerprint(publicKey)
             if (ownerKey && typeof ownerKey === 'object' && keyId(ownerKey) !== keyId(publicKey)) throw new Error('The response is not signed by the configured Color owner.')
             if (typeof ownerKey === 'string' && ownerKey.trim().replace(/^sha256[:-]/i, '').toLowerCase() !== receivedFingerprint) throw new Error('The response is not signed by the configured Color owner.')
+            if (verifiedOwnerFingerprint && verifiedOwnerFingerprint !== receivedFingerprint) throw new Error('The Color owner key changed during this session.')
             const first = verifiedOwnerFingerprint !== receivedFingerprint
             verifiedOwnerKey = publicKey
             verifiedOwnerFingerprint = receivedFingerprint
-            if (peerId) { ownerPeers.add(peerId); ownerPeer = peerId }
+            if (peerId) { ownerPeers.add(peerId); if (!ownerPeer || room?.getPeers()[ownerPeer]?.dc?.readyState !== 'open') ownerPeer = peerId }
             clearTimeout(offlineTimer); clearInterval(statusTimer)
             if (first) {
                 const detail = { color: '#' + ownerColor, publicKey, fingerprint: receivedFingerprint, configured: !!ownerKey }
@@ -379,8 +449,8 @@ window.Color = {
         }
         const verify = async (message, peerId) => {
             try {
-                await trustOwner(message.publicKey, peerId)
                 if (!await verifyWithKey(message.publicKey, message.signature, JSON.stringify(message.payload))) throw new Error('The Color signature is invalid.')
+                await trustOwner(message.publicKey, peerId)
                 return true
             } catch (error) {
                 showStatus('COLOR OFFLINE')
@@ -397,23 +467,52 @@ window.Color = {
             standbyRoom = Spectrum.joinRoom({ appId: planet }, 'color-standby-' + ownerColor + '-' + String(block).toLowerCase())
             ;[sendStandby] = standbyRoom.makeAction('standby')
             standbyRoom.makeAction('standby')[1](async (message, pid) => {
+                if (message?.type === 'STORED') {
+                    const task = standbyWrites.get(message.id)
+                    if (task && task.pid === pid && await verifyWithKey(task.publicKey, message.signature, JSON.stringify(['color-standby-stored-v1', task.nonce, message.id])) && standbyWrites.get(message.id) === task) { standbyWrites.delete(message.id); clearTimeout(task.timer); task.resolve() }
+                    return
+                }
                 if (message?.type !== 'CAPABILITY' || !message.capability || !message.signature || !message.ownerPublicKey) return
                 const body = JSON.stringify(message.capability)
                 if (message.capability.ownerColor !== ownerColor || message.capability.block !== String(block).toLowerCase() || message.capability.expires < Date.now() || !await verifyWithKey(message.ownerPublicKey, message.signature, body)) return
+                const published = message.snapshot
+                if (!published || published.ownerColor !== ownerColor || published.block !== String(block).toLowerCase() || published.blockInstanceId !== message.capability.blockInstanceId || published.expires < Date.now() || !Array.isArray(published.sources) || published.sources.length && !published.sources.includes(location.origin) || !await verifyWithKey(message.ownerPublicKey, message.snapshotSignature, JSON.stringify(published)) || await digest(published.document) !== published.documentHash) return
                 try { await trustOwner(message.ownerPublicKey) } catch (_) { return }
                 standbyCandidates.set(pid, message)
+                if (!liveBlockLoaded && !ownerPeer) {
+                    activeBlock = { instanceId: published.blockInstanceId, blockId: published.blockId }
+                    if (activeDocumentHash !== published.documentHash) { activeDocumentHash = published.documentHash; renderSnapshot(published.document); emit('color-block-ready', { block: activeBlock, verified: true, standby: true }) }
+                    sendVisit(null).catch(() => {})
+                }
             })
             standbyRoom.onPeerJoin(pid => sendStandby({ type: 'WHO_STANDS', ownerColor, block: String(block).toLowerCase() }, pid))
+            standbyRoom.onPeerLeave(pid => { standbyCandidates.delete(pid); if (!ownerPeer && !standbyCandidates.size) checkConnection() })
         }
         const sendStandbyAction = async envelope => {
             ensureStandby()
             sendStandby?.({ type: 'WHO_STANDS', ownerColor, block: String(block).toLowerCase() })
             await new Promise(resolve => setTimeout(resolve, 700))
-            const candidate = [...standbyCandidates.entries()][0]
-            if (!candidate || !verifiedOwnerKey) throw new Error('No approved standby is online.')
-            const [pid, grant] = candidate, ownerEnvelope = await encryptFor(verifiedOwnerKey, envelope), adminEnvelope = grant.capability.role === 'admin' ? await encryptFor(grant.capability.candidatePublicKey, envelope) : null
-            sendStandby({ type: 'ENVELOPE', id: uuid(), capability: grant.capability, signature: grant.signature, ownerPublicKey: grant.ownerPublicKey, ownerEnvelope, adminEnvelope, savedAt: Date.now() }, pid)
+            const candidates = [...standbyCandidates].filter(([pid, grant]) => grant.capability.expires > Date.now() && grant.capability.blockInstanceId === envelope.blockInstanceId && standbyRoom.getPeers()[pid]?.dc?.readyState === 'open')
+            if (!candidates.length || !verifiedOwnerKey) throw new Error('No approved standby is online.')
+            const ownerEnvelope = await encryptFor(verifiedOwnerKey, envelope), id = await digest(JSON.stringify([envelope.returnAddress?.id || visitorColor, envelope.namespace || 'visit', envelope.message?.requestId || envelope.visitId || uuid()]))
+            let failure
+            for (const [pid, grant] of candidates) {
+                const adminEnvelope = grant.capability.role === 'admin' ? await encryptFor(grant.capability.candidatePublicKey, envelope) : null
+                try {
+                    if (standbyWrites.has(id)) return standbyWrites.get(id).promise
+                    const promise = new Promise((resolve, reject) => {
+                        const timer = setTimeout(() => { standbyWrites.delete(id); reject(new Error('Standby did not acknowledge durable storage.')) }, 15000)
+                        standbyWrites.set(id, { resolve, reject, timer, pid, nonce: grant.capability.nonce, publicKey: grant.capability.candidatePublicKey })
+                        sendStandby({ type: 'ENVELOPE', id, capability: grant.capability, signature: grant.signature, ownerPublicKey: grant.ownerPublicKey, ownerEnvelope, adminEnvelope }, pid)
+                    })
+                    standbyWrites.get(id).promise = promise
+                    await promise
+                    return
+                } catch (error) { failure = error; standbyCandidates.delete(pid) }
+            }
+            throw failure
         }
+
         const mineProof = async (targetColor = ownerColor) => {
             const hourStamp = Math.floor(Date.now() / 3600000)
             for (let nonce = 1; ; nonce++) {
@@ -421,48 +520,26 @@ window.Color = {
                 if (nonce % 1000 === 0) await new Promise(resolve => setTimeout(resolve, 0))
             }
         }
-        const sendVisitorIdentity = async peerId => {
-            if (!visitorPublicKey) {
-                const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-                visitorPublicKey = await crypto.subtle.exportKey('jwk', pair.publicKey)
+        const sendVisitorIdentity = async (peerId, nonce = null) => {
+            visitorKeys ||= crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+            const pair = await visitorKeys
+            visitorPublicKey ||= await crypto.subtle.exportKey('jwk', pair.publicKey)
+            if (!visitorProof || Number(visitorProof.split('_')[0]) !== Math.floor(Date.now() / 3600000)) visitorProofTask ||= mineProof().then(proof => { visitorProof = proof; return proof }).finally(() => { visitorProofTask = null })
+            if (nonce && visitorProofTask) await visitorProofTask
+            const claim = { color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof || 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }
+            if (nonce) {
+                const pc = room?.getPeers()[peerId]?.pc, fingerprint = description => description?.sdp?.match(/a=fingerprint:sha-256 ([^\r\n]+)/i)?.[1]?.toUpperCase()
+                const local = fingerprint(pc?.localDescription), remote = fingerprint(pc?.remoteDescription)
+                if (!local || !remote) return
+                const transcript = JSON.stringify(['color-peer-v1', ownerColor, nonce, local, remote, claim])
+                claim.proof = { nonce, signature: btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new TextEncoder().encode(transcript))))) }
+                if (room?.getPeers()[peerId]?.pc !== pc) return
+                sendIdentity(claim, peerId)
+                return
             }
-            sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
-            visitorProof ||= await mineProof()
-            sendIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
-        }
-        const sendToColor = async (target, namespace, message) => {
-            const targetColor = String(target || '').replace('#', '').toLowerCase()
-            if (!/^[0-9a-f]{6}$/.test(targetColor) || !/^[a-z0-9_-]{1,64}$/.test(namespace || '')) return
-            iframe.contentWindow?.postMessage({ type: 'color-sdk-color-action', targetColor: '#' + targetColor, namespace, message }, 'https://colorlog.in')
-            let connection = colorConnections.get(targetColor)
-            if (!connection) {
-                const targetRoom = Spectrum.joinRoom({ appId: planet }, 'color-' + targetColor)
-                const [sendTargetIdentity] = targetRoom.makeAction('identity')
-                const senders = new Map()
-                connection = { room: targetRoom, peers: new Set(), senders, pending: [] }
-                colorConnections.set(targetColor, connection)
-                targetRoom.onPeerJoin(async peerId => {
-                    connection.peers.add(peerId)
-                    if (!visitorPublicKey) {
-                        const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
-                        visitorPublicKey = await crypto.subtle.exportKey('jwk', pair.publicKey)
-                    }
-                    sendTargetIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
-                    const proof = await mineProof(targetColor)
-                    sendTargetIdentity({ color: visitorColor, pubKey: visitorPublicKey, minedToken: proof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }, peerId)
-                    const deliverPending = () => connection.pending.filter(item => Date.now() - item.savedAt < 30000).forEach(item => connection.senders.get(item.namespace)?.(item.message, peerId))
-                    setTimeout(deliverPending, 300)
-                    setTimeout(deliverPending, 1400)
-                })
-                targetRoom.onPeerLeave(peerId => connection.peers.delete(peerId))
-            }
-            let sender = connection.senders.get(namespace)
-            if (!sender) { sender = connection.room.makeAction(namespace)[0]; connection.senders.set(namespace, sender) }
-            connection.pending = [...connection.pending.filter(item => Date.now() - item.savedAt < 30000), { namespace, message, savedAt: Date.now() }].slice(-20)
-            const deliver = () => connection.peers.forEach(peerId => sender(message, peerId))
-            deliver()
-            setTimeout(deliver, 800)
-            setTimeout(deliver, 2500)
+            sendIdentity(claim, peerId)
+            if (visitorProofTask) await visitorProofTask
+            sendIdentity({ ...claim, minedToken: visitorProof }, peerId)
         }
         const renderSnapshot = documentHtml => {
             clearTimeout(offlineTimer)
@@ -485,7 +562,7 @@ window.Color = {
         const loadCachedBlock = async () => {
             const records = await storageRequest('read'), cached = (Array.isArray(records) ? records : []).find(item => item?.selector === String(block).toLowerCase())
             const message = cached?.message, payload = message?.payload
-            if (!message || payload?.kind !== 'block' || !payload.document || !await verify(message, null) || await digest(payload.document) !== payload.documentHash) return
+            if (!message || payload?.kind !== 'block' || payload.origin !== location.origin || payload.ownerColor !== '#' + ownerColor || !payload.document || !await verify(message, null) || await digest(payload.document) !== payload.documentHash) return
             if (liveBlockLoaded) return
             activeBlock = payload.block
             activeDocumentHash = payload.documentHash
@@ -493,38 +570,62 @@ window.Color = {
             snapshot?.addEventListener('load', () => { if (!liveBlockLoaded && !ownerPeer) checkConnection() }, { once: true })
             emit('color-block-ready', { block: payload.block, verified: true, cached: true })
         }
-        const requestBlock = peerId => sendSdk?.({ type: 'GET_BLOCK', requestId: blockRequestId, origin: location.origin, block, visitorColor, ownerView: visitorColor.slice(1) === ownerColor }, peerId)
+        const authorizeRequest = request => new Promise((resolve, reject) => {
+            if (!request.returnAddress) { resolve(request); return }
+            const id = uuid()
+            storageRequests.set(id, { resolve: requestProof => resolve({ ...request, requestProof }), reject })
+            postStorage({ type: 'color-sdk-authorize-request', id, request })
+            setTimeout(() => { if (storageRequests.delete(id)) reject(new Error('Color request authorization is unavailable.')) }, 10000)
+        })
+        const sendVisit = async peerId => {
+            if (visitConfirmed || !activeBlock || standbyVisitPending || !peerId && !standbyCandidates.size) return
+            standbyVisitPending = true
+            try {
+                const returnAddress = await getReturnAddress(activeBlock.instanceId), request = await authorizeRequest({ type: 'SDK_VISIT', origin: location.origin, blockInstanceId: activeBlock.instanceId, visitorColor, visitId, returnAddress })
+                if (peerId) sendSdk?.(request, peerId)
+                else { await sendStandbyAction(request); visitConfirmed = true }
+            } finally { standbyVisitPending = false }
+        }
+        const requestBlock = peerId => sendSdk?.({ type: block ? 'GET_BLOCK' : 'GET_CONTEXT', requestId: blockRequestId, origin: location.origin, block, visitorColor, ownerView: visitorColor.slice(1) === ownerColor }, peerId)
         const connect = () => {
             if (room) return
             room = Spectrum.joinRoom({ appId: planet }, storeRoomId)
             ;[send, get] = room.makeAction(action)
             pendingGetCallbacks.splice(0).forEach(callback => get(callback))
             ;[sendIdentity] = room.makeAction('identity')
-            ;[sendFile] = room.makeAction('file')
             room.makeAction('identity')[1]((data, peerId) => {
-                if (!data?.pubKey || String(data.color || '').replace('#', '').toLowerCase() !== ownerColor) return
-                trustOwner(data.pubKey, peerId).catch(error => emit('color-error', { error: error.message }))
+                if (data?.type === 'IDENTITY_CHALLENGE' && /^[a-f0-9]{64}$/.test(data.nonce || '')) sendVisitorIdentity(peerId, data.nonce).catch(error => emit('color-error', { error: error.message }))
             })
-            if (block) {
+            ;[sendFile] = room.makeAction('file')
+            {
                 ;[sendSdk] = room.makeAction('sdk_ops')
                 room.makeAction('sdk_ops')[1](async (message, peerId) => {
-                    if (message?.type !== 'SDK_RESPONSE' || !await verify(message, peerId)) return
-                    const payload = message.payload || {}
-                    if (payload.origin !== location.origin) return
-                    if (payload.kind === 'source' && payload.requestId === blockRequestId) {
+                    const payload = message?.payload
+                    if (message?.type !== 'SDK_RESPONSE' || payload?.origin !== location.origin || (['block', 'context'].includes(payload.kind) && payload.ownerColor !== '#' + ownerColor) || (['block', 'source', 'context'].includes(payload.kind) && payload.requestId !== blockRequestId) || !await verify(message, peerId)) return
+                    if (['block', 'context', 'source'].includes(payload.kind) && peerId !== ownerPeer) return
+                    if (payload.kind === 'context' && !block) {
+                        activeBlock = payload.block
+                        sendVisit(peerId).catch(() => {})
+                    } else if (payload.kind === 'source' && payload.requestId === blockRequestId) {
                         showStatus('WAITING FOR OWNER CONFIRMATION')
                         emit('color-source-pending', { origin: location.origin, color: '#' + ownerColor })
                     } else if (payload.kind === 'block' && payload.requestId === blockRequestId) {
                         if (!payload.block) return showStatus(payload.error || 'BLOCK NOT FOUND')
                         if (!payload.document || await digest(payload.document) !== payload.documentHash) return emit('color-error', { error: 'The signed block document does not match its fingerprint.' })
-                        clearInterval(retryTimer)
                         liveBlockLoaded = true
                         if (activeDocumentHash === payload.documentHash && activeBlock?.instanceId === payload.block.instanceId) { clearTimeout(offlineTimer); clearInterval(statusTimer); container.querySelector('.color-sdk-notice')?.remove(); return }
                         activeBlock = payload.block
                         activeDocumentHash = payload.documentHash
+                        sendVisit(peerId).catch(() => {})
                         renderSnapshot(payload.document)
                         if (!payload.ownerView) cacheBlock(message).catch(() => {})
                         emit('color-block-ready', { block: payload.block, verified: true })
+                    } else if (payload.kind === 'visit' && payload.visitId === visitId && payload.blockInstanceId === activeBlock?.instanceId) {
+                        visitConfirmed = true
+                    } else if (payload.kind === 'delivery' && payload.envelope?.packet?.header?.address?.origin === location.origin) {
+                        const id = uuid(); deliveryResponses.set(id, peerId)
+                        postStorage({ type: 'color-sdk-delivery', id, envelope: payload.envelope })
+                        setTimeout(() => deliveryResponses.delete(id), 15000)
                     } else if (payload.kind === 'action' && (activeBlock?.blockId === 'page' || payload.blockInstanceId === activeBlock?.instanceId) && payload.namespace) {
                         snapshot?.contentWindow?.postMessage({ type: 'color-sdk-block-message', namespace: payload.namespace, message: payload.message }, '*')
                     }
@@ -532,8 +633,8 @@ window.Color = {
             }
             room.onPeerJoin(peerId => {
                 emit('color-connected', { peerId, color: '#' + ownerColor })
-                if (block) requestBlock(peerId)
-                sendVisitorIdentity(peerId).then(() => { if (block) requestBlock(peerId) }).catch(error => emit('color-error', { error: error.message }))
+                requestBlock(peerId)
+                sendVisitorIdentity(peerId).then(() => requestBlock(peerId)).catch(error => emit('color-error', { error: error.message }))
                 if (block) { setTimeout(() => requestBlock(peerId), 750); setTimeout(() => requestBlock(peerId), 2500) }
             })
             room.onPeerLeave(peerId => {
@@ -542,34 +643,56 @@ window.Color = {
                 if (peerId === ownerPeer) {
                     ownerPeer = [...ownerPeers].find(pid => room?.getPeers?.()[pid]?.dc?.readyState === 'open') || null
                     if (!ownerPeer) {
+                        liveBlockLoaded = false
+                        ensureStandby()
                         checkConnection()
                     }
                 }
             })
             room.onPeerError((peerId, error) => emit('color-error', { peerId, error: error?.message || 'Color connection failed.' }))
-            if (block) retryTimer = setInterval(() => { if (!liveBlockLoaded) requestBlock() }, 10000)
+            retryTimer = setInterval(() => { if (!activeBlock || block && !liveBlockLoaded) requestBlock(); if (ownerPeer) sendVisitorIdentity(ownerPeer).catch(() => {}); sendVisit(ownerPeer).catch(() => {}); if (standbyRoom) sendStandby({ type: 'WHO_STANDS', ownerColor, block: String(block).toLowerCase() }) }, 10000)
         }
-        const handleMessage = event => {
-            if (event.source === iframe.contentWindow && event.origin === 'https://colorlog.in') {
-                if (event.data?.type === 'color-sdk-record-response') {
+        const handleMessage = async event => {
+            if (event.source === storagePopup && event.origin === 'https://colorlog.in' && event.data?.type === 'color-sdk-connect-ready' && event.data.nonce === bridgeNonce) {
+                const channel = new MessageChannel()
+                storagePort?.close(); storagePort = channel.port1
+                storagePort.onmessage = message => handleMessage({ source: storagePort, origin: 'https://colorlog.in', data: message.data }).catch(error => emit('color-error', { error: error.message }))
+                storagePopup.postMessage({ type: 'color-sdk-connect', nonce: bridgeNonce }, 'https://colorlog.in', [channel.port2])
+                deliveryAddresses.clear(); visitConfirmed = false
+                postStorage({ type: 'getSphereColor', title: document.title })
+                sendVisit(ownerPeer).catch(() => {})
+                return
+            }
+            if ((event.source === iframe.contentWindow || storagePort && event.source === storagePort) && event.origin === 'https://colorlog.in') {
+                if (event.data?.type === 'color-sdk-storage-closed' && event.source === storagePort) { storagePort.close(); storagePort = null; deliveryAddresses.clear(); return }
+                if (event.data?.type === 'color-sdk-delivery-response') {
+                    const peerId = deliveryResponses.get(event.data.id)
+                    deliveryResponses.delete(event.data.id)
+                    if (peerId && event.data.response) { sendSdk?.({ type: 'DELIVERY_ACK', response: event.data.response }, peerId); emit('color-delivery-stored', { id: event.data.response.ack.id, color: '#' + event.data.response.ack.color }) }
+                    else if (event.data.error) emit('color-storage-required', { error: event.data.error, color: visitorColor })
+                    return
+                }
+                if (['color-sdk-record-response', 'color-sdk-context-response', 'color-sdk-authorize-response'].includes(event.data?.type)) {
                     const task = storageRequests.get(event.data.id)
                     if (task) {
                         storageRequests.delete(event.data.id)
-                        event.data.error ? task.reject(new Error(event.data.error)) : task.resolve(event.data.records)
+                        event.data.error ? task.reject(new Error(event.data.error)) : task.resolve(event.data.proof || event.data.address || event.data.records)
                         return
                     }
                     snapshot?.contentWindow?.postMessage(event.data, '*')
                     return
                 }
+                if (storagePort && event.source !== storagePort) return
                 const detected = typeof event.data === 'string' ? event.data : event.data?.color
                 if (typeof detected === 'string' && /^#[0-9a-f]{6}$/i.test(detected)) {
+                    if (visitorColor !== detected.toLowerCase()) { deliveryAddresses.clear(); visitConfirmed = false }
                     visitorColor = detected.toLowerCase()
                     colorLink.style.backgroundColor = visitorColor
                     colorLink.title = visitorColor.toUpperCase()
                     emit('color-change', { color: visitorColor })
                     if (block && !activeBlock) loadCachedBlock().catch(() => {})
                     connect()
-                    if (block && room) requestBlock()
+                    if (room) requestBlock()
                 }
                 if (event.data && ['zoom-complete', 'zoom-finished', 'zoom-done'].includes(event.data.type)) window.dispatchEvent(new Event('color-zoom-finished'))
                 return
@@ -578,19 +701,25 @@ window.Color = {
             if (event.data?.type === 'color-sdk-file-upload' && ownerPeer) {
                 const meta = event.data.meta, bytes = event.data.bytes instanceof ArrayBuffer ? new Uint8Array(event.data.bytes) : null
                 if (!meta?.id || !bytes || bytes.length !== Number(meta.size) || bytes.length > 64 * 1024 * 1024) return
-                sendFile?.({ type: 'start', fileId: meta.id, name: meta.name, size: bytes.length, mime: meta.type, ownerColor: visitorColor, hash: meta.hash, chunks: Math.ceil(bytes.length / 32768) }, ownerPeer)
-                for (let offset = 0, index = 0; offset < bytes.length; offset += 32768, index++) sendFile?.({ type: 'chunk', fileId: meta.id, index, bytes: bytes.slice(offset, offset + 32768) }, ownerPeer)
-                sendFile?.({ type: 'end', fileId: meta.id }, ownerPeer)
+                await sendFile?.({ type: 'start', fileId: meta.id, name: meta.name, size: bytes.length, mime: meta.type, ownerColor: visitorColor, hash: meta.hash, chunks: Math.ceil(bytes.length / 32768) }, ownerPeer)
+                for (let offset = 0, index = 0; offset < bytes.length; offset += 32768, index++) await sendFile?.({ type: 'chunk', fileId: meta.id, index, bytes: bytes.slice(offset, offset + 32768) }, ownerPeer)
+                await sendFile?.({ type: 'end', fileId: meta.id }, ownerPeer)
             } else if (event.data?.type === 'color-sdk-block-action' && ownerPeer && room?.getPeers?.()[ownerPeer]?.dc?.readyState === 'open') {
                 const message = event.data.message && typeof event.data.message === 'object' ? { ...event.data.message, origin: location.origin, visitorColor } : event.data.message
-                sendSdk?.({ type: 'BLOCK_ACTION', origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message }, ownerPeer)
+                if (activeBlock?.blockId !== 'page' && event.data.blockInstanceId !== activeBlock?.instanceId) return
+                const returnAddress = await getReturnAddress(event.data.blockInstanceId).catch(() => null)
+                try { sendSdk?.(await authorizeRequest({ type: 'BLOCK_ACTION', origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message, returnAddress }), ownerPeer) } catch (error) { emit('color-storage-required', { error: error.message, color: visitorColor }) }
             } else if (event.data?.type === 'color-sdk-block-action') {
                 const message = event.data.message && typeof event.data.message === 'object' ? { ...event.data.message, origin: location.origin, visitorColor } : event.data.message
-                sendStandbyAction({ origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message }).then(() => snapshot?.contentWindow?.postMessage({ type: 'color-sdk-block-message', message: { type: 'QUEUED', ok: true } }, '*')).catch(error => emit('color-error', { error: error.message }))
-            } else if (event.data?.type === 'color-sdk-color-action') {
-                sendToColor(event.data.targetColor || visitorColor, event.data.namespace, event.data.message).catch(error => emit('color-error', { error: error.message }))
+                if (activeBlock?.blockId !== 'page' && event.data.blockInstanceId !== activeBlock?.instanceId) return
+                const returnAddress = await getReturnAddress(event.data.blockInstanceId).catch(() => null)
+                authorizeRequest({ type: 'BLOCK_ACTION', origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message, returnAddress }).then(sendStandbyAction).then(() => snapshot?.contentWindow?.postMessage({ type: 'color-sdk-block-message', message: { type: 'QUEUED', ok: true } }, '*')).catch(error => emit('color-error', { error: error.message }))
             } else if (event.data?.type === 'color-sdk-record-request') {
-                iframe.contentWindow?.postMessage({ ...event.data, color: visitorColor, ownerColor: '#' + ownerColor }, 'https://colorlog.in')
+                if (activeBlock?.blockId !== 'page' && event.data.blockInstanceId !== activeBlock?.instanceId) return
+                try {
+                    await getReturnAddress(event.data.blockInstanceId)
+                    postStorage({ ...event.data, color: visitorColor, ownerColor: '#' + ownerColor })
+                } catch (error) { snapshot?.contentWindow?.postMessage({ type: 'color-sdk-record-response', id: event.data.id, error: error.message }, '*') }
             }
         }
         window.addEventListener('message', handleMessage)
@@ -608,16 +737,21 @@ window.Color = {
                 clearTimeout(offlineTimer)
                 clearInterval(statusTimer)
                 window.removeEventListener('message', handleMessage)
+                storagePort?.close()
                 room?.leave()
-                colorConnections.forEach(connection => connection.room.leave())
-                colorConnections.clear()
+                deliveryAddresses.clear()
+                deliveryResponses.clear()
+                storageRequests.forEach(task => task.reject(new Error('Color SDK closed.')))
+                storageRequests.clear()
+                standbyWrites.forEach(task => { clearTimeout(task.timer); task.reject(new Error('Color SDK closed.')) }); standbyWrites.clear()
                 standbyRoom?.leave()
                 snapshot?.remove()
                 iframe.remove()
                 colorLink.remove()
                 container.querySelector('.color-sdk-notice')?.remove()
             },
-            resetTrust: () => { verifiedOwnerKey = null; verifiedOwnerFingerprint = null },
+            resetTrust: () => { verifiedOwnerKey = null; verifiedOwnerFingerprint = null; deliveryAddresses.clear(); visitConfirmed = false },
+            connectStorage: () => colorLink.click(),
             get connected() { return Object.values(room?.getPeers?.() || {}).some(peer => peer.dc?.readyState === 'open') },
             get color() { return visitorColor },
             get ownerKey() { return verifiedOwnerKey },

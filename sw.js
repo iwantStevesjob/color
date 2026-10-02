@@ -8,7 +8,14 @@ const iconResponse = async (color, size) => {
 }
 
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()))
-self.addEventListener('activate', event => event.waitUntil(self.clients.claim()))
+self.addEventListener('activate', event => event.waitUntil((async () => {
+    const cache = await caches.open(BACKUP_CACHE)
+    for (const request of await cache.keys()) {
+        const url = new URL(request.url)
+        if (url.hostname.endsWith('.metered.live') && url.pathname.includes('/turn/credentials')) await cache.delete(request)
+    }
+    await self.clients.claim()
+})()))
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url)
     if (url.origin === location.origin && url.pathname.endsWith('/backup.webmanifest')) {
@@ -35,5 +42,21 @@ self.addEventListener('fetch', event => {
         event.respondWith(iconResponse(color, Number(url.pathname.match(/(192|512)\.png$/)[1])))
         return
     }
-    if (event.request.method === 'GET') event.respondWith(caches.open(BACKUP_CACHE).then(cache => cache.match(event.request).then(saved => saved || fetch(event.request).then(response => { if (response.ok || response.type === 'opaque') cache.put(event.request, response.clone()); return response }))))
+    // Installed documents are explicitly saved by Color. Runtime traffic, credentials and
+    // updated SDK/block definitions must reach the network instead of a permanent old cache.
+    if (event.request.method === 'GET' && url.origin === location.origin && /\/color-[a-z0-9_-]+\.html$/i.test(url.pathname) && !url.search) {
+        event.respondWith(caches.open(BACKUP_CACHE).then(cache => cache.match(event.request).then(saved => saved || fetch(event.request))))
+        return
+    }
+    const scope = new URL(self.registration.scope).pathname
+    const staticAsset = url.pathname === scope || /\/(index\.html|color\.js|blocks\.json)$/.test(url.pathname) || url.pathname.startsWith(scope + 'libs/')
+    if (event.request.method === 'GET' && url.origin === location.origin && url.pathname.startsWith(scope) && staticAsset && !url.search && event.request.cache !== 'no-store') {
+        event.respondWith(caches.open(BACKUP_CACHE).then(async cache => {
+            try {
+                const response = await fetch(event.request)
+                if (response.ok && !/no-store|private/i.test(response.headers.get('Cache-Control') || '')) await cache.put(event.request, response.clone())
+                return response
+            } catch (error) { const saved = await cache.match(event.request); if (saved) return saved; throw error }
+        }))
+    }
 })
