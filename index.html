@@ -5126,6 +5126,7 @@
                     try {
                         const pc = this.room.getPeers()[pid]?.pc
                         if (!pc || !data || JSON.stringify(data).length > 16384) return
+                        if (window.app.mesh === this && window.app.requiresMiningForCurrentConnection() && !window.app.user.proofToken) return
                         if (data.type === 'IDENTITY_CHALLENGE') {
                             if (/^[a-f0-9]{64}$/.test(data.nonce || '')) await this.sendIdentity(pid, data.nonce)
                             return
@@ -5139,7 +5140,10 @@
                                     const nonce = Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join('')
                                     this.identityChallenges.set(pid, { nonce, pc, created: Date.now(), claim: data })
                                     this.rawSendId({ type: 'IDENTITY_CHALLENGE', nonce }, pid)
-                                } else if (!proof && data.minedToken && data.minedToken !== 'PENDING') pending.claim = data
+                                } else if (!proof) {
+                                    if (data.minedToken && data.minedToken !== 'PENDING') pending.claim = data
+                                    this.rawSendId({ type: 'IDENTITY_CHALLENGE', nonce: pending.nonce }, pid)
+                                }
                                 return
                             }
                             if (this.room.getPeers()[pid]?.pc !== pc || this.identityChallenges.get(pid) !== pending) return
@@ -5225,6 +5229,13 @@
                 })
                 onSdkOps((d, p) => this.emit('sdk-action', d, p))
                 this.room.onPeerLeave(p => { this.verifiedPeers.delete(p); this.authenticatedPeers.delete(p); this.peerIdentities.delete(p); this.identityChallenges.delete(p); this.emit('peer-leave', p) })
+                this.identityRetryTimer = setInterval(() => {
+                    const app = window.app, waitingForApproval = app.mesh === this && app.requiresMiningForCurrentConnection() && app.joinApprovedPeers.size === 0
+                    for (const [pid, peer] of Object.entries(this.room.getPeers())) if (peer.dc?.readyState === 'open' && (!this.verifiedPeers.has(pid) || waitingForApproval)) {
+                        this.sendIdentity(pid).catch(error => console.warn('[P2P] Identity retry failed', error))
+                        if (waitingForApproval && app.user.proofToken && this.verifiedPeers.has(pid)) this.sendCursor({ type: 'request' }, pid)
+                    }
+                }, 2000)
             }
 
             registerBlockAction(namespace) {
@@ -5242,6 +5253,7 @@
             }
 
             async sendIdentity(targetPeerId = null, nonce = null) {
+                if (window.app.mesh === this && window.app.requiresMiningForCurrentConnection() && !window.app.user.proofToken) return
                 const jwk = await this.identity.getPublicKeyData()
                 if (!jwk) return
                 const cursor = await window.app.syncCursorIndex(this.roomHex)
@@ -5310,7 +5322,7 @@
             getPeers() { return this.room.getPeers() }
             getDiscoveredPeers() { return this.room.getDiscoveredPeers() }
             enableSync() { this.room.enableSync() }
-            leave() { this.room.leave() }
+            leave() { clearInterval(this.identityRetryTimer); this.room.leave() }
             on(e, cb) { if (!this.handlers.has(e)) this.handlers.set(e, []); this.handlers.get(e).push(cb); if (e === 'peer-identity') this.peerIdentities.forEach((data, pid) => cb(data, pid)) }
             emit(e, ...args) { this.handlers.get(e)?.forEach(cb => cb(...args)) }
             setExpectedSecret(secret) { this.expectedQrSecret = secret }

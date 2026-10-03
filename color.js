@@ -525,7 +525,9 @@ window.Color = {
             const pair = await visitorKeys
             visitorPublicKey ||= await crypto.subtle.exportKey('jwk', pair.publicKey)
             if (!visitorProof || Number(visitorProof.split('_')[0]) !== Math.floor(Date.now() / 3600000)) visitorProofTask ||= mineProof().then(proof => { visitorProof = proof; return proof }).finally(() => { visitorProofTask = null })
-            const claim = { color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof || 'PENDING', cursor: 0, sdkOrigin: location.origin, sdkBlock: block }
+            if (!nonce && visitorProofTask) await visitorProofTask
+            if (!visitorProof) return
+            const claim = { color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }
             if (nonce) {
                 const pc = room?.getPeers()[peerId]?.pc, fingerprint = description => description?.sdp?.match(/a=fingerprint:sha-256 ([^\r\n]+)/i)?.[1]?.toUpperCase()
                 const local = fingerprint(pc?.localDescription), remote = fingerprint(pc?.remoteDescription)
@@ -537,8 +539,6 @@ window.Color = {
                 return
             }
             sendIdentity(claim, peerId)
-            if (visitorProofTask) await visitorProofTask
-            sendIdentity({ ...claim, minedToken: visitorProof }, peerId)
         }
         const renderSnapshot = documentHtml => {
             clearTimeout(offlineTimer)
