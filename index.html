@@ -4334,7 +4334,7 @@
         }
 
         function joinRoom(config, roomId) {
-            const connectedPeers = {}, pendingOffers = {}, handledOffers = new Set(), trackerSockets = {}, peerJoinCallbacks = [], peerLeaveCallbacks = [], peerDiscoverCallbacks = [], peerSeenCallbacks = [], peerErrorCallbacks = [], actionHandlers = {}, announceIntervals = []
+            const connectedPeers = {}, pendingOffers = {}, handledOffers = new Set(), trackerSockets = {}, peerJoinCallbacks = [], peerLeaveCallbacks = [], peerDiscoverCallbacks = [], peerSeenCallbacks = [], peerErrorCallbacks = [], actionHandlers = {}, announceIntervals = new Set()
             let offerPool = [], infoHash = null, isLeaving = false, readyResolve, offerPoolFill = null
             let syncEnabled = false
             let discoveredPeers = new Set()
@@ -4369,7 +4369,7 @@
             function setupDataChannel(dc, peerId) {
                 const handleOpen = () => peerJoinCallbacks.forEach(cb => cb(peerId))
                 if (dc.readyState === 'open') handleOpen(); else dc.onopen = handleOpen
-                dc.onclose = () => { if (connectedPeers[peerId]?.dc !== dc) return; delete connectedPeers[peerId]; discoveredPeers.delete(peerId); peerLeaveCallbacks.forEach(cb => cb(peerId)) }
+                dc.onclose = () => { if (connectedPeers[peerId]?.dc !== dc) return; const pc = connectedPeers[peerId].pc; delete connectedPeers[peerId]; pc?.close(); discoveredPeers.delete(peerId); peerLeaveCallbacks.forEach(cb => cb(peerId)) }
                 dc.onmessage = e => {
                     try {
                         if (e.data instanceof ArrayBuffer) {
@@ -4395,7 +4395,7 @@
                 ws.onopen = () => startAnnouncing(ws)
                 ws.onerror = () => { }
                 ws.onmessage = e => { try { const data = JSON.parse(e.data); if (data) handleTrackerMessage(ws, data) } catch (err) { } }
-                ws.onclose = () => { clearInterval(ws.__colorAnnounceInterval); if (trackerSockets[url] === ws) delete trackerSockets[url]; if (!isLeaving) setTimeout(() => connectToTracker(url), 5000) }
+                ws.onclose = () => { clearInterval(ws.__colorAnnounceInterval); announceIntervals.delete(ws.__colorAnnounceInterval); if (trackerSockets[url] === ws) delete trackerSockets[url]; if (!isLeaving) setTimeout(() => connectToTracker(url), 5000) }
             }
 
             async function startAnnouncing(ws) {
@@ -4420,7 +4420,7 @@
                 await announce()
                 if (isLeaving || ws.readyState !== WebSocket.OPEN) return
                 ws.__colorAnnounceInterval = setInterval(() => announce().catch(console.error), ANNOUNCE_INTERVAL)
-                announceIntervals.push(ws.__colorAnnounceInterval)
+                announceIntervals.add(ws.__colorAnnounceInterval)
             }
 
             async function handleTrackerMessage(ws, data) {
@@ -5083,9 +5083,9 @@
         }
 
         class TrustedMesh {
-            constructor(roomId, identity) {
+            constructor(roomId, identity, options = {}) {
                 this.roomHex = roomId.replace('color-', '')
-                this.room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, roomId)
+                this.room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69', ...options }, roomId)
                 this.identity = identity
                 this.handlers = new Map()
                 this.verifiedPeers = new Set()
@@ -7074,7 +7074,8 @@
             }
         }
         async function standaloneBlockPwaRuntime() {
-            const runtimeNode = document.getElementById('block-pwa-data'), runtime = JSON.parse(runtimeNode.textContent), payload = runtime.payload, data = payload.data ||= {}, def = runtime.def || {}, root = document.querySelector('[data-block-instance]'), isAdmin = true, userColor = '#' + runtime.color
+            const runtimeNode = document.getElementById('block-pwa-data'), runtime = JSON.parse(runtimeNode.textContent), payload = runtime.payload, data = payload.data ||= {}, def = runtime.def || {}, isAdmin = true, userColor = '#' + runtime.color
+            let root = document.querySelector('[data-block-instance]')
             const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]))
             const publicData = value => value?.data || data, execute = (script, context) => new Function('context', 'with(context){return(async()=>{' + script + '})()}')(context), callbacks = [], hostNonce = crypto.randomUUID(), hostOrigin = location.origin, host = document.createElement('iframe')
             const DOMPurify = { sanitize: value => { const node = document.createElement('div'); node.textContent = String(value ?? ''); return node.textContent } }
@@ -7103,6 +7104,8 @@
             const hydrate = () => {
                 if (hydrating) return
                 hydrating = true
+                const replacement = root.cloneNode(true)
+                root.replaceWith(replacement); root = replacement
                 if (runtime.customDocument) { const sandbox = root?.querySelector('[data-custom-block-sandbox]'); if (sandbox) sandbox.srcdoc = runtime.customDocument }
                 else Promise.resolve(execute(runtime.js, { app, root, payload, data, def, isAdmin, userColor, escapeHtml, publicData, send, records, runtimeCount, updateBlock })).catch(console.error)
                 queueMicrotask(() => { hydrating = false })
@@ -7111,7 +7114,8 @@
                 const updater = typeof instanceOrUpdater === 'function' ? instanceOrUpdater : maybeUpdater, updated = updater?.(payload) || payload
                 if (updated !== payload) { Object.assign(payload, updated); Object.assign(data, updated.data || {}) }
                 await requestHost('persist', { payload, broadcast })
-                queueMicrotask(() => { hydrate(); saveHardcoded().catch(console.error) })
+                hydrate()
+                await saveHardcoded().catch(console.error)
                 return payload
             })
             const upsertBlock = (blockId, match, updater) => blockId === payload.blockId && (!match || match(payload)) ? updateBlock(payload.instanceId, updater) : Promise.resolve(null)
@@ -7136,6 +7140,7 @@
                 const message = event.data
                 if (event.source !== host.contentWindow || event.origin !== hostOrigin || message?.type !== 'color-block-host-status' || message.nonce !== hostNonce) return
                 if (message.replyId) { const task = hostRequests.get(message.replyId); if (task) { hostRequests.delete(message.replyId); clearTimeout(task.timer); message.error ? task.reject(new Error(message.error)) : task.resolve(message.result) } return }
+                if (message.event === 'peer-leave') { mesh.verifiedPeers.delete(message.pid); mesh.peerIdentities.delete(message.pid) }
                 if (message.error) { document.getElementById('block-pwa-status').textContent = 'OFFLINE'; console.error(message.error) }
                 else if (message.event === 'action' || message.event === 'replica') {
                     actionQueue = actionQueue.catch(() => {}).then(async () => {
@@ -7172,6 +7177,14 @@
             window.addEventListener('appinstalled', () => { installPrompt = null; success.classList.add('done') })
             navigator.storage?.persist?.().catch(() => {})
             navigator.serviceWorker?.register('sw.js').catch(() => {})
+            let wakeLock = null
+            const keepAwake = async () => {
+                if (document.visibilityState !== 'visible' || !navigator.wakeLock || wakeLock && !wakeLock.released) return
+                try { wakeLock = await navigator.wakeLock.request('screen') } catch (error) { console.warn('[Block admin] Screen wake lock unavailable', error) }
+            }
+            document.addEventListener('visibilitychange', keepAwake)
+            installButton.addEventListener('click', keepAwake)
+            keepAwake()
         }
 
         class EditorApp {
@@ -7299,7 +7312,7 @@
                 this.fileTransfers = new FileTransferModule(this)
 
                 this.deviceLinksReady = Promise.all([this.identity.init(), this.db.init()]).then(async () => {
-                    try { await this.initDeviceLinks() } catch (error) { this.deviceLinkError = error; console.error('Device pairing initialization failed', error) }
+                    if (!new URLSearchParams(location.search).has('blockHost')) try { await this.initDeviceLinks() } catch (error) { this.deviceLinkError = error; console.error('Device pairing initialization failed', error) }
                     const rooms = await this.db.getAllRooms()
                     this.visitedRooms = rooms.map(r => 'color-' + r.hex)
                     this.setSessionState('ready')
@@ -7311,6 +7324,7 @@
                     this.syncDebugPassword()
                 })
 
+                if (new URLSearchParams(location.search).has('blockHost')) return
                 document.querySelectorAll('[data-info-page]').forEach(button => button.addEventListener('click', () => this.showInfoPage(button.dataset.infoPage).catch(console.error)))
                 document.getElementById('info-close').addEventListener('click', () => this.closeInfoPage())
                 document.getElementById('backup-connect-device').addEventListener('click', () => this.openBackupConnection().catch(error => this.backupStatus(error.message)))
@@ -7973,7 +7987,7 @@
             }
 
             async hostStandaloneBlock(request, notify) {
-                const { color, selector, index, payload, keys } = request || {}, def = payload?.definition
+                const { color, selector, index, payload, keys } = request || {}, def = request?.def || payload?.definition
                 if (!/^[0-9a-f]{6}$/.test(color || '') || !Number.isSafeInteger(index) || payload?.type !== 'block' || !payload.instanceId || !def?.id || keys?.sig?.kty !== 'EC' || keys?.aes?.kty !== 'oct' || keys?.pub?.x !== keys.sig.x || keys?.pub?.y !== keys.sig.y) throw new Error('Invalid owner block PWA')
                 let replicaRecovery = null
                 const ensureReplica = this.ensureStandaloneBlockReplica = async () => {
@@ -8021,7 +8035,7 @@
                 }
                 this.user.color = '#' + color
                 this.roomId = 'color-' + color
-                const mesh = this.standaloneBlockHost = new TrustedMesh(this.roomId, identity), namespace = def.actions?.namespace || def.action || ''
+                const mesh = this.mesh = this.standaloneBlockHost = new TrustedMesh(this.roomId, identity, { offerPoolSize: 2 }), namespace = def.actions?.namespace || def.action || ''
                 this.fileTransfers.attachMesh(mesh)
                 if (namespace) mesh.registerBlockAction(namespace)
                 const deliveryOwner = { roomId: 'color-' + color, user: { color: '#' + color }, appState: { session: 'joined' }, identity }
@@ -8059,7 +8073,7 @@
                 mesh.on('block-action', async (receivedNamespace, data, pid) => { if (receivedNamespace === namespace && data?.blockInstanceId === payload.instanceId) { await ensureReplica(); await dispatchAction({ event: 'action', channel: 'block', data, pid, namespace, identity: mesh.peerIdentities.get(pid) }) } })
                 mesh.on('fragment', fragments => notify({ event: 'fragment', fragments }))
                 mesh.on('peer-join', () => notify({ status: 'connected' }))
-                mesh.on('peer-leave', () => notify({ status: 'listening' }))
+                mesh.on('peer-leave', pid => { peerKeys.delete(pid); notify({ event: 'peer-leave', pid, status: 'listening' }) })
                 this.standaloneBlockMessage = async message => {
                     if (message?.type === 'action-complete') {
                         const task = actionTasks.get(message.actionId)
@@ -8106,7 +8120,7 @@
             async startStandbyOwner(entry, options = {}) {
                 const color = String(options.color || this.user.color).replace('#', '').toLowerCase(), selector = String(entry.selector).toLowerCase(), roomKey = color + ':' + selector
                 if (!/^[0-9a-f]{6}$/.test(color) || this.standbyOwnerRooms.has(roomKey)) return
-                const room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69' }, 'color-standby-' + color + '-' + selector), [send, receive] = room.makeAction('standby')
+                const room = joinRoom({ appId: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69', offerPoolSize: options.publicKey ? 2 : OFFER_POOL_SIZE }, 'color-standby-' + color + '-' + selector), [send, receive] = room.makeAction('standby')
                 this.standbyOwnerRooms.set(roomKey, room)
                 const publicKey = options.publicKey || await this.identity.getPublicKeyData(), sign = options.sign || (value => this.identity._call('sign', value)), decrypt = options.decrypt || (envelope => this.identity._call('decrypt_owner_envelope', { roomHex: color, envelope }))
                 if (!publicKey) { room.leave(); this.standbyOwnerRooms.delete(roomKey); return }
@@ -8116,7 +8130,7 @@
                     if (!def) throw new Error('The approved block no longer exists.')
                     return this.handleSdkAction(message, 'standby-' + (message.message?.requestId || message.visitId || crypto.randomUUID()), { queued: true })
                 })
-                const applicants = new Set(), replicaHashes = new Map(), replicaParts = new Map()
+                const applicants = new Set(), replicaHashes = new Map(), replicaSentHashes = new Map(), replicaParts = new Map()
                 let pending = Promise.resolve(), publicSnapshot = null, publicSource = '', stateSource = '', ownerState = null
                 const snapshot = async () => {
                     const payload = await current()
@@ -8158,11 +8172,14 @@
                         if (!payload) return
                         if (source !== stateSource) {
                             const envelope = await window.colorDelivery.encryptFor(publicKey, payload), body = { ownerColor: color, block: selector, blockInstanceId: payload.instanceId, envelope }
-                            ownerState = { type: 'OWNER_STATE', body, signature: await sign(JSON.stringify(body)) }; stateSource = source
+                            const text = JSON.stringify({ type: 'OWNER_STATE', body, signature: await sign(JSON.stringify(body)) })
+                            ownerState = { text, id: await this.sdkHash(text), total: Math.ceil(text.length / 120000) }; stateSource = source
                         }
-                        const text = JSON.stringify(ownerState), id = await this.sdkHash(text), total = Math.ceil(text.length / 120000)
+                        const { text, id, total } = ownerState
+                        if (replicaSentHashes.get(pid) === id) return
                         if (total > 512) throw new Error('Block replica exceeds the 60 MB transfer limit.')
-                        for (let part = 0; part < total; part++) await send({ type: 'OWNER_STATE_PART', id, part, total, text: text.slice(part * 120000, (part + 1) * 120000) }, pid)
+                        for (let part = 0; part < total; part++) if ((await send({ type: 'OWNER_STATE_PART', id, part, total, text: text.slice(part * 120000, (part + 1) * 120000) }, pid)).includes(false)) return
+                        if (room.getPeers()[pid]?.dc?.readyState === 'open') replicaSentHashes.set(pid, id)
                     } else if (message?.type === 'OWNER_STATE') {
                         const body = message.body
                         if (body?.ownerColor !== color || body.block !== selector || body.blockInstanceId !== entry.payload.instanceId || !await window.colorDelivery.verify(publicKey, message.signature, JSON.stringify(body))) return
@@ -8192,6 +8209,7 @@
                     pending = pending.catch(() => {}).then(() => process(message, pid)).catch(error => console.error('[Standby] queued interaction failed', error))
                 })
                 room.onPeerJoin(pid => announce(pid).catch(console.error))
+                room.onPeerLeave(pid => { replicaHashes.delete(pid); replicaSentHashes.delete(pid); for (const key of replicaParts.keys()) if (key.startsWith(pid + ':')) replicaParts.delete(key) })
                 const timer = setInterval(() => announce().catch(console.error), 15000), leave = room.leave.bind(room)
                 room.leave = () => { clearInterval(timer); return leave() }
                 room.enableSync()
@@ -15431,6 +15449,7 @@ self.onmessage = async e => {
             return null
         }
         async function init() {
+            if (new URLSearchParams(location.search).has('blockHost')) return
             console.info('[Sphere] init start')
             if (window.self !== window.top) document.getElementById('debug-btn').style.display = 'none'
             window.findPositionFromColor = findPositionFromColor

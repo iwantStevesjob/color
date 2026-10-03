@@ -113,7 +113,7 @@ window.Color = {
                     let isLeaving = false;
                     const messageHandlers = {}; // namespace -> [handler]
                     const listeners = { peerJoin: [], peerLeave: [], peerError: [] };
-                    const announceIntervals = [];
+                    const announceIntervals = new Set();
                     let offerPoolTimer = null;
 
                     async function init() {
@@ -137,6 +137,7 @@ window.Color = {
                         };
                         ws.onclose = () => {
                             clearInterval(ws.__colorAnnounceInterval);
+                            announceIntervals.delete(ws.__colorAnnounceInterval);
                             delete trackerSockets[url];
                             if (!isLeaving) setTimeout(() => connectToTracker(url), 5000);
                         };
@@ -162,7 +163,7 @@ window.Color = {
                         await announce();
                         if (isLeaving || ws.readyState !== WebSocket.OPEN) return;
                         ws.__colorAnnounceInterval = setInterval(() => announce().catch(error => listeners.peerError.forEach(cb => cb(null, error))), ANNOUNCE_INTERVAL);
-                        announceIntervals.push(ws.__colorAnnounceInterval);
+                        announceIntervals.add(ws.__colorAnnounceInterval);
                     }
                     function createPeerConnection(isInitiator, onDataChannel) {
                         const pc = new RTCPeerConnection(RTC_CONFIG);
@@ -227,7 +228,7 @@ window.Color = {
                     function setupDataChannel(dc, peerId) {
                         const opened = () => setTimeout(() => listeners.peerJoin.forEach(cb => cb(peerId)), 0);
                         if (dc.readyState === 'open') opened(); else dc.onopen = opened;
-                        dc.onclose = () => { if (connectedPeers[peerId]?.dc !== dc) return; delete connectedPeers[peerId]; listeners.peerLeave.forEach(cb => cb(peerId)); };
+                        dc.onclose = () => { if (connectedPeers[peerId]?.dc !== dc) return; const pc = connectedPeers[peerId].pc; delete connectedPeers[peerId]; pc?.close(); listeners.peerLeave.forEach(cb => cb(peerId)); };
                         dc.onmessage = e => {
                             try {
                                 const payload = readChannelMessage(dc, e.data);
@@ -641,8 +642,10 @@ window.Color = {
                 ownerPeers.delete(peerId)
                 if (peerId === ownerPeer) {
                     ownerPeer = [...ownerPeers].find(pid => room?.getPeers?.()[pid]?.dc?.readyState === 'open') || null
+                    if (ownerPeer) { requestBlock(ownerPeer); sendVisitorIdentity(ownerPeer).then(() => sendVisit(ownerPeer)).catch(error => emit('color-error', { error: error.message })) }
                     if (!ownerPeer) {
                         liveBlockLoaded = false
+                        requestBlock()
                         ensureStandby()
                         checkConnection()
                     }
