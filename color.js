@@ -1,26 +1,15 @@
 window.Color = {
-    init: async function (config = {}) {
-        const {
-            planet = 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69',
-            color = 'ffffff', // Store owner's hex
-            action = 'store_ops',
-            targetDiv,
-            block = null,
-            iceServers = null,
-            ownerKey = null,
-            onOwner = null
-        } = config;
-
-        // Store Owner Room ID
-        const ownerColor = String(color).replace('#', '').toLowerCase();
-        if (!/^[0-9a-f]{6}$/.test(ownerColor)) throw new Error('Color.init requires a six-digit target color.');
-        if (block && !/^(?:page|[a-z0-9][a-z0-9-]*)(?:-[1-9]\d*)?$/.test(String(block).toLowerCase())) throw new Error('Color.init block must be page or an installed block selector.');
-        if (typeof ownerKey === 'string' && ownerKey.trim() && !/^(?:sha256[:-])?[0-9a-f]{64}$/i.test(ownerKey.trim())) throw new Error('Color.init ownerKey must be a SHA-256 fingerprint.');
-        if (ownerKey && typeof ownerKey === 'object' && (ownerKey.kty !== 'EC' || !['P-256', 'P-521'].includes(ownerKey.crv) || !ownerKey.x || !ownerKey.y)) throw new Error('Color.init ownerKey must be a P-256 or P-521 public JWK.');
-        const storeRoomId = "color-" + ownerColor;
-
-
-        const Spectrum = (() => {
+    // The rainbow planet: the cone positions every Color loads with; rooms on it are the ones everybody can reach.
+    rainbowPlanet: 'planet-r0.00,0.98,0.69g-0.85,-0.49,0.69b0.85,-0.49,0.69',
+    // The Color app this copy of the SDK belongs to: the origin it was loaded from (https, or a localhost development
+    // server), so a page using a local color.js picks its Color on that same local app. Anything else: colorlog.in.
+    origin: (() => {
+        try { const url = new URL(document.currentScript?.src || ''); if (url.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(url.hostname)) return url.origin } catch (_) { }
+        return 'https://colorlog.in'
+    })(),
+    // The serverless transport (WebTorrent trackers plus MQTT brokers, offers and answers sealed with the room key).
+    // Each call makes its own instance; init and room both use it.
+    spectrum: function (iceServers = null) {
             const TRACKERS = [
                 'wss://relay.rollcall.network',
                 'wss://tracker.webtorrent.dev',
@@ -45,9 +34,9 @@ window.Color = {
                 const limit = Math.min(peer.pc?.sctp?.maxMessageSize || 65536, 48000), deadline = Date.now() + 60000
                 let frames = [message]
                 if (typeof message === 'string' && new TextEncoder().encode(message).length > limit) {
-                    if (message.length > 2097152) throw new Error('Color message exceeds 2 MB.')
+                    if (message.length > 8388608) throw new Error('Color message exceeds 8 MB.')
                     const width = Math.max(256, Math.min(12000, Math.floor((limit - 512) / 6))), id = crypto.randomUUID(), total = Math.ceil(message.length / width)
-                    if (total > 512) throw new Error('The negotiated channel message size is too small.')
+                    if (total > 2048) throw new Error('The negotiated channel message size is too small.')
                     frames = Array.from({ length: total }, (_, part) => JSON.stringify({ __colorFrame: 1, id, part, total, text: message.slice(part * width, (part + 1) * width) }))
                 }
                 for (const frame of frames) {
@@ -61,17 +50,21 @@ window.Color = {
         }
 
         function readChannelMessage(dc, text) {
-            if (typeof text !== 'string' || text.length > 2097152) return null
+            if (typeof text !== 'string' || text.length > 8388608) return null
             const message = JSON.parse(text)
             if (message?.__colorFrame !== 1) return message
-            if (typeof message.id !== 'string' || message.id.length > 64 || !Number.isInteger(message.part) || !Number.isInteger(message.total) || message.total < 1 || message.total > 512 || message.part < 0 || message.part >= message.total || typeof message.text !== 'string' || message.text.length > 12000) return null
+            if (typeof message.id !== 'string' || message.id.length > 64 || !Number.isInteger(message.part) || !Number.isInteger(message.total) || message.total < 1 || message.total > 2048 || message.part < 0 || message.part >= message.total || typeof message.text !== 'string' || message.text.length > 12000) return null
             const frames = dc.colorFrames ||= new Map(), now = Date.now()
             for (const [id, item] of frames) if (now - item.updated > 30000) frames.delete(id)
             if (!frames.has(message.id) && frames.size >= 8) return null
             const item = frames.get(message.id) || { total: message.total, pieces: new Map(), size: 0 }
             if (item.total !== message.total) return null
             item.size += message.text.length - (item.pieces.get(message.part)?.length || 0)
-            if (item.size > 2097152) { frames.delete(message.id); return null }
+            if (item.size > 8388608) { frames.delete(message.id); return null }
+            // Several large messages arriving at once may not hold more than 16 MB between them; the oldest partial one gives way.
+            let buffered = item.size
+            for (const [id, other] of frames) if (id !== message.id) buffered += other.size
+            if (buffered > 16777216) for (const [id, other] of frames) { if (id === message.id) continue; frames.delete(id); buffered -= other.size; if (buffered <= 16777216) break }
             item.updated = now; item.pieces.set(message.part, message.text); frames.set(message.id, item)
             if (item.pieces.size !== item.total) return null
             frames.delete(message.id)
@@ -84,6 +77,25 @@ window.Color = {
             async function sha1Hash(str) {
                 const hashBuffer = await crypto.subtle.digest('SHA-1', encoder.encode(str));
                 return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(36)).join('').slice(0, 20);
+            }
+            // Offers and answers cross the trackers sealed with the room's key (same scheme as the Color page).
+            const SIGNAL_PREFIX = 'color-sealed-v1.';
+            const signalBase64 = bytes => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            const signalBytes = text => Uint8Array.from(atob(String(text || '').replace(/-/g, '+').replace(/_/g, '/')), char => char.charCodeAt(0));
+            async function deriveSignalKey(appId, roomId, secret = '') {
+                const material = await crypto.subtle.importKey('raw', encoder.encode(roomId + '\n' + secret), 'HKDF', false, ['deriveKey']);
+                return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: encoder.encode(appId), info: encoder.encode('color-signal-v1') }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+            }
+            async function sealSignal(key, description, senderId, offerId) {
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+                const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: encoder.encode(senderId + ':' + offerId + ':' + description.type) }, key, encoder.encode(description.sdp));
+                return { type: description.type, sdp: SIGNAL_PREFIX + signalBase64(iv) + '.' + signalBase64(new Uint8Array(data)) };
+            }
+            async function openSignal(key, description, senderId, offerId, type) {
+                if (description?.type !== type || typeof description.sdp !== 'string' || !description.sdp.startsWith(SIGNAL_PREFIX) || description.sdp.length > 65536) throw new Error('Unsealed signaling refused.');
+                const [iv, data] = description.sdp.slice(SIGNAL_PREFIX.length).split('.');
+                const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: signalBytes(iv), additionalData: encoder.encode(senderId + ':' + offerId + ':' + type) }, key, signalBytes(data));
+                return { type, sdp: new TextDecoder().decode(plain) };
             }
         function waitForIce(pc) {
             return new Promise((resolve, reject) => {
@@ -100,10 +112,59 @@ window.Color = {
             })
         }
 
+            // Second rendezvous network (same scheme as the Color page): public MQTT brokers carry presence and sealed offers,
+            // so an embed still reaches its owner when the WebTorrent trackers are down. Brokers only see ciphertext.
+            const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://test.mosquitto.org:8081/mqtt'];
+            const brokerHub = (() => {
+                const sockets = new Map(), topics = new Map(), decoder = new TextDecoder();
+                const text = value => { const bytes = encoder.encode(value); return [bytes.length >> 8, bytes.length & 255, ...bytes] };
+                const packet = (type, body) => { const head = [type]; let length = body.length; do { let digit = length % 128; length = Math.floor(length / 128); if (length > 0) digit |= 128; head.push(digit) } while (length > 0); const out = new Uint8Array(head.length + body.length); out.set(head); out.set(body, head.length); return out };
+                const subscribePacket = topic => packet(0x82, [0, 1, ...text(topic), 0]);
+                const publishPacket = (topic, payload) => { const name = text(topic), data = encoder.encode(payload), body = new Uint8Array(name.length + data.length); body.set(name); body.set(data, name.length); return packet(0x30, body) };
+                function connect(url) {
+                    if (sockets.has(url)) return;
+                    let ws;
+                    try { ws = new WebSocket(url, 'mqtt') } catch (error) { return }
+                    ws.binaryType = 'arraybuffer';
+                    let buffer = new Uint8Array(0), ready = false;
+                    const entry = { ws, isReady: () => ready && ws.readyState === WebSocket.OPEN };
+                    sockets.set(url, entry);
+                    ws.onopen = () => ws.send(packet(0x10, [...text('MQTT'), 4, 2, 0, 60, ...text('color' + genId(16))]));
+                    ws.onerror = () => { };
+                    ws.onclose = () => { clearInterval(ping); if (sockets.get(url) === entry) sockets.delete(url); if (topics.size) setTimeout(() => { if (topics.size) connect(url) }, 8000 + Math.random() * 4000) };
+                    ws.onmessage = event => {
+                        if (!(event.data instanceof ArrayBuffer)) return;
+                        const chunk = new Uint8Array(event.data), joined = new Uint8Array(buffer.length + chunk.length);
+                        joined.set(buffer); joined.set(chunk, buffer.length); buffer = joined;
+                        if (buffer.length > 1048576) { ws.close(); return }
+                        for (;;) {
+                            if (buffer.length < 2) return;
+                            let multiplier = 1, length = 0, index = 1, digit;
+                            do { if (index >= buffer.length) return; digit = buffer[index++]; length += (digit & 127) * multiplier; multiplier *= 128 } while (digit & 128);
+                            if (buffer.length < index + length) return;
+                            const type = buffer[0] >> 4, body = buffer.subarray(index, index + length);
+                            buffer = buffer.slice(index + length);
+                            if (type === 2) { ready = body[1] === 0; if (!ready) { ws.close(); return } for (const topic of topics.keys()) ws.send(subscribePacket(topic)); for (const handlers of topics.values()) handlers.forEach(handler => handler.ready?.()) }
+                            else if (type === 3 && body.length >= 2) {
+                                const size = (body[0] << 8) | body[1], topic = decoder.decode(body.subarray(2, 2 + size)), payload = decoder.decode(body.subarray(2 + size));
+                                topics.get(topic)?.forEach(handler => { try { handler(payload) } catch (error) { } });
+                            }
+                        }
+                    };
+                    const ping = setInterval(() => { if (entry.isReady()) ws.send(new Uint8Array([0xC0, 0])) }, 30000);
+                }
+                return {
+                    subscribe(topic, handler) { if (!topics.has(topic)) topics.set(topic, new Set()); topics.get(topic).add(handler); BROKERS.forEach(connect); for (const entry of sockets.values()) if (entry.isReady()) entry.ws.send(subscribePacket(topic)) },
+                    unsubscribe(topic, handler) { const handlers = topics.get(topic); if (!handlers) return; handlers.delete(handler); if (!handlers.size) { topics.delete(topic); for (const entry of sockets.values()) if (entry.isReady()) entry.ws.send(packet(0xA2, [0, 2, ...text(topic)])) } if (!topics.size) for (const entry of [...sockets.values()]) entry.ws.close() },
+                    publish(topic, payload) { let sent = false; for (const entry of sockets.values()) if (entry.isReady()) { try { entry.ws.send(publishPacket(topic, payload)); sent = true } catch (error) { } } return sent }
+                };
+            })();
+
             return {
                 joinRoom: (config, roomId) => {
                     const selfId = genId(20);
-                    let infoHash = null;
+                    let infoHash = null, signalKey = null, brokerTopic = null, brokerTimer = null, lastBrokerHello = 0;
+                    const brokerOffered = new Map();
                     const connectedPeers = {};
                     const pendingOffers = {};
                     const handledOffers = new Set();
@@ -118,7 +179,15 @@ window.Color = {
 
                     async function init() {
                         infoHash = await sha1Hash(config.appId + roomId);
+                        signalKey = await deriveSignalKey(config.appId, roomId, config.secret || '');
                         TRACKERS.forEach(url => connectToTracker(url));
+                        if (!isLeaving) {
+                            brokerTopic = 'color/' + infoHash;
+                            brokerHub.subscribe(brokerTopic + '/all', onBrokerPresence);
+                            brokerHub.subscribe(brokerTopic + '/to/' + selfId, onBrokerDirect);
+                            brokerHello();
+                            brokerTimer = setInterval(brokerHello, 20000 + Math.random() * 5000);
+                        }
                         fillOfferPool();
                         offerPoolTimer = setInterval(fillOfferPool, OFFER_TTL);
                     }
@@ -157,7 +226,8 @@ window.Color = {
                                     }
                                 }, OFFER_TTL);
                             }
-                            const msg = { action: 'announce', info_hash: infoHash, peer_id: selfId, numwant: OFFER_POOL_SIZE, offers: offers.map(o => ({ offer_id: o.offerId, offer: { type: o.offer.type, sdp: o.offer.sdp } })) };
+                            const msg = { action: 'announce', info_hash: infoHash, peer_id: selfId, numwant: OFFER_POOL_SIZE, offers: await Promise.all(offers.map(async o => ({ offer_id: o.offerId, offer: await sealSignal(signalKey, o.offer, selfId, o.offerId) }))) };
+                            if (ws.readyState !== WebSocket.OPEN || isLeaving) return;
                             ws.send(JSON.stringify(msg));
                         };
                         await announce();
@@ -237,8 +307,40 @@ window.Color = {
                             } catch (err) { }
                         };
                     }
+                    // Broker rendezvous: presence says "I am in this room"; the lower peer id answers with one sealed offer and the
+                    // answer returns the same way. The tracker handler below processes both.
+                    const brokerPublish = (target, message) => brokerTopic && brokerHub.publish(brokerTopic + (target ? '/to/' + target : '/all'), JSON.stringify(message));
+                    const brokerSocket = { readyState: WebSocket.OPEN, send(text) { const message = JSON.parse(text); if (message.to_peer_id && message.answer) brokerPublish(message.to_peer_id, { peer_id: message.peer_id, offer_id: message.offer_id, answer: message.answer }) } };
+                    const brokerHello = () => { if (!isLeaving && brokerTopic) { lastBrokerHello = Date.now(); brokerPublish(null, { peer_id: selfId }) } };
+                    const onBrokerPresence = async text => {
+                        let data;
+                        try { data = JSON.parse(text) } catch (error) { return }
+                        const peer = data?.peer_id;
+                        if (isLeaving || typeof peer !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(peer) || peer === selfId || connectedPeers[peer]) return;
+                        if (selfId > peer) { if (Date.now() - lastBrokerHello > 3000) brokerHello(); return }
+                        if (Date.now() - (brokerOffered.get(peer) || 0) < 15000) return;
+                        // Presences cost nothing to fake and each offer is a live connection: at most 20 a minute, record pruned.
+                        for (const [id, time] of brokerOffered) if (Date.now() - time > 60000) brokerOffered.delete(id);
+                        if ([...brokerOffered.values()].filter(time => Date.now() - time < 60000).length >= 20) return;
+                        brokerOffered.set(peer, Date.now());
+                        const [offer] = await getOffersFromPool(1);
+                        if (!offer) return;
+                        if (isLeaving || connectedPeers[peer]) { offer.pc.close(); return }
+                        pendingOffers[offer.offerId] = { pc: offer.pc, dc: offer.dc, created: offer.created };
+                        setTimeout(() => { if (pendingOffers[offer.offerId]) { pendingOffers[offer.offerId].pc.close(); delete pendingOffers[offer.offerId] } }, OFFER_TTL);
+                        brokerPublish(peer, { peer_id: selfId, offer_id: offer.offerId, offer: await sealSignal(signalKey, offer.offer, selfId, offer.offerId) });
+                    };
+                    onBrokerPresence.ready = () => brokerHello();
+                    const onBrokerDirect = text => {
+                        let data;
+                        try { data = JSON.parse(text) } catch (error) { return }
+                        if (isLeaving || typeof data?.peer_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(data.peer_id) || data.peer_id in Object.prototype || data.peer_id === selfId || typeof data.offer_id !== 'string') return;
+                        handleTrackerMessage(brokerSocket, { info_hash: infoHash, peer_id: data.peer_id, offer_id: data.offer_id, offer: data.offer, answer: data.answer }).catch(() => { });
+                    };
                     async function handleTrackerMessage(ws, data) {
                         if (data.info_hash !== infoHash || data.peer_id === selfId) return;
+                        // Peer ids are remote input: plain characters only, and never a name every object already has.
+                        if (data.peer_id != null && (typeof data.peer_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(data.peer_id) || data.peer_id in Object.prototype)) return;
                         if (Array.isArray(data.offers)) {
                             for (const offer of data.offers) await handleTrackerMessage(ws, { ...data, offers: null, offer_id: offer.offer_id, offer: offer.offer });
                             return;
@@ -247,6 +349,9 @@ window.Color = {
                         if (data.offer && data.offer_id) {
                             const offerKey = data.peer_id + ':' + data.offer_id
                             if (handledOffers.has(offerKey) || connectedPeers[data.peer_id]) return
+                            // Anything that does not open with this room's key is ignored.
+                            const offer = await openSignal(signalKey, data.offer, data.peer_id, data.offer_id, 'offer').catch(() => null)
+                            if (!offer || isLeaving || handledOffers.has(offerKey) || connectedPeers[data.peer_id]) return
                             handledOffers.add(offerKey); setTimeout(() => handledOffers.delete(offerKey), OFFER_TTL)
                             const peerEntry = { pc: null, dc: null, direction: 'incoming' }
                             connectedPeers[data.peer_id] = peerEntry
@@ -257,14 +362,18 @@ window.Color = {
                                 })
                                 peerEntry.pc = pc
                                 setTimeout(() => { if (connectedPeers[data.peer_id] === peerEntry && peerEntry.dc?.readyState !== 'open') pc.close() }, 30000)
-                                await pc.setRemoteDescription(new RTCSessionDescription(data.offer))
+                                await pc.setRemoteDescription(new RTCSessionDescription(offer))
                                 await pc.setLocalDescription(await pc.createAnswer())
-                                const answer = await waitForIce(pc)
+                                const answer = await sealSignal(signalKey, await waitForIce(pc), selfId, data.offer_id)
                                 if (isLeaving || connectedPeers[data.peer_id] !== peerEntry || ws.readyState !== WebSocket.OPEN) { pc.close(); return }
                                 ws.send(JSON.stringify({ action: 'announce', info_hash: infoHash, peer_id: selfId, to_peer_id: data.peer_id, offer_id: data.offer_id, answer }))
                             } catch (err) { if (connectedPeers[data.peer_id] === peerEntry) delete connectedPeers[data.peer_id]; peerEntry.pc?.close() }
                         }
                         if (data.answer && data.offer_id) {
+                            if (!pendingOffers[data.offer_id]) return
+                            const answer = await openSignal(signalKey, data.answer, data.peer_id, data.offer_id, 'answer').catch(() => null)
+                            if (!answer) return
+                            data = { ...data, answer }
                             const pending = pendingOffers[data.offer_id]
                             if (!pending) return
                             const existing = connectedPeers[data.peer_id]
@@ -301,6 +410,8 @@ window.Color = {
                         getPeers: () => connectedPeers,
                         leave: () => {
                             isLeaving = true;
+                            clearInterval(brokerTimer);
+                            if (brokerTopic) { brokerHub.unsubscribe(brokerTopic + '/all', onBrokerPresence); brokerHub.unsubscribe(brokerTopic + '/to/' + selfId, onBrokerDirect) }
                             announceIntervals.forEach(clearInterval);
                             clearInterval(offerPoolTimer);
                             Object.values(trackerSockets).forEach(ws => ws.close());
@@ -311,7 +422,116 @@ window.Color = {
                     };
                 }
             };
-        })();
+    },
+    // A generic shared room for a site's own app (a game world, a lobby): everyone who joins the same app and room name
+    // meets peer to peer. Its id never starts with "color-", so it can never be a Color's own room. Returns the transport's
+    // room: makeAction(namespace) -> [send, onMessage], onPeerJoin, onPeerLeave, getPeers, leave.
+    room: function (app, name, options = {}) {
+        const id = value => String(value || '').toLowerCase()
+        const appId = id(app), roomName = id(name)
+        if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(appId) || !/^[a-z0-9][a-z0-9-]{0,47}$/.test(roomName)) throw new Error('Color.room needs an app and a room name of letters, digits and dashes.')
+        const config = { appId: options.planet || window.Color.rainbowPlanet }
+        if (options.secret) config.secret = String(options.secret)
+        return window.Color.spectrum(options.iceServers || null).joinRoom(config, 'app-' + appId + '-' + roomName)
+    },
+    // Asks the visitor to choose a Color on the Color sphere (in a window of the Color app) and to log into it there.
+    // Resolves with that Color's "#rrggbb" once they have; the Color's keys never leave the Color app.
+    // A Color's plain name, for things named by it ("Crimson Cab", "Teal T-shirt"): the nearest of the web's named colours, measured in
+    // CIELAB (distance there follows the eye; in RGB a mid blue came out nearest a purple).
+    NAMES: 'Black:000000,Navy:000080,Dark Blue:00008b,Medium Blue:0000cd,Blue:0000ff,Dark Green:006400,Green:008000,Teal:008080,Dark Cyan:008b8b,Deep Sky Blue:00bfff,Dark Turquoise:00ced1,Medium Spring Green:00fa9a,Lime:00ff00,Spring Green:00ff7f,Cyan:00ffff,Midnight Blue:191970,Dodger Blue:1e90ff,Light Sea Green:20b2aa,Forest Green:228b22,Sea Green:2e8b57,Dark Slate Gray:2f4f4f,Lime Green:32cd32,Medium Sea Green:3cb371,Turquoise:40e0d0,Royal Blue:4169e1,Steel Blue:4682b4,Dark Slate Blue:483d8b,Medium Turquoise:48d1cc,Indigo:4b0082,Dark Olive Green:556b2f,Cadet Blue:5f9ea0,Cornflower Blue:6495ed,Rebecca Purple:663399,Medium Aquamarine:66cdaa,Dim Gray:696969,Slate Blue:6a5acd,Olive Drab:6b8e23,Slate Gray:708090,Light Slate Gray:778899,Medium Slate Blue:7b68ee,Lawn Green:7cfc00,Chartreuse:7fff00,Aquamarine:7fffd4,Maroon:800000,Purple:800080,Olive:808000,Gray:808080,Sky Blue:87ceeb,Light Sky Blue:87cefa,Blue Violet:8a2be2,Dark Red:8b0000,Dark Magenta:8b008b,Saddle Brown:8b4513,Dark Sea Green:8fbc8f,Light Green:90ee90,Medium Purple:9370db,Dark Violet:9400d3,Pale Green:98fb98,Dark Orchid:9932cc,Yellow Green:9acd32,Sienna:a0522d,Brown:a52a2a,Dark Gray:a9a9a9,Light Blue:add8e6,Green Yellow:adff2f,Pale Turquoise:afeeee,Light Steel Blue:b0c4de,Powder Blue:b0e0e6,Firebrick:b22222,Dark Goldenrod:b8860b,Medium Orchid:ba55d3,Rosy Brown:bc8f8f,Dark Khaki:bdb76b,Silver:c0c0c0,Medium Violet Red:c71585,Indian Red:cd5c5c,Peru:cd853f,Chocolate:d2691e,Tan:d2b48c,Light Gray:d3d3d3,Thistle:d8bfd8,Orchid:da70d6,Goldenrod:daa520,Pale Violet Red:db7093,Crimson:dc143c,Gainsboro:dcdcdc,Plum:dda0dd,Burlywood:deb887,Light Cyan:e0ffff,Lavender:e6e6fa,Dark Salmon:e9967a,Violet:ee82ee,Pale Goldenrod:eee8aa,Light Coral:f08080,Khaki:f0e68c,Alice Blue:f0f8ff,Honeydew:f0fff0,Azure:f0ffff,Sandy Brown:f4a460,Wheat:f5deb3,Beige:f5f5dc,White Smoke:f5f5f5,Mint Cream:f5fffa,Ghost White:f8f8ff,Salmon:fa8072,Antique White:faebd7,Linen:faf0e6,Light Goldenrod:fafad2,Old Lace:fdf5e6,Red:ff0000,Magenta:ff00ff,Deep Pink:ff1493,Orange Red:ff4500,Tomato:ff6347,Hot Pink:ff69b4,Coral:ff7f50,Dark Orange:ff8c00,Light Salmon:ffa07a,Orange:ffa500,Light Pink:ffb6c1,Pink:ffc0cb,Gold:ffd700,Peach Puff:ffdab9,Navajo White:ffdead,Moccasin:ffe4b5,Bisque:ffe4c4,Misty Rose:ffe4e1,Blanched Almond:ffebcd,Papaya Whip:ffefd5,Lavender Blush:fff0f5,Seashell:fff5ee,Cornsilk:fff8dc,Lemon Chiffon:fffacd,Floral White:fffaf0,Snow:fffafa,Yellow:ffff00,Light Yellow:ffffe0,Ivory:fffff0,White:ffffff',
+    name: function (hex) {
+        const h = String(hex || '').replace('#', '').toLowerCase(); if (!/^[0-9a-f]{6}$/.test(h)) return ''
+        const lab = s => {
+            const [r, g, b] = [0, 2, 4].map(i => { const c = parseInt(s.slice(i, i + 2), 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4 })
+            const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116
+            const x = f((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047), y = f(0.2126 * r + 0.7152 * g + 0.0722 * b), z = f((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883)
+            return [116 * y - 16, 500 * (x - y), 200 * (y - z)]
+        }
+        if (!window.Color._names) window.Color._names = window.Color.NAMES.split(',').map(e => { const [n, x] = e.split(':'); return [n, lab(x)] })
+        const [L, A, B] = lab(h); let best = '', bd = Infinity
+        for (const [n, [l, a, b]] of window.Color._names) { const d = (L - l) ** 2 + (A - a) ** 2 + (B - b) ** 2; if (d < bd) { bd = d; best = n } }
+        return best
+    },
+    // The Color sphere in the page (as color.clothing shows it): the Color app in an iframe over the page, faded in and out.
+    // options: container, zIndex, fade (seconds), background (behind the sphere; transparent unless given, so the page shows through).
+    // known: the Color this visitor already has (null if none). onPick(fn): the Color they land on (#rrggbb). onCancel(fn): they closed it.
+    // read(color, app) / write(color, app, value): this site's small data for an app, kept local-only in that visitor's Color (the one
+    // they are in, or just landed on here), in their own Color database.
+    sphere: function (options = {}) {
+        const origin = window.Color.origin, frame = document.createElement('iframe'), picks = [], cancels = [], waiting = new Map()
+        frame.src = origin + '/'; frame.allow = 'storage-access'
+        frame.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;border:0;z-index:' + (options.zIndex || 9999) + ';background:' + (options.background || 'transparent') + ';opacity:0;pointer-events:none;transition:opacity ' + (options.fade || .8) + 's ease'
+        let knownDone, asked = false; const known = new Promise(resolve => { knownDone = resolve })
+        const listen = event => {
+            if (event.source !== frame.contentWindow || event.origin !== origin) return
+            const d = event.data
+            if (typeof d === 'string' && /^#[0-9a-f]{6}$/i.test(d) && asked) { asked = false; knownDone(d.toLowerCase() === '#ffffff' ? null : d.toLowerCase()); return }
+            if (d?.type === 'zoom-complete' && /^#?[0-9a-f]{6}$/i.test(String(d.color || ''))) { const c = '#' + String(d.color).replace('#', '').toLowerCase(); picks.forEach(fn => fn(c)); return }
+            if (d?.type === 'cancel-color') { cancels.forEach(fn => fn()); return }
+            if (d?.type === 'color-sdk-app-response') { const task = waiting.get(d.id); if (task) { waiting.delete(d.id); d.error ? task.reject(new Error(d.error)) : task.resolve(d.value) } }
+        }
+        window.addEventListener('message', listen)
+        frame.addEventListener('load', () => { asked = true; frame.contentWindow.postMessage({ type: 'getSphereColor', title: document.title }, origin) })
+        ;(options.container || document.body).appendChild(frame)
+        const ask = (action, color, app, value) => new Promise((resolve, reject) => {
+            const id = crypto.randomUUID(); waiting.set(id, { resolve, reject })
+            frame.contentWindow.postMessage({ type: 'color-sdk-app-request', id, action, color: String(color || '').replace('#', '').toLowerCase(), app, value }, origin)
+            setTimeout(() => { if (waiting.delete(id)) reject(new Error('The Color app did not answer.')) }, 15000)
+        })
+        return {
+            el: frame, known,
+            show() { frame.style.pointerEvents = 'auto'; frame.style.opacity = '1' },
+            hide() { frame.style.pointerEvents = 'none'; frame.style.opacity = '0' },
+            onPick(fn) { picks.push(fn) }, onCancel(fn) { cancels.push(fn) },
+            read: (color, app) => ask('read', color, app),
+            write: (color, app, value) => ask('write', color, app, value),
+            close() { window.removeEventListener('message', listen); frame.remove() }
+        }
+    },
+    pick: function () {
+        return new Promise((resolve, reject) => {
+            const origin = window.Color.origin, nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
+            const popup = window.open(origin + '/?color-pick=' + nonce + '&pick-origin=' + encodeURIComponent(location.origin), '_blank')
+            if (!popup) { reject(new Error('Allow pop-ups for this site to pick a Color.')); return }
+            let timer = null
+            const done = (error, color) => { window.removeEventListener('message', listen); clearInterval(timer); if (error) reject(error); else resolve(color) }
+            const listen = event => {
+                if (event.source !== popup || event.origin !== origin || event.data?.type !== 'color-pick' || event.data.nonce !== nonce) return
+                const color = String(event.data.color || '').replace('#', '').toLowerCase()
+                if (/^[0-9a-f]{6}$/.test(color)) done(null, '#' + color); else done(new Error('No Color was picked.'))
+            }
+            window.addEventListener('message', listen)
+            timer = setInterval(() => { if (popup.closed) done(new Error('The Color window was closed.')) }, 500)
+        })
+    },
+    init: async function (config = {}) {
+        const {
+            planet = window.Color.rainbowPlanet,
+            color = 'ffffff', // Store owner's hex
+            action = 'store_ops',
+            targetDiv,
+            block = null,
+            iceServers = null,
+            ownerKey = null,
+            page = '',
+            onOwner = null
+        } = config;
+
+        // Store Owner Room ID
+        const ownerColor = String(color).replace('#', '').toLowerCase();
+        if (!/^[0-9a-f]{6}$/.test(ownerColor)) throw new Error('Color.init requires a six-digit target color.');
+        if (block && !/^(?:page|[a-z0-9][a-z0-9-]*)(?:-[1-9]\d*)?$/.test(String(block).toLowerCase())) throw new Error('Color.init block must be page or an installed block selector.');
+        if (typeof ownerKey === 'string' && ownerKey.trim() && !/^(?:sha256[:-])?[0-9a-f]{64}$/i.test(ownerKey.trim())) throw new Error('Color.init ownerKey must be a SHA-256 fingerprint.');
+        // Without ownerKey the first peer that proves the Color is trusted for this page view. The embed code that Color
+        // generates always includes it; then nobody but the real owner can receive this block's forms or orders.
+        if (!ownerKey) console.warn('[Color] Color.init has no ownerKey: copy the embed code from Color so that only the real owner of #' + ownerColor.toUpperCase() + ' can receive this block\'s submissions.');
+        if (ownerKey && typeof ownerKey === 'object' && (ownerKey.kty !== 'EC' || !['P-256', 'P-521'].includes(ownerKey.crv) || !ownerKey.x || !ownerKey.y)) throw new Error('Color.init ownerKey must be a P-256 or P-521 public JWK.');
+        // A private page meets in its own room; its name also seals the signaling so trackers cannot read or find it.
+        const pageName = String(page || '').normalize('NFKC').replace(/[^\p{L}\p{N} ._-]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 48);
+        const storeRoomId = "color-" + ownerColor + (pageName ? '~' + pageName : '');
+
+
+        const Spectrum = window.Color.spectrum(iceServers);
 
         // Generic SDK bridge. Block UI and behavior arrive from the owner as signed block documents.
         let room = null
@@ -460,8 +680,10 @@ window.Color = {
             }
         }
         const encryptFor = async (publicJwk, value) => {
-            const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: publicJwk.crv }, true, ['deriveKey', 'deriveBits']), remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: publicJwk.crv, x: publicJwk.x, y: publicJwk.y }, { name: 'ECDH', namedCurve: publicJwk.crv }, false, []), key = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, pair.privateKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt']), iv = crypto.getRandomValues(new Uint8Array(12)), data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value)))
-            return { ephemeral: await crypto.subtle.exportKey('jwk', pair.publicKey), iv: Array.from(iv), data: Array.from(new Uint8Array(data)) }
+            const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: publicJwk.crv }, true, ['deriveKey', 'deriveBits']),remote = await crypto.subtle.importKey('jwk', { kty: 'EC', crv: publicJwk.crv, x: publicJwk.x, y: publicJwk.y }, { name: 'ECDH', namedCurve: publicJwk.crv }, false, []), ephemeral = await crypto.subtle.exportKey('jwk', pair.publicKey)
+            // Version 2 envelope: the shared secret goes through HKDF with the one-time key as context (same scheme as the Color page).
+            const secret = await crypto.subtle.deriveKey({ name: 'ECDH', public: remote }, pair.privateKey, 'HKDF', false, ['deriveKey']), key = await crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: new TextEncoder().encode('color-envelope-v2:' + ephemeral.x + ':' + ephemeral.y) }, secret, { name: 'AES-GCM', length: 256 }, false, ['encrypt']), iv = crypto.getRandomValues(new Uint8Array(12)), data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value)))
+            return { v: 2, ephemeral, iv: Array.from(iv), data: Array.from(new Uint8Array(data)) }
         }
         const ensureStandby = () => {
             if (standbyRoom || !block) return
@@ -517,7 +739,7 @@ window.Color = {
         const mineProof = async (targetColor = ownerColor) => {
             const hourStamp = Math.floor(Date.now() / 3600000)
             for (let nonce = 1; ; nonce++) {
-                if ((await digest(targetColor + hourStamp + nonce)).startsWith('0000')) return hourStamp + '_' + nonce
+                if ((await digest(targetColor + hourStamp + ':' + visitorPublicKey.x + ':' + nonce)).startsWith('0000')) return hourStamp + '_' + nonce
                 if (nonce % 1000 === 0) await new Promise(resolve => setTimeout(resolve, 0))
             }
         }
@@ -528,7 +750,8 @@ window.Color = {
             if (!visitorProof || Number(visitorProof.split('_')[0]) !== Math.floor(Date.now() / 3600000)) visitorProofTask ||= mineProof().then(proof => { visitorProof = proof; return proof }).finally(() => { visitorProofTask = null })
             if (!nonce && visitorProofTask) await visitorProofTask
             if (!visitorProof) return
-            const claim = { color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }
+            // v is the wire-format version shared with the Color page; a mismatch is reported there instead of hanging.
+            const claim = { v: 3, color: visitorColor, pubKey: visitorPublicKey, minedToken: visitorProof, cursor: 0, sdkOrigin: location.origin, sdkBlock: block }
             if (nonce) {
                 const pc = room?.getPeers()[peerId]?.pc, fingerprint = description => description?.sdp?.match(/a=fingerprint:sha-256 ([^\r\n]+)/i)?.[1]?.toUpperCase()
                 const local = fingerprint(pc?.localDescription), remote = fingerprint(pc?.remoteDescription)
@@ -589,7 +812,7 @@ window.Color = {
         const requestBlock = peerId => sendSdk?.({ type: block ? 'GET_BLOCK' : 'GET_CONTEXT', requestId: blockRequestId, origin: location.origin, block, visitorColor, ownerView: visitorColor.slice(1) === ownerColor }, peerId)
         const connect = () => {
             if (room) return
-            room = Spectrum.joinRoom({ appId: planet }, storeRoomId)
+            room = Spectrum.joinRoom({ appId: planet, ...(pageName ? { secret: pageName } : {}) }, storeRoomId)
             ;[send, get] = room.makeAction(action)
             pendingGetCallbacks.splice(0).forEach(callback => get(callback))
             ;[sendIdentity] = room.makeAction('identity')
@@ -674,7 +897,7 @@ window.Color = {
                     else if (event.data.error) emit('color-storage-required', { error: event.data.error, color: visitorColor })
                     return
                 }
-                if (['color-sdk-record-response', 'color-sdk-context-response', 'color-sdk-authorize-response'].includes(event.data?.type)) {
+                if (['color-sdk-record-response', 'color-sdk-context-response', 'color-sdk-authorize-response', 'color-sdk-local-blocks-response'].includes(event.data?.type)) {
                     const task = storageRequests.get(event.data.id)
                     if (task) {
                         storageRequests.delete(event.data.id)
@@ -716,6 +939,9 @@ window.Color = {
                 if (activeBlock?.blockId !== 'page' && event.data.blockInstanceId !== activeBlock?.instanceId) return
                 const returnAddress = await getReturnAddress(event.data.blockInstanceId).catch(() => null)
                 authorizeRequest({ type: 'BLOCK_ACTION', origin: location.origin, visitorColor, blockInstanceId: event.data.blockInstanceId, namespace: event.data.namespace, message, returnAddress }).then(sendStandbyAction).then(() => snapshot?.contentWindow?.postMessage({ type: 'color-sdk-block-message', message: { type: 'QUEUED', ok: true } }, '*')).catch(error => emit('color-error', { error: error.message }))
+            } else if (event.data?.type === 'color-sdk-local-blocks-request') {
+                // Which local-only blocks the visitor shares with sites; answered by the visitor's own Color frame.
+                postStorage({ type: 'color-sdk-local-blocks-request', id: String(event.data.id || '').slice(0, 160) })
             } else if (event.data?.type === 'color-sdk-record-request') {
                 if (activeBlock?.blockId !== 'page' && event.data.blockInstanceId !== activeBlock?.instanceId) return
                 try {
